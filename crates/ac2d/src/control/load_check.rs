@@ -22,9 +22,9 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
     check_items(data).map_err(|(_, e)| e)
 }
 
-/// Newest session epoch a loaded trace may record. A rig opens one epoch per session open
-/// or audio restart, so half the range is more than any rig reaches, and the other half
-/// stays for the sessions opened after a load.
+/// The bound on the session epoch a loaded trace may record: it records one below it. A rig
+/// opens one epoch per session open or audio restart, so half the range is more than any
+/// rig reaches, and the other half stays for the sessions opened after a load.
 pub(super) const MAX_LOADED_EPOCH: u32 = u32::MAX / 2;
 
 /// One item of a session, by its index in its list: what a refusal is about.
@@ -122,12 +122,12 @@ pub(super) fn check_items(
     // half of the range is no epoch this rig reached, and would leave too few after it.
     for (i, t) in data.traces.iter().enumerate() {
         if let Some(e) = t.meta.source.shared_epoch()
-            && e.0 > MAX_LOADED_EPOCH
+            && e.0 >= MAX_LOADED_EPOCH
         {
             return Err((
                 Item::Trace(i),
                 invalid(format!(
-                    "trace {} records session epoch {}, past the {MAX_LOADED_EPOCH} a \
+                    "trace {} records session epoch {}, at or past the {MAX_LOADED_EPOCH} a \
                      session file can hold: the file is damaged",
                     t.meta.id, e.0
                 )),

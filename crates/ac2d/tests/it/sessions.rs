@@ -596,6 +596,7 @@ fn a_session_with_values_out_of_range_refuses_to_load() {
     };
     edited_copy(dir.path(), "good", "epoch", captured_in(u32::MAX));
     edited_copy(dir.path(), "good", "epoch-edge", captured_in(u32::MAX / 2));
+    edited_copy(dir.path(), "good", "epoch-last", captured_in(u32::MAX / 2 - 1));
     // The good session still loads with an in-range delay.
     edited_copy(dir.path(), "good", "near", delay(-10.0, 0.5));
 
@@ -611,6 +612,7 @@ fn a_session_with_values_out_of_range_refuses_to_load() {
         "offset",
         "trace-nudge",
         "epoch",
+        "epoch-edge",
     ] {
         let e = c
             .call(Command::FileLoad {
@@ -636,10 +638,10 @@ fn a_session_with_values_out_of_range_refuses_to_load() {
     assert_eq!((d.applied, d.nudged), (Seconds(-10.0), Seconds(0.5)));
 
     c.ok(Command::FileLoad {
-        session: named("epoch-edge"),
+        session: named("epoch-last"),
         discard: true,
     });
-    assert_eq!(c.state().session.epoch.0, u32::MAX / 2 + 1);
+    assert_eq!(c.state().session.epoch.0, u32::MAX / 2);
     h.shutdown();
 }
 

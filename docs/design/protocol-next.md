@@ -508,7 +508,7 @@ These change nothing on the wire or in a stored format and land on their own bra
   a `state.since` reaching past what the bound kept answers `resync_required`, as for count.
 - **`ZMQ_MAXMSGSIZE` and the epoch (L-12).** Every socket sets `ZMQ_MAXMSGSIZE` to its
   message bound; the stream epoch is incremented checked, and a session whose traces
-  record an epoch past half the range refuses to load.
+  record an epoch at or past half the range refuses to load.
 - **Runtime directory (T-02, Unix).** `Instance::lock` creates the directory, sets it to 0700
   itself, then `lstat`s it: a directory, not a symlink, owned by the effective uid, no group
   or other bits. The daemon refuses to start only when it cannot set the mode or the
