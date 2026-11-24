@@ -104,16 +104,17 @@ impl Value {
     /// the math does, refers it at [`Value::column_hz`]: a live column's bins were each
     /// referred to `delay` at their own frequency, so a change of delay turns the column at
     /// theirs, and at the centre it would miss by `2π·(centre − column_hz)·(delay − to)`.
+    /// A column with no turn keeps its value bit for bit (no wrap, no round trip through f64).
     fn refer_at_bins(&mut self, centres: &[f64], to: f64) {
         let (Some(hz), Some(phase)) = (&self.column_hz, self.columns.phase_deg.as_mut()) else {
             return;
         };
-        if hz.len() != centres.len() || phase.len() != centres.len() {
+        if self.delay == to || hz.len() != centres.len() || phase.len() != centres.len() {
             return;
         }
         for ((p, f), c) in phase.iter_mut().zip(hz.iter()).zip(centres) {
             let turn = 360.0 * (f - c) * (self.delay - to);
-            if p.is_finite() && turn.is_finite() {
+            if turn != 0.0 && p.is_finite() && turn.is_finite() {
                 *p = wrap_deg(f64::from(*p) - turn) as f32;
             }
         }
@@ -342,20 +343,37 @@ pub(crate) fn combine(
     let included_at: Vec<usize> = included.iter().map(|(k, _)| *k).collect();
     let reference = delay_reference(cfg, &included_at, seen_delay);
     // Live columns go in referred at the frequencies their bins were measured at: a sum,
-    // difference or average refers each to the reference delay, a ratio on one time base
-    // to none (only their difference is kept); a cascade and an alignment refer nothing.
+    // difference or average refers each to the reference delay; a cascade and an alignment
+    // refer nothing. A ratio on one time base turns A/B by −2π·centre·(d_a − d_b);
+    // what it should turn by is −2π·f·(d_a − d_b) at the operands' common column frequency
+    // f, so A alone takes the extra 2π·(f − centre)·(d_a − d_b): A referred to B's delay,
+    // and equal delays leave the ratio untouched.
+    // Only operands that all state the same column frequencies (one ladder, one grid) are
+    // turned: a column of a stored operand, or of a live one on another ladder, belongs to
+    // another frequency, so turning only some would set the operands' relative phase off by
+    // 2π·(f − centre)·(their delay − the reference). Then every operand stays at the column
+    // centre, as a stored trace is, so the operands of one math are always treated alike.
     let one_time_base = included
         .first()
         .and_then(|(_, v)| v.time_base)
         .is_some_and(|t| included.iter().all(|(_, v)| v.time_base == Some(t)));
+    let one_ladder = included
+        .first()
+        .and_then(|(_, v)| v.column_hz.as_deref())
+        .is_some_and(|h| {
+            included
+                .iter()
+                .all(|(_, v)| v.column_hz.as_deref() == Some(h))
+        });
     let refer_to = match (&cfg.expr, cfg.domain) {
+        _ if !(one_time_base && one_ladder) => None,
         (_, MathDomain::Spectrum | MathDomain::Rta) => None,
         (
             MathExpr::Binary {
                 op: MathOp::Divide, ..
             },
             _,
-        ) if one_time_base => Some(0.0),
+        ) => included.get(1).map(|(_, v)| v.delay),
         (
             MathExpr::Binary {
                 op: MathOp::Add | MathOp::Subtract,
@@ -363,7 +381,7 @@ pub(crate) fn combine(
             }
             | MathExpr::Average { .. },
             _,
-        ) if one_time_base => match reference {
+        ) => match reference {
             CoreReference::Fixed(d) => Some(d),
             CoreReference::Trace(j) => included.get(j).map(|(_, v)| v.delay),
         },

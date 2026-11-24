@@ -18,6 +18,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::*;
 use crate::jobs::{Live, Probe};
 
+mod column_hz;
+
 const EPOCH: SessionEpoch = SessionEpoch(3);
 
 fn grid() -> GridDef {
@@ -872,7 +874,7 @@ fn at_hz(a: Answer, hz: Vec<f64>) -> Answer {
 }
 
 /// A live operand's column is referred to the math's delay at the frequency its estimate
-/// belongs to: `A − B` with B 10 ms later and its columns' bins 1 % above their centres is
+/// belongs to: `A − B` with B 10 ms later and both operands' bins 1 % above their centres is
 /// `1 − e^{−j2π·f·10 ms}` at those frequencies; a stored operand is taken at the centres.
 #[test]
 fn a_live_column_is_referred_at_its_bins() {
@@ -881,7 +883,7 @@ fn a_live_column_is_referred_at_its_bins() {
     let c = binary(meas(1), MathOp::Subtract, meas(2));
     let d = 0.01;
     let answers = [
-        flat(1, 0.0),
+        at_hz(flat(1, 0.0), hz.clone()),
         at_hz(member(2, 0.0, d, d, ProtectionFlags::NONE), hz.clone()),
     ];
     let f = run(&c, &[None; 2], &answers);

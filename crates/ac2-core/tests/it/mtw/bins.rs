@@ -233,4 +233,41 @@ fn a_column_turns_with_the_delay_at_its_bins() {
             assert!(lo <= hz[i] && hz[i] <= hi, "column {i}");
         }
     }
+    // A blend column is two stages' Gxx-weighted sums of bins: with the measurement an exact
+    // copy of the reference every bin's Gxy is real and positive, so the turned column is a
+    // positive sum of phasors on the arc its bins span, and turned back at `column_hz` it
+    // misses by no more than the turn from there to the farther end of that arc. It cannot be
+    // exact, since `column_hz` takes the bins' plain mean and the estimate weights them by
+    // their Gxx; but those weights scatter about uniform, so over all blend columns the miss
+    // at `column_hz` stays well below the miss at the centre (measured about 1/7 of it; a
+    // swapped deep/shallow weight measures about 7/8).
+    let (mut blends, mut at_hz, mut at_centre) = (0, 0f64, 0f64);
+    for (i, c) in turned.columns.iter().enumerate() {
+        let ColumnSource::Blend { deep, shallow, .. } = c.source else {
+            continue;
+        };
+        if c.validity != Validity::Valid || at.columns[i].validity != Validity::Valid {
+            continue;
+        }
+        let span = |b: ac2_core::mtw::StageBins| {
+            let bin_hz = m.layout().stages[b.stage].bin_hz;
+            (b.lo as f64 * bin_hz, (b.hi - 1) as f64 * bin_hz)
+        };
+        let ((dl, dh), (sl, sh)) = (span(deep), span(shallow));
+        let reach = (hz[i] - dl.min(sl)).max(dh.max(sh) - hz[i]);
+        let bound = 360.0 * reach * tau + 1e-9;
+        assert!(
+            miss(hz[i], i) <= bound,
+            "column {i}: {}° > {bound}°",
+            miss(hz[i], i)
+        );
+        blends += 1;
+        at_hz += miss(hz[i], i);
+        at_centre += miss(turned.freq_hz[i], i);
+    }
+    assert!(blends > 20, "{blends}");
+    assert!(
+        at_hz < 0.3 * at_centre,
+        "{at_hz}° vs {at_centre}° at the centres"
+    );
 }

@@ -483,7 +483,8 @@ fn column_z(t: &Frame, c: usize) -> Complex64 {
 
 /// A difference's grid column is the difference of its operands' bins, each referred at its
 /// bin's frequency, for operands 2.5 ms and 10 ms apart: a column holding one bin equals that
-/// bin's difference, and one of several lies among their differences. Referred at the column
+/// bin's difference, and one of several lies among their differences (which only checks the
+/// indexing; a centre-referred column would lie there too). Referred at the column
 /// centre instead, a column would miss by `2π·(centre − bin)·Δd`, which the test prints.
 #[test]
 fn a_math_column_is_its_bins_math() {
@@ -551,7 +552,10 @@ fn a_math_column_is_its_bins_math() {
                     alone += 1;
                 } else {
                     // Inside the box the bins' differences span, widened by the bulge of the
-                    // curve between neighbouring bins (at most half their distance).
+                    // curve between neighbouring bins (at most half their distance). A sanity
+                    // check that the column and its bins are indexed alike, not evidence for
+                    // the frequency a column is referred at: the centre lies among the bins,
+                    // so a column referred there passes too; the columns of one bin above are.
                     let step = each
                         .windows(2)
                         .map(|w| (w[1] - w[0]).norm())
