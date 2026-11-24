@@ -192,22 +192,25 @@ pub struct StandingRig {
     /// of a window the figure covers). Figures to 0.01 ppm and whole seconds, so the entry
     /// changes only when a shown digit does.
     pub clock: PeerClock,
-    /// When this rig began pairing marks, since both rigs' sessions (re)started; `None`
-    /// while none come. A link gap leaves a hole in them and does not move this.
+    /// When this rig began pairing the marks counted now (its wall time, placed again only
+    /// when off by over 2 s), since both rigs' sessions (re)started or the last hole in the
+    /// marks of over a minute; `None` while none come.
     pub marks_since: Option<WallNs>,
-    /// Whole minutes counted toward *not locked*, of the number it needs, while the figure
-    /// is beyond the rule but not yet for long enough.
+    /// The minutes counted toward a verdict since a minute closed beyond the rule; `None`
+    /// while not counting, or once a verdict is reached.
     pub counting: Option<MinuteCount>,
 }
 
-/// Minutes counted toward a held verdict.
+/// Whole minutes counted toward a held verdict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MinuteCount {
+    /// Of those counted, beyond the rule.
+    pub beyond: u32,
     /// Counted so far.
-    pub minutes: u32,
-    /// Needed.
-    pub of: u32,
+    pub counted: u32,
+    /// Needed for a verdict.
+    pub needed: u32,
 }
 
 /// A paired rig's open session as its levels frames show it.

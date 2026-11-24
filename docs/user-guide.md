@@ -270,10 +270,12 @@ inputs or audio: the clocks between the two rigs as the timing in its always-on 
 shows them (*from levels ketunkolo · clocks agree · +0.12 ppm over 60 s · marks for 5 min
 12 s · 96 kHz, 3 inputs · link up*). *measuring clocks…* means there is no verdict yet:
 the first whole minute of timing is not in, or the figure is beyond 2 ppm and is being
-watched before it is called (*+2.71 ppm over 60 s · 4 of 10 min beyond 2 ppm*). A time
-sync slewing either computer's clock looks like a rate for a minute or two, so *clocks
-agree* comes after one minute within 2 ppm, while *CLOCKS NOT LOCKED +3.1 ppm over 60 s*
-waits for ten minutes in a row beyond it, all one way. Ten minutes that do not agree among
+watched before it is called (*+2.71 ppm over 60 s · beyond 2 ppm for 4 of the 10 min a
+verdict needs*). A time sync slewing either computer's clock looks like a rate for a minute
+or two, so *clocks agree* comes after one minute within 2 ppm, and again after two minutes
+in a row below 1.8 ppm once a minute went beyond, while *CLOCKS NOT LOCKED +3.1 ppm over 60
+s* waits for ten minutes in a row beyond it, all one way. *marks for* counts from the start
+of the sessions or the last gap of over a minute in the timing. Ten minutes that do not agree among
 themselves read *CLOCKS: CAN'T TELL (figure not steady: +0.4 … +3.1 ppm)*. Other reasons:
 *no timing in ketunkolo's levels*, *ketunkolo has no audio session*, *no link to
 ketunkolo*, *ketunkolo's levels arrive 250 ms late: the network, or its system clock

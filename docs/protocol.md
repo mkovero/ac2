@@ -2234,24 +2234,29 @@ function with exactly one channel on a remote rig), `standing` ([`StandingRig` {
 `name`, `link` (as `RemoteRig`), `session` (`StandingSession` \| nil {`sample_rate_hz`,
 `channels` (its captured inputs)}: while its `source/levels` frames come), `clock`
 (`PeerClock` from the marks on those frames alone, §5.1, by the same windows and rules as
-`rigs`, held as §5.1 of `docs/design/remote-auto.md` says: `agree` once a whole minute
-closes within the 2 ppm rule, `measuring` again when one closes outside it;
-`cross_rate` and `own_clock` only after ten whole minutes in a row beyond it, one side and
-one sign (a system clock slewed by its time sync moves the marks for minutes; until then
-`measuring`); ten counted and not of one mind `not_steady{low, high}` (ppm, the least and
-the greatest minute); `other_rate` when the two sessions' nominal rates differ, nothing
+`rigs`, held as §5.1 of `docs/design/remote-auto.md` says, and changed only as whole minutes
+close: `agree` once a minute closes within the 2 ppm rule and no count runs; a minute
+closing beyond it starts a count and `measuring` with it, until two minutes in a row close
+below 1.8 ppm; `cross_rate` and `own_clock` only once the count reaches ten minutes all
+beyond the rule, one side and one sign (a system clock slewed by its time sync moves the
+marks for minutes); ten counted and not of one mind `not_steady{low, high}` (ppm, the least
+and the greatest minute); a thin minute, anything the judge cannot tell, or a hole in the
+marks of over a minute clears the count; `other_rate` when the two sessions' nominal rates differ, nothing
 fitted; `no_marks` while frames come without marks or not at all from a rig whose session
 is open; `no_session` naming the rig without one; `link_down` while the link is not up;
 `clocks_disagree` when its marks land in this rig's future for a second; `marks_late{by}`
 when they arrive later than the link offset in force (else the longest one, 0.5 s) allows
 for 3 s running, until 3 s clean, by `by` s: a slow network and a system clock behind look
-the same; `ppm` and `span` nil while no marks come; figures to 0.01 ppm, whole seconds and
-whole ms, so the entry changes only when a shown digit does), `marks_since` (`WallNs` \|
-nil: when this rig began pairing marks, nil while none come; either rig's new session or
-daemon starts it again, a hole in the marks (over 2 s by their own sample index or system
-time, not by arrival) breaks the windows and the open minute but not this), `counting`
-(`MinuteCount` \| nil {`minutes`, `of`}: minutes counted toward `not_locked` while the
-figure is beyond the rule)}], one per paired rig, with or without remote
+the same (`clocks_disagree` held the same way); `ppm` and `span` nil while no marks come;
+figures to 0.01 ppm, whole seconds and whole ms; `ppm` is the figure at each minute's close
+and moves between closes only by 1 ppm or more, so a steady pair's entry changes once a
+minute at most), `marks_since` (`WallNs` \| nil: this rig's wall time less how long the
+marks counted now have been paired, placed again only when off by over 2 s; nil while none
+come; either rig's new session or daemon, or a hole in the marks of over a minute, starts it
+again; a shorter hole (over 2 s by their own sample index or system time, not by arrival)
+breaks the windows and the open minute but not this), `counting` (`MinuteCount` \| nil
+{`beyond`, `counted`, `needed`}: while a count runs and has no verdict, the minutes counted,
+those of them beyond the rule, and the number a verdict needs)}], one per paired rig, with or without remote
 inputs or audio); committed when any of it changes; the clock relations are reported only,
 never corrected for),
 `sweep` (`SweepRun` | nil: the latest `sweep.run` run),

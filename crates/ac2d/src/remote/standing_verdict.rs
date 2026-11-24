@@ -7,17 +7,25 @@
 //! line against its system clock. A slew passes, a rate difference stays. So the two
 //! verdicts are held unequally:
 //!
-//! - *agree* once the newest whole minute is within the rule, as the audio-fed relation
-//!   says it: a slew only ever makes a locked pair look apart, never an apart pair look
-//!   locked for a minute running;
-//! - *not locked* (the cross-rig rate or either rig's own line) only after
-//!   [`HOLD_MINUTES`] whole minutes in a row beyond the rule, all on one side with one sign;
+//! - *agree* once a whole minute closes within the rule with no count running, as the
+//!   audio-fed relation says it: a slew only ever makes a locked pair look apart, never an
+//!   apart pair look locked for a minute running;
+//! - *not locked* (the cross-rig rate or either rig's own line, each as the judge reads it
+//!   now, not as its watch holds it) only after [`HOLD_MINUTES`] whole minutes in a row
+//!   beyond the rule, all on one side with one sign;
 //! - ten minutes counted and not of one mind: *can't tell*, the figure not steady, with its
 //!   spread; never *measuring* for ever.
 //!
-//! A count begins at a minute beyond the rule and ends at two minutes in a row within it; a
-//! single minute within between minutes beyond is the noise near the bound that the
-//! not-steady verdict is for.
+//! A count begins at a minute beyond [`BOUND_PPM`] and ends at two minutes in a row within
+//! [`ENTER_PPM`]: the gap between the two keeps a figure that sits at the bound from
+//! leaving and re-entering agreement every minute. What is shown changes only when a minute
+//! closes (or the judge cannot tell): a live figure between closes is a fit over a window
+//! still filling with the newest marks, the very thing the minute rule waits out.
+//!
+//! The count is cleared by anything the judge cannot tell, including the system clocks
+//! disagreeing (marks in this rig's future) or the marks arriving late: either says a system
+//! clock may have moved, and the minutes before rest on it. A hole longer than a minute
+//! clears it too, so ten minutes in a row are ten minutes of marks, not two runs hours apart.
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -25,7 +33,7 @@ use std::time::Duration;
 use ac2_proto::model::{CantTellReason, MinuteCount, NotLockedReason, PeerRelation};
 use ac2_proto::units::{RigId, Seconds, WallNs};
 
-use super::peer_clock::{BOUND_PPM, Evidence, PeerClockWatch};
+use super::peer_clock::{BOUND_PPM, Evidence, PeerClockWatch, judge};
 use super::standing::{Minutes, StandingReport};
 use super::{MAX_LINK_OFFSET_S, link_offset};
 
@@ -36,11 +44,26 @@ use super::{MAX_LINK_OFFSET_S, link_offset};
 /// below that. A step (`maxerror` and the kernel's unsync flag) is the system clock checks'
 /// to catch, not this.
 pub(crate) const HOLD_MINUTES: usize = 10;
-/// Marks late for this long before they say so, and clean for this long before they stop:
-/// a link's queue that fills for a moment is not a clock behind, and one at the bound must
-/// not flip the relation every second.
+/// A count ends at two minutes in a row within this, ppm: below the bound by about half the
+/// minute figure's scatter (0.34–0.40 ppm sd per 60 s window), so a figure at the bound
+/// counts on rather than flipping in and out.
+pub(crate) const ENTER_PPM: f64 = 1.8;
+/// Marks late (or ahead) for this long before they say so: a link's queue that fills for a
+/// moment is not a clock behind.
 pub(crate) const LATE_IN: Duration = Duration::from_secs(3);
+/// Clean for this long before a lateness stops showing: one at the bound must not flip the
+/// relation every second.
 pub(crate) const LATE_OUT: Duration = Duration::from_secs(3);
+/// A shown lateness moves only by more than this, s.
+const LATE_STEP: f64 = 0.01;
+/// The shown figure is the one at each minute's close; between closes it moves only by more
+/// than this, ppm. A 60 s fit slid by a second swaps a second of stamps at either end, and
+/// tens of µs of stamp scatter there moves it by several hundredths of a ppm; a smaller step
+/// would move the entry every few seconds on that alone. Half the rule still shows a real
+/// excursion before its minute closes.
+pub(crate) const FIGURE_STEP: f64 = 1.0;
+/// `marks_since` is placed again only when it is off by more than this, s.
+const SINCE_STEP_NS: u64 = 2_000_000_000;
 
 /// How far past the link offset the marks arrive, s: the one in force when set (`set`),
 /// else the longest any link may run, since the operator may need that much and this rig
@@ -72,27 +95,46 @@ impl Minute {
             Self::Within(p) | Self::Beyond(_, p) => p,
         }
     }
+
+    fn settled(self) -> bool {
+        matches!(self, Self::Within(p) if p.abs() < ENTER_PPM)
+    }
 }
 
 /// The minutes behind the verdict.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Tally {
-    /// The feed's series and minutes closed as last seen.
-    seen: Option<(u64, u64)>,
+    /// The feed's series, long holes and minutes closed as last seen.
+    seen: Option<(u64, u64, u64)>,
     last: Option<Minute>,
     /// Since the count began, the newest [`HOLD_MINUTES`]; empty: not counting.
     count: VecDeque<Minute>,
+    /// What was shown last.
+    shown: PeerRelation,
+}
+
+impl Default for Tally {
+    fn default() -> Self {
+        Self {
+            seen: None,
+            last: None,
+            count: VecDeque::new(),
+            shown: PeerRelation::Measuring,
+        }
+    }
 }
 
 impl Tally {
     fn clear(&mut self) {
         self.last = None;
         self.count.clear();
+        self.shown = PeerRelation::Measuring;
     }
 
-    /// The relation the watch holds now, `rel`, and the feed's minutes.
-    fn note(&mut self, rel: &PeerRelation, minutes: Option<Minutes>) {
-        match rel {
+    /// The judge's relation now, unheld (`raw`), and the feed's minutes; whether a minute
+    /// closed.
+    fn note(&mut self, raw: &PeerRelation, minutes: Option<Minutes>) -> bool {
+        match raw {
             // What the judge cannot tell, the minutes before it did not show either; what
             // is only missing (no marks, no link) leaves them standing.
             PeerRelation::CantTell { reason } if !only_missing(reason) => self.clear(),
@@ -102,23 +144,28 @@ impl Tally {
             _ => {}
         }
         let Some(m) = minutes else {
-            return;
+            return false;
         };
-        let Some((series, closed)) = self.seen.filter(|(s, _)| *s == m.series) else {
+        let Some((series, holes, closed)) = self.seen.filter(|(s, ..)| *s == m.series) else {
             self.clear();
-            self.seen = Some((m.series, m.closed));
-            return;
+            self.seen = Some((m.series, m.holes, m.closed));
+            return false;
         };
-        if m.closed == closed {
-            return;
+        if holes != m.holes {
+            // The minutes before a long hole are not in a row with those after it; the
+            // first to close after it is all after it.
+            self.clear();
         }
-        self.seen = Some((series, m.closed));
+        self.seen = Some((series, m.holes, m.closed));
+        if m.closed == closed {
+            return false;
+        }
         let Some(p) = m.last else {
             // A minute too thin to fit breaks the run.
             self.clear();
-            return;
+            return true;
         };
-        let minute = match rel {
+        let minute = match raw {
             PeerRelation::NotLocked {
                 reason: NotLockedReason::OwnClock { rig, ppm },
             } => Minute::Beyond(
@@ -131,67 +178,85 @@ impl Tally {
             _ if p.abs() > BOUND_PPM => Minute::Beyond(Side::Cross { fast: p > 0.0 }, p),
             _ => Minute::Within(p),
         };
-        let within = matches!(minute, Minute::Within(_));
-        if within && matches!(self.last, Some(Minute::Within(_))) {
+        let ends = minute.settled() && self.last.is_some_and(Minute::settled);
+        if ends {
             self.count.clear();
-        } else if !within || !self.count.is_empty() {
+        } else if !matches!(minute, Minute::Within(_)) || !self.count.is_empty() {
             if self.count.len() == HOLD_MINUTES {
                 self.count.pop_front();
             }
             self.count.push_back(minute);
         }
         self.last = Some(minute);
+        true
     }
 
-    /// The relation shown for the watch's `rel`, and the count toward a verdict.
-    fn shown(&self, rel: PeerRelation) -> (PeerRelation, Option<MinuteCount>) {
+    /// The relation shown with the watch's (held) relation `held`, and the count.
+    fn shown(&mut self, held: PeerRelation) -> (PeerRelation, Option<MinuteCount>) {
         if matches!(
-            rel,
+            held,
             PeerRelation::CantTell { .. }
                 | PeerRelation::NotLocked {
                     reason: NotLockedReason::OtherRate { .. }
                 }
         ) {
-            return (rel, None);
+            return (held, None);
         }
-        if self.count.len() == HOLD_MINUTES {
-            let sides = self.count.iter().map(|m| match m {
-                Minute::Beyond(s, _) => Some(*s),
-                Minute::Within(_) => None,
-            });
-            let first = self.count.front().and_then(|m| match m {
-                Minute::Beyond(s, _) => Some(*s),
-                Minute::Within(_) => None,
-            });
-            let last = self.count.back().map_or(0.0, |m| m.ppm());
-            if let Some(side) = first
-                && sides.into_iter().all(|s| s == Some(side))
-            {
-                let reason = match side {
-                    Side::Cross { .. } => NotLockedReason::CrossRate {
-                        ppm: last,
-                        over: Seconds(60.0),
-                    },
-                    Side::Own { rig, .. } => NotLockedReason::OwnClock { rig, ppm: last },
-                };
-                return (PeerRelation::NotLocked { reason }, None);
-            }
-            let ppms = || self.count.iter().map(|m| m.ppm());
-            let reason = CantTellReason::NotSteady {
+        let shown = if self.count.len() == HOLD_MINUTES {
+            self.verdict()
+        } else if self.count.is_empty()
+            && matches!(self.last, Some(Minute::Within(_)))
+            && (held == PeerRelation::Agree || self.shown == PeerRelation::Agree)
+        {
+            // Agreement shown stays until a minute says otherwise; a not-locked the watch
+            // still holds keeps it measuring until the watch lets go.
+            PeerRelation::Agree
+        } else {
+            PeerRelation::Measuring
+        };
+        self.shown = shown;
+        (shown, self.counting())
+    }
+
+    /// Ten minutes counted: of one side and sign, or not steady.
+    fn verdict(&self) -> PeerRelation {
+        let side = |m: &Minute| match m {
+            Minute::Beyond(s, _) => Some(*s),
+            Minute::Within(_) => None,
+        };
+        let first = self.count.front().and_then(side);
+        let last = self.count.back().map_or(0.0, |m| m.ppm());
+        if let Some(s) = first
+            && self.count.iter().all(|m| side(m) == Some(s))
+        {
+            let reason = match s {
+                Side::Cross { .. } => NotLockedReason::CrossRate {
+                    ppm: last,
+                    over: Seconds(60.0),
+                },
+                Side::Own { rig, .. } => NotLockedReason::OwnClock { rig, ppm: last },
+            };
+            return PeerRelation::NotLocked { reason };
+        }
+        let ppms = || self.count.iter().map(|m| m.ppm());
+        PeerRelation::CantTell {
+            reason: CantTellReason::NotSteady {
                 low: ppms().fold(f64::INFINITY, f64::min),
                 high: ppms().fold(f64::NEG_INFINITY, f64::max),
-            };
-            return (PeerRelation::CantTell { reason }, None);
+            },
         }
-        let within = matches!(self.last, Some(Minute::Within(_)));
-        if within && rel == PeerRelation::Agree {
-            return (PeerRelation::Agree, None);
-        }
-        let counting = (!within && !self.count.is_empty()).then_some(MinuteCount {
-            minutes: self.count.len() as u32,
-            of: HOLD_MINUTES as u32,
-        });
-        (PeerRelation::Measuring, counting)
+    }
+
+    fn counting(&self) -> Option<MinuteCount> {
+        (!self.count.is_empty() && self.count.len() < HOLD_MINUTES).then(|| MinuteCount {
+            beyond: self
+                .count
+                .iter()
+                .filter(|m| matches!(m, Minute::Beyond(..)))
+                .count() as u32,
+            counted: self.count.len() as u32,
+            needed: HOLD_MINUTES as u32,
+        })
     }
 }
 
@@ -206,22 +271,24 @@ fn only_missing(r: &CantTellReason) -> bool {
     )
 }
 
-/// Late marks with a persistence in and out.
+/// A system-time disagreement (late or ahead) with a persistence in and out, its figure
+/// moved only by more than [`LATE_STEP`].
 #[derive(Debug, Default)]
-struct Late {
+struct Persist {
     over_since: Option<Duration>,
     clean_since: Option<Duration>,
     by: Option<f64>,
 }
 
-impl Late {
-    /// The lateness at `now`, `by`; what is shown.
+impl Persist {
+    /// The disagreement at `now`, `by`; what is shown.
     fn update(&mut self, by: Option<f64>, now: Duration) -> Option<f64> {
         match by {
             Some(b) => {
                 self.clean_since = None;
                 let since = *self.over_since.get_or_insert(now);
-                if self.by.is_some() || now.saturating_sub(since) >= LATE_IN {
+                let moved = self.by.is_none_or(|s| (b - s).abs() > LATE_STEP);
+                if moved && (self.by.is_some() || now.saturating_sub(since) >= LATE_IN) {
                     self.by = Some(b);
                 }
             }
@@ -238,22 +305,27 @@ impl Late {
 }
 
 /// The standing relation with one paired rig: the judge's watch, the minutes behind it and
-/// the late marks' persistence.
+/// the system-time disagreements' persistence.
 #[derive(Debug)]
 pub(crate) struct StandingWatch {
     pub(crate) watch: PeerClockWatch,
     tally: Tally,
-    late: Late,
+    late: Persist,
+    ahead: Persist,
+    figure: Option<(f64, Seconds)>,
+    since: Option<WallNs>,
 }
 
 /// What a standing entry shows: figures to 0.01 ppm, whole seconds and whole milliseconds,
-/// so it changes only when a shown digit does.
+/// each moved only by a step that means something, so a steady pair's entry stays put.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Shown {
     pub(crate) relation: PeerRelation,
     pub(crate) ppm: Option<f64>,
     pub(crate) span: Option<Seconds>,
     pub(crate) counting: Option<MinuteCount>,
+    /// When the marks counted now began, this rig's wall time.
+    pub(crate) marks_since: Option<WallNs>,
 }
 
 impl StandingWatch {
@@ -261,12 +333,15 @@ impl StandingWatch {
         Self {
             watch: PeerClockWatch::absent(CantTellReason::LinkDown),
             tally: Tally::default(),
-            late: Late::default(),
+            late: Persist::default(),
+            ahead: Persist::default(),
+            figure: None,
+            since: None,
         }
     }
 
-    /// Judges `e` (its `late` before persistence) at `now` (time since the daemon's start)
-    /// and wall time `wall`, with the feed's `minutes`.
+    /// Judges `e` (its `late` and `disagree` before persistence) at `now` (time since the
+    /// daemon's start) and wall time `wall`, with the feed's `minutes`.
     pub(crate) fn update(
         &mut self,
         mut e: Evidence<'_>,
@@ -275,15 +350,35 @@ impl StandingWatch {
         wall: WallNs,
     ) -> Shown {
         e.late = self.late.update(e.late, now);
+        e.disagree = self.ahead.update(e.disagree, now);
+        let raw = judge(&e);
         self.watch.update(&e, now, wall);
-        let rel = self.watch.clock.relation;
-        self.tally.note(&rel, minutes);
-        let (relation, counting) = self.tally.shown(rel);
+        let closed = self.tally.note(&raw, minutes);
+        let (relation, counting) = self.tally.shown(self.watch.clock.relation);
+        let live = self.watch.clock.ppm.zip(self.watch.clock.span);
+        self.figure = match (self.figure, live) {
+            (Some((was, span)), Some((p, _))) if !closed && (p - was).abs() < FIGURE_STEP => {
+                Some((was, span))
+            }
+            (_, live) => live.map(|(p, s)| (hundredths(p), Seconds(s.0.round()))),
+        };
+        // Kept through a gap in the reports: marks that come back to the same count land on
+        // the same time and do not move it.
+        if let Some(d) = e.streaming_for {
+            let at = WallNs(wall.0.saturating_sub(d.as_nanos() as u64));
+            if self
+                .since
+                .is_none_or(|s| s.0.abs_diff(at.0) > SINCE_STEP_NS)
+            {
+                self.since = Some(at);
+            }
+        }
         Shown {
             relation: quantise(relation),
-            ppm: self.watch.clock.ppm.map(hundredths),
-            span: self.watch.clock.span.map(|s| Seconds(s.0.round())),
+            ppm: self.figure.map(|f| f.0),
+            span: self.figure.map(|f| f.1),
             counting,
+            marks_since: e.streaming_for.and(self.since),
         }
     }
 }

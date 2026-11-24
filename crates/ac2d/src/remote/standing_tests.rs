@@ -287,8 +287,9 @@ fn a_rate_apart_counts_ten_minutes_then_is_not_locked() {
     assert_eq!(
         shown.counting,
         Some(MinuteCount {
-            minutes: HOLD_MINUTES as u32 - 1,
-            of: HOLD_MINUTES as u32
+            beyond: HOLD_MINUTES as u32 - 1,
+            counted: HOLD_MINUTES as u32 - 1,
+            needed: HOLD_MINUTES as u32
         })
     );
     r.run(held_at() - 5.0, held_at() + 5.0);
@@ -327,7 +328,7 @@ fn a_minute_beyond_the_rule_drops_agreement_and_counts() {
     let rep = r.report(245.0);
     let shown = r.judge(&rep, 245.0);
     assert_eq!(shown.relation, PeerRelation::Measuring);
-    assert_eq!(shown.counting.unwrap().minutes, 1);
+    assert_eq!(shown.counting.unwrap().beyond, 1);
 }
 
 #[test]
@@ -372,6 +373,48 @@ fn a_rigs_own_line_beyond_the_rule_waits_its_ten_minutes() {
 }
 
 #[test]
+fn an_own_line_that_comes_back_is_not_held_into_a_tenth_minute() {
+    // Its own line 4 ppm off for nine minutes, then back: the watch holds it a minute
+    // more, but the minutes count it as the judge reads it.
+    let mut r = Rigs::new(0.0);
+    r.own_ppm = 4.0;
+    r.run(0.0, held_at() - 50.0);
+    r.own_ppm = 0.0;
+    r.run_checking(held_at() - 50.0, held_at() + 200.0, |t, _, shown| {
+        assert!(
+            !matches!(shown.relation, PeerRelation::NotLocked { .. }),
+            "{t} s: {shown:?}"
+        );
+    });
+}
+
+#[test]
+fn a_noisy_steady_pair_shows_the_same_entry_between_minute_closes() {
+    // Stamps on the other rig's system time scattered by up to ±50 µs.
+    let mut r = Rigs::new(0.4);
+    r.offset = Box::new(|t| {
+        let n = (t * FPS).round() as u64;
+        ((n.wrapping_mul(2_654_435_761) % 100_001) as f64 - 50_000.0) * 1e-9
+    });
+    let mut before: Option<(Shown, u64)> = None;
+    let mut moved = 0;
+    r.run_checking(0.0, 400.0, |t, rep, shown| {
+        let closed = rep.minutes.map_or(0, |m| m.closed);
+        if t > 65.0
+            && let Some((was, at)) = &before
+            && *at == closed
+        {
+            assert_eq!(was, shown, "{t} s");
+        } else if t > 65.0 {
+            moved += 1;
+        }
+        before = Some((shown.clone(), closed));
+    });
+    // At most once a minute.
+    assert!(moved <= 6, "{moved}");
+}
+
+#[test]
 fn a_link_that_stalls_and_catches_up_loses_nothing() {
     // Arrivals held for 3 s, then the frames come at once: every mark is there.
     let mut r = Rigs::new(0.0);
@@ -405,14 +448,16 @@ fn a_hole_in_the_marks_breaks_the_fit_and_keeps_the_minutes_closed() {
     assert_eq!(before.closed, 2);
     let rep = r.report(140.0);
     assert_eq!(rep.absent, Some(Absent::TheirFrames));
-    assert!(rep.long.is_none() && rep.marks_for.is_none() && rep.marks_since.is_none());
+    assert!(rep.long.is_none() && rep.marks_for.is_none());
     r.run(740.0, 745.0);
     let rep = r.report(745.0);
     // Five seconds of marks: no fit bridging the hole, the minutes closed before it kept.
     assert!(rep.long.is_none() && rep.short.is_none(), "{rep:?}");
     assert_eq!(rep.minutes.unwrap().series, before.series);
     assert_eq!(rep.minutes.unwrap().closed, 2);
-    // The open minute counts from after the hole; the step is no rate.
+    assert_eq!(rep.minutes.unwrap().holes, 1);
+    // The open minute counts from after the hole; the step is no rate; the minute closing
+    // after it is the first agreement since.
     r.run(745.0, 801.0);
     let rep = r.report(801.0);
     assert!(ppm(&rep).abs() < 0.05, "{}", ppm(&rep));
@@ -478,8 +523,11 @@ fn system_clocks_apart_are_found_from_marks_that_hold_a_second() {
     // Less the 5 ms transit and this rig's slack.
     let by = r.report(3.0).ahead.unwrap();
     assert!(by > 0.035 && by < 0.045, "{by}");
+    // Said once it has held as long as a lateness must.
+    assert_eq!(r.shown(3.0), PeerRelation::Measuring);
+    r.run(3.0, 6.0);
     assert!(matches!(
-        r.shown(3.0),
+        r.shown(6.0),
         PeerRelation::CantTell {
             reason: CantTellReason::ClocksDisagree { .. }
         }

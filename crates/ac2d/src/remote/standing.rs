@@ -14,8 +14,9 @@
 //! system time, not by when they arrive: a link that stalls and then delivers everything
 //! late has lost nothing) is a break in the windows: both sample indices kept counting
 //! through it, but either system clock may have moved meanwhile, so the fit takes the two
-//! sides as segments of their own, and the minute open at the hole counts again. The
-//! minutes closed before it stand. What the closed minutes may say is
+//! sides as segments of their own, and the minute open at the hole counts again. A hole of
+//! over a minute ([`Minutes::holes`]) also starts the count of marks again: minutes on
+//! either side of it are not minutes in a row. What the closed minutes may say is
 //! [`super::standing_verdict`]'s.
 
 use std::collections::VecDeque;
@@ -25,10 +26,9 @@ use std::time::{Duration, Instant};
 use ac2_core::clock_map::StampLine;
 use ac2_core::clock_rate::RateWindow;
 use ac2_proto::frame::{FrameStamp, METER_FPS, SourceLevelsFrame};
-use ac2_proto::units::{DaemonIncarnation, SessionEpoch, WallNs};
+use ac2_proto::units::{DaemonIncarnation, SessionEpoch};
 
 use super::join::{CROSS_LONG_S, CROSS_SHORT_S, CROSS_STEP_S};
-use crate::util::wall_ns;
 
 /// A mark waits up to one meter period for its frame beside the link offset's transit and
 /// periods; the late side allows it.
@@ -46,6 +46,8 @@ pub(crate) const LAPSED: Duration = Duration::from_secs(2);
 /// Marks this far apart by their own sample index or system time leave a hole in the
 /// evidence: frames come 30 a second, so this is some sixty missing, not a late one.
 const HOLE_S: f64 = 2.0;
+/// A hole this long, s, is a whole minute missing.
+const LONG_HOLE_S: f64 = 60.0;
 /// A mark's age says something about the system clocks only when it holds this long: transit
 /// and credit only ever add age, so the least age over it bounds the late side, and one
 /// stamp's jitter must not read as a clock ahead, so the greatest bounds the early side.
@@ -113,6 +115,8 @@ pub(crate) enum Absent {
 pub(crate) struct Minutes {
     /// Counts the starts: a new one is a new count.
     pub(crate) series: u64,
+    /// Holes of over a minute in this series: one more is a new count too.
+    pub(crate) holes: u64,
     pub(crate) closed: u64,
     /// The long window's figure as the newest closed, ppm; `None`: too thin to fit.
     pub(crate) last: Option<f64>,
@@ -124,10 +128,9 @@ pub(crate) struct StandingReport {
     /// The cross-rig rate over the long and the short window: (ppm, span s).
     pub(crate) long: Option<(f64, f64)>,
     pub(crate) short: Option<(f64, f64)>,
-    /// How long marks were paired, from the first since the windows (re)started to the
-    /// newest, and when the first was (this rig's wall time).
+    /// How long marks were paired, from the first since the windows (re)started or the last
+    /// hole of over a minute, to the newest.
     pub(crate) marks_for: Option<Duration>,
-    pub(crate) marks_since: Option<WallNs>,
     /// The marks held in this rig's future over a second: the other rig's system clock is
     /// ahead by at least this, s.
     pub(crate) ahead: Option<f64>,
@@ -155,7 +158,7 @@ pub(crate) struct StandingFeed {
     short: RateWindow,
     run: Option<Run>,
     rate: u32,
-    since: Option<(Instant, WallNs)>,
+    since: Option<Instant>,
     last_frame: Option<Instant>,
     last_mark: Option<Instant>,
     /// The newest mark's sample index and system time, for holes.
@@ -199,6 +202,7 @@ impl StandingFeed {
             periods: (0.0, 0.0),
             minutes: Minutes {
                 series: 0,
+                holes: 0,
                 closed: 0,
                 last: None,
             },
@@ -224,6 +228,7 @@ impl StandingFeed {
         self.ages_since = None;
         self.minutes = Minutes {
             series: self.minutes.series + 1,
+            holes: 0,
             closed: 0,
             last: None,
         };
@@ -266,17 +271,32 @@ impl StandingFeed {
             self.restart(run, local.rate);
         }
         let rate = f64::from(local.rate);
-        let hole = self.newest.is_some_and(|(sample, system)| {
-            mark.sample.0 <= sample
-                || mark.system_ns <= system
-                || (mark.sample.0 - sample) as f64 > HOLE_S * rate
-                || (mark.system_ns - system) as f64 > HOLE_S * 1e9
+        // A frame whose block had no capture stamp carries the mark before it again.
+        if self
+            .newest
+            .is_some_and(|(sample, _)| sample == mark.sample.0)
+        {
+            return;
+        }
+        // Seconds of the marks' own time missing; a step back is a hole of unknown length.
+        let missing = self.newest.map(|(sample, system)| {
+            if mark.sample.0 < sample || mark.system_ns <= system {
+                f64::INFINITY
+            } else {
+                ((mark.sample.0 - sample) as f64 / rate)
+                    .max((mark.system_ns - system) as f64 * 1e-9)
+            }
         });
+        let hole = missing.is_some_and(|s| s > HOLE_S);
         if hole {
             // The open minute spans the hole: it counts again from here.
             self.minute_from = None;
             self.ages.clear();
             self.ages_since = None;
+        }
+        if missing.is_some_and(|s| s > LONG_HOLE_S) {
+            self.minutes.holes += 1;
+            self.since = None;
         }
         self.newest = Some((mark.sample.0, mark.system_ns));
         let at = local_at(local.reference, local.line, rate, mark.system_ns as f64);
@@ -289,7 +309,7 @@ impl StandingFeed {
         let ns = (at * 1e9 / rate) as u64;
         self.long.push(mark.sample.0, ns, broke);
         self.short.push(mark.sample.0, ns, broke);
-        self.since.get_or_insert_with(|| (now, WallNs(wall_ns())));
+        self.since.get_or_insert(now);
         self.last_mark = Some(now);
         self.minute(mark.sample.0, rate);
         self.age(local, at, their_period, now);
@@ -358,8 +378,7 @@ impl StandingFeed {
                 .since
                 .zip(self.last_mark)
                 .filter(|_| fed)
-                .map(|((s, _), l)| l.saturating_duration_since(s)),
-            marks_since: self.since.filter(|_| fed).map(|(_, w)| w),
+                .map(|(s, l)| l.saturating_duration_since(s)),
             ahead: (settled && greatest < -slack).then(|| -greatest - slack),
             least_age: settled.then(|| ages().fold(f64::INFINITY, f64::min)),
             allow: slack + meter_period_s(),

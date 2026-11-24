@@ -272,6 +272,20 @@ fn running_without_agreement_does_not_say_the_clocks_agree() {
     assert_eq!(caption(&x, &r), None);
 }
 
+/// A transfer function on a rig the remote state holds no relation for says that much: not
+/// a cause it does not know.
+#[test]
+fn running_on_a_rig_with_no_clock_reading_says_so() {
+    let mut r = remote(PeerRelation::Agree);
+    r.rigs.clear();
+    let x = tf(RemoteSide::Measurement, CrossTfState::Running);
+    let line = &status_lines(&x, &r, "X")[0];
+    assert!(
+        line.starts_with("CLOCKS: CAN'T TELL (no clock reading for "),
+        "{line}"
+    );
+}
+
 #[test]
 fn slip_drift_and_late_are_cues_not_refusals() {
     let r = remote(PeerRelation::Agree);

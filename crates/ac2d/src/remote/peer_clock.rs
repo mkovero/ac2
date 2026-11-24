@@ -102,7 +102,7 @@ fn own_line(rig: RigId, c: &Clocks) -> Result<Option<f64>, CantTellReason> {
 }
 
 /// The relation the evidence alone shows, before any hold.
-fn judge(e: &Evidence<'_>) -> PeerRelation {
+pub(crate) fn judge(e: &Evidence<'_>) -> PeerRelation {
     let cant = |reason| PeerRelation::CantTell { reason };
     let Some(theirs) = e.theirs.1 else {
         return cant(e.absent);

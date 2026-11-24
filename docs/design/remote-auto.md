@@ -331,13 +331,16 @@ session opens; with streams on demand that minute would come at every start.
   reads in a minute's fit as a rate (100 µs over a minute is about 2 ppm), on the
   cross-rig figure and on each rig's own line alike. A slew only ever makes a locked pair
   look apart, so the two verdicts are held unequally: *agree* once the first whole minute
-  closes within the rule, back to *measuring* whenever a minute closes outside it; *not
-  locked* (the cross-rig rate or either rig's own line) only after ten whole minutes in a
-  row beyond the rule, one side and one sign, with *measuring* and the count (*4 of 10
-  min*) meanwhile. Ten counted and not of one mind is *can't tell (figure not steady: +0.4
-  … +3.1 ppm)*, never *measuring* for ever. Two minutes in a row within the rule end a
-  count; a minute too thin to fit, or anything the judge cannot tell (an unsynced system
-  clock), clears it. Ten minutes: one chrony correction would have to move the clock 1.2
+  closes within the rule; a minute closing outside it starts a count, *measuring* with the
+  count (*beyond 2 ppm for 4 of the 10 min a verdict needs*) while it runs; *not locked*
+  (the cross-rig rate or either rig's own line, each minute classed by the judge's own
+  reading, not the watch's held one) only once ten minutes are counted all beyond the rule,
+  one side and one sign. Ten counted and not of one mind is *can't tell (figure not steady:
+  +0.4 … +3.1 ppm)*, never *measuring* for ever. Two minutes in a row below 1.8 ppm end a
+  count (a margin, so a figure sitting at the rule does not flip in and out); a minute too
+  thin to fit, anything the judge cannot tell (an unsynced system clock, marks late or in
+  the future), or a hole in the marks of over a minute clears it: minutes on either side are
+  not in a row. What is shown changes only as minutes close. Ten minutes: one chrony correction would have to move the clock 1.2
   ms or more at an update interval of 256 s or longer to read past 2 ppm that long.
 - **Late marks:** marks older than the link offset in force (else the longest a link may
   run, 0.5 s) for 3 s running are *can't tell (… levels arrive N ms late: the network, or

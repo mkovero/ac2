@@ -162,7 +162,7 @@ fn the_clocks_are_measured_from_levels_alone_and_start_again_on_a_reopen() {
 }
 
 #[test]
-fn a_link_gap_leaves_a_hole_and_keeps_the_count() {
+fn slow_a_short_link_gap_leaves_a_hole_and_keeps_the_count() {
     let mut t = rigs(FS);
     wait_remote(&mut t.ca, "measuring", |r| measuring_for(r, 2.0));
     let since = marks_since(&remote(&mut t.ca)).unwrap();
@@ -189,8 +189,10 @@ fn a_link_gap_leaves_a_hole_and_keeps_the_count() {
     t.b.shutdown();
 }
 
+/// The marks' count is a fixed time, not a figure that ticks: while measuring, no state is
+/// committed second after second. (Steady figures are the unit tests'.)
 #[test]
-fn a_steady_pair_commits_no_state_second_after_second() {
+fn slow_counting_marks_commit_no_state_while_measuring() {
     let mut t = rigs(FS);
     wait_remote(&mut t.ca, "measuring", |r| measuring_for(r, 2.0));
     let first = remote(&mut t.ca);

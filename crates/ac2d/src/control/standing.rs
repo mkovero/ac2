@@ -113,7 +113,7 @@ impl Control {
                 link,
                 session,
                 clock,
-                marks_since: fed.and_then(|r| r.marks_since),
+                marks_since: shown.marks_since.filter(|_| fed.is_some()),
                 counting: shown.counting.filter(|_| !early),
             });
         }

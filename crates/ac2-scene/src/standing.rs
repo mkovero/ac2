@@ -19,7 +19,10 @@ pub fn status_lines(r: &RemoteState, now: WallNs) -> Vec<String> {
 fn line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
     let rel = relation_text(r, &s.name, &s.clock.relation);
     let mut parts = vec![format!("from levels {}", s.name), rel];
-    if let (Some(p), Some(span)) = (s.clock.ppm, s.clock.span) {
+    // A verdict that is not locked says its own figure; a second one beside it would be
+    // another window's and could disagree.
+    let verdict = matches!(s.clock.relation, PeerRelation::NotLocked { .. });
+    if let (Some(p), Some(span), false) = (s.clock.ppm, s.clock.span, verdict) {
         parts.push(format!(
             "{} ppm over {} s",
             format::signed(p, 2),
@@ -27,11 +30,21 @@ fn line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
         ));
     }
     if let Some(c) = s.counting {
-        parts.push(format!("{} of {} min beyond 2 ppm", c.minutes, c.of));
+        parts.push(if c.beyond == c.counted {
+            format!(
+                "beyond 2 ppm for {} of the {} min a verdict needs",
+                c.beyond, c.needed
+            )
+        } else {
+            format!(
+                "beyond 2 ppm in {} of {} min, of the {} a verdict needs",
+                c.beyond, c.counted, c.needed
+            )
+        });
     }
     if let Some(since) = s.marks_since {
         let s = now.0.saturating_sub(since.0) / 1_000_000_000;
-        parts.push(format!("marks for {}", format::duration(s as f64)));
+        parts.push(format!("marks for {}", whole_seconds(s)));
     }
     if s.link == RemoteLink::Up {
         parts.push(match &s.session {
@@ -57,6 +70,15 @@ fn line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
         format!("link {}", link_words(s))
     });
     parts.join(" · ")
+}
+
+/// A time in whole seconds: *12 s*, *5 min 12 s*, *2 h 05 min*.
+fn whole_seconds(s: u64) -> String {
+    if s < 60 {
+        format!("{s} s")
+    } else {
+        format::duration(s as f64)
+    }
 }
 
 /// The link in short: its state without the audio rate, which a levels feed does not have.
@@ -122,11 +144,28 @@ mod tests {
             "from levels ketunkolo · measuring clocks… · 96 kHz, 3 inputs · link up"
         );
         let mut counting = rig(up.clone(), PeerRelation::Measuring, Some(2.71));
-        counting.standing[0].counting = Some(MinuteCount { minutes: 4, of: 10 });
+        counting.standing[0].counting = Some(MinuteCount {
+            beyond: 4,
+            counted: 4,
+            needed: 10,
+        });
         assert_eq!(
             one(&counting),
-            "from levels ketunkolo · measuring clocks… · +2.71 ppm over 60 s · 4 of 10 min \
-             beyond 2 ppm · marks for 5 min 12 s · 96 kHz, 3 inputs · link up"
+            "from levels ketunkolo · measuring clocks… · +2.71 ppm over 60 s · beyond 2 ppm \
+             for 4 of the 10 min a verdict needs · marks for 5 min 12 s · 96 kHz, 3 inputs · \
+             link up"
+        );
+        counting.standing[0].counting = Some(MinuteCount {
+            beyond: 2,
+            counted: 3,
+            needed: 10,
+        });
+        counting.standing[0].marks_since = Some(WallNs(NOW - 12_400_000_000));
+        assert_eq!(
+            one(&counting),
+            "from levels ketunkolo · measuring clocks… · +2.71 ppm over 60 s · beyond 2 ppm \
+             in 2 of 3 min, of the 10 a verdict needs · marks for 12 s · 96 kHz, 3 inputs · \
+             link up"
         );
         assert_eq!(
             one(&rig(
@@ -139,8 +178,8 @@ mod tests {
                 },
                 Some(3.12)
             )),
-            "from levels ketunkolo · CLOCKS NOT LOCKED +3.1 ppm over 60 s · +3.12 ppm over \
-             60 s · marks for 5 min 12 s · 96 kHz, 3 inputs · link up"
+            "from levels ketunkolo · CLOCKS NOT LOCKED +3.1 ppm over 60 s · marks for 5 min \
+             12 s · 96 kHz, 3 inputs · link up"
         );
         assert_eq!(
             one(&rig(

@@ -271,7 +271,11 @@ fn standing_rigs() -> Vec<StandingRig> {
         s(RemoteLink::Up, true, PeerRelation::Agree, Some(0.12)),
         s(RemoteLink::Up, true, PeerRelation::Measuring, None),
         StandingRig {
-            counting: Some(MinuteCount { minutes: 4, of: 10 }),
+            counting: Some(MinuteCount {
+                beyond: 3,
+                counted: 4,
+                needed: 10,
+            }),
             ..s(RemoteLink::Up, true, PeerRelation::Measuring, Some(2.71))
         },
         s(
