@@ -1,5 +1,5 @@
-//! Paged replies at their documented caps fit one ctrl message: a page the daemon may send
-//! is never answered `too_large` instead.
+//! `spl.log_get`, `spl.history_get` and `spl.band_log_get` at their documented caps fit
+//! one ctrl message: a page the daemon may send is never answered `too_large` instead.
 
 use ac2_proto::model::{LeqConfig, SplBandLog, SplHistory, SplLogPage};
 use ac2_proto::samples;

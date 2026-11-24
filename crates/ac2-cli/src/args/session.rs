@@ -26,7 +26,8 @@ pub enum SessionCmd {
         discard: bool,
     },
     /// Save measurements and traces (with slots and display edits) to the session they
-    /// belong to (`session status`).
+    /// belong to (`session status`). One loaded from or exported to a file on a client's
+    /// machine is written with `save-as PATH`: the daemon knows that file by name only.
     Save,
     /// Save measurements and traces as another session; they then belong to it.
     SaveAs {

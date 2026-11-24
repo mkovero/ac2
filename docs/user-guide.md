@@ -3186,7 +3186,7 @@ Backspace goes up a folder; Esc goes back or closes.
 |---|---|
 | `ac2 session status` | the audio I/O and the working state: name, *unsaved changes*, when saved, what could be recovered |
 | `ac2 session new [--discard]` | new, empty measurements and traces |
-| `ac2 session save` | saves to the session it belongs to |
+| `ac2 session save` | saves to the session it belongs to; one loaded from or exported to a file on a client's machine needs `save-as <file>` (the daemon knows that file by name only) |
 | `ac2 session save-as <session> [--force]` | saves as another session; `--force` replaces an existing one |
 | `ac2 session load <session> [--discard]` | opens one, disarmed (`load`, because `session open` opens the audio I/O) |
 | `ac2 session recover` | brings back what the last `new` or `load` replaced |
