@@ -1,9 +1,9 @@
 # Protocol next: edit tokens, roles, big state, frame meta, log keys
 
-Status: decided, not built. Everything here lands under one protocol version (PROTO 105; 103
-and 104 are taken by branches that land before it) and one bump of each file format it
-touches; there is no reader for the shapes it replaces. File version numbers below are
-counted from `main` at 6cbfd73c; a branch that bumps one of them first moves these up by one.
+Status: decided, not built. Everything here lands under one protocol version
+(`PROTO_VERSION` 104 → 105) and one bump of each file format it touches; there is no reader
+for the shapes it replaces. File version numbers below are counted from `main` at 5c95a4a3;
+a branch that bumps one of them first moves these up by one.
 
 ## Problem
 
@@ -43,10 +43,12 @@ move `edit_rev`, so a whole-config write prepared before them is refused and re-
 than replayed over them.
 
 Every `base` taken today from `config_rev` moves to `edit_rev`: in the daemon the internal
-`meas_update` calls (`control/walks.rs`, `control/leq.rs`); in the CLI `cmd/leq.rs`,
-`cmd/osc.rs`, `cmd/bands.rs`, `cmd/math.rs`, `cmd/meas.rs`; in the app `leq_dialog.rs`
-(construction and `LeqDialog::rebase`), `state/queries.rs` and `state/stimulus.rs`. The
-frame-pacing and glide paths that compare stamps keep comparing `config_rev`.
+`meas_update` call (`control/walks.rs`) and the `MeasUpdate` that `control/leq.rs` executes
+for a band transfer; in the CLI `cmd/leq.rs`, `cmd/osc.rs`, `cmd/bands.rs`, `cmd/math.rs`,
+`cmd/meas.rs`; in the app `leq_dialog.rs` (construction and `LeqDialog::rebase`),
+`state/queries.rs` and `state/stimulus.rs`. The paths that compare frame stamps keep comparing
+`config_rev`: in the app `conn/pacing.rs`, `state/glide.rs`, `state/walk_bar.rs`,
+`state/leq.rs`, and the bins-to-`tf` match in `ac2-scene` `tf/bins.rs`.
 
 Because every commit of the measurement moves `edit_rev`, a second edit built from the mirror
 before the first one's event arrives (a key repeat, an offset drag followed by a configuration
@@ -115,7 +117,8 @@ stream reopen, a file load), and `SetDelay` carries the delay's rev as it carrie
 today. The daemon's own equality test of a settled capture (`settled` in
 `control/traces.rs`) becomes `stamp.config_rev == max(m.config_rev, delay.rev)` and reads
 `awaiting_pick` from the delay entity. `leq_reported` (`control/leq.rs`) is SPL only and
-keeps comparing `config_rev`.
+keeps comparing `config_rev`. A transfer's `bins/<meas>/<stage>` frames carry the stamp of
+the `tf` emit they belong to (`jobs/bins.rs`), so the same rule holds for them.
 
 **Mirror and session file.** `apply_change` gains `Delay` and `DelayFinding` upserts keyed
 by `meas`; deletes arrive as events. The saved measurement already keeps its delay apart
@@ -192,8 +195,8 @@ or a download; a snapshot transfer aside). Everything else is refused, including
 commands that read but act on the rig: `stream.devices` (drivers load), `stream.preview`,
 `stream.preview_stop`, `stream.control_panel`, `stream.detect_loopback`, `delay.find`,
 `file.upload_*`, `file.import`. On the data socket a viewer may subscribe to every topic
-except `audio/<channel>` (rigs only, as today), and sends credit and keyframe requests as
-anyone.
+except `audio/<channel>` and `source/levels` (rigs only, as today, the gate in `peers.rs`),
+`bins/<meas>/<stage>` included, and sends credit and keyframe requests as anyone.
 
 **Refusal.** A viewer's refusal is `refused` with detail `view_only {}`; a rig's keeps its
 message. Both are checked in `request.rs` before dedup admission, so a refused request stores
@@ -261,8 +264,8 @@ store records its rev as not replayable, so a `state.since` spanning it answers
   over either is `refused` with the count in the message.
 - **`file.upload_abort {transfer: TransferId}`** replies `ack`, deletes the spool file and
   frees the slot. A download ends with `file.download_end` as today. A `trace.import`
-  refused with `pick_channel` or `bad_options` keeps its upload; the client retries on the
-  same `transfer` id and aborts it when the operator cancels.
+  refused with `pick_channel` or `bad_options` keeps its upload; the client retries the
+  import on the same `transfer` id, and sends `file.upload_abort` when the operator cancels.
 - **Ending.** A peer's transfers are dropped, spool files deleted, after 2 minutes without a
   chunk, on `file.upload_abort`, and when the peer is revoked or demoted. The daemon has no
   signal for a ctrl connection's end, so the idle timeout is what frees a vanished client's
@@ -285,32 +288,36 @@ equals the count its name belongs to (`n`, `meta.pairs.len()` or `meta.sources.l
 it. Every `array_size(d.elem, n)` (`frame/wire.rs` encode, delta encode, delta decode and
 header size; `frame/decode.rs`) becomes `array_size(d.elem, d.len)`.
 
-**Levels (`stream_levels`, `preview_levels`).** Per input (`len` = inputs): `ppm`, `max`,
-`true_peak`, `overs`, `peak`, `rms`, `clip` as today; `ppm` and `max` are declared `dbtp`
-under `momentary` / `short_term` and `dbfs` under a peak detector. Per pair (`len` =
-`pairs.len()`): `pair_corr` (`f32`, unit `correlation`, NaN while a side is under the gate),
-`pair_quiet` (`u32`, the raw `Elem::U32`, unit `side`: 0 none, 1 left, 2 right; `Elem::U8`
-is the coherence coding and is not used). Per loudness source (`len` = sources): `lufs_m`,
-`lufs_s`, `lufs_m_max`, `lufs_s_max` (`f32`, unit `lufs`, −∞ as today), `lufs_i` (`f32`,
-`lufs`, NaN for none), `lra` (`f32`, `lu`, NaN for none), `tp_max` (`f32`, `dbtp`), `loud_s`
-(`f32`, `seconds`, metered time since the reset). New units: `correlation`, `side`, `lufs`,
-`lu`. `meta` keeps only what changes on a configuration change: `channels`, `ballistic`,
-`pairs: Vec<Pair>` (left, right) and `sources: Vec<LoudnessSource>`, each source with its
-`since: WallNs` (it moves on a reset, which may go as a keyframe). The header no longer grows
-per source by more than a pair of channel numbers.
+**Levels (`stream_levels`, `preview_levels`, `source_levels`).** Per input (`len` = inputs):
+`ppm`, `max`, `true_peak`, `overs`, `peak`, `rms`, `clip` as today; `ppm` and `max` are
+declared `dbtp` under `momentary` / `short_term` and `dbfs` under a peak detector. Per pair
+(`len` = `pairs.len()`): `pair_corr` (`f32`, unit `correlation`, NaN while a side is under the
+gate), `pair_quiet` (`u32`, the raw `Elem::U32`, unit `side`: 0 none, 1 left, 2 right;
+`Elem::U8` is the coherence coding and is not used). Per loudness source (`len` = sources):
+`lufs_m`, `lufs_s`, `lufs_m_max`, `lufs_s_max` (`f32`, unit `lufs`, −∞ as today), `lufs_i`
+(`f32`, `lufs`, NaN for none), `lra` (`f32`, `lu`, NaN for none), `tp_max` (`f32`, `dbtp`),
+`loud_s` (`f32`, `seconds`, metered time since the reset). New units: `correlation`, `side`,
+`lufs`, `lu`. `meta` keeps only what changes on a configuration change: `channels`,
+`ballistic`, `pairs: Vec<Pair>` (left, right) and `sources: Vec<LoudnessSource>`, each source
+with its `since: WallNs` (it moves on a reset, which may go as a keyframe). The header no
+longer grows per source by more than a pair of channel numbers. `source_levels` carries the
+same arrays; its meta keeps `sample_rate_hz` and the timing `mark` beside the fields above.
 
-**Delta meta.** `PerFrame` gains the kinds whose metadata moves every frame; a delta's
+**Delta meta.** `PerFrame` covers every kind whose metadata moves every frame; a delta's
 `meta` slot carries:
 
 | kind | per-frame part |
 |---|---|
-| `tf` | `filled`, `settling` (today), `delay`, `nudged`, `align: Option<AlignState>` |
+| `tf` | `filled`, `settling` (today), `delay`, `nudged`, `math.align: Option<AlignState>` |
+| `bins` | `blocks`, `eff_avg` (today), `delay`, `nudged` |
 | `spl` | as today |
 | `spec` | `ages: Vec<Option<Seconds>>` (one per band of `bands`), `harmonics` |
 | `stream_gonio`, `preview_gonio` | `gains: Vec<f32>` (dBFS, one per pair) |
-| levels kinds | nil (everything moved into arrays) |
+| `stream_levels`, `preview_levels` | nil (everything moved into arrays) |
+| `source_levels` | `mark` (today) |
 
-Everything else in those kinds' meta is static; a change of it still goes as a keyframe.
+Everything else in those kinds' meta (`TfMeta.bins` included) is static; a change of it
+still goes as a keyframe.
 `leq` and `band_leq` stay keyframe-only.
 
 **Delta stamp.** The delta header carries `config_rev` and `config_applied_at` after
@@ -463,6 +470,7 @@ network mode.
 |---|---|---|
 | `session.devices`, `.preview`, `.preview_stop`, `.control_panel`, `.detect_loopback`, `.open`, `.close`, `.status`, `.inputs`, `.outputs`, `.replay` | `stream.*` (same suffixes) | proto, ac2d, client, cli, ui, e2e, tools/protocol |
 | `State.session`, event kind `session`, `Session`, `SessionConfig`, `SessionEpoch`, `session_epoch` (header, welcome, snapshot) | `State.stream`, `stream`, `Stream`, `StreamConfig`, `StreamEpoch`, `stream_epoch` | same + traces (sidecar) |
+| `StandingSession`, `StandingRig.session`, `CantTellReason::NoSession` (`no_session`) | `StandingStream`, `StandingRig.stream`, `NoStream` (`no_stream`) | proto, ac2d, scene, ui, cli |
 | frame kinds `session_levels`, `session_gonio`; topics `session/levels`, `session/gonio`, `session/preview`, prefix `session/` | `stream_levels`, `stream_gonio`; `stream/levels`, `stream/gonio`, `preview/levels`, `stream/` | proto, ac2d, client, ui, plot |
 | `Result` as `{"Ok"}` / `{"Err"}`; `CtrlError::MissingVersion` text | `{"ok"}` / `{"err"}` (snake_case); `missing_version` | proto, tools/protocol |
 | tag keys `kind` (`InputKind`, `Surface`), `state` (`Recovery`), `shape` (`TargetCurve`), `status` (`BandTransferBand`) | `type` | proto, traces, ac2d (calstore, plans), ui |
@@ -471,7 +479,7 @@ network mode.
 | `rig.unpair.rig` | `rig_id: RigId` | proto, ac2d, cli, ui |
 | `server.authorize`, `server.revoke` | `auth.authorize`, `auth.revoke` | proto, ac2d, cli, ui |
 | `rig.monitor_start {base, on}` | `rig.monitor_at_start {base, on}` | proto, ac2d, cli, ui |
-| `sample_rate: Hz` / `u32` (sweep info, `ir` meta, dynamics, trace, sidecar) | `sample_rate_hz` | proto, traces, ac2d, ui |
+| `sample_rate: Hz` / `u32` (sweep info, `ir` meta, dynamics, trace, sidecar), `BinsMeta.rate` | `sample_rate_hz` | proto, traces, ac2d, ui, scene |
 | `AlignBand.lo/hi`, `FreqRange.lo/hi` | `lo_hz`, `hi_hz` | proto, core conv, ui, scene |
 | `sim` event setting `State.sim_map` | event kind `sim_map: Option<SimState>` | proto, ac2d, client |
 | delta header `…, crc, meta` | `…, config_rev, config_applied_at, …, meta, crc` (§6) | proto |
@@ -536,19 +544,28 @@ bumped once (table below), by the first branch that changes its shape; a later b
 changes it again does so under the same number and extends the converter. Nothing deploys
 until the last has landed.
 
-1. `pn-stream`: `session.*` to `stream.*` alone (largest diff, no logic).
+1. `pn-stream`: `session.*` to `stream.*` alone (largest diff, no logic), with the standing
+   names (`StandingSession`, `NoSession`); `jobs/meters.rs` builds both the `stream_levels`
+   and the `source_levels` meta.
 2. `pn-names`: the pure renames of §9 (tag keys, `colour`, `channel`, `rig_id`, `auth.*`,
-   `rig.monitor_at_start`, unit suffixes, snake_case `Result`).
+   `rig.monitor_at_start`, unit suffixes, snake_case `Result`). `TransferResolution` is
+   already tagged `type`, and the `sample_rate_hz` of `SourceLevelsMeta` and the standing
+   entries already carry the suffix; `BinsMeta.rate` joins the sample-rate renames.
 3. `pn-shapes`: the §9 rows that change a shape but not frames or files: `sim_map`, dynamics
    envelopes as arrays, `RigPeer`, the `Version` detail, required `level`, busy `refused`,
    required `serde` fields.
 4. `pn-files`: string integers in JSON files and `next_run`.
-5. `pn-edit`: §1, §2 (`edit_rev`, delay entity, `expect_rev` gone, `eq put` base).
-6. `pn-roles`: §3 (needs the `auth.*` names of 2).
+5. `pn-edit`: §1, §2 (`edit_rev`, delay entity, `expect_rev` gone, `eq put` base); bins
+   frames take the `tf` stamp already, so they follow without a change of their own.
+6. `pn-roles`: §3 (needs the `auth.*` names of 2). The data socket's rig gate already
+   keeps `source/levels` and `audio/<channel>` from every non-rig, a viewer included.
 7. `pn-ipc`: §8; then an all-OS CI run (`-f all_os=true`) and the Wine AF_UNIX proof.
 8. `pn-big`: §4 and the one history cap; snapshot transfers exempt from `MAX_TRANSFERS`.
 9. `pn-spool`: §5; then an all-OS CI run for the free-space query per OS.
-10. `pn-frames`: §6 with the `dbtp` tagging and the delta header, `wire_size` rerun.
+10. `pn-frames`: §6 with the `dbtp` tagging and the delta header,
+    `crates/ac2d/tests/wire_size.rs` rerun. `PerFrame` (`frame/wire.rs`) already carries
+    `bins` and `source_levels` and its match is exhaustive; this step adds `delay` /
+    `nudged` to `bins` and gives `source_levels` the levels arrays.
 11. `pn-logs`: §7; then an all-OS CI run for the boot clock, boot id, RTC, zone and
     `adjtimex` code per OS.
 12. `pn-misc`: `DmxSet.snap`, the `artnet.test` merge, the `cal.line` range, the loopback
@@ -560,10 +577,10 @@ Every serde writer of the workspace was walked; stored formats that change shape
 
 | format | from → to | why | deploy action |
 |---|---|---|---|
-| `PROTO_VERSION` | 101 → 105 | everything above | daemon, CLI, apps together |
-| session format (`ac2-traces::session::VERSION`) | 48 → 49 | stream names, tag keys, `lo_hz` / `hi_hz`, `sample_rate_hz`, `next_run`, string integers, log versions and marks | autosave of 48 set aside at start (its logs stay plain CSV); save or export first; old saved sessions reach 105 by `file.salvage` |
+| `PROTO_VERSION` | 104 → 105 | everything above | daemon, CLI, apps together |
+| session format (`ac2-traces::session::VERSION`) | 49 → 50 | stream names, tag keys, `lo_hz` / `hi_hz`, `sample_rate_hz`, `next_run`, string integers, log versions and marks | autosave of 49 set aside at start (its logs stay plain CSV); save or export first; old saved sessions reach 105 by `file.salvage` |
 | `working.json` (autosave folder) | unversioned | `saved_at`, `replaced_at` as strings | set aside with its autosave |
-| rig meter logs (`rig_logs`) | session format 48 → 49 | as the session | not read back; the meters start new logs, old CSV stays on disk |
+| rig meter logs (`rig_logs`) | session format 49 → 50 | as the session | not read back; the meters start new logs, old CSV stays on disk |
 | raw capture sidecar | 3 → 4 | stream names, `sample_rate_hz`, string integers, measurement without `delay` and `TimelineChange::Delay` (§1) | old captures not replayed; keep the WAV |
 | SPL log | v2 → v3 | §7 | none (inside sessions) |
 | band log | v1 → v2 | §7 | none (inside sessions) |
