@@ -263,7 +263,9 @@ stops and disarms before handing over. A lease belongs to the instance holding i
 not to the key: an acquire by the current owner's key (a reconnect, or a second process
 with the same key) also fades out, disarms and invalidates the old token, so a new lease
 always starts disarmed. A transport hiccup keeps the lease only by refreshing with the
-held token. Every acquire, force, arm, fire, set, stop, release
+held token. Turning the network off (`server.network`) ends a network client's lease at
+once the same way, with an `expiry` event: that client can no longer refresh or stop it.
+Every acquire, force, arm, fire, set, stop, release
 and expiry is a `generator` event naming the client (`last_action.client`; for `expiry` the
 owner whose lease expired). The output path enforces the deadline itself; if it mutes on an
 expired deadline before the control side noticed, the daemon disarms with the same `expiry`

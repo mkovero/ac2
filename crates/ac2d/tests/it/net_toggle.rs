@@ -603,14 +603,15 @@ fn desired(firing: bool) -> GeneratorDesired {
 }
 
 /// A network app holding the stimulus is told the network went off before its connection
-/// ends, and the stimulus it held stops as its lease runs out.
+/// ends, and the stimulus it held stops at once, not when its lease would have run out.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn turning_off_tells_the_network_app_and_its_lease_fades() {
+async fn turning_off_tells_the_network_app_and_ends_its_lease() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let laptop = KeyPair::generate().unwrap();
     let mut cfg = settings_config(realtime_rig(), dir.path(), &laptop, None);
-    cfg.lease_expiry = Duration::from_millis(600);
+    // Far longer than the wait below: only ending the lease with the network stops it.
+    cfg.lease_expiry = Duration::from_secs(600);
     let h = Daemon::start(cfg).unwrap();
     let ctx = Context::new().unwrap();
     let port = turn_on(&mut Client::connect(&ctx, h.ctrl_endpoint()), &h);
@@ -661,11 +662,15 @@ async fn turning_off_tells_the_network_app_and_its_lease_fades() {
         assert!(t0.elapsed() < T, "the remote app was not told");
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    let s = mirror_until(&local, poll, "the lease run out", |s| {
-        (s.generator.owner.is_none() && !s.generator.firing).then(|| s.server.clone())
+    let (s, last) = mirror_until(&local, poll, "the lease ended", |s| {
+        (s.generator.owner.is_none() && !s.generator.firing)
+            .then(|| (s.server.clone(), s.generator.last_action.clone()))
     })
     .await;
     assert_eq!(s.status, NetStatusKind::Off);
+    let last = last.expect("audited");
+    assert_eq!(last.action, ac2_proto::model::GenAction::Expiry);
+    assert_eq!(last.client.map(|c| c.0), Some("laptop".to_owned()));
     drop(lease);
     drop(remote);
     h.shutdown();

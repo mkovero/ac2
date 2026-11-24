@@ -131,21 +131,35 @@ impl Control {
 
     pub(super) fn check_lease(&mut self, now: Instant) {
         if self.out.lease.as_ref().is_some_and(|l| l.deadline <= now) {
-            let owner = self.out.lease.take().map(|l| l.owner);
-            tracing::warn!(
-                "stimulus lease of {} expired: output muted",
-                owner.as_ref().map_or_else(|| "?".to_owned(), describe)
-            );
-            self.abort_runs(SweepFailure::LeaseExpired, "the stimulus lease expired");
-            self.stop_output();
-            let mut g = self.store.state().generator.clone();
-            g.owner = None;
-            g.owner_local = false;
-            g.armed = false;
-            g.firing = false;
-            self.audit(&mut g, GenAction::Expiry, owner.as_ref());
-            self.commit(Change::Generator(g));
+            self.end_lease("expired");
         }
+    }
+
+    /// The network went off: a network client holding the lease can no longer refresh or
+    /// stop it, so its stimulus must not play on for the rest of the lease.
+    pub(super) fn drop_network_lease(&mut self) {
+        if self.out.lease.as_ref().is_some_and(|l| !l.owner.is_local()) {
+            self.end_lease("ended with the network");
+        }
+    }
+
+    /// Takes the lease away from its holder: output faded out, disarmed, audited as an
+    /// expiry of that owner's lease.
+    fn end_lease(&mut self, why: &str) {
+        let owner = self.out.lease.take().map(|l| l.owner);
+        tracing::warn!(
+            "stimulus lease of {} {why}: output muted",
+            owner.as_ref().map_or_else(|| "?".to_owned(), describe)
+        );
+        self.abort_runs(SweepFailure::LeaseExpired, "the stimulus lease expired");
+        self.stop_output();
+        let mut g = self.store.state().generator.clone();
+        g.owner = None;
+        g.owner_local = false;
+        g.armed = false;
+        g.firing = false;
+        self.audit(&mut g, GenAction::Expiry, owner.as_ref());
+        self.commit(Change::Generator(g));
     }
 
     /// The output path muted itself on an expired gate: whatever the control side believed,

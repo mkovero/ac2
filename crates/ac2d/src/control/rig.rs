@@ -272,6 +272,9 @@ impl Control {
         }
         self.server_sync();
         r?;
+        if !enabled {
+            self.drop_network_lease();
+        }
         tracing::warn!(
             target: "ac2d::audit",
             "network {} by {}",
