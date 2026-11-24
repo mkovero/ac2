@@ -115,7 +115,10 @@ pub(crate) enum Absent {
 pub(crate) struct Minutes {
     /// Counts the starts: a new one is a new count.
     pub(crate) series: u64,
-    /// Holes of over a minute in this series: one more is a new count too.
+    /// Holes in the marks (over 2 s, or a step back) in this series: the minute open at
+    /// one was dropped.
+    pub(crate) gaps: u64,
+    /// Of those, holes of over a minute (or a step back): one more is a new count.
     pub(crate) holes: u64,
     pub(crate) closed: u64,
     /// The long window's figure as the newest closed, ppm; `None`: too thin to fit.
@@ -202,6 +205,7 @@ impl StandingFeed {
             periods: (0.0, 0.0),
             minutes: Minutes {
                 series: 0,
+                gaps: 0,
                 holes: 0,
                 closed: 0,
                 last: None,
@@ -228,6 +232,7 @@ impl StandingFeed {
         self.ages_since = None;
         self.minutes = Minutes {
             series: self.minutes.series + 1,
+            gaps: 0,
             holes: 0,
             closed: 0,
             last: None,
@@ -293,6 +298,7 @@ impl StandingFeed {
             self.minute_from = None;
             self.ages.clear();
             self.ages_since = None;
+            self.minutes.gaps += 1;
         }
         if missing.is_some_and(|s| s > LONG_HOLE_S) {
             self.minutes.holes += 1;

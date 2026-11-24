@@ -195,6 +195,18 @@ impl Rigs {
         )
     }
 
+    /// One frame captured at `t` with its mark changed by `edit`.
+    fn one(&mut self, t: f64, edit: impl FnOnce(&mut LevelsMark)) {
+        let (stamp, mut f) = self.frame(t);
+        if let Some(m) = f.meta.mark.as_mut() {
+            edit(m);
+        }
+        let arrive = t + 0.005;
+        let local = self.local.then(|| self.local(arrive));
+        self.feed
+            .frame(&stamp, f, local, Some(PERIOD), self.at(arrive));
+    }
+
     /// The relation shown at `t`, after the frames run so far.
     fn shown(&mut self, t: f64) -> PeerRelation {
         let rep = self.report(t);
@@ -457,12 +469,79 @@ fn a_hole_in_the_marks_breaks_the_fit_and_keeps_the_minutes_closed() {
     assert_eq!(rep.minutes.unwrap().closed, 2);
     assert_eq!(rep.minutes.unwrap().holes, 1);
     // The open minute counts from after the hole; the step is no rate; the minute closing
-    // after it is the first agreement since.
-    r.run(745.0, 801.0);
+    // after it is the first agreement since, and until it closes, measuring.
+    r.run_checking(745.0, 801.0, |t, rep, shown| {
+        if rep.minutes.unwrap().closed == 2 {
+            assert_eq!(shown.relation, PeerRelation::Measuring, "{t} s");
+        }
+    });
     let rep = r.report(801.0);
     assert!(ppm(&rep).abs() < 0.05, "{}", ppm(&rep));
     assert_eq!(rep.minutes.unwrap().closed, 3);
     assert_eq!(r.shown(801.0), PeerRelation::Agree);
+}
+
+#[test]
+fn a_short_hole_drops_the_open_minute_and_keeps_the_count() {
+    // The third minute 5 ppm apart, then ten seconds with no marks.
+    let mut r = Rigs::new(0.0);
+    r.offset = minute_rates(|k| if k == 2 { 5.0 } else { 0.0 });
+    r.run(0.0, 185.0);
+    let rep = r.report(185.0);
+    assert_eq!(r.judge(&rep, 185.0).counting.unwrap().counted, 1);
+    r.run_checking(195.0, 262.0, |t, rep, shown| {
+        let m = rep.minutes.unwrap();
+        assert_eq!((m.gaps, m.holes), (1, 0), "{t} s");
+        // The minute open at the hole is dropped: the next closes a minute after it.
+        let counted = shown.counting.unwrap().counted;
+        assert_eq!(counted, if t < 254.5 { 1 } else { 2 }, "{t} s");
+        assert_eq!(m.closed, if t < 254.5 { 3 } else { 4 }, "{t} s");
+    });
+
+    // Agreeing: measuring from the hole until a minute closes after it.
+    let mut r = Rigs::new(0.0);
+    r.run(0.0, 125.0);
+    assert_eq!(r.shown(125.0), PeerRelation::Agree);
+    r.run_checking(135.0, 200.0, |t, _, shown| {
+        let want = if t < 194.5 {
+            PeerRelation::Measuring
+        } else {
+            PeerRelation::Agree
+        };
+        assert_eq!(shown.relation, want, "{t} s");
+    });
+}
+
+#[test]
+fn a_hole_is_long_past_a_minute_of_the_marks_own_time() {
+    // The last frame before the hole is number 3749; the next comes 59.9 or 60.1 s later.
+    let resume = |s: f64| (3749.0 + s * FPS) / FPS;
+    for (missing, holes) in [(59.9, 0), (60.1, 1)] {
+        let mut r = Rigs::new(0.0);
+        r.run(0.0, 125.0);
+        r.run(resume(missing), resume(missing) + 1.0);
+        let m = r.report(resume(missing) + 1.0).minutes.unwrap();
+        assert_eq!((m.gaps, m.holes), (1, holes), "{missing} s");
+    }
+}
+
+#[test]
+fn a_repeated_mark_is_skipped_and_one_stepping_back_is_a_hole() {
+    let mut r = Rigs::new(0.0);
+    r.run(0.0, 65.0);
+    let before = r.report(65.0);
+    // The frame after the newest carries the newest's mark again.
+    let (_, f) = r.frame(64.0 + 29.0 / FPS);
+    let newest = f.meta.mark.unwrap();
+    r.one(65.0, |m| *m = newest);
+    r.run(65.0 + 1.0 / FPS, 66.0);
+    let after = r.report(66.0);
+    assert_eq!(after.minutes.unwrap().gaps, 0);
+    assert!(after.marks_for.unwrap() > before.marks_for.unwrap());
+    // A mark from before the newest: a hole of unknown length.
+    r.one(66.0, |m| m.sample.0 -= 48_000);
+    let m = r.report(66.0).minutes.unwrap();
+    assert_eq!((m.gaps, m.holes), (1, 1));
 }
 
 #[test]

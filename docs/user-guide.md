@@ -287,9 +287,12 @@ the first whole minute of timing is not in, or the figure is beyond 2 ppm and is
 watched before it is called (*+2.71 ppm over 60 s · beyond 2 ppm for 4 of the 10 min a
 verdict needs*). A time sync slewing either computer's clock looks like a rate for a minute
 or two, so *clocks agree* comes after one minute within 2 ppm, and again after two minutes
-in a row below 1.8 ppm once a minute went beyond, while *CLOCKS NOT LOCKED +3.1 ppm over 60
-s* waits for ten minutes in a row beyond it, all one way. *marks for* counts from the start
-of the sessions or the last gap of over a minute in the timing. Ten minutes that do not agree among
+running below 1.8 ppm once a minute went beyond, while *CLOCKS NOT LOCKED +3.1 ppm over 60
+s* waits for ten measured minutes running beyond it, all one way; a gap in the timing of a
+few seconds drops only the minute it fell in, one of over a minute starts the count again.
+After the link or the timing drops out, *clocks agree* waits for a whole minute after it.
+*marks for* counts from the start of the sessions or the last gap of over a minute in the
+timing. Ten minutes that do not agree among
 themselves read *CLOCKS: CAN'T TELL (figure not steady: +0.4 … +3.1 ppm)*. Other reasons:
 *no timing in ketunkolo's levels*, *ketunkolo has no audio session*, *no link to
 ketunkolo*, *ketunkolo's levels arrive 250 ms late: the network, or its system clock

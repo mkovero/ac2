@@ -2234,23 +2234,30 @@ function with exactly one channel on a remote rig), `standing` ([`StandingRig` {
 `name`, `link` (as `RemoteRig`), `session` (`StandingSession` \| nil {`sample_rate_hz`,
 `channels` (its captured inputs)}: while its `source/levels` frames come), `clock`
 (`PeerClock` from the marks on those frames alone, §5.1, by the same windows and rules as
-`rigs`, held as §5.1 of `docs/design/remote-auto.md` says, and changed only as whole minutes
-close: `agree` once a minute closes within the 2 ppm rule and no count runs; a minute
-closing beyond it starts a count and `measuring` with it, until two minutes in a row close
-below 1.8 ppm; `cross_rate` and `own_clock` only once the count reaches ten minutes all
-beyond the rule, one side and one sign (a system clock slewed by its time sync moves the
-marks for minutes); ten counted and not of one mind `not_steady{low, high}` (ppm, the least
-and the greatest minute); a thin minute, anything the judge cannot tell, or a hole in the
-marks of over a minute clears the count; `other_rate` when the two sessions' nominal rates differ, nothing
+`rigs`, held as §5.1 of `docs/design/remote-auto.md` says. Minutes are measured minutes:
+one open across a hole in the marks of a few seconds is dropped and the next starts after
+it; a hole of over a minute starts the count again. `agree` once a minute closes within the
+2 ppm rule with no count running and the judge agreeing, and not while the figure shown is
+beyond the rule; a minute closing beyond it starts a count and `measuring` with it, until
+two consecutive measured minutes close below 1.8 ppm or the ten counted are all within the
+rule; `cross_rate` and `own_clock` only once ten consecutive measured minutes are all beyond
+the rule, one side and one sign (a system clock slewed by its time sync moves the marks for
+minutes); ten counted and not of one mind `not_steady{low, high}` (the least and the
+greatest cross-rig figure, ppm; an own line's minutes count as beyond and stay out of it,
+unless no minute was the cross figure's); a thin minute or anything the judge cannot tell
+clears the count and the minute open then; evidence that only stops (`no_marks`,
+`no_session`, `link_down`, a hole of a few seconds) keeps it, and `agree` waits for a minute
+closing after it; `other_rate` when the two sessions' nominal rates differ, nothing
 fitted; `no_marks` while frames come without marks or not at all from a rig whose session
 is open; `no_session` naming the rig without one; `link_down` while the link is not up;
 `clocks_disagree` when its marks land in this rig's future for a second; `marks_late{by}`
 when they arrive later than the link offset in force (else the longest one, 0.5 s) allows
 for 3 s running, until 3 s clean, by `by` s: a slow network and a system clock behind look
 the same (`clocks_disagree` held the same way); `ppm` and `span` nil while no marks come;
-figures to 0.01 ppm, whole seconds and whole ms; `ppm` is the figure at each minute's close
-and moves between closes only by 1 ppm or more, so a steady pair's entry changes once a
-minute at most), `marks_since` (`WallNs` \| nil: this rig's wall time less how long the
+figures to 0.01 ppm, whole seconds and whole ms; `ppm` is nil until a minute closes, then
+the closed minute's own figure (the one it was classed by, over 60 s), moved between closes
+to the live one only when that is more than 1 ppm away, so a steady pair's entry changes
+once a minute at most), `marks_since` (`WallNs` \| nil: this rig's wall time less how long the
 marks counted now have been paired, placed again only when off by over 2 s; nil while none
 come; either rig's new session or daemon, or a hole in the marks of over a minute, starts it
 again; a shorter hole (over 2 s by their own sample index or system time, not by arrival)

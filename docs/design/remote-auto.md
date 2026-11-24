@@ -330,18 +330,26 @@ session opens; with streams on demand that minute would come at every start.
 - **Hold (the standing feed only):** hosts' system clocks are slewed (chrony), and a slew
   reads in a minute's fit as a rate (100 µs over a minute is about 2 ppm), on the
   cross-rig figure and on each rig's own line alike. A slew only ever makes a locked pair
-  look apart, so the two verdicts are held unequally: *agree* once the first whole minute
-  closes within the rule; a minute closing outside it starts a count, *measuring* with the
-  count (*beyond 2 ppm for 4 of the 10 min a verdict needs*) while it runs; *not locked*
-  (the cross-rig rate or either rig's own line, each minute classed by the judge's own
-  reading, not the watch's held one) only once ten minutes are counted all beyond the rule,
-  one side and one sign. Ten counted and not of one mind is *can't tell (figure not steady:
-  +0.4 … +3.1 ppm)*, never *measuring* for ever. Two minutes in a row below 1.8 ppm end a
-  count (a margin, so a figure sitting at the rule does not flip in and out); a minute too
-  thin to fit, anything the judge cannot tell (an unsynced system clock, marks late or in
-  the future), or a hole in the marks of over a minute clears it: minutes on either side are
-  not in a row. What is shown changes only as minutes close. Ten minutes: one chrony correction would have to move the clock 1.2
-  ms or more at an update interval of 256 s or longer to read past 2 ppm that long.
+  look apart, so the two verdicts are held unequally. Minutes are measured minutes: a hole
+  of a few seconds drops the minute open across it, one of over a minute starts the count
+  again. *Agree* once a whole minute closes within the rule with no count running and the
+  judge agreeing at the close, never beside a shown figure beyond the rule; a minute
+  closing outside it starts a count, *measuring* with the count (*beyond 2 ppm for 4 of the
+  10 min a verdict needs*) while it runs; *not locked* (the cross-rig rate or either rig's
+  own line, each minute classed by the judge's reading at its close) only once ten
+  consecutive measured minutes are counted all beyond the rule, one side and one sign. Ten
+  counted and not of one mind is *can't tell (figure not steady: +0.4 … +3.1 ppm)*, the
+  spread of the cross-rig figure alone, never *measuring* for ever. Two consecutive minutes
+  below 1.8 ppm end a count (a margin, so a figure sitting at the rule does not flip in and
+  out), and so do ten all within the rule. A minute too thin to fit, or anything the judge
+  cannot tell (an unsynced system clock, marks late or in the future, another nominal
+  rate), clears it and the minute open then, which spans the disturbance. Evidence that
+  only stops (no link, no marks, a hole of a few seconds) keeps the count, and agreement
+  waits for a minute closing after it. The figure shown is the closed minute's own, none
+  before the first; between closes it follows the live one only when that is more than 1
+  ppm away. The hold is one function of its state and each report (`Hold::step`), tested
+  state by input. Ten minutes: one chrony correction would have to move the clock 1.2 ms or
+  more at an update interval of 256 s or longer to read past 2 ppm that long.
 - **Late marks:** marks older than the link offset in force (else the longest a link may
   run, 0.5 s) for 3 s running are *can't tell (… levels arrive N ms late: the network, or
   its system clock behind)*, and clean for 3 s before that goes.
