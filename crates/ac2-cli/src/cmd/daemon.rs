@@ -15,6 +15,7 @@ use serde_json::json;
 use super::{connect, is_local, target};
 use crate::args::{Cli, DaemonCmd};
 use crate::output::{self, Out};
+use crate::status::Build;
 use crate::{BUILD_ID, CliError};
 
 /// The build id in a `welcome.server` string such as `ac2d 0.1.0 (build 0.1.0+1a2b3c4d5e6f)`.
@@ -27,7 +28,7 @@ pub fn parse_build_id(server: &str) -> Option<&str> {
 
 pub(crate) async fn run(cli: &Cli, cmd: &DaemonCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     match cmd {
-        DaemonCmd::Status => status(cli, out).await,
+        DaemonCmd::Status { verbose } => status(cli, *verbose, out).await,
         DaemonCmd::Start => start(cli, out).await,
         DaemonCmd::Stop => stop(cli, out).await,
     }
@@ -69,94 +70,40 @@ fn status_text(
     session: &ac2_proto::model::Session,
     st: &ac2_proto::model::State,
     local: bool,
+    verbose: bool,
 ) -> String {
     let w = c.welcome();
-    let mut s = format!(
-        "daemon       {}\nrig          {}   id {}",
-        w.server, w.name, w.rig_id
-    );
-    match parse_build_id(&w.server) {
-        Some(b) if b != BUILD_ID && local => s.push_str(&format!(
-            "\nSTALE        daemon build {b}, this ac2 is {BUILD_ID}; restart it: `ac2 daemon stop && ac2 daemon start`"
-        )),
-        Some(b) if b != BUILD_ID => {
-            s.push_str(&format!("\nbuild        {b} (this ac2: {BUILD_ID})"))
-        }
-        Some(_) => {}
-        None => s.push_str("\nbuild        unknown (the daemon did not report a build id)"),
-    }
-    s.push_str(&format!(
-        "\nclient id    {}\nincarnation  {:016x}   epoch {}   rev {}\n{}",
-        w.client_id.0,
-        w.daemon_incarnation.0,
-        w.session_epoch,
-        w.rev,
-        output::session(session)
-    ));
-    if let Some(stopped) = &session.stopped {
-        s.push('\n');
-        s.push_str(
-            &ac2_scene::audio::audio_stopped_text(
-                stopped,
-                crate::watch::now_wall(),
-                output::local_offset_s,
-            )
-            .status,
-        );
-    }
-    if let Some(c) = output::clock(session, &st.timing) {
-        s.push('\n');
-        s.push_str(&c);
-    }
-    for l in ac2_scene::clock::status_lines(&st.clocks) {
-        s.push('\n');
-        s.push_str(&l);
-    }
-    let remote = session
-        .open
-        .as_ref()
-        .map(|o| o.config.remote_inputs.as_slice())
-        .unwrap_or_default();
-    for l in ac2_scene::between_rigs::status_lines(&st.remote, remote) {
-        s.push('\n');
-        s.push_str(&l);
-    }
-    // Beside the audio-fed relation, never in its place: the clocks as each paired rig's
-    // always-on levels show them.
-    for l in ac2_scene::standing::status_lines(&st.remote, crate::watch::now_wall()) {
-        s.push('\n');
-        s.push_str(&l);
-    }
-    for l in ac2_scene::cross_rig::status_cli(&st.remote, &st.measurements, &w.name) {
-        s.push('\n');
-        s.push_str(&l);
-    }
-    s.push('\n');
-    s.push_str(&output::autosave(&st.autosave, crate::watch::now_wall()));
-    for l in output::log_failures(&st.autosave, &st.measurements, crate::watch::now_wall()) {
-        s.push('\n');
-        s.push_str(&l);
-    }
-    for l in output::damaged_files(&st.rig) {
-        s.push('\n');
-        s.push_str(&l);
-    }
-    let inputs = output::inputs(st, crate::watch::now_wall());
-    if !st.inputs.is_empty() || session.open.is_some() {
-        s.push_str("\ninputs\n");
-        s.push_str(&inputs);
-    }
-    s
+    let build = match parse_build_id(&w.server) {
+        Some(b) if b == BUILD_ID => Build::Same,
+        Some(b) if local => Build::Stale {
+            daemon: b.to_owned(),
+            ours: BUILD_ID.to_owned(),
+        },
+        Some(b) => Build::Other {
+            daemon: b.to_owned(),
+            ours: BUILD_ID.to_owned(),
+        },
+        None => Build::Unknown,
+    };
+    crate::status::text(&crate::status::Input {
+        welcome: &w,
+        session,
+        state: st,
+        build,
+        now: crate::watch::now_wall(),
+        offset_s: &output::local_offset_s,
+        verbose,
+    })
 }
 
-pub(crate) async fn status(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
+pub(crate) async fn status(cli: &Cli, verbose: bool, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
     let r = c.call(Command::SessionStatus).await?;
     let session = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
     let st = super::state(&c).await?;
     let local = is_local(cli);
     out.emit(&status_json(&c, &session, &st, local), || {
-        status_text(&c, &session, &st, local)
+        status_text(&c, &session, &st, local, verbose)
     })?;
     Ok(())
 }
@@ -225,7 +172,10 @@ async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
         j["started"] = json!(false);
         j["already_running"] = json!(true);
         out.emit(&j, || {
-            format!("already running\n{}", status_text(&c, &session, &st, true))
+            format!(
+                "already running\n{}",
+                status_text(&c, &session, &st, true, false)
+            )
         })?;
         return Ok(());
     }
@@ -300,7 +250,7 @@ async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
         out.emit(&j, || {
             format!(
                 "another ac2d is running for this user\n{}",
-                status_text(&c, &session, &st, true)
+                status_text(&c, &session, &st, true, false)
             )
         })?;
         return Ok(());
@@ -312,7 +262,7 @@ async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
         format!(
             "started {} (pid {pid})\n{}",
             exe.display(),
-            status_text(&c, &session, &st, true)
+            status_text(&c, &session, &st, true, false)
         )
     })?;
     Ok(())

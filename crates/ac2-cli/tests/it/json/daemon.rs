@@ -94,5 +94,10 @@ async fn status_reports_build_ids() -> R {
     );
     let d = ok_json(&f, &["daemon", "status", "--json"]).await?;
     assert_eq!(d["build_matches"], true);
+    // `-v` is for the text view: the JSON document is the same one.
+    let vv = ok_json(&f, &["status", "-v", "--json"]).await?;
+    let keys = |x: &Value| x.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>());
+    assert_eq!(keys(&vv), keys(&v));
+    assert_eq!(vv["session"], v["session"]);
     Ok(())
 }

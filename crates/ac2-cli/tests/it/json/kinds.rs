@@ -149,8 +149,16 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     assert_eq!(input_row(&l["inputs"], 3)["cal"]["type"], "line");
     // `ac2 status` shows the same lines.
     let st = ac2(&f, &["status"]).await?.stdout;
-    has(&st, "in 3+4 · line · pair Main");
-    has(&st, "in 2 · digital · dBFS");
+    let row = |label: &str| {
+        st.lines()
+            .find(|l| l.starts_with(&format!("  {label} ")))
+            .unwrap_or_else(|| panic!("no {label} row in\n{st}"))
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert!(row("3+4").starts_with("3+4 line pair Main L dBu"), "{st}");
+    assert_eq!(row("2"), "2 digital dBFS");
 
     // `cal rm --line` removes it; the mic form still needs a mic.
     let r = ac2(&f, &["cal", "rm", "--input", "3", "--line"]).await?;

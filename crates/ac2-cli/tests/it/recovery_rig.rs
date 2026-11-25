@@ -28,7 +28,7 @@ async fn run(ep: &Endpoints, json: bool, args: &[&str]) -> String {
 async fn status_until(ep: &Endpoints, what: &str, ok: impl Fn(&str) -> bool) -> String {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        let t = status(ep, false).await;
+        let t = run(ep, false, &["status", "-v"]).await;
         if ok(&t) {
             return t;
         }
@@ -62,24 +62,26 @@ async fn status_shows_stopped_audio_until_the_daemon_reopens_it() {
     let text = status_until(&ep, "failed attempt", |t| t.contains("failed:")).await;
     let line = text
         .lines()
-        .find(|l| l.starts_with("audio   "))
+        .find(|l| l.starts_with("! audio "))
         .unwrap_or_else(|| panic!("no audio line in\n{text}"));
     assert!(
-        line.starts_with("audio        STOPPED: audio host ended the stream at "),
+        line.starts_with("! audio   STOPPED · audio host ended the stream at "),
         "{line}"
     );
+    assert!(line.contains(" · reopening (attempt "), "{line}");
+    // `-v` adds what the backend said.
     assert!(
-        line.contains("failed: Fake backend unavailable: the simulated device is gone · next in "),
-        "{line}"
+        text.contains("failed: Fake backend unavailable: the simulated device is gone · next in "),
+        "{text}"
     );
-    assert!(text.contains("audio I/O open"), "{text}");
+    assert!(text.contains("\nAUDIO     open · "), "{text}");
     let json: serde_json::Value = serde_json::from_str(&status(&ep, true).await).unwrap();
     assert_eq!(json["session"]["stopped"]["cause"]["type"], "host_ended");
     assert_eq!(json["session"]["stopped"]["recovery"]["state"], "waiting");
 
     backend.restore();
     let text = status_until(&ep, "reopened session", |t| !t.contains("STOPPED")).await;
-    assert!(text.contains("audio I/O open"), "{text}");
+    assert!(text.contains("\nAUDIO     open · "), "{text}");
 }
 
 /// `ac2 session panel` on the open session's device; the operator picks 44.1 kHz and 512

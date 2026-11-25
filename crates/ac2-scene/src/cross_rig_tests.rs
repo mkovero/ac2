@@ -550,3 +550,11 @@ fn the_link_offset_reads_a_time_or_default() {
         "link offset 30 ms: the remote inputs anchor again, their averages restart"
     );
 }
+
+#[test]
+fn the_short_delay_basis_names_no_rig() {
+    assert_eq!(
+        delay_basis_short(-0.145_062),
+        "−145.062 ms · incl. the rigs' clock offset (not measured)"
+    );
+}

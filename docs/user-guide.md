@@ -226,7 +226,8 @@ remote audio keeps arriving after the link offset (lost packets do not count): r
 (*Wait for remote inputs*, below) or with `ac2 session link-offset 30ms` (`default` for
 the least that works, at most 500 ms; the remote inputs anchor again and every average on
 them restarts). Two channels on two different remote rigs are refused. `ac2 status` prints
-these lines per cross-rig transfer function.
+each cross-rig transfer function under *MEASUREMENTS*: whether it averages, from which rig,
+then these lines and its delay (`-v` adds the advice and the delay's basis in full).
 
 In the app the relation is said next to every cross-rig result, always in words (a problem
 is never only a colour):
@@ -247,7 +248,7 @@ is never only a colour):
   streaming*, *LINK OFFSET TOO SMALL · paired · streaming*.
   A paired rig needs no remote input for its tag: paired daemons time-stamp the levels
   they always send each other, and the rig shown's daemon judges the clocks from those
-  (`ac2 status`, *from levels*). About a minute after both sessions are open the tag reads
+  (`ac2 status`, *RIGS*). About a minute after both sessions are open the tag reads
   `AGREE`, or `UNKNOWN` when it can't tell; a not-locked verdict from levels needs ten
   minutes beyond 2 ppm, and until then the tag reads `TIMING` and its tooltip says
   *measuring clocks…* with the figure, how
@@ -288,17 +289,20 @@ is never only a colour):
 Settings › Connection has a *Between rigs* block per rig the
 session takes inputs from (*Between rigs* in the palette, or a click on where the daemon runs in the top bar): the clock
 relation and why, the last change, the link and its bit rate, the link offset, late frames,
-slips and the arrival margin; `ac2 status` prints the same. Its last line, *Wait for remote
+slips and the arrival margin; `ac2 status -v` prints the same under the rig in *RIGS*. Its last line, *Wait for remote
 inputs (link offset): default (10 ms)*, sets the link offset: **Enter** on it, type a time
 (`30ms`, or `30`: a bare number is ms) or `default`, **Enter** reopens the session with it,
 as `ac2 session link-offset` does. A time below the least that works is raised to it, and
 the line says both (*1 ms set · 17 ms in force, the least that works*). On the rig that gives its inputs, the rigs admitted to
 it are listed there and removed with **Delete** twice.
 
-`ac2 status` also prints a `from levels` line for every paired rig, with or without remote
-inputs or audio: the clocks between the two rigs as the timing in its always-on levels
-shows them (*from levels ketunkolo · clocks agree · ketunkolo runs +0.12 ppm against this
-rig over 60 s · marks for 5 min 12 s · 96 kHz, 3 inputs · link up*). *measuring clocks…* means there is no verdict yet:
+`ac2 status` also names every paired rig under *RIGS*, with or without remote inputs or
+audio: a rig the session takes no input from reads *levels only*, with the clocks between
+the two rigs as the timing in its always-on levels shows them (*ketunkolo   clocks agree ·
++0.12 ppm over 60 s   levels only · link up*); `ac2 status -v` adds the whole reading
+(*levels: clocks agree · ketunkolo runs +0.12 ppm against this rig over 60 s · marks for 5
+min 12 s · 96 kHz, 3 inputs · link up*). For a rig the session does take inputs from, the
+audio's relation is said, and the levels' only when it differs. *measuring clocks…* means there is no verdict yet:
 the first whole minute of timing is not in, or the figure is beyond 2 ppm and is being
 watched before it is called (*ketunkolo runs +2.71 ppm against this rig over 60 s ·
 beyond 2 ppm for 4 min running · a verdict at 10, agree after 2 min below 1.8*); the figure is always the other rig's
@@ -525,7 +529,7 @@ measures and what its OS says, nothing more:
   bound on the clock's error, which grows between updates of the time service: a loose
   upper bound, not the clock's actual offset, and no claim about PTP or NTP.
 
-`ac2 status` prints the same as `sample clock` and `system clock` lines.
+`ac2 status` prints the same as `sample clock` and `system clock` lines under *AUDIO*.
 
 - **A** on a refused key, then a name, authorizes it; the client connects on its next retry.
 - *Authorize a client by its key…* takes a name and the key `ac2 auth show` prints.
@@ -3442,9 +3446,9 @@ Support/ac2` on macOS, `%APPDATA%\ac2\data` on Windows):
 Any of these loads by path: `ac2 session load ~/.local/share/ac2/autosave.unrestored`.
 
 When an SPL meter's log cannot be written (a full disk, a read-only or missing directory)
-every pane shows **LOG NOT SAVED · disk full** in the warning colour, and `ac2 status` /
-`ac2 session status` print `log          NOT SAVED: SPL log of Main not saved for 12 min:
-disk full`. The meter and its Leq history on screen are complete; the file misses the
+every pane shows **LOG NOT SAVED · disk full** in the warning colour, and `ac2 status`
+prints `! log       NOT SAVED: SPL log of Main not saved for 12 min: disk full` under
+*AUTOSAVE* (`ac2 session status`: `log          NOT SAVED: …`). The meter and its Leq history on screen are complete; the file misses the
 seconds since then until a write succeeds again (tried every 30 s and with each autosave),
 when the banner goes by itself. Free space and wait, or save the session elsewhere.
 
@@ -3470,7 +3474,8 @@ session of its own in `<autosave>.set-aside-<time>/`, the reason names it (id an
 rest of the session is restored, and the traces it owned stay, filed under no measurement
 (as **Delete, keep traces** leaves them). Whatever depended on it (a math trace computed from
 it, a walk with it) is set aside with it. The app shows **FILE DAMAGED · what** until the daemon
-restarts, and `ac2 status` prints a `damaged` line for each file with what was done.
+restarts, and `ac2 status` prints a `! damaged` line under *AUTOSAVE* for each file with what
+was done.
 
 | Flag | Does |
 |---|---|
@@ -4861,7 +4866,7 @@ documents each command.
 
 | command | what it does |
 |---|---|
-| `ac2 devices`, `ac2 status`, `ac2 daemon start / stop / status` | the daemon and its audio devices; `status` includes the autosave state |
+| `ac2 devices`, `ac2 status [-v]`, `ac2 daemon start / stop / status [-v]` | the daemon and its audio devices; `status` reads at a glance ([below](#ac2-status)) |
 | `ac2 session open / close / status / inputs / replay` | the audio I/O (`open --out-device` plays on another device than the capture one), each input's mic and active curve; replaying a recording as the audio input |
 | `ac2 session inputs [--kind IN=mic\|line\|digital] [--mic IN=NAME] [--curve IN=LABEL\|off] [--pair L,R[=NAME]] [--no-pairs]` | what each input carries, its mic and curve, the stereo pairs; alone, lists them |
 | `ac2 session panel [--backend B] [--device D]` | opens the device's driver settings on the daemon's host (an ASIO driver's control panel, Audio MIDI Setup for Core Audio) |
@@ -4887,4 +4892,55 @@ documents each command.
 | `ac2 selftest frames --meas <name\|id> [--seconds N] [--remote HOST]` | how one measurement's live frames reach this client, read-only (no sound, no state change; only hello, subscribe, unsubscribe): subscribes to its stream (`spec`, `rta`, `tf`, `spl`) as the app does and records every frame for `--seconds` (default 30, Ctrl-C ends early). Reports the arrival interval (mean, p50, p95, p99, max, gaps over twice the median), the age at arrival (this host's wall clock − the frame's `capture_wall_ns`: it includes the two hosts' clock offset, about ±1 ms with NTP) and its drift, seq gaps, the hop (`audio_sample` step at the session rate) beside the interval, and bytes per frame and Mbit/s. Text: a line every 5 s and a summary; `--json`: one line per frame and a closing summary object |
 | `ac2 discover`, `ac2 auth pair / show` | find network daemons, pair with one |
 | `ac2 server info`, `ac2 server network [on [--interface NAME \| --addr IP \| --all] [--port N] \| off]`, `ac2 server authorize NAME --refused FINGERPRINT \| --key KEY` | on the rig's own host: how the daemon serves clients (local endpoints, the network's setting, status and why it waits or failed, server key, authorized and lately refused keys, interfaces); the network switched on or off live, session and local clients running on, and kept across restarts (`on` alone keeps the last interface and port; first time every interface, port 47820); a refused client authorized by the fingerprint `server info` lists, at once. Refused from a remote client, while `ac2d --listen` fixes the network, and by a daemon with no network to serve |
-| `ac2 auth admit-rig NAME --key KEY --rig-id ID`, `ac2 auth peer-add NAME --rig-id ID --at HOST[:PORT] --key KEY`, `ac2 auth peer-remove NAME`, `ac2 session open … --remote-in RIG:IN [--link-offset TIME]`, `ac2 session link-offset TIME\|default` | remote inputs (network mode on both rigs): the rig whose input is taken admits the other rig's server key, which may then read its inputs and nothing else; the taking rig pairs with it and opens a session with that input beside its own (`--remote-in` names the paired rig and its input, 1-based). `ac2 status` adds a *between rigs* line per remote rig (clock relation, link), the link offset and a line per remote input. and a block per transfer function across rigs (its clock gate, relock, slip, drift and late cues, delay with its basis); `link-offset` reopens the audio I/O with that offset, the remote inputs anchoring again |
+| `ac2 auth admit-rig NAME --key KEY --rig-id ID`, `ac2 auth peer-add NAME --rig-id ID --at HOST[:PORT] --key KEY`, `ac2 auth peer-remove NAME`, `ac2 session open … --remote-in RIG:IN [--link-offset TIME]`, `ac2 session link-offset TIME\|default` | remote inputs (network mode on both rigs): the rig whose input is taken admits the other rig's server key, which may then read its inputs and nothing else; the taking rig pairs with it and opens a session with that input beside its own (`--remote-in` names the paired rig and its input, 1-based). `ac2 status` names each remote rig once under *RIGS* (clock relation, link, a line per remote input), the link offset under *AUDIO*, and each transfer function across rigs under *MEASUREMENTS* (its clock gate, relock, slip, drift and late cues, delay); `link-offset` reopens the audio I/O with that offset, the remote inputs anchoring again |
+
+### `ac2 status`
+
+The rig and its daemon's build first, then a section each, said only when it has something
+to say: *AUDIO* (the audio I/O, its inputs and outputs, its clocks), *RIGS* (every rig this
+one takes audio or levels from, once), *MEASUREMENTS* (transfer functions across rigs),
+*INPUTS* (each input's mic, curve and calibration) and *AUTOSAVE*. A line that reports a
+problem (clocks not locked or can't tell, a link down, late frames or slips, a stopped
+measurement, stopped audio, a failed autosave, a damaged file) starts with `!`, so
+`ac2 status | grep '^!'` lists them; an uncalibrated input is not a problem. Lines stay
+within 100 columns:
+
+```
+pupu   ac2d 0.1.0 (build 0.1.0+202486c60e44)
+
+AUDIO     open · jack · 96 kHz · 256 samples
+  in      1–8 · ac2 on ac2pi-0ab1c6 in 1
+          Wait for remote inputs (link offset): default (15 ms)
+  out     6
+  clock   one clock · drift +1.3 ppm over 2.0 s
+          sample clock +1 ppm against the system clock (last minute)
+          system clock synced, OS bound ±2.5 ms
+
+RIGS
+! ac2 on ac2pi-0ab1c6   CLOCKS NOT LOCKED +7.8 ppm                link up, 3.2 Mbit/s
+!                       in 1 streaming · 1 late frames in the last hour · 0 slips
+  ac2 on ketunkolo      measuring clocks… · −0.69 ppm over 60 s   levels only · link up
+
+MEASUREMENTS
+! Reference -> usb-behku   Clocks not locked: averaging stopped   meas from ac2 on ac2pi-0ab1c6
+                           delay −145.062 ms · incl. the rigs' clock offset (not measured)
+
+INPUTS
+  1+2                        mic MM1 34804   pair   L 90° · electrical ±1 dB · 43 d ago
+                             R 90° · 114.0 dB SPL at 1.00 kHz · 27 d ago
+  3                          line                   dBFS
+  4                          mic                    uncalibrated
+  5+6                        line            pair   dBFS
+  7                          mic                    uncalibrated
+  8                          mic                    uncalibrated
+  ac2 on ac2pi-0ab1c6 in 1   mic                    uncalibrated
+
+AUTOSAVE   saving…
+```
+
+`-v` adds the identifiers (rig id, client id, incarnation, session epoch, rev) and the long
+words, one fact group a line, wider than 100 columns where a sentence needs it: why the
+clocks are not locked and what to do, each rig's link window and arrival margin, the
+levels' reading with its marks and verdict count, the delay's basis naming both rigs, and
+each calibration's whole chain (how it was taken, the data sheet, the loading). `--json`
+prints the same document with or without `-v`.

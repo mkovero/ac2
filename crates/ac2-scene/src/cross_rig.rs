@@ -232,6 +232,15 @@ pub fn delay_basis(delay_s: f64, ours: &str, theirs: &str) -> String {
     )
 }
 
+/// [`delay_basis`] in short, for a line that names the rigs elsewhere: *12.38 ms · incl.
+/// the rigs' clock offset (not measured)*.
+pub fn delay_basis_short(delay_s: f64) -> String {
+    format!(
+        "{} · incl. the rigs' clock offset (not measured)",
+        format::delay(delay_s)
+    )
+}
+
 /// `ac2 status` lines, one block per cross-rig transfer function of `measurements`: its
 /// title, then its status lines and delay with its basis, indented. `ours`: this rig's name.
 pub fn status_cli(r: &RemoteState, measurements: &[Measurement], ours: &str) -> Vec<String> {

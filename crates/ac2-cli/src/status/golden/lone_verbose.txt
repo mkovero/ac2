@@ -1,0 +1,22 @@
+ac2 on studio   ac2d 0.1.0 (build 0.1.0+202486c60e44)
+  rig id        26b1c286d80b073e
+  client id     local-006b8b4567
+  incarnation   af476c4afd9ff09b
+  epoch         12
+  rev           3274
+
+AUDIO     open · jack · 96 kHz · 256 samples
+  in      1, 2
+  out     6
+  clock   one clock · drift +1.3 ppm over 2.0 s
+          one callback for input and output
+          sample clock +1 ppm against the system clock (last minute)
+          system clock synced, OS bound ±2.5 ms
+
+INPUTS
+  1      mic MM1 34804   90° · 114.0 dB SPL at 1.00 kHz · 3 d ago
+         verified · 114.0 dB SPL at 1.00 kHz · 3 d ago
+         114.0 dB SPL at 1.00 kHz · read −6.5 dBFS
+  2      mic             uncalibrated
+
+AUTOSAVE   autosaved 2 min ago

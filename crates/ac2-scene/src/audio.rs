@@ -24,7 +24,8 @@ pub struct AudioStoppedText {
     pub detail: String,
     /// Top bar: `audio stopped · reopening (attempt 3, next in 8 s)`.
     pub bar: String,
-    /// `ac2 status` line.
+    /// `ac2 status` line, short: `STOPPED · device not delivering since 20:36 · reopening
+    /// (attempt 3, next in 8 s)`; `detail` says the backend's words.
     pub status: String,
 }
 
@@ -87,7 +88,7 @@ pub fn audio_stopped_text(
         banner: format!("AUDIO STOPPED · {what}"),
         detail: format!("{long} · measurements paused"),
         bar: format!("audio stopped · {short}"),
-        status: format!("audio        STOPPED: {what}; {long}"),
+        status: format!("STOPPED · {what} · {short}"),
     }
 }
 
@@ -345,8 +346,7 @@ mod tests {
         assert_eq!(t.bar, "audio stopped · reopening (attempt 3, next in 8 s)");
         assert_eq!(
             t.status,
-            "audio        STOPPED: device not delivering since 20:36; attempt 3 failed: \
-             No JACK server: start JACK · next in 8 s"
+            "STOPPED · device not delivering since 20:36 · reopening (attempt 3, next in 8 s)"
         );
         assert!((changes_in(&s, at(12.4)) - 0.6).abs() < 1e-6);
     }

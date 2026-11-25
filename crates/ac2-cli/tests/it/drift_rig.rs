@@ -50,14 +50,12 @@ async fn slow_status_shows_the_clock_domain_and_the_drift() {
     .unwrap();
     let before = status(&ep).await;
     assert!(
-        before.contains(
-            "clock        one clock (one callback for input and output); drift not measured yet (needs a stimulus)"
-        ),
+        before.contains("\n  clock   one clock · drift not measured yet (needs a stimulus)\n"),
         "{before}"
     );
     // A session just opened has no minute of stamps: no figure for its clock yet.
-    assert!(before.contains("\nsample clock measuring…\n"), "{before}");
-    assert!(before.contains("\nsystem clock "), "{before}");
+    assert!(before.contains(" sample clock measuring…\n"), "{before}");
+    assert!(before.contains(" system clock "), "{before}");
 
     let lease = c
         .acquire_lease(false, OnDrop::StopAndRelease)
@@ -114,23 +112,22 @@ async fn slow_status_shows_the_clock_domain_and_the_drift() {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
+    // Different clocks are trouble: the line starts with `!`.
     let line = text
         .lines()
-        .find(|l| l.starts_with("clock"))
-        .unwrap_or_else(|| panic!("no clock line in\n{text}"));
+        .find(|l| l.starts_with("! clock "))
+        .unwrap_or_else(|| panic!("no troubled clock line in\n{text}"));
     assert!(
-        line.starts_with(
-            "clock        one clock (one callback for input and output); drift +50.0 ppm over "
-        ) || line.starts_with(
-            "clock        one clock (one callback for input and output); drift +49.9 ppm over "
-        ) || line.starts_with(
-            "clock        one clock (one callback for input and output); drift +50.1 ppm over "
-        ),
+        ["+49.9", "+50.0", "+50.1"]
+            .iter()
+            .any(|p| line.starts_with(&format!("! clock   one clock · drift {p} ppm over "))),
         "{line}"
     );
     assert!(
-        line.ends_with("  WARNING: output and input on different clocks"),
-        "{line}"
+        text.lines()
+            .any(|l| l.starts_with('!')
+                && l.ends_with("WARNING: output and input on different clocks")),
+        "{text}"
     );
     drop(lease);
 }

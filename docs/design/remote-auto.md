@@ -88,7 +88,8 @@ pub enum InputRef { Local(u16), Remote { rig: RigId, channel: u16 } }
 (*ketunkolo has no session open*). §2.5 says what keeps a session open.
 
 Rows carry that rig's row text (name, role, mic, calibration) from its `source.state`, never
-a channel number (`ac2 status` shows one today as *in 32769 · mic · — · uncalibrated*).
+a channel number (`ac2 status` names a remote input as its rig and input, *ac2 on
+ac2pi-0ab1c6 in 1*).
 
 ### 2.3 Refusals, said in the picker before anything starts
 

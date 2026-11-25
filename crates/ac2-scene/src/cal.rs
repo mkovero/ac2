@@ -336,6 +336,33 @@ pub fn sensitivity_state(s: &Sensitivity<'_>, client_now: WallNs, offset: ClockO
     }
 }
 
+/// [`sensitivity_state`] in short, for a column beside the input's mic and curve
+/// (`ac2 status`): `94.0 dB SPL at 1.00 kHz · 3 h ago`, `electrical ±1 dB · 3 h ago`,
+/// `from ECM on in 2 · 3 h ago`, `uncalibrated`. A verified calibration goes without the
+/// word: only one from another mic or input needs saying.
+pub fn sensitivity_short(s: &Sensitivity<'_>, client_now: WallNs, offset: ClockOffset) -> String {
+    let age = |at: WallNs| format::ago(time::age_s(at, client_now, offset));
+    let how = |e: &CalEntry| match &e.spl.method {
+        CalMethod::Acoustic { .. } => calibrator(e),
+        CalMethod::Electrical { uncertainty: u, .. } => format!("electrical {}", uncertainty(*u)),
+    };
+    match s {
+        Sensitivity::Uncalibrated => "uncalibrated".into(),
+        Sensitivity::Verified(e) => format!("{} · {}", how(e), age(e.spl.calibrated_at)),
+        Sensitivity::OtherMicOrInput(e) => format!(
+            "from {} on in {} · {}",
+            e.key.mic,
+            u32::from(e.key.channel) + 1,
+            age(e.spl.calibrated_at)
+        ),
+        Sensitivity::Line(e) => format!(
+            "{} · {}",
+            line_scale(ac2_proto::cal::dbu_fs(e.line.v_fs.0)),
+            age(e.line.calibrated_at)
+        ),
+    }
+}
+
 /// A line calibration's record: `1.228 V read −9.0 dBFS · full scale 3.46 V (+13.0 dBu)`.
 pub fn line_detail(l: &ac2_proto::model::LineCal) -> String {
     format!(
@@ -512,6 +539,18 @@ mod tests {
             sensitivity_state(&Sensitivity::Uncalibrated, now, off),
             "uncalibrated"
         );
+        assert_eq!(
+            sensitivity_short(&Sensitivity::Verified(&e), now, off),
+            "94.0 dB SPL at 1.00 kHz · 3 h ago"
+        );
+        assert_eq!(
+            sensitivity_short(&Sensitivity::OtherMicOrInput(&e), now, off),
+            "from ECM on in 2 · 3 h ago"
+        );
+        assert_eq!(
+            sensitivity_short(&Sensitivity::Uncalibrated, now, off),
+            "uncalibrated"
+        );
         assert_eq!(stated_sensitivity(15.0), "15.0 mV/Pa (−36.5 dBV/Pa)");
         assert_eq!(
             curve_line(&curve("90°")),
@@ -553,6 +592,10 @@ mod tests {
         assert_eq!(
             sensitivity_state(&Sensitivity::Verified(&e), now, off),
             "verified · electrical (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago"
+        );
+        assert_eq!(
+            sensitivity_short(&Sensitivity::Verified(&e), now, off),
+            "electrical ±1 dB · 2 h ago"
         );
         assert_eq!(
             method_detail(&e),

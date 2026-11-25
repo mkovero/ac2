@@ -1,7 +1,7 @@
 //! The words for the clocks and the link between this rig and the rigs its remote inputs
-//! come from (`docs/design/remote-inputs.md` §5): one line per remote rig and one per
-//! remote input, as `ac2 status` prints them under *between rigs*, and the same words on the
-//! app's Connection page (*Between rigs*) and Audio I/O rows.
+//! come from (`docs/design/remote-inputs.md` §5): the app's Connection page (*Between
+//! rigs*) and Audio I/O rows, and `ac2 status` under *RIGS*, a rig's line in short and its
+//! inputs under it.
 
 use ac2_proto::model::{
     Anchor, ArrivalReason, CantTellReason, NotLockedReason, PeerClock, PeerRelation, RemoteAudio,
@@ -56,6 +56,43 @@ pub fn relation_text(r: &RemoteState, other: &str, rel: &PeerRelation) -> String
         PeerRelation::CantTell { reason } => {
             format!("CLOCKS: CAN'T TELL ({})", cant_tell_why(r, other, reason))
         }
+    }
+}
+
+/// The relation in a few words, for a column beside the rig's name (`ac2 status`): the
+/// capitals and figure the measurement list's heading uses (*CLOCKS NOT LOCKED +7.8 ppm*),
+/// *CLOCKS: CAN'T TELL* without its reason (the reason is a sentence of its own),
+/// *clocks agree*, *measuring clocks…*.
+pub fn relation_short(other: &str, rel: &PeerRelation) -> String {
+    match rel {
+        PeerRelation::Agree => "clocks agree".into(),
+        PeerRelation::Measuring => MEASURING.into(),
+        PeerRelation::NotLocked { reason } => match reason {
+            NotLockedReason::CrossRate { ppm, .. } | NotLockedReason::OwnClock { ppm, .. } => {
+                format!("CLOCKS NOT LOCKED {} ppm", format::signed(*ppm, 1))
+            }
+            NotLockedReason::OtherRate { theirs, ours } => {
+                format!("CLOCKS NOT LOCKED: {}", other_rate(other, *theirs, *ours))
+            }
+        },
+        PeerRelation::CantTell { .. } => "CLOCKS: CAN'T TELL".into(),
+    }
+}
+
+/// [`relation_short`] with the clock's figure and its window where the relation does not
+/// state a figure of its own: *clocks agree · +0.03 ppm over 60 s*, *measuring clocks… ·
+/// −0.69 ppm over 60 s*. A not-locked verdict keeps only its own figure: a second one
+/// would be another window's and could disagree. `digits`: decimals of the figure, as
+/// the source resolves it.
+pub fn clock_short(other: &str, c: &PeerClock, digits: usize) -> String {
+    let rel = relation_short(other, &c.relation);
+    match (&c.relation, c.ppm, c.span) {
+        (PeerRelation::Agree | PeerRelation::Measuring, Some(p), Some(span)) => format!(
+            "{rel} · {} ppm over {} s",
+            format::signed(p, digits),
+            format::fixed(span.0, 0)
+        ),
+        _ => rel,
     }
 }
 
@@ -437,35 +474,6 @@ pub fn rig_block(
     out
 }
 
-/// `between rigs` lines: one per remote rig, then one per remote input of `inputs` (the
-/// session's, in order). Empty without remote inputs.
-pub fn status_lines(r: &RemoteState, inputs: &[RemoteInput]) -> Vec<String> {
-    let mut out = Vec::new();
-    for rig in &r.rigs {
-        out.push(format!(
-            "between rigs {} · {} · link {}",
-            rig.name,
-            relation_text(r, &rig.name, &rig.clock.relation),
-            link_text(rig)
-        ));
-    }
-    if let Some(o) = r.link_offset {
-        out.push(format!("link offset  {} ms", format::fixed(o.0 * 1e3, 0)));
-    }
-    for i in inputs {
-        if !r.inputs.iter().any(|s| s.slot == i.slot) {
-            continue;
-        }
-        out.push(format!(
-            "remote input {} in {}: {}",
-            rig_name(r, i),
-            i.channel + 1,
-            input_state(r, i, &|_| None).text
-        ));
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,14 +528,16 @@ mod tests {
     fn locked_rigs_read_as_agreeing_with_the_link_and_the_input() {
         let (r, i) = state(PeerRelation::Agree, RemoteAudio::Streaming);
         assert_eq!(
-            status_lines(&r, &i),
-            vec![
-                "between rigs ketunkolo · clocks agree · link up, 3.1 Mbit/s",
-                "link offset  10 ms",
-                "remote input ketunkolo in 1: streaming, placed by capture time · 0 late \
-                 frames in the last hour · 0 slips",
-            ]
+            relation_text(&r, "ketunkolo", &r.rigs[0].clock.relation),
+            "clocks agree"
         );
+        assert_eq!(link_text(&r.rigs[0]), "up, 3.1 Mbit/s");
+        let s = input_state(&r, &i[0], &|_| None);
+        assert_eq!(
+            s.text,
+            "streaming, placed by capture time · 0 late frames in the last hour · 0 slips"
+        );
+        assert_eq!(s.tone, InputTone::Plain);
     }
 
     #[test]
@@ -544,15 +554,16 @@ mod tests {
                 ours: 96_000,
             },
         );
-        let l = status_lines(&r, &i);
-        assert!(
-            l[0].contains("CLOCKS NOT LOCKED: ketunkolo runs +5.6 ppm against this rig over 40 s"),
-            "{l:?}"
+        assert_eq!(
+            relation_text(&r, "ketunkolo", &r.rigs[0].clock.relation),
+            "CLOCKS NOT LOCKED: ketunkolo runs +5.6 ppm against this rig over 40 s"
         );
+        let s = input_state(&r, &i[0], &|_| None);
         assert!(
-            l[2].contains("ketunkolo runs 48 kHz, this rig 96 kHz"),
-            "{l:?}"
+            s.text.contains("ketunkolo runs 48 kHz, this rig 96 kHz"),
+            "{s:?}"
         );
+        assert_eq!(s.tone, InputTone::Fault);
         let (r, _) = state(
             PeerRelation::CantTell {
                 reason: CantTellReason::SystemClockUnsynced { rig: RigId(2) },
@@ -632,6 +643,73 @@ mod tests {
                 "10 ms link offset · 2 late frames in the last hour · 1 slips · arrival margin \
                  4.2 ms",
             ]
+        );
+    }
+
+    #[test]
+    fn the_short_relation_says_the_verdict_and_a_figure_once() {
+        let c = |relation, ppm: Option<f64>| PeerClock {
+            relation,
+            ppm,
+            span: ppm.map(|_| Seconds(60.0)),
+            last_change: None,
+        };
+        let not_locked = |reason| PeerRelation::NotLocked { reason };
+        assert_eq!(
+            clock_short("k", &c(PeerRelation::Agree, Some(0.03)), 2),
+            "clocks agree · +0.03 ppm over 60 s"
+        );
+        assert_eq!(
+            clock_short("k", &c(PeerRelation::Measuring, Some(-0.69)), 2),
+            "measuring clocks… · −0.69 ppm over 60 s"
+        );
+        assert_eq!(
+            clock_short("k", &c(PeerRelation::Measuring, None), 1),
+            "measuring clocks…"
+        );
+        // A not-locked verdict states its own figure; the clock's is another window's.
+        assert_eq!(
+            clock_short(
+                "k",
+                &c(
+                    not_locked(NotLockedReason::OwnClock {
+                        rig: RigId(2),
+                        ppm: 7.8
+                    }),
+                    Some(7.6)
+                ),
+                1
+            ),
+            "CLOCKS NOT LOCKED +7.8 ppm"
+        );
+        assert_eq!(
+            relation_short(
+                "k",
+                &not_locked(NotLockedReason::CrossRate {
+                    ppm: -5.6,
+                    over: Seconds(40.0)
+                })
+            ),
+            "CLOCKS NOT LOCKED −5.6 ppm"
+        );
+        assert_eq!(
+            relation_short(
+                "k",
+                &not_locked(NotLockedReason::OtherRate {
+                    theirs: 48_000,
+                    ours: 96_000
+                })
+            ),
+            format!("CLOCKS NOT LOCKED: {}", other_rate("k", 48_000, 96_000))
+        );
+        assert_eq!(
+            relation_short(
+                "k",
+                &PeerRelation::CantTell {
+                    reason: CantTellReason::NoAudio
+                }
+            ),
+            "CLOCKS: CAN'T TELL"
         );
     }
 }

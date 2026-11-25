@@ -78,7 +78,12 @@ pub enum Cmd {
     /// List audio devices.
     Devices,
     /// Daemon status (same as `daemon status`).
-    Status,
+    Status {
+        /// Add identifiers (rig id, client id, incarnation, epoch, rev) and the long
+        /// reasons, advice and calibration provenance.
+        #[arg(short, long)]
+        verbose: bool,
+    },
     /// Start, stop or inspect the local daemon.
     Daemon {
         /// Action.
@@ -268,8 +273,13 @@ pub enum DaemonCmd {
     Start,
     /// Stop the local daemon (signals the pid in its pid file).
     Stop,
-    /// Version, build id (stale check), incarnation, session.
-    Status,
+    /// Rig, build (stale check), audio I/O, other rigs, inputs, autosave.
+    Status {
+        /// Add identifiers (rig id, client id, incarnation, epoch, rev) and the long
+        /// reasons, advice and calibration provenance.
+        #[arg(short, long)]
+        verbose: bool,
+    },
 }
 
 /// `selftest …`.

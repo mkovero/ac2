@@ -55,7 +55,7 @@ pub fn rig_clock_line(rig: &str, c: &Clocks) -> String {
     format!("{rig} · {}", clock_line(c))
 }
 
-/// `ac2 status`'s two lines, under its 13-column labels.
+/// `ac2 status`'s two lines, under the session's clock.
 pub fn status_lines(c: &Clocks) -> [String; 2] {
     let text = sample_clock_text(c.capture.as_ref(), &c.system);
     let sample = match c.capture.as_ref().map(|c| c.rate) {

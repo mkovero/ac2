@@ -6,10 +6,10 @@ use ac2_proto::GridDef;
 use ac2_proto::model::layout::{EntryRef, PaneContent, PaneEntry, RigRef};
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
-    ClockRelation, DelayReference, DepthPolicy, InputKind, LfWindow, LineCalEntry, MeasKind,
-    Measurement, Mic, Pair, PeakMode, Polarity, RecordingEnd, RecordingFile, RecordingRun, Session,
-    SessionFile, SmoothingFraction, SmoothingMode, State, TimingState, TimingStatus, TraceData,
-    TraceMeta, TraceSource,
+    DelayReference, DepthPolicy, InputKind, LfWindow, LineCalEntry, MeasKind, Measurement, Mic,
+    Pair, PeakMode, Polarity, RecordingEnd, RecordingFile, RecordingRun, Session, SessionFile,
+    SmoothingFraction, SmoothingMode, State, TimingState, TimingStatus, TraceData, TraceMeta,
+    TraceSource,
 };
 use ac2_proto::units::{MeasId, WallNs};
 use ac2_scene::format;
@@ -402,15 +402,6 @@ pub fn autosave(a: &Autosave, now: WallNs) -> String {
             .map_or_else(|| "off".to_owned(), |l| l.text),
     };
     format!("autosave     {text}")
-}
-
-/// The state files the daemon found damaged at start, a line each:
-/// `damaged      rig settings rig.json damaged: …; set aside as rig.json.damaged-…`.
-pub fn damaged_files(rig: &ac2_proto::model::Rig) -> Vec<String> {
-    ac2_scene::autosave::damaged_file_lines(&rig.damaged_files)
-        .into_iter()
-        .map(|l| format!("damaged      {l}"))
-        .collect()
 }
 
 /// The SPL logs the daemon cannot write, a line each:
@@ -831,32 +822,6 @@ pub fn timing_state(s: &TimingState, rate: Option<u32>) -> String {
         }
         TimingState::Lost => "LOST".to_owned(),
     }
-}
-
-/// The session's clock domain, as one line: what the backend states about input and output
-/// clocks and, once the loopback monitor has measured it, their drift
-/// (`docs/design/multi-device.md`). `None` while no session is open.
-pub fn clock(session: &Session, t: &TimingStatus) -> Option<String> {
-    let open = session.open.as_ref()?;
-    let relation = match open.clock {
-        ClockRelation::SingleCallback => "one clock (one callback for input and output)",
-        ClockRelation::Unknown => "input and output may be on different clocks",
-    };
-    let drift = match &t.drift {
-        None if open.config.loopback.is_none() => "drift not measured (no loopback)".to_owned(),
-        None => "drift not measured yet (needs a stimulus)".to_owned(),
-        Some(d) => format!(
-            "drift {} ppm over {}{}",
-            format::signed(d.ppm, 1),
-            format::duration(d.span.0),
-            if d.warning {
-                "  WARNING: output and input on different clocks"
-            } else {
-                ""
-            }
-        ),
-    };
-    Some(format!("clock        {relation}; {drift}"))
 }
 
 /// Timing status, as lines.

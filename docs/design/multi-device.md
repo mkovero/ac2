@@ -183,9 +183,9 @@ open question (§9).
   stays up for the session (the clock relation does not heal, so the judged estimate is
   kept through stimulus gaps and offset epochs) and goes when the session is reopened.
   Asserted headless in `ac2-scene::banner` and from mirrored state in `ac2-ui`.
-- `ac2 status` prints a `clock` line: the session's clock relation in words and the drift,
-  e.g. `clock        one clock (one callback for input and output); drift +50.0 ppm over
-  30 s  WARNING: output and input on different clocks` (the fake rig claims one callback
+- `ac2 status` prints a `clock` row under *AUDIO*: the session's clock relation in words and
+  the drift, e.g. `! clock   one clock · drift +50.0 ppm over 30 s · WARNING: output and
+  input on different clocks` (`-v` adds *one callback for input and output*; the fake rig claims one callback
   and simulates two clocks: the relation is a prior, the measurement decides). `ac2 status
   --json` carries the whole `timing` status; `ac2 timing` keeps its drift line.
 - The session dialog notes, for an open session whose output plays on another device than

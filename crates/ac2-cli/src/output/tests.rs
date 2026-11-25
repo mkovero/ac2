@@ -58,24 +58,3 @@ fn log_failure_lines() {
         ["log          NOT SAVED: band log of measurement 3 not saved for 10 min: disk full"]
     );
 }
-
-#[test]
-fn damaged_file_lines() {
-    use ac2_proto::model::{DamagedFile, Rig, StateFile};
-    let mut rig = Rig::default();
-    assert!(damaged_files(&rig).is_empty());
-    rig.damaged_files.push(DamagedFile {
-        kind: StateFile::Calibrations,
-        path: "/c/calibrations.json".into(),
-        set_aside_as: Some("/c/calibrations.json.damaged-5".into()),
-        reason: "expected value; started without it".into(),
-        at: WallNs(0),
-    });
-    assert_eq!(
-        damaged_files(&rig),
-        [
-            "damaged      calibrations calibrations.json damaged: expected value; started \
-          without it; set aside as calibrations.json.damaged-5"
-        ]
-    );
-}

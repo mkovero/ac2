@@ -105,8 +105,9 @@ instead of closing the session.
   STOPPED` (SPL readout, Leq view) instead of a STALE age — the banner has the time.
 - Top bar: the session item in fault colour, `audio stopped · reopening (attempt 3, next in
   8 s)`.
-- `ac2 status`: `audio        STOPPED: device not delivering since 20:36; attempt 3 failed:
-  … · next in 8 s`; `--json` carries `session.stopped`.
+- `ac2 status`: `! audio   STOPPED · device not delivering since 20:36 · reopening (attempt
+  3, next in 8 s)` under *AUDIO*, and with `-v` the detail (`attempt 3 failed: … · next in
+  8 s · measurements paused`); `--json` carries `session.stopped`.
 
 All texts come from `ac2_scene::audio`.
 

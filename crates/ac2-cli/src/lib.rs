@@ -9,6 +9,7 @@ pub mod args;
 mod cmd;
 mod output;
 pub mod selftest;
+mod status;
 mod watch;
 
 use std::io::Write;

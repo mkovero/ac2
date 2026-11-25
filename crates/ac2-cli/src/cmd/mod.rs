@@ -46,7 +46,7 @@ use crate::{BUILD_ID, CliError};
 pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
     match &cli.cmd {
         Cmd::Devices => session::devices(cli, out).await,
-        Cmd::Status => daemon::status(cli, out).await,
+        Cmd::Status { verbose } => daemon::status(cli, *verbose, out).await,
         Cmd::Daemon { cmd } => daemon::run(cli, cmd, out).await,
         Cmd::Session {
             cmd: SessionCmd::Inputs(a),
