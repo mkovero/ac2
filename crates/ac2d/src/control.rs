@@ -25,7 +25,8 @@ use ac2_proto::model::{
     TraceSource,
 };
 use ac2_proto::units::{
-    DaemonIncarnation, LeaseToken, MeasId, RequestId, Rev, Seconds, StreamEpoch, SweepId, WallNs,
+    DaemonIncarnation, Dbfs, LeaseToken, MeasId, RequestId, Rev, Seconds, StreamEpoch, SweepId,
+    WallNs,
 };
 use ac2_proto::{ProtoError, ReplyBody};
 use ac2_zmq::Context;
@@ -180,6 +181,8 @@ pub(crate) enum ControlMsg {
         token: u64,
         result: Box<Result<LoopbackDetection, ProtoError>>,
     },
+    /// The burst of detection `token` started (`true`) or has played out (`false`).
+    LoopbackBurst { token: u64, sounding: bool },
     /// Sweep `id` started playing repeat `repeat` (1-based).
     SweepProgress { id: SweepId, repeat: u8 },
     /// Sweep `id` has its whole recording, or lost audio while recording.
@@ -328,6 +331,11 @@ struct PendingDetect {
     token: u64,
     reply: PendingReply,
     cut: crate::detect::Cut,
+    /// The burst's level and output, for the generator to show while it sounds.
+    level: Dbfs,
+    output: u16,
+    /// The generator shows the burst firing.
+    sounding: bool,
 }
 
 /// A `delay.find` running on a job thread; answered when the result arrives.
@@ -718,7 +726,11 @@ impl Control {
                         self.answer(&p.route, &p.client, p.id, r, Instant::now());
                     }
                 }
+                Ok(ControlMsg::LoopbackBurst { token, sounding }) => {
+                    self.loopback_burst(token, sounding);
+                }
                 Ok(ControlMsg::LoopbackDetected { token, result }) => {
+                    self.loopback_burst(token, false);
                     if let Some(d) = self.pending.detecting.take_if(|d| d.token == token) {
                         let p = d.reply;
                         let r = self

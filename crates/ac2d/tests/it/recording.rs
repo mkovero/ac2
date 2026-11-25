@@ -25,7 +25,7 @@ use ac2_proto::model::{
     Signal, SpecAveraging, SpectrumConfig, TraceData,
 };
 use ac2_proto::units::{Dbfs, MeasId, Seconds, StreamEpoch, TraceId};
-use ac2_proto::{Command, ErrorCode};
+use ac2_proto::{Command, ErrorCode, Warning};
 use ac2_traces::raw::{self, TimelineChange, WavReader};
 use ac2d::Daemon;
 use common::*;
@@ -670,4 +670,59 @@ fn run_of_state_progress(c: &mut Client, d: &mut ac2_audio::FakeDriver) {
         }
         assert!(Instant::now() < deadline, "no progress");
     }
+}
+
+/// A command that closes or reopens the stream under a recording ends it, and its reply
+/// says which recording ended; `rec.stop` ends one on purpose and says nothing.
+#[test]
+fn a_command_that_ends_a_recording_says_so() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let backend = manual_rig();
+    let mut cfg = config(backend.clone(), inproc("rec-ended"));
+    cfg.recording_dir = Some(dir.path().to_owned());
+    let h = Daemon::start(cfg).unwrap();
+    let (mut c, _sub) = connect(&h, &[]);
+    let warned = |c: &mut Client, cmd: Command| {
+        let id = c.next_id();
+        let r = c.call_req(ac2_proto::Request::new(id, cmd));
+        assert!(r.result.is_ok(), "{:?}", r.result);
+        r.warnings
+    };
+    let ended = |name: &str| {
+        vec![Warning::RecordingEnded {
+            recording: RecordingRef::Name { name: name.into() },
+        }]
+    };
+    let open = || Command::StreamOpen {
+        config: stream(false),
+    };
+    assert!(warned(&mut c, open()).is_empty());
+
+    // Each stream the fake rig opens is driven by its own driver.
+    c.ok(record(vec![0], "closed", 60.0));
+    let mut d = driver(&backend);
+    run_of_state_progress(&mut c, &mut d);
+    assert_eq!(warned(&mut c, Command::StreamClose), ended("closed"));
+    assert!(warned(&mut c, open()).is_empty());
+
+    c.ok(record(vec![0], "reopened", 60.0));
+    d = driver(&backend);
+    run_of_state_progress(&mut c, &mut d);
+    assert_eq!(warned(&mut c, open()), ended("reopened"));
+
+    // A session replaced on a worker: the reply that follows its result carries it.
+    c.ok(record(vec![0], "renewed", 60.0));
+    d = driver(&backend);
+    run_of_state_progress(&mut c, &mut d);
+    assert_eq!(
+        warned(&mut c, Command::FileNew { discard: true }),
+        ended("renewed")
+    );
+
+    c.ok(record(vec![0], "stopped", 60.0));
+    d = driver(&backend);
+    run_of_state_progress(&mut c, &mut d);
+    assert!(warned(&mut c, Command::RecStop).is_empty());
+    h.shutdown();
 }

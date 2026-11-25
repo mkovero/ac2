@@ -711,7 +711,7 @@ impl Control {
         }
         let v_fs = cal::full_scale_volts(volts.0, measured);
         let dbu_fs = cal::dbu_fs(v_fs);
-        let (lo, hi) = cal::LINE_DBU_FS_RANGE;
+        let (lo, hi) = cal::LINE_DBU_FS_ACCEPTED;
         if !(lo..=hi).contains(&dbu_fs.0) {
             return Err(invalid(format!(
                 "{} V at {measured:.1} dBFS puts full scale at {:+.1} dBu, outside {lo:+} … \
@@ -741,6 +741,16 @@ impl Control {
             v_fs,
             dbu_fs.0
         );
+        let (lo, hi) = cal::LINE_DBU_FS_USUAL;
+        if !(lo..=hi).contains(&dbu_fs.0) {
+            tracing::warn!(
+                "input {} line full scale {:+.1} dBu is outside the usual {lo:+} … {hi:+} dBu",
+                nth(channel),
+                dbu_fs.0
+            );
+            self.reply_warnings
+                .push(ac2_proto::Warning::LineLevelUnusual { full_scale: dbu_fs });
+        }
         Ok(ReplyBody::LineCalibration(entry))
     }
 

@@ -81,11 +81,12 @@ impl Control {
 
     /// Fades the output out (the gate makes the source fade on its own as well).
     /// Whether `gen.stop` has anything to stop: the generator armed or firing, a sweep or
-    /// dynamics run under way, or the output still sounding.
+    /// dynamics run under way, a loopback burst, or the output still sounding.
     pub(super) fn generator_active(&self) -> bool {
         let g = &self.store.state().generator;
         g.armed
             || g.firing
+            || self.pending.detecting.is_some()
             || self.sweep.is_some()
             || self.dynamics.is_some()
             || self

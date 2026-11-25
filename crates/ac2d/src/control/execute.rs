@@ -147,6 +147,10 @@ impl Control {
                 }
                 self.abort_runs(SweepFailure::Stopped, "the stimulus was stopped");
                 self.stop_output();
+                if let Some(d) = &self.pending.detecting {
+                    // The burst is cut with the output's fade, as any stimulus is stopped.
+                    d.cut.set();
+                }
                 let mut g = self.store.state().generator.clone();
                 g.armed = false;
                 g.firing = false;

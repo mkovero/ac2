@@ -14,7 +14,7 @@ use ac2_audio::{
 };
 use ac2_proto::frame::{ClipFlags, FrameData};
 use ac2_proto::model::{
-    Availability, BackendKind, DeviceId, GeneratorDesired, GeneratorSettings, Signal,
+    Availability, BackendKind, DeviceId, GenAction, GeneratorDesired, GeneratorSettings, Signal,
 };
 use ac2_proto::units::{Dbfs, LeaseToken};
 use ac2_proto::{Command, ErrorCode, ReplyBody, Subscription, Topic};
@@ -297,7 +297,7 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
         opened: Arc::clone(&opened),
     };
     let h = start(Arc::new(rec));
-    let (mut c, _s) = connect(&h, &[]);
+    let (mut c, s) = connect(&h, &[b"evt"]);
     let detect = |token, level| Command::StreamDetectLoopback {
         lease_token: token,
         backend: BackendKind::Fake,
@@ -344,6 +344,31 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
     assert!(d.ranked[2..].iter().all(|r| r.gain.is_none()));
     // One stream, the generator routed to the one output asked for.
     assert_eq!(*opened.lock().unwrap(), vec![(1, true)]);
+    // Every client saw the burst on the generator: firing for its length, then silent.
+    let generator = |firing: bool| {
+        let e = s
+            .event(
+                Duration::from_secs(5),
+                |e| matches!(&e.change, ac2_proto::Change::Generator(g) if g.firing == firing),
+            )
+            .expect("a generator event");
+        let ac2_proto::Change::Generator(g) = e.change else {
+            unreachable!()
+        };
+        g
+    };
+    let on = generator(true);
+    let audit = on.last_action.clone().expect("audited");
+    assert_eq!(audit.action, GenAction::LoopbackBurst);
+    assert!(audit.client.is_some());
+    let burst = on.settings.expect("the burst's settings");
+    assert_eq!(
+        (burst.signal, burst.level, burst.outputs),
+        (Signal::Pink, Dbfs(-30.0), vec![0])
+    );
+    let off = generator(false);
+    assert_eq!(off.last_action, Some(audit));
+    assert!(!off.armed);
     // Refused while the stimulus is armed (the burst outlasted the lease's refresh period:
     // take it again).
     c.ok(Command::StreamOpen {

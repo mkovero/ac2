@@ -207,6 +207,9 @@ impl Control {
                                 id: req.id,
                             },
                             cut,
+                            level,
+                            output,
+                            sounding: false,
                         });
                         return;
                     }
@@ -301,7 +304,16 @@ impl Control {
                     Err(e) => Err(e),
                 }
             }
-            cmd => self.execute(&client, cmd),
+            cmd => {
+                // `rec.stop` ends the recording because it was asked to.
+                let recording = match cmd {
+                    Command::RecStop => None,
+                    _ => self.recording_token(),
+                };
+                let r = self.execute(&client, cmd);
+                self.warn_recording_ended(recording);
+                r
+            }
         };
         self.answer(route, &client, req.id, result, now);
     }

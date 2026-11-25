@@ -2,11 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::units::MeasId;
+use crate::model::RecordingRef;
+use crate::units::{Dbu, MeasId};
 
-/// Something the command did that the caller should know about although it succeeded.
+/// Something the command did that the caller should know about, beside its outcome.
 /// Wire: `{"type": "<name>", …}` in the reply's `warnings`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Warning {
     /// `stream.close` ended the audio the rig SPL meters meter: they read nothing and their
@@ -20,5 +21,19 @@ pub enum Warning {
     RigMonitorMoved {
         /// The rig-scoped measurements affected.
         meas: Vec<MeasId>,
+    },
+    /// The command closed or reopened the stream a recording was recording: the recording
+    /// ended there, its file finalised (`file.load`, `file.new`, `stream.open`,
+    /// `stream.close`, `stream.replay`, …; `rec.stop` ends one on purpose and says nothing).
+    RecordingEnded {
+        /// The recording that ended.
+        recording: RecordingRef,
+    },
+    /// `cal.line` stored a full scale outside the usual +4 … +30 dBu of line interfaces:
+    /// within what an input can be (−40 … +50 dBu), but worth a second look at the volts
+    /// typed (mV for V) and at the level measured.
+    LineLevelUnusual {
+        /// The line full scale stored.
+        full_scale: Dbu,
     },
 }

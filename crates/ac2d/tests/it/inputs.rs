@@ -14,7 +14,7 @@ use ac2_proto::model::{
     InputSetup, Pair, PairSide, PreviewInput, Signal,
 };
 use ac2_proto::units::{Dbfs, Hz, Volts};
-use ac2_proto::{Command, ErrorCode, ReplyBody, Subscription};
+use ac2_proto::{Command, ErrorCode, ReplyBody, Subscription, Warning};
 use ac2d::{Daemon, Handle};
 use common::*;
 
@@ -250,29 +250,46 @@ fn slow_a_line_calibration_measures_the_tone_and_lands_in_the_list() {
             firing: true,
         },
     });
-    // Millivolts typed as volts put full scale far outside any line input's range.
+    // A +4 dBu tone (1.2277 V) measured at −18.02 dBFS: full scale is +22.02 dBu, 9.775 V.
+    let v_fs = 1.2277 / 10f64.powf(measured / 20.0);
+    let dbu_fs = 20.0 * (v_fs / 0.774_597).log10();
+    // Volts past any amplifier tap put full scale above +50 dBu: refused.
     let e = steady(
         &mut c,
         Command::CalLine {
             channel: 1,
-            volts: Volts(0.0012277),
+            volts: Volts(50.0),
         },
     )
     .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid);
     assert!(e.msg.contains("dBu"), "{}", e.msg);
-    // A +4 dBu tone (1.2277 V) measured at −18.02 dBFS: full scale is +22.02 dBu, 9.775 V.
-    let v_fs = 1.2277 / 10f64.powf(measured / 20.0);
-    let dbu_fs = 20.0 * (v_fs / 0.774_597).log10();
-    let entry = steady(
-        &mut c,
-        Command::CalLine {
-            channel: 1,
-            volts: Volts(1.2277),
-        },
-    )
-    .unwrap()
-    .line_calibration();
+    let line = |c: &mut Client, volts: f64| {
+        let id = c.next_id();
+        let r = c.call_req(ac2_proto::Request::new(
+            id,
+            Command::CalLine {
+                channel: 1,
+                volts: Volts(volts),
+            },
+        ));
+        let entry = r.result.expect("stored").line_calibration();
+        (entry, r.warnings)
+    };
+    // Millivolts typed as volts: 60 dB down, inside what an input can be but outside the
+    // usual line levels, stored with a warning.
+    let (_, warnings) = line(&mut c, 0.0012277);
+    match warnings.as_slice() {
+        [Warning::LineLevelUnusual { full_scale }] => {
+            assert!(
+                (full_scale.0 - (dbu_fs - 60.0)).abs() < 0.1,
+                "{full_scale:?}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    let (entry, warnings) = line(&mut c, 1.2277);
+    assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(entry.key.channel, 1);
     assert_eq!(entry.key.device, fake_dev());
     assert_eq!(entry.line.volts, Volts(1.2277));

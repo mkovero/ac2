@@ -391,6 +391,33 @@ impl Control {
         self.commit(Change::Recording(run));
     }
 
+    /// The recording under way, by its token: [`Self::warn_recording_ended`] tells whether a
+    /// command ended it.
+    pub(super) fn recording_token(&self) -> Option<u64> {
+        self.recording.as_ref().map(|a| a.token)
+    }
+
+    /// Puts `recording_ended` on the reply of the command that ran since `before` was taken,
+    /// when that command closed or reopened the stream under the recording: the operator
+    /// who reopens a device or loads a session learns that the recording stopped with it,
+    /// not later from the recording's state.
+    pub(super) fn warn_recording_ended(&mut self, before: Option<u64>) {
+        let Some(token) = before else {
+            return;
+        };
+        if self.recording_token() == Some(token) {
+            return;
+        }
+        if let Some(run) = &self.store.state().recording {
+            self.reply_warnings
+                .push(ac2_proto::Warning::RecordingEnded {
+                    recording: RecordingRef::Name {
+                        name: run.name.clone(),
+                    },
+                });
+        }
+    }
+
     /// The recorder reported progress.
     pub(super) fn recording_progress(&mut self, token: u64) {
         let Some(a) = self.recording.as_mut().filter(|a| a.token == token) else {

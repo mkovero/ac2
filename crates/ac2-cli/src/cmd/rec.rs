@@ -107,8 +107,8 @@ pub(crate) async fn replay(
     out: &mut Out<'_>,
 ) -> Result<(), CliError> {
     let local = is_local(cli) || cli.ctrl_endpoint.is_some();
-    let r = c
-        .call(Command::StreamReplay {
+    let (r, warnings) = c
+        .call_warned(Command::StreamReplay {
             recording: recording_ref(recording, local)?,
             pace: if fast {
                 ReplayPace::Fast
@@ -117,6 +117,7 @@ pub(crate) async fn replay(
             },
         })
         .await?;
+    super::osc::note_warnings(c, &warnings, out).await;
     let s = expect_body!("stream.replay", r, ReplyBody::Stream(s) => s)?;
     out.emit(&s, || output::stream(&s))?;
     Ok(())

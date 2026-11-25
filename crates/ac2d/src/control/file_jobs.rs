@@ -441,6 +441,7 @@ impl Control {
             self.answer(&r.route, &r.client, r.id, Err(e), Instant::now());
             return;
         }
+        let recording = self.recording_token();
         let result = match (job.pending, done) {
             (Pending::List, FileDone::List(r)) => r,
             (
@@ -499,6 +500,7 @@ impl Control {
                 )))
             }
         };
+        self.warn_recording_ended(recording);
         let r = job.reply;
         self.answer(&r.route, &r.client, r.id, result, Instant::now());
     }

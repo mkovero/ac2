@@ -636,17 +636,21 @@ pub(super) async fn session_step(
             }
         }
         S::New { discard } => {
-            c.call(Command::FileNew { discard: *discard }).await?;
+            let (_, warnings) = c
+                .call_warned(Command::FileNew { discard: *discard })
+                .await?;
+            send_warnings(o, warnings);
             D::New
         }
         S::Open { from, discard } => {
             let session = session_source(c, o, from).await?;
-            let r = c
-                .call(Command::FileLoad {
+            let (r, warnings) = c
+                .call_warned(Command::FileLoad {
                     session,
                     discard: *discard,
                 })
                 .await?;
+            send_warnings(o, warnings);
             let file = expect_body!("file.load", r, ReplyBody::SessionFile(f) => f)?;
             D::Opened {
                 file,
@@ -657,7 +661,8 @@ pub(super) async fn session_step(
             }
         }
         S::Recover => {
-            c.call(Command::FileRecover).await?;
+            let (_, warnings) = c.call_warned(Command::FileRecover).await?;
+            send_warnings(o, warnings);
             D::Recovered
         }
         S::Salvage { from } => {

@@ -195,10 +195,11 @@ pub(crate) async fn session(
             })?;
         }
         SessionCmd::New { discard } => {
-            let r = c
-                .call(Command::FileNew { discard: *discard })
+            let (r, warnings) = c
+                .call_warned(Command::FileNew { discard: *discard })
                 .await
                 .map_err(unsaved)?;
+            super::osc::note_warnings(c, &warnings, out).await;
             let rev = expect_body!("file.new", r, ReplyBody::Ack { rev } => rev)?;
             out.emit(&json!({ "rev": rev }), || {
                 "new session: no measurements or traces".to_owned()
@@ -247,18 +248,20 @@ pub(crate) async fn session(
                 },
                 Target::Daemon(r) => r,
             };
-            let r = c
-                .call(Command::FileLoad {
+            let (r, warnings) = c
+                .call_warned(Command::FileLoad {
                     session: r,
                     discard: *discard,
                 })
                 .await
                 .map_err(unsaved)?;
+            super::osc::note_warnings(c, &warnings, out).await;
             let f = expect_body!("file.load", r, ReplyBody::SessionFile(f) => f)?;
             emit_file(out, &f, text::opened_toast(&f))?;
         }
         SessionCmd::Recover => {
-            let r = c.call(Command::FileRecover).await?;
+            let (r, warnings) = c.call_warned(Command::FileRecover).await?;
+            super::osc::note_warnings(c, &warnings, out).await;
             let rev = expect_body!("file.recover", r, ReplyBody::Ack { rev } => rev)?;
             let w = state(c).await?.working;
             out.emit(&json!({ "rev": rev, "working": w }), || {
