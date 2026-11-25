@@ -53,7 +53,8 @@ fn rebase(v: &mut serde_json::Value, now: i128) {
         Value::String(s) => {
             if let Some(ago) = s.strip_prefix("now-").and_then(|n| n.parse::<i128>().ok()) {
                 let at = u64::try_from(now - ago).unwrap_or(0);
-                *v = Value::from(at);
+                // A `WallNs` is a decimal string in JSON.
+                *v = Value::from(at.to_string());
             }
         }
         Value::Array(a) => a.iter_mut().for_each(|x| rebase(x, now)),

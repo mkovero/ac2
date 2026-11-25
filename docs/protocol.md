@@ -34,6 +34,10 @@ daemon answered there.
   `Lufs` (programme loudness), `DbSpl`, `Dbu` (dB re 0.7746 V RMS), `Volts` (RMS),
   `MvPerPa` (mic sensitivity), `Ohms`, `Phon`, `Degrees`. Sample counts (`Samples`) are
   signed integers; sample indices and `WallNs` (Unix ns, daemon clock) are u64.
+- `WallNs`, `RigId` and `GridId` use all 64 bits: u64 integers in msgpack, decimal strings
+  (`"1790000000000000000"`, digits only) in every JSON file (§7) and JSON header line, so a
+  reader whose JSON numbers are doubles (53 bits) cannot change them. Other integers in
+  those files stay numbers.
 - Indices on the wire (channels, inputs, outputs, steps, points) are zero-based except
   `DynamicsStatus.step` (1-based; 0 is before the first burst) and the 1-based indices in
   CSV files; counters (`repeat`, `pass`) and line numbers start at 1.
@@ -1643,8 +1647,8 @@ start); otherwise the onset fade is derived. `name` nil names the trace `Run <nu
   followed by its silence (`post_roll`, ≥ 1 s and ≥ `tail`), records the reference and every
   measurement input, analyses each against the reference on a job thread and stores one trace
   of `kind: sweep` per measurement input, owned by the measurement (source `sweep` {`meas`,
-  `meas_name`, `run`, `number` — one more than the highest run number of the measurement's
-  stored runs —, `epoch`, `sweep`, `level`, `repeats`, `lf_harmonics`, `reference_input`,
+  `meas_name`, `run`, `number` — the measurement's run counter, past every run it made,
+  deleted ones included (the session keeps it as `next_run`, §7.2) —, `epoch`, `sweep`, `level`, `repeats`, `lf_harmonics`, `reference_input`,
   `measurement_input` — the trace's own input}, `delay` = its arrival). The traces are named
   the run's `name`; with several inputs each adds ` · ` and its input's name (the mic name,
   else the device's channel name, else `Input N`). Each trace carries its own input's mic and
@@ -1719,8 +1723,8 @@ an A/B pair plays an identical programme. The generator's level is the highest b
   highest level as its settings, and `gen.set` is `refused`; stop, release, lease expiry
   and a closed stream abort it with the ordinary fade-out. When the last rest is in, the
   generator is disarmed (as after a sweep) and one trace of `kind: dynamics` is stored, owned
-  by the measurement (source `dynamics` {`meas`, `meas_name`, `run`, `number` — one more than
-  the highest run number of the measurement's stored runs —, `epoch`}), `cal`
+  by the measurement (source `dynamics` {`meas`, `meas_name`, `run`, `number` — the
+  measurement's run counter, as for a sweep run —, `epoch`}), `cal`
   `uncalibrated`, on a one-column grid at the carrier (`log`, 48 per octave) whose column is
   a gap.
 - Progress and outcome are the `dynamics` entity (§4.1), `DynamicsRun`: `id`, `meas`,
@@ -2862,7 +2866,7 @@ What a daemon reads of each artefact; any other version is refused:
 
 | artefact | versions read |
 |---|---|
-| trace CSV (§7.1) | `v1` … `v6` |
+| trace CSV (§7.1) | `v1` … `v7` |
 | session directory (§7.2) | manifest version 50 only |
 | raw capture sidecar (§7.5) | version 4 only; the protocol types it holds must still decode |
 | SPL log (§7.4) | `v2` only |
@@ -2938,14 +2942,16 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 49, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 50, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
-ColourFamily | null, layout: PaneLayout | null, offset: Db, eq: [EqSet]}], spl_logs:
+ColourFamily | null, layout: PaneLayout | null, offset: Db, eq: [EqSet], next_run: u32}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
 dB]] | null}], walks: [WalkState], plans: [PlanSpec], remote_inputs: [RemoteInput]}` (JSON, field names as in this
 document; `plans` are the session's copies of the plans its walks walk; `remote_inputs` are
 the other rigs' inputs the session took, by slot; `mic_curve_points` are the points of
-`meta.mic_curve`, a curve applied after capture). A trace
+`meta.mic_curve`, a curve applied after capture; `next_run` is the number the
+measurement's next sweep or dynamics run takes: past every run it made, deleted ones
+included, never lowered, so a run number never names two runs). A trace
 file is named by its trace id and a 64-bit FNV-1a hash of its content, so it never changes
 once written. A save writes the trace files that are not there yet, then replaces
 `session.json` atomically (temporary file + rename), then removes the files no manifest

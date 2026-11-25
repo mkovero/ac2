@@ -111,7 +111,7 @@ impl Control {
             .iter()
             .filter(|m| m.config.scope == MeasScope::Session)
             .map(|m| {
-                let mut sm = super::rig_meas::saved_of(m);
+                let mut sm = super::rig_meas::saved_of(m, self.next_run_number(m.id));
                 if let MeasKind::Math { config } = &mut sm.config.kind {
                     config.owner = self.session_owner(config.owner);
                 }
@@ -586,6 +586,7 @@ impl Control {
         let mut loaded = Vec::with_capacity(data.measurements.len());
         for sm in data.measurements {
             self.ids.meas_past(sm.id);
+            self.raise_next_run(sm.id, sm.next_run);
             let delay = matches!(sm.config.kind, MeasKind::Transfer { .. }).then(|| {
                 let d = sm.delay.unwrap_or(SavedDelay {
                     applied: Seconds(0.0),

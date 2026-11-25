@@ -301,6 +301,12 @@ fn file_round_trip_and_atomic_write() {
         .map(|d| d.expect("e").file_name())
         .collect();
     assert_eq!(names.len(), 1, "{names:?}");
+    // The times are decimal strings: a reader with double-precision numbers keeps them.
+    let doc: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).expect("read")).expect("json");
+    assert_eq!(doc["sensitivities"][0]["spl"]["calibrated_at"], "10");
+    assert_eq!(doc["mics"][0]["curves"][0]["reference"]["imported_at"], "3");
+    assert_eq!(doc["lines"][0]["line"]["calibrated_at"], "40");
 
     let (s2, c2) = CalStore::open(&path);
     s2.check().expect("readable");
@@ -362,7 +368,7 @@ fn pairs_in_the_file_are_checked() {
             .expect_err("microphone")
             .contains("microphone")
     );
-    let dup_line = r#"{"format":"ac2-calibrations","version":5,"sensitivities":[],"lines":[{"key":{"device":"d","channel":0},"line":{"v_fs":1.0,"volts":0.5,"measured":-6.0,"calibrated_at":1}},{"key":{"device":"d","channel":0},"line":{"v_fs":2.0,"volts":0.5,"measured":-12.0,"calibrated_at":2}}],"mics":[],"inputs":[],"pairs":[]}"#;
+    let dup_line = r#"{"format":"ac2-calibrations","version":5,"sensitivities":[],"lines":[{"key":{"device":"d","channel":0},"line":{"v_fs":1.0,"volts":0.5,"measured":-6.0,"calibrated_at":"1"}},{"key":{"device":"d","channel":0},"line":{"v_fs":2.0,"volts":0.5,"measured":-12.0,"calibrated_at":"2"}}],"mics":[],"inputs":[],"pairs":[]}"#;
     assert!(
         parse(dup_line.as_bytes())
             .expect_err("duplicate line")
@@ -499,7 +505,7 @@ fn a_damaged_file_is_set_aside_and_its_previous_copy_read() {
         b"",
         b"\0\0\0\0\0\0",
         br#"{"format":"other","version":2,"sensitivities":[],"mics":[],"inputs":[]}"#,
-        br#"{"format":"ac2-calibrations","version":5,"sensitivities":[],"lines":[],"mics":[{"name":"m","curves":[{"reference":{"label":"0deg","file_name":"c","content_hash":"0","points":2,"f_lo":20.0,"f_hi":10.0,"imported_at":1,"stated_sensitivity":null},"points":[[20.0,0.0],[10.0,0.0]]}]}],"inputs":[],"pairs":[]}"#,
+        br#"{"format":"ac2-calibrations","version":5,"sensitivities":[],"lines":[],"mics":[{"name":"m","curves":[{"reference":{"label":"0deg","file_name":"c","content_hash":"0","points":2,"f_lo":20.0,"f_hi":10.0,"imported_at":"1","stated_sensitivity":null},"points":[[20.0,0.0],[10.0,0.0]]}]}],"inputs":[],"pairs":[]}"#,
         br#"{"format":"ac2-calibrations","version":5,"sensitivities":[],"lines":[],"mics":[{"name":"m","curves":[]}],"inputs":[],"pairs":[]}"#,
     ] {
         // No previous copy: an empty store, writable.

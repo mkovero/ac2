@@ -70,6 +70,8 @@ impl RigMeter {
             layout: self.layout.clone(),
             offset: Db(0.0),
             eq: Vec::new(),
+            // An SPL meter makes no runs.
+            next_run: 1,
         }
     }
 }

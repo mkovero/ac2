@@ -54,6 +54,7 @@ pub(super) fn session_sample() -> Session {
                 layout: Some(layout_with_a_moved_loudness_plate()),
                 offset: ac2_proto::units::Db(0.0),
                 eq: Vec::new(),
+                next_run: 4,
             },
             SavedMeasurement {
                 id: MeasId(2),
@@ -70,6 +71,7 @@ pub(super) fn session_sample() -> Session {
                 layout: None,
                 offset: ac2_proto::units::Db(0.0),
                 eq: Vec::new(),
+                next_run: 1,
             },
         ],
         spl_logs: vec![SavedSplLog {

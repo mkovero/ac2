@@ -64,6 +64,8 @@ struct Seeded {
     meter: MeasConfig,
     target: ArtnetTarget,
     monitor: StreamConfig,
+    /// A paired rig's server key.
+    peer_key: String,
     /// Kept open: the Art-Net frames the daemon sends land here.
     _node: UdpSocket,
 }
@@ -77,6 +79,7 @@ fn seeded() -> Seeded {
             universe: PortAddress::new(0).unwrap(),
         },
         monitor: stream(false),
+        peer_key: ac2_zmq::KeyPair::generate().unwrap().public.to_z85(),
         _node: node,
     }
 }
@@ -98,9 +101,18 @@ fn file_with_meters(s: &Seeded, meters: Value) -> Value {
         "artnet_target": s.target,
         "artnet_fade": 2.5,
         "levels": LevelsSettings::default(),
-        "peers": []
+        "peers": [{
+            "rig": PEER_RIG,
+            "name": "rig-b",
+            "ctrl": "tcp://127.0.0.1:9",
+            "key": s.peer_key
+        }]
     })
 }
+
+/// A paired rig's id past 2^53, as the file writes it: a decimal string, so a reader whose
+/// JSON numbers are doubles cannot change it.
+const PEER_RIG: &str = "18446744073709551557";
 
 /// The seeded night meter as the file keeps it.
 fn meter_json(s: &Seeded) -> Value {
@@ -151,6 +163,7 @@ fn a_current_file_loads_whole_and_round_trips() {
         st.rig.damaged_files
     );
     assert_rig_kept(&st, &s);
+    assert_eq!(st.remote.peers[0].rig, RigId(PEER_RIG.parse().unwrap()));
     let m = st.measurements.iter().find(|m| m.id == MeasId(1)).unwrap();
     assert_eq!(m.config, s.meter, "limits and cue intact");
     drop(c);
@@ -158,6 +171,7 @@ fn a_current_file_loads_whole_and_round_trips() {
     let rj = rig_json(dir.path());
     assert_eq!(rj["version"], VERSION);
     assert!(rj["meters"][0].get("compared").is_none());
+    assert_eq!(rj["peers"][0]["rig"], PEER_RIG);
     let written = std::fs::read(dir.path().join("rig.json")).unwrap();
 
     // What it wrote, the next start reads unchanged and leaves unchanged.

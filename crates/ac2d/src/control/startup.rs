@@ -155,6 +155,7 @@ impl Control {
             file_jobs: file_jobs::FileJobs::default(),
             sims: sim::Sims::default(),
             remote: remote::RemoteCtl::new(),
+            next_run: HashMap::new(),
             rig: RigState {
                 settings: rig,
                 meas: rigm,
