@@ -294,9 +294,8 @@ impl LeqLog {
         if runs.awaiting.is_some() {
             if runs.held.len() >= MAX_HELD {
                 let gone = runs.held.remove(0);
-                // The run's gap stays on its first row kept.
-                if let Some(next) = runs.held.first_mut().filter(|n| n.run == gone.run) {
-                    next.gap = next.gap.or(gone.gap);
+                if let Some(next) = runs.held.first_mut() {
+                    next.gap = carried_gap(gone.run, gone.gap, next.run, next.gap);
                 }
                 runs.note_dropped();
             }
@@ -314,8 +313,8 @@ impl LeqLog {
         if runs.awaiting.is_some() {
             if runs.held_bands.len() >= MAX_HELD {
                 let gone = runs.held_bands.remove(0);
-                if let Some(next) = runs.held_bands.first_mut().filter(|n| n.run == gone.run) {
-                    next.gap = next.gap.or(gone.gap);
+                if let Some(next) = runs.held_bands.first_mut() {
+                    next.gap = carried_gap(gone.run, gone.gap, next.run, next.gap);
                 }
                 runs.note_dropped();
             }
@@ -360,6 +359,7 @@ impl LeqLog {
     /// stored one stays, and the write is tried again [`RETRY_S`] later), and rows waiting
     /// for its run's anchor are served.
     pub(crate) fn mark_written(&mut self, meas: MeasId, m: &LogMark, result: Result<(), String>) {
+        let result_ok = result.is_ok();
         let r = &mut self.runs;
         match result {
             Ok(()) => {
@@ -383,7 +383,28 @@ impl LeqLog {
             }
         }
         if r.awaiting.is_some_and(|a| a <= m.anchor.run) {
-            self.release();
+            // Rows held past the written reservation (the write took longer than the
+            // reservation's lead) would be served unanchored: they wait for a mark that
+            // covers them.
+            let newest = [
+                r.held.last().map(|h| (h.second, h.run)),
+                r.held_bands.last().map(|h| (h.second, h.run)),
+            ]
+            .into_iter()
+            .flatten()
+            .max();
+            match newest {
+                Some((second, run)) if result_ok && second >= m.anchor.second => {
+                    let (base_s, base_ms) = r
+                        .issued
+                        .map_or((m.anchor.second, m.anchor.boot_ms), |i| (i.second, i.boot_ms));
+                    let cover = second + RESERVE_S;
+                    let boot_ms = base_ms + cover.saturating_sub(base_s) * 1000;
+                    let c = r.mark_at(run, cover, boot_ms);
+                    r.ask(c);
+                }
+                _ => self.release(),
+            }
         }
     }
 
@@ -440,6 +461,25 @@ impl Runs {
             Some((r, g)) if r == run => g,
             _ => LogGap::Known,
         }
+    }
+}
+
+/// The gap of the held row that becomes first once the one before it (`gone`) is dropped.
+/// Within a run the run's gap moves to it. An unknown gap moves to it from any run: the
+/// distance from the row before the dropped one to this one is unknown too, and a
+/// restored log's window floor rests on the row that carries it.
+fn carried_gap(
+    gone_run: u32,
+    gone: Option<LogGap>,
+    next_run: u32,
+    next: Option<LogGap>,
+) -> Option<LogGap> {
+    if gone == Some(LogGap::Unknown) {
+        Some(LogGap::Unknown)
+    } else if gone_run == next_run {
+        next.or(gone)
+    } else {
+        next
     }
 }
 

@@ -925,7 +925,9 @@ or it boots without its meter and refuses every network client.
    directly); the CLI's in-process daemons are its tests, which get the temp directory too.
 2. **Rows held for an anchor the write thread never reports** (§7, a hung disk): at most
    600 per log (a reservation's length) are held; past that the oldest held row is dropped,
-   its run's gap moving to the first row kept, and the log shows a gap there. Serving them
+   its run's gap moving to the first row kept (an `unknown` gap to it whatever its run), and
+   the log shows a gap there. When the anchor comes, rows held at or past its reservation
+   wait on for a mark that covers the newest of them. Serving them
    without the anchor could hand a second out twice after a power cut; dropping never does.
    Live levels and the windows go on meanwhile; the drop is logged once per wait.
 3. **A mark write that fails** reserves nothing: the reservation stored before stands, and

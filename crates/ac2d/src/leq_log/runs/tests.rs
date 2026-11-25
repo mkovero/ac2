@@ -5,9 +5,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use ac2_proto::model::{LogClock, LogGap, SplLogRow};
+use ac2_proto::model::{BAND_COUNT, LogClock, LogGap, SplLogRow};
 use ac2_proto::spl_log::SplLogInfo;
-use ac2_proto::units::{MeasId, WallNs};
+use ac2_proto::units::{Db, MeasId, Seconds, WallNs};
+use ac2_traces::band_log::BandLogRow;
 use ac2_traces::log_mark::{Anchor, LogMark};
 use ac2_traces::session::SavedSplLog;
 
@@ -219,10 +220,100 @@ fn rows_held_for_an_anchor_never_written_are_bounded() {
     assert_eq!(log.runs.held.len(), MAX_HELD);
     let m = log.take_want().expect("anchor asked for");
     log.mark_written(MeasId(1), &m, Ok(()));
+    // The rows reach past that anchor's reservation: they wait for one covering them.
+    assert!(log.rows().is_empty(), "nothing served past the reservation");
+    let c = log.take_want().expect("a covering mark asked for");
+    assert!(c.anchor.second > n - 1);
+    log.mark_written(MeasId(1), &c, Ok(()));
     let rows = log.rows();
     assert_eq!(rows.len(), MAX_HELD);
     assert_eq!((rows[0].second, rows[MAX_HELD - 1].second), (5, n - 1));
     assert_eq!(rows[0].gap, Some(LogGap::Known), "the run's gap kept");
+}
+
+/// Rows held while the anchor's write took longer than the reservation's lead are served
+/// only under a mark that covers the newest of them; rows below the reservation go at once.
+#[test]
+fn rows_held_past_the_reservation_wait_for_a_covering_mark() {
+    let held_for = |seconds: u64| {
+        let mut log = LeqLog::default();
+        log.attach(Waker(Arc::new(|| {})));
+        let s = log.begin_run(&now(BOOT, 10_000, T0, LogClock::Synced));
+        let m = log.take_want().expect("anchor asked for");
+        for k in 0..seconds {
+            log.issue(s.run, k, 11_000 + k * 1000);
+            log.push_row(SplLogRow {
+                second: k,
+                run: s.run,
+                ..row((T0 + k) * NS, -30.0)
+            });
+        }
+        log.mark_written(MeasId(1), &m, Ok(()));
+        (log, m)
+    };
+    let (log, _) = held_for(550);
+    assert_eq!(log.rows().len(), 550, "below the reservation: served");
+
+    let (mut log, m) = held_for(RESERVE_S + 3);
+    assert!(log.rows().is_empty(), "rows past the reservation are not served");
+    let c = log.take_want().expect("a covering mark asked for");
+    assert!(c.anchor.second >= m.anchor.second + 2 + RESERVE_S);
+    log.mark_written(MeasId(1), &c, Ok(()));
+    assert_eq!(log.rows().len(), MAX_HELD);
+    assert_eq!(log.rows().last().map(|r| r.second), Some(RESERVE_S + 2));
+}
+
+fn band_row(second: u64, run: u32) -> BandLogRow {
+    BandLogRow {
+        second,
+        run,
+        start: WallNs((T0 + second) * NS),
+        clock: LogClock::Synced,
+        gap: None,
+        measured: Seconds(1.0),
+        utc_offset_s: 0,
+        levels: [-70.0; BAND_COUNT],
+        correction: Db(0.0),
+        period: None,
+        sensitivity: None,
+    }
+}
+
+/// A dropped held row whose gap was unknown passes it on to the next held row, of its run
+/// or of the next: the log still shows that nothing is known about the distance there.
+#[test]
+fn an_unknown_gap_survives_its_runs_rows_being_dropped() {
+    let mut log = LeqLog::default();
+    log.attach(Waker(Arc::new(|| {})));
+    let a = log.begin_run(&now(BOOT, 10_000, T0, LogClock::Synced));
+    log.runs.open = Some((a.run, LogGap::Unknown));
+    log.push_row(SplLogRow {
+        second: 0,
+        run: a.run,
+        ..row(T0 * NS, -30.0)
+    });
+    log.push_band_row(BandLogRow {
+        second: 0,
+        run: a.run,
+        ..band_row(0, a.run)
+    });
+    // A suspend: a new run, its gap known, its rows held behind the first.
+    let b = log.begin_run(&now(BOOT, 20_000, T0 + 10, LogClock::Synced));
+    for k in 0..MAX_HELD as u64 {
+        log.push_row(SplLogRow {
+            second: 10 + k,
+            run: b.run,
+            ..row((T0 + 10 + k) * NS, -30.0)
+        });
+        log.push_band_row(BandLogRow {
+            second: 10 + k,
+            run: b.run,
+            ..band_row(10 + k, b.run)
+        });
+    }
+    assert_eq!(log.runs.held[0].run, b.run, "run a's row dropped");
+    assert_eq!(log.runs.held[0].gap, Some(LogGap::Unknown));
+    assert_eq!(log.runs.held_bands[0].gap, Some(LogGap::Unknown));
 }
 
 /// Rows logged before the clock synchronised are re-stamped from their distance to the
