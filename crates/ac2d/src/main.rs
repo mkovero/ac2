@@ -179,12 +179,24 @@ fn main() -> ExitCode {
         .is_none()
         .then(ac2_paths::log_dir);
     let log_name = if args.ephemeral { "ac2d-sim" } else { "ac2d" };
-    if let Some(path) = ac2_paths::log::init_in(file_dir.as_deref(), log_name) {
+    // The audit trail has a file of its own under the journal too: the journal's rotation
+    // and rate limits must not decide how long it lasts.
+    let audit_dir = ac2_paths::log_dir();
+    let audit = ac2_paths::log::AuditLog {
+        dir: &audit_dir,
+        target: ac2d::AUDIT_TARGET,
+    };
+    let (log_path, audit_path) =
+        ac2_paths::log::init_with(file_dir.as_deref(), Some(audit), log_name);
+    if let Some(path) = log_path {
         tracing::info!(
             "ac2d {}: logging to {}",
             env!("CARGO_PKG_VERSION"),
             path.display()
         );
+    }
+    if let Some(path) = audit_path {
+        tracing::info!("audit trail in {}", path.display());
     }
     ac2_paths::log::install_panic_hook("ac2d");
     let backend = args.backend.unwrap_or_else(BackendChoice::platform);

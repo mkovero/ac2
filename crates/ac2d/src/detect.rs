@@ -9,6 +9,7 @@
 //! asked for; every other output of the stream stays silent.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use ac2_audio::{
@@ -48,8 +49,24 @@ const TIMEOUT: Duration = Duration::from_secs(6);
 const MAX_INPUTS: u16 = 64;
 const STOP_TIMEOUT: Duration = Duration::from_millis(300);
 
+/// Set to stop a detection under way: its requester may no longer make sound. The burst
+/// is cut with the output's fade, as a lease taken away cuts the stimulus.
+#[derive(Clone, Default)]
+pub(crate) struct Cut(Arc<AtomicBool>);
+
+impl Cut {
+    pub(crate) fn set(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    fn is_set(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
 /// One detection, validated by control.
 pub(crate) struct DetectRequest {
+    pub(crate) cut: Cut,
     pub(crate) backend: Arc<dyn Backend>,
     pub(crate) kind: BackendKind,
     pub(crate) input_device: DeviceId,
@@ -209,6 +226,11 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
             channels: vec![Vec::new(); usize::from(n.input_channels)],
         };
         let mut pump = |cap: &mut Capture| -> Result<(), ProtoError> {
+            if r.cut.is_set() {
+                return Err(refused(
+                    "the detection was cut: this client may no longer make sound on this rig",
+                ));
+            }
             if t0.elapsed() > TIMEOUT {
                 return Err(internal("the device delivered no audio; is it running?"));
             }
@@ -235,7 +257,7 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
         handle.set_gain(Gain::UNITY);
         handle.start();
         tracing::info!(
-            target: "ac2d::audit",
+            target: crate::AUDIT_TARGET,
             "loopback burst {:.1} dBFS on output {} of {:?} {:?}",
             r.level_dbfs,
             r.output + 1,

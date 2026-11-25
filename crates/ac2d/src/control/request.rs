@@ -11,11 +11,14 @@ use ac2_proto::{
     decode_request, encode_reply, peek_envelope,
 };
 
+use ac2_proto::printable::printable;
+
 use crate::dedup::{Admit, Retry};
 use crate::health::StreamState;
+use crate::refusals::LOGGED_ERROR_CHARS;
 use crate::util::{internal, invalid, perr, wall_ns};
 
-use super::{Control, PendingFind, PendingReply, PreviewKey};
+use super::{Control, PendingDetect, PendingFind, PendingReply, PreviewKey};
 use crate::route::{Peer, Route};
 
 impl Control {
@@ -97,7 +100,17 @@ impl Control {
                 return;
             }
             Err(e) => {
-                tracing::warn!("undecodable ctrl message dropped: {e}");
+                // The decoder's message quotes what it could not read: bounded and one line,
+                // and warned about once per client.
+                let e = printable(&e.to_string(), LOGGED_ERROR_CHARS);
+                if self
+                    .refusals
+                    .first(peer.curve().map(|(_, k)| *k), "undecodable")
+                {
+                    tracing::warn!("undecodable ctrl message dropped: {e} (repeats at debug)");
+                } else {
+                    tracing::debug!("undecodable ctrl message dropped: {e}");
+                }
                 return;
             }
         };
@@ -108,7 +121,10 @@ impl Control {
                 None => "no protocol version".to_owned(),
             };
             let who = peer.curve().map_or("a local client", |(name, _)| name);
-            if self.refusals.first(peer.curve().map(|(_, k)| *k), &why) {
+            if self
+                .refusals
+                .first(peer.curve().map(|(_, k)| *k), "version")
+            {
                 tracing::warn!(
                     "refused {who} at {why}, this build speaks {PROTO_VERSION} (repeats at debug)"
                 );
@@ -182,15 +198,16 @@ impl Control {
                     output,
                     level,
                 ) {
-                    Ok(token) => {
-                        self.pending.detecting = Some((
+                    Ok((token, cut)) => {
+                        self.pending.detecting = Some(PendingDetect {
                             token,
-                            PendingReply {
+                            reply: PendingReply {
                                 route: route.clone(),
                                 client,
                                 id: req.id,
                             },
-                        ));
+                            cut,
+                        });
                         return;
                     }
                     Err(e) => Err(e),
@@ -277,7 +294,7 @@ impl Control {
             | Command::FileList
             | Command::FileImport { .. }
             | Command::FileDownloadBegin { .. }) => {
-                match self.start_file_job(route, &client, req.id, cmd) {
+                match self.start_file_job(route, &client, req.id, cmd, role) {
                     Ok(()) => return,
                     Err(e) => Err(e),
                 }
@@ -297,6 +314,10 @@ impl Control {
         result: Result<ReplyBody, ProtoError>,
         now: Instant,
     ) {
+        let mut result = result;
+        if client.curve().is_some() {
+            super::redact::reply(&mut result);
+        }
         let reply = Reply::new(id, result).with_warnings(std::mem::take(&mut self.reply_warnings));
         let Some(bytes) = encode_bounded(&reply) else {
             return;

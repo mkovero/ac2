@@ -98,8 +98,13 @@ impl Outbox {
         self.send(TAG_DETACH, &[&epoch.0.to_le_bytes(), &[u8::from(off)]])
     }
 
-    pub(crate) fn event(&self, body: &[u8]) {
-        self.send(TAG_EVENT, &[body]);
+    /// An event for every data peer: `body` to the local pair, `net` (when the network
+    /// is sent another copy, [`crate::control`]'s redaction) or `body` to the network pair.
+    pub(crate) fn event(&self, body: &[u8], net: Option<&[u8]>) {
+        match net {
+            None => self.send(TAG_EVENT, &[body]),
+            Some(n) => self.send(TAG_EVENT, &[body, n]),
+        };
     }
 
     pub(crate) fn ka(&self, parts: Vec<Vec<u8>>) {

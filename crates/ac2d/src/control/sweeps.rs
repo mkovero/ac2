@@ -256,7 +256,7 @@ impl Control {
             started_at: WallNs(wall_ns()),
         };
         tracing::info!(
-            target: "ac2d::audit",
+            target: crate::AUDIT_TARGET,
             "sweep {} by {}: {} × {:.2} s at {:.1} dBFS on out {:?}, inputs {:?} re {}",
             id.0,
             client.id().0,

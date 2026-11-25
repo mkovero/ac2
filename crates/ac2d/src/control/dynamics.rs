@@ -289,7 +289,7 @@ impl Control {
             started_at: WallNs(wall_ns()),
         };
         tracing::info!(
-            target: "ac2d::audit",
+            target: crate::AUDIT_TARGET,
             "dynamics {} by {}: {steps} steps at {:.2} Hz up to {top:.1} dBFS on out {:?}, \
              inputs {:?} re {}, at most {longest:.0} s",
             id.0,

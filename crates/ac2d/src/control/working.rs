@@ -31,7 +31,7 @@ use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
 use ac2_traces::session::{self, Session as SessionData};
 use serde::{Deserialize, Serialize};
 
-use super::file_jobs::{FileDone, Pending, ReplaceRead, Work};
+use super::file_jobs::{Cancel, FileDone, Pending, ReplaceRead, Work};
 use super::{Control, ControlMsg};
 use crate::route::Peer;
 use crate::util::{internal, missing, perr, perr_detail, wall_ns};
@@ -408,7 +408,7 @@ impl Control {
             Copy::Disk(dir) => RecoverFrom::Disk(dir.clone()),
         };
         let kept = self.kept()?;
-        let work: Work = Box::new(move || {
+        let work: Work = Box::new(move |_: &Cancel| {
             let read = match src {
                 RecoverFrom::Memory(d) => Ok(*d),
                 RecoverFrom::Disk(dir) => session::load(&dir).map_err(|e| {

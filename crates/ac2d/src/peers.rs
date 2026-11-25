@@ -57,6 +57,11 @@ pub(crate) const DATA_SNDHWM: u32 = 2 * (DATA_WINDOW_MAX / FRAME_CHARGE_MIN + 1 
 /// a quiet connection is sent each second included; one that read nothing for a minute has
 /// stopped, and if it reads again it is told to rejoin.
 pub(crate) const STALLED_AFTER: Duration = Duration::from_secs(60);
+/// Most subscriptions one data peer holds. The app holds one per topic a visible pane
+/// draws (a few per measurement, its analysis stages) and a rig one per input it takes:
+/// hundreds in a big session. Past this the peer is dropped: each message is matched
+/// against its list, and the I/O thread serves every client.
+pub(crate) const MAX_SUBSCRIPTIONS: usize = 4096;
 
 /// Longest a peer goes without being sent anything while keepalives are produced.
 pub(crate) const KA_IDLE: Duration = Duration::from_secs(1);
@@ -485,9 +490,13 @@ impl Peers {
         let req = match decode_data_request(body) {
             Ok(r) => r,
             Err(e) => {
-                let why = e.to_string();
+                // The decoder's message quotes what it could not read: bounded, one line.
+                let why = ac2_proto::printable::printable(
+                    &e.to_string(),
+                    crate::refusals::LOGGED_ERROR_CHARS,
+                );
                 let who = client.map_or("a local client", |c| c.name.as_str());
-                if self.refusals.first(client.map(|c| c.key), &why) {
+                if self.refusals.first(client.map(|c| c.key), "undecodable") {
                     tracing::warn!("data request from {who} dropped: {why} (repeats at debug)");
                 } else {
                     tracing::debug!("data request from {who} ({}) dropped: {why}", hex(rid));
@@ -520,6 +529,7 @@ impl Peers {
         // subscription (a new connection does), is one that was dropped as stalled.
         let rejoin = !known && !matches!(req.msg, DataUp::Window { .. } | DataUp::Subscribe { .. });
         let mut gone = false;
+        let mut over = false;
         match req.msg {
             DataUp::Window { bytes } => {
                 p.window = bytes.clamp(DATA_WINDOW_MIN, DATA_WINDOW_MAX);
@@ -538,6 +548,8 @@ impl Peers {
                             sub
                         );
                     }
+                } else if p.subs.len() >= MAX_SUBSCRIPTIONS {
+                    over = true;
                 } else if !p.subs.contains(&sub) {
                     tracing::debug!("peer {} subscribes {:?}", p.name(), sub);
                     subscribe(interest, &sub);
@@ -563,6 +575,19 @@ impl Peers {
                 p.blocked = false;
                 gone = p.flush_resync(sock).is_err() || p.flush_audio(sock).is_err();
             }
+        }
+        if over {
+            let who = client.map_or("a local client", |c| c.name.as_str());
+            if self
+                .refusals
+                .first(client.map(|c| c.key), "too many subscriptions")
+            {
+                tracing::warn!(
+                    "{who} dropped: past {MAX_SUBSCRIPTIONS} subscriptions (repeats at debug)"
+                );
+            }
+            self.drop_peer(rid, interest, "past the subscription limit");
+            return;
         }
         if rejoin && !gone {
             gone = p.notice(sock, FlowNotice::Rejoin).is_err();

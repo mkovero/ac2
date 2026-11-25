@@ -3,7 +3,9 @@
 //! ctrl message.
 //!
 //! Transfers are held in memory (at most [`MAX_TRANSFERS`] × 64 MiB) and belong to the
-//! client that began them. An archive is unpacked into a staging directory under the
+//! client that began them; viewers together hold at most half of them, so an operator
+//! always has room, and every transfer ends [`IDLE`] after its last chunk or at its
+//! lifetime ([`DEFAULT_LIFETIME`]), whichever comes first, however often it is touched. An archive is unpacked into a staging directory under the
 //! session directory (`.incoming/`, never listed: names starting with `.` are not session
 //! names) — on the same file system as the sessions, so `file.import` is a rename, and not
 //! in a RAM-backed temporary directory a big session could fill.
@@ -20,7 +22,7 @@ use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
 use ac2_traces::session::{self, Manifest};
 
 use super::Control;
-use super::file_jobs::{FileDone, Pending, Work};
+use super::file_jobs::{Cancel, FileDone, Pending, Work};
 use super::files::{info, session_err};
 use crate::route::Peer;
 use crate::util::{internal, invalid, missing, perr, perr_detail, refused};
@@ -31,6 +33,12 @@ pub(crate) const CHUNK_BYTES: u32 = 1 << 20;
 pub(crate) const MAX_TRANSFERS: usize = 4;
 /// A transfer nobody touched for this long is dropped.
 pub(crate) const IDLE: Duration = Duration::from_secs(120);
+/// Transfers viewers may hold together: the rest stay an operator's.
+pub(crate) const MAX_VIEWER_TRANSFERS: usize = MAX_TRANSFERS / 2;
+/// A transfer is dropped this long after it began, touched or not: a client that fetches
+/// one chunk now and then must not hold a slot and its 64 MiB for ever. 64 MiB in 15 min
+/// is about 600 kbit/s, slower than any link a session is sent over.
+pub const DEFAULT_LIFETIME: Duration = Duration::from_secs(15 * 60);
 /// Staging directory under the session directory.
 const STAGING: &str = ".incoming";
 
@@ -54,16 +62,27 @@ enum Kind {
 #[derive(Debug)]
 struct Xfer {
     client: Peer,
+    /// A viewer's: counted against [`MAX_VIEWER_TRANSFERS`]. A role change drops the
+    /// transfer, so the role it began with is the role it has.
+    viewer: bool,
+    born: Instant,
     last: Instant,
     kind: Kind,
 }
 
 /// The transfers under way.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Transfers {
     next: u32,
     map: HashMap<TransferId, Xfer>,
     staged: u32,
+    lifetime: Duration,
+}
+
+impl Default for Transfers {
+    fn default() -> Self {
+        Self::new(DEFAULT_LIFETIME)
+    }
 }
 
 fn archive_err(e: ArchiveError) -> ProtoError {
@@ -76,7 +95,8 @@ fn archive_err(e: ArchiveError) -> ProtoError {
 
 fn gone(t: TransferId) -> ProtoError {
     missing(format!(
-        "no transfer {t} (finished, or dropped after 2 min without a chunk)"
+        "no transfer {t} (finished, or dropped after 2 min without a chunk or at its \
+         lifetime)"
     ))
 }
 
@@ -95,18 +115,42 @@ pub(crate) fn file_part(path: &str) -> &str {
         .unwrap_or(path)
 }
 
+/// Most characters of a client's file name the daemon keeps.
+const MAX_FILE_CHARS: usize = 255;
+
+/// The last component of a path a client sent, as the daemon keeps it (in the state, in a
+/// log line): one line, bounded.
+pub(crate) fn client_file(path: &str) -> String {
+    ac2_proto::printable::printable(file_part(path), MAX_FILE_CHARS)
+}
+
 impl Transfers {
+    /// Transfers that live at most `lifetime` each.
+    pub(crate) fn new(lifetime: Duration) -> Self {
+        Self {
+            next: 0,
+            map: HashMap::new(),
+            staged: 0,
+            lifetime,
+        }
+    }
+
     fn prune(&mut self, now: Instant) {
+        let lifetime = self.lifetime;
         self.map.retain(|id, x| {
-            let keep = now.duration_since(x.last) < IDLE;
-            if !keep {
-                tracing::info!("transfer {id} dropped: idle");
+            let idle = now.duration_since(x.last) >= IDLE;
+            let old = now.duration_since(x.born) >= lifetime;
+            if idle || old {
+                tracing::info!(
+                    "transfer {id} dropped: {}",
+                    if idle { "idle" } else { "at its lifetime" }
+                );
             }
-            keep
+            !idle && !old
         });
     }
 
-    fn add(&mut self, client: &Peer, kind: Kind) -> Result<TransferId, ProtoError> {
+    fn add(&mut self, client: &Peer, viewer: bool, kind: Kind) -> Result<TransferId, ProtoError> {
         let now = Instant::now();
         self.prune(now);
         if self.map.len() >= MAX_TRANSFERS {
@@ -120,6 +164,8 @@ impl Transfers {
             id,
             Xfer {
                 client: client.clone(),
+                viewer,
+                born: now,
                 last: now,
                 kind,
             },
@@ -169,10 +215,15 @@ impl Transfers {
         }
     }
 
-    /// How many transfers `client` holds.
-    pub(crate) fn held_by(&mut self, client: &Peer) -> usize {
+    /// How many transfers viewers hold; viewer `key` alone when given.
+    pub(crate) fn held_by_viewers(&mut self, key: Option<&ac2_zmq::PublicKey>) -> usize {
         self.prune(Instant::now());
-        self.map.values().filter(|x| x.client == *client).count()
+        self.map
+            .values()
+            .filter(|x| {
+                x.viewer && key.is_none_or(|k| x.client.curve().is_some_and(|(_, c)| c == k))
+            })
+            .count()
     }
 
     /// Drops every transfer of a network key whose role was taken down.
@@ -222,9 +273,10 @@ impl Control {
         if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(invalid("sha256 must be 64 hex digits"));
         }
-        let file_name = file_part(&file).to_owned();
+        let file_name = client_file(&file);
         let transfer = self.transfers.add(
             client,
+            false,
             Kind::Upload {
                 file: file_name.clone(),
                 bytes,
@@ -294,9 +346,9 @@ impl Control {
         let aside = self.stage_path("replaced");
         let root = self.s.session_dir.clone();
         let (n, t) = (name.clone(), target.clone());
-        let work: Work = Box::new(move || {
+        let work: Work = Box::new(move |cancel: &Cancel| {
             FileDone::Import(import_upload(
-                &bytes, &n, &t, &root, &staged, &aside, overwrite,
+                &bytes, &n, &t, &root, &staged, &aside, overwrite, cancel,
             ))
         });
         Ok((
@@ -343,12 +395,15 @@ impl Control {
                         f.strip_suffix(".ac2session").unwrap_or(f).to_owned()
                     }
                 };
-                let work: Work = Box::new(move || {
-                    let packed = prepare_stage(&dir).and_then(|()| {
-                        session::save(&dir, &data)
-                            .map_err(session_err)
-                            .and_then(|_| ac2_archive::pack_dir(&dir).map_err(archive_err))
-                    });
+                let work: Work = Box::new(move |cancel: &Cancel| {
+                    let packed = cancel
+                        .check()
+                        .and_then(|()| prepare_stage(&dir))
+                        .and_then(|()| {
+                            session::save(&dir, &data)
+                                .map_err(session_err)
+                                .and_then(|_| ac2_archive::pack_dir(&dir).map_err(archive_err))
+                        });
                     remove_dir(&dir);
                     FileDone::Download(packed)
                 });
@@ -359,10 +414,11 @@ impl Control {
             }
             Some(r) => {
                 let (name, dir) = self.session_path(client, r)?;
-                let work: Work = Box::new(move || {
+                let work: Work = Box::new(move |cancel: &Cancel| {
                     FileDone::Download(
-                        session::read_manifest(&dir)
-                            .map_err(session_err)
+                        cancel
+                            .check()
+                            .and_then(|()| session::read_manifest(&dir).map_err(session_err))
                             .and_then(|_| ac2_archive::pack_dir(&dir).map_err(archive_err)),
                     )
                 });
@@ -405,9 +461,10 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         let bytes = data.len() as u64;
         let sha256 = ac2_archive::sha256_hex(&data);
+        let viewer = self.peer_role(client) == Some(ac2_proto::model::ClientRole::Viewer);
         let transfer = self
             .transfers
-            .add(client, Kind::Download { data, working })?;
+            .add(client, viewer, Kind::Download { data, working })?;
         Ok(ReplyBody::Transfer(Transfer {
             transfer,
             file_name,
@@ -453,7 +510,7 @@ impl Control {
         if let (Some(path), Some((hash, at))) = (saved_as, working) {
             // The origin is mirrored to every client: the file's name only, not where on the
             // writing client's machine it lies.
-            let path = file_part(&path).to_owned();
+            let path = client_file(&path);
             tracing::info!("working state exported by {} to {path:?}", client.id().0);
             self.set_working(super::working::Persist {
                 origin: Some(SessionOrigin::Client { path }),
@@ -488,6 +545,7 @@ pub(super) fn unpack_into(bytes: &[u8], dir: &Path) -> Result<(), ProtoError> {
 
 /// `file.import`'s disk work: unpacks into `staged`, then renames it to `target` (an
 /// existing session moved to `aside` first, and back if the rename fails).
+#[allow(clippy::too_many_arguments)]
 fn import_upload(
     bytes: &[u8],
     name: &str,
@@ -496,6 +554,7 @@ fn import_upload(
     staged: &Path,
     aside: &Path,
     overwrite: bool,
+    cancel: &Cancel,
 ) -> Result<Manifest, ProtoError> {
     if !overwrite && let Some(p) = session::peek(target) {
         return Err(exists(name, p.saved_at.unwrap_or_default()));
@@ -519,6 +578,12 @@ fn import_upload(
             return Err(session_err(e));
         }
     };
+    // The last moment before the session directory changes: a requester whose role was
+    // taken down meanwhile imports nothing.
+    if let Err(e) = cancel.check() {
+        remove_dir(staged);
+        return Err(e);
+    }
     let old = if target.exists() {
         if let Err(e) = prepare_stage(aside) {
             remove_dir(staged);
@@ -580,10 +645,10 @@ mod tests {
             working: None,
         };
         let ids: Vec<_> = (0..MAX_TRANSFERS)
-            .map(|_| t.add(&a, kind()).expect("room"))
+            .map(|_| t.add(&a, false, kind()).expect("room"))
             .collect();
         assert_eq!(
-            t.add(&a, kind()).map_err(|e| e.code),
+            t.add(&a, false, kind()).map_err(|e| e.code),
             Err(ErrorCode::Refused)
         );
         let b = Peer::local(b"b");
@@ -595,7 +660,29 @@ mod tests {
             t.map.get_mut(&ids[0]).expect("x").last = old;
             t.prune(Instant::now());
             assert!(t.get(&a, ids[0]).is_err());
-            assert!(t.add(&a, kind()).is_ok());
+            assert!(t.add(&a, false, kind()).is_ok());
+        }
+    }
+
+    /// Touched again and again, a transfer still ends at its lifetime.
+    #[test]
+    fn a_touched_transfer_ends_at_its_lifetime() {
+        let mut t = Transfers::default();
+        let a = Peer::local(b"a");
+        let id = t
+            .add(
+                &a,
+                false,
+                Kind::Download {
+                    data: vec![1],
+                    working: None,
+                },
+            )
+            .expect("room");
+        assert!(t.get(&a, id).is_ok(), "fresh, and touched now");
+        if let Some(born) = Instant::now().checked_sub(DEFAULT_LIFETIME) {
+            t.map.get_mut(&id).expect("x").born = born;
+            assert!(t.get(&a, id).is_err(), "at its lifetime though touched");
         }
     }
 }
