@@ -109,6 +109,9 @@ impl Rig {
     /// Fills the staging directory the daemon's `n`th staged transfer will use, so that
     /// making room for it takes a while: the download it belongs to stays pending.
     fn slow_stage(&self, n: u64) {
+        // The daemon empties the staging directory as its control thread starts, before it
+        // answers any request: one answer first, or that cleanup removes what is made here.
+        self.local().call(Command::ServerInfo).unwrap();
         let d = self
             .sessions()
             .join(".incoming")
