@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ac2_client::TopicFrame;
-use ac2_proto::frame::{ClipFlags, SessionLevelsFrame};
+use ac2_proto::frame::{ClipFlags, StreamLevelsFrame};
 use ac2_proto::units::MeasId;
 use ac2_proto::{Frame, FrameData};
 
@@ -28,8 +28,8 @@ fn frame(topic: Topic, seq: u64) -> TopicFrame {
         topic,
         frame: Arc::new(Frame {
             stamp,
-            data: FrameData::SessionLevels(SessionLevelsFrame {
-                meta: ac2_proto::frame::SessionLevelsMeta {
+            data: FrameData::StreamLevels(StreamLevelsFrame {
+                meta: ac2_proto::frame::StreamLevelsMeta {
                     channels: vec![0],
                     ballistic: Default::default(),
                     pair_levels: vec![],
@@ -191,7 +191,7 @@ fn same_picture_ignores_seq_and_time_only() {
 fn same_picture_takes_a_meters_nan_for_itself() {
     let nan = |seq| {
         let mut f = frame(TF, seq);
-        if let FrameData::SessionLevels(l) = &mut Arc::make_mut(&mut f.frame).data {
+        if let FrameData::StreamLevels(l) = &mut Arc::make_mut(&mut f.frame).data {
             l.true_peak = vec![f32::NAN];
             l.max = vec![f32::NAN];
         }
@@ -199,7 +199,7 @@ fn same_picture_takes_a_meters_nan_for_itself() {
     };
     let (a, mut b) = (nan(1), nan(2));
     assert!(same_picture(&a.frame, &b.frame));
-    if let FrameData::SessionLevels(l) = &mut Arc::make_mut(&mut b.frame).data {
+    if let FrameData::StreamLevels(l) = &mut Arc::make_mut(&mut b.frame).data {
         l.rms = vec![f32::NAN];
     }
     assert!(!same_picture(&a.frame, &b.frame));

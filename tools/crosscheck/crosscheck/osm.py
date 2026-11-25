@@ -132,7 +132,7 @@ def ac2_use_curve(ac2: Ac2, d: Path, curve: dict | None, active: bool) -> bool:
 @contextmanager
 def private_daemon(bin_dir: Path, root: Path):
     """An ac2d of its own: fake backend (it opens no device), its own HOME, config, runtime
-    and recordings, no autosave. The replay sessions it opens have no outputs."""
+    and recordings, no autosave. The replay streams it opens have no outputs."""
     home = root / "home"
     run = root / "run"
     rec = root / "recordings"
@@ -181,12 +181,12 @@ def run_ac2(ac2: Ac2, recdir: Path, name: str, wav_path: Path, frames: int, s: d
             "--window", s["window"], "--average", f"fifo:{fifo}", "--start")
 
     def replay():
-        sess = ac2.run("session", "replay", name, "--fast") or {}
+        sess = ac2.run("stream", "replay", name, "--fast") or {}
         epoch = sess.get("epoch")
         # The replay has ended once a capture is of the file's last sample.
         t0 = time.monotonic()
         while True:
-            # refused until the new session's first result exists
+            # refused until the new stream's first result exists
             c = ac2.run("trace", "capture", "osm-tf", "--name", "osm-probe", check=False)
             c = c if isinstance(c, dict) else {}
             ac2.run("trace", "rm", "osm-probe", json_out=False, check=False)

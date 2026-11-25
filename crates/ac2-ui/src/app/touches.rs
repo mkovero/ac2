@@ -91,7 +91,7 @@ impl Touches {
 /// by the Programme panes.
 fn topic_panes(topic: &Topic) -> &'static [PaneKind] {
     match topic {
-        Topic::SessionLevels | Topic::SessionGonio => &[PaneKind::Programme],
+        Topic::StreamLevels | Topic::StreamGonio => &[PaneKind::Programme],
         Topic::Data { stream, .. } => match stream {
             Stream::Tf => &[PaneKind::Transfer, PaneKind::Walk],
             Stream::Ir => &[PaneKind::Transfer],

@@ -1,4 +1,4 @@
-//! Audio that stops while a session is open (`docs/design/audio-recovery.md`), from an
+//! Audio that stops while a stream is open (`docs/design/audio-recovery.md`), from an
 //! empty daemon on the fake rig: a device that stops delivering without an error is
 //! reported within the bound, the daemon keeps answering while its reopen hangs on the
 //! device, and once the device is back the same measurements run in a new epoch with the
@@ -16,10 +16,10 @@ use ac2_client::{Client, OnDrop};
 use ac2_proto::frame::{FrameData, LeqRun};
 use ac2_proto::model::{
     DriverChange, DriverReset, DriverResetReason, GeneratorDesired, GeneratorSettings, Recovery,
-    Session, Signal, State, StopCause,
+    Signal, State, StopCause, Stream,
 };
 use ac2_proto::units::{Dbfs, MeasId};
-use ac2_proto::{Command, ReplyBody, Stream, Subscription, Topic};
+use ac2_proto::{Command, ReplyBody, Subscription, Topic};
 use ac2d::{Daemon, Handle};
 use common::*;
 
@@ -43,13 +43,13 @@ async fn until(c: &Client, what: &str, wait: Duration, ok: impl Fn(&State) -> bo
         assert!(
             Instant::now() < deadline,
             "timed out waiting for {what}: {:?}",
-            s.session
+            s.stream
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
 
-/// An empty daemon on `backend` with a session open (loopback), a transfer measurement and
+/// An empty daemon on `backend` with a stream open (loopback), a transfer measurement and
 /// an SPL meter running.
 async fn start(backend: &FakeBackend) -> (Handle, Client, MeasId, MeasId) {
     start_with(backend, None).await
@@ -65,8 +65,8 @@ async fn start_with(
     cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;
-    c.call(Command::SessionOpen {
-        config: session(true),
+    c.call(Command::StreamOpen {
+        config: stream(true),
     })
     .await
     .unwrap();
@@ -87,21 +87,25 @@ async fn start_with(
 /// The SPL meter's run once `ok` holds.
 async fn run_until(c: &Client, meas: MeasId, what: &str, ok: impl Fn(&LeqRun) -> bool) -> LeqRun {
     let poll = Poll::new(WAIT, 50);
-    frame_until(c, (meas, Stream::Leq), poll, what, |f| {
-        match &f.frame.data {
+    frame_until(
+        c,
+        (meas, ac2_proto::Stream::Leq),
+        poll,
+        what,
+        |f| match &f.frame.data {
             FrameData::Leq(l) => l.meta.run.filter(|r| ok(r)),
             _ => None,
-        }
-    })
+        },
+    )
     .await
 }
 
-fn stopped(s: &Session) -> bool {
+fn stopped(s: &Stream) -> bool {
     s.stopped.is_some()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn slow_a_stalled_device_is_reported_and_the_session_reopens_by_itself() {
+async fn slow_a_stalled_device_is_reported_and_the_stream_reopens_by_itself() {
     let backend = realtime_rig();
     let (_h, c, tf, meter) = start(&backend).await;
     c.subscribe(Subscription::Meas(meter)).unwrap();
@@ -121,25 +125,22 @@ async fn slow_a_stalled_device_is_reported_and_the_session_reopens_by_itself() {
         .unwrap();
     run_until(&c, meter, "two seconds logged", |r| r.measured.0 >= 2.0).await;
     let before = state(&c);
-    let epoch = before.session.epoch;
-    let opened = before.session.open.clone().unwrap();
+    let epoch = before.stream.epoch;
+    let opened = before.stream.open.clone().unwrap();
 
     // The device stops delivering, without an error: AUDIO STOPPED within the bound.
     let t0 = Instant::now();
     backend.stall(None);
-    let s = until(&c, "audio stopped", WAIT, |s| stopped(&s.session)).await;
+    let s = until(&c, "audio stopped", WAIT, |s| stopped(&s.stream)).await;
     let took = t0.elapsed();
     assert!(
         took < Duration::from_millis(1000 + 1500),
         "reported after {took:?}"
     );
-    let st = s.session.stopped.clone().unwrap();
+    let st = s.stream.stopped.clone().unwrap();
     assert_eq!(st.cause, StopCause::NotDelivering { after_ms: 1000 });
-    assert_eq!(
-        s.session.epoch, epoch,
-        "the session stays open in its epoch"
-    );
-    assert_eq!(s.session.open.as_ref(), Some(&opened));
+    assert_eq!(s.stream.epoch, epoch, "the stream stays open in its epoch");
+    assert_eq!(s.stream.open.as_ref(), Some(&opened));
     // Measurements are paused, not stopped; the generator is disarmed at once.
     let s = until(&c, "generator disarmed", WAIT, |s| !s.generator.armed).await;
     assert!(!s.generator.firing);
@@ -152,15 +153,15 @@ async fn slow_a_stalled_device_is_reported_and_the_session_reopens_by_itself() {
     // The reopen hangs on the stalled device; the daemon still answers at once.
     let s = until(&c, "attempt 1 opening", WAIT, |s| {
         matches!(
-            s.session.stopped.as_ref().map(|x| &x.recovery),
+            s.stream.stopped.as_ref().map(|x| &x.recovery),
             Some(Recovery::Opening { attempt: 1, .. })
         )
     })
     .await;
-    assert!(stopped(&s.session));
+    assert!(stopped(&s.stream));
     tokio::time::sleep(Duration::from_secs(2)).await;
     let asked = Instant::now();
-    let status = c.call(Command::SessionStatus).await.unwrap().session();
+    let status = c.call(Command::StreamStatus).await.unwrap().stream();
     assert!(status.stopped.is_some());
     assert!(asked.elapsed() < Duration::from_millis(500));
 
@@ -168,10 +169,10 @@ async fn slow_a_stalled_device_is_reported_and_the_session_reopens_by_itself() {
     let back_at = ac2_proto::units::WallNs(wall_now_ns());
     backend.restore();
     let s = until(&c, "reopened", WAIT, |s| {
-        s.session.stopped.is_none() && s.session.epoch.0 > epoch.0
+        s.stream.stopped.is_none() && s.stream.epoch.0 > epoch.0
     })
     .await;
-    let o = s.session.open.clone().unwrap();
+    let o = s.stream.open.clone().unwrap();
     assert_eq!(o.config, opened.config);
     assert!(o.opened_at > opened.opened_at);
     assert!(!s.generator.armed && !s.generator.firing);
@@ -187,14 +188,14 @@ async fn slow_a_stalled_device_is_reported_and_the_session_reopens_by_itself() {
     c.subscribe(Subscription::Meas(tf)).unwrap();
     let topic = Topic::Data {
         meas: tf,
-        stream: Stream::Tf,
+        stream: ac2_proto::Stream::Tf,
     };
     let deadline = Instant::now() + WAIT;
     loop {
         if c.latest()
             .unwrap()
             .get(&topic)
-            .is_some_and(|f| f.frame.stamp.session_epoch == s.session.epoch)
+            .is_some_and(|f| f.frame.stamp.stream_epoch == s.stream.epoch)
         {
             break;
         }
@@ -211,7 +212,7 @@ async fn slow_a_vanished_device_is_reopened_with_backoff_until_it_returns() {
     let backend = realtime_rig();
     let dir = tempfile::tempdir().unwrap();
     let (_h, c, _, _) = start_with(&backend, Some(dir.path().to_owned())).await;
-    let epoch = state(&c).session.epoch;
+    let epoch = state(&c).stream.epoch;
     // A recording across the outage ends with it: the audio after the reopen is never
     // spliced onto the file.
     c.call(Command::RecStart {
@@ -230,9 +231,9 @@ async fn slow_a_vanished_device_is_reopened_with_backoff_until_it_returns() {
     .await;
     let t0 = Instant::now();
     backend.vanish(Some(Duration::from_millis(3500)));
-    let s = until(&c, "host ended", WAIT, |s| stopped(&s.session)).await;
+    let s = until(&c, "host ended", WAIT, |s| stopped(&s.stream)).await;
     assert_eq!(
-        s.session.stopped.as_ref().unwrap().cause,
+        s.stream.stopped.as_ref().unwrap().cause,
         StopCause::HostEnded
     );
     let s = until(&c, "the recording ended", WAIT, |s| {
@@ -247,12 +248,12 @@ async fn slow_a_vanished_device_is_reopened_with_backoff_until_it_returns() {
     assert_eq!(s.recording.as_ref().unwrap().name, "across");
     let s = until(&c, "a failed attempt", WAIT, |s| {
         matches!(
-            s.session.stopped.as_ref().map(|x| &x.recovery),
+            s.stream.stopped.as_ref().map(|x| &x.recovery),
             Some(Recovery::Waiting { .. })
         )
     })
     .await;
-    match &s.session.stopped.as_ref().unwrap().recovery {
+    match &s.stream.stopped.as_ref().unwrap().recovery {
         Recovery::Waiting { error, next_at, .. } => {
             assert!(error.contains("simulated device is gone"), "{error}");
             assert!(next_at.0 > wall_now_ns() - 100_000_000);
@@ -260,9 +261,9 @@ async fn slow_a_vanished_device_is_reopened_with_backoff_until_it_returns() {
         other => panic!("{other:?}"),
     }
     // Attempts at about 0, 1, 3 and 7 s: the device returns at 3.5 s, the fourth opens it.
-    let s = until(&c, "reopened", WAIT, |s| s.session.stopped.is_none()).await;
-    assert!(s.session.epoch.0 > epoch.0);
-    assert!(s.session.open.is_some());
+    let s = until(&c, "reopened", WAIT, |s| s.stream.stopped.is_none()).await;
+    assert!(s.stream.epoch.0 > epoch.0);
+    assert!(s.stream.open.is_some());
     let took = t0.elapsed();
     assert!(
         took > Duration::from_millis(3500) && took < Duration::from_secs(15),
@@ -277,9 +278,9 @@ async fn slow_a_vanished_device_is_reopened_with_backoff_until_it_returns() {
 async fn slow_a_device_back_mid_wait_is_reopened_at_once() {
     let backend = realtime_rig();
     let (_h, c, _, _) = start(&backend).await;
-    let epoch = state(&c).session.epoch;
+    let epoch = state(&c).stream.epoch;
     backend.vanish(None);
-    let waiting = |s: &State| match s.session.stopped.as_ref().map(|x| &x.recovery) {
+    let waiting = |s: &State| match s.stream.stopped.as_ref().map(|x| &x.recovery) {
         Some(Recovery::Waiting {
             attempt, next_at, ..
         }) => Some((*attempt, *next_at)),
@@ -308,9 +309,9 @@ async fn slow_a_device_back_mid_wait_is_reopened_at_once() {
     let left = next_at.0.saturating_sub(wall_now_ns()) as f64 / 1e9;
     assert!(left > 3.0, "{left}");
     backend.restore();
-    let s = until(&c, "reopened", WAIT, |s| s.session.stopped.is_none()).await;
+    let s = until(&c, "reopened", WAIT, |s| s.stream.stopped.is_none()).await;
     let took = back.elapsed();
-    assert!(s.session.epoch.0 > epoch.0);
+    assert!(s.stream.epoch.0 > epoch.0);
     assert!(took < Duration::from_millis(2500), "{took:?}");
 }
 
@@ -319,29 +320,29 @@ async fn a_close_ends_the_attempts() {
     let backend = realtime_rig();
     let (_h, c, _, _) = start(&backend).await;
     backend.vanish(None);
-    until(&c, "stopped", WAIT, |s| stopped(&s.session)).await;
-    c.call(Command::SessionClose).await.unwrap();
+    until(&c, "stopped", WAIT, |s| stopped(&s.stream)).await;
+    c.call(Command::StreamClose).await.unwrap();
     until(&c, "closed", WAIT, |s| {
-        s.session.open.is_none() && s.session.stopped.is_none()
+        s.stream.open.is_none() && s.stream.stopped.is_none()
     })
     .await;
     backend.restore();
     tokio::time::sleep(Duration::from_secs(3)).await;
     let s = state(&c);
     assert!(
-        s.session.open.is_none(),
+        s.stream.open.is_none(),
         "no attempt after the close: {:?}",
-        s.session
+        s.stream
     );
 }
 
 /// The operator changes the driver's rate and buffer size in its control panel while a
-/// session pinned to 48 kHz runs: the driver resets the stream, and the session reopens at
+/// stream pinned to 48 kHz runs: the driver resets the stream, and the stream reopens at
 /// the driver's new settings (asking for the old ones would undo the change), says so, and
 /// its measurements run again at the new rate. The generator that was playing stays
-/// stopped, and the session says why.
+/// stopped, and the stream says why.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_driver_panel_change_reopens_the_session_at_the_drivers_new_rate() {
+async fn a_driver_panel_change_reopens_the_stream_at_the_drivers_new_rate() {
     let backend = realtime_rig();
     let (_h, c, _tf, _meter) = start(&backend).await;
     let lease = c.acquire_lease(false, OnDrop::Release).await.unwrap();
@@ -365,14 +366,14 @@ async fn a_driver_panel_change_reopens_the_session_at_the_drivers_new_rate() {
         |s| s.measurements.iter().all(|m| m.running) && s.generator.firing,
     )
     .await;
-    let was = before.session.open.clone().unwrap();
+    let was = before.stream.open.clone().unwrap();
     assert_eq!(was.config.sample_rate_hz, Some(FS));
     assert_eq!(was.driver_change, None);
     assert_eq!(was.driver_reset, None);
 
     backend.script_panel(Some((44_100, 512)));
     let reply = c
-        .call(Command::SessionControlPanel {
+        .call(Command::StreamControlPanel {
             backend: was.backend,
             device: was.input_device.clone(),
         })
@@ -381,13 +382,13 @@ async fn a_driver_panel_change_reopens_the_session_at_the_drivers_new_rate() {
     assert!(matches!(reply, ReplyBody::Ack { .. }), "{reply:?}");
     assert_eq!(backend.panel_opens(), 1);
 
-    let after = until(&c, "the session reopened at 44.1 kHz", WAIT, |s| {
-        s.session.stopped.is_none()
-            && s.session.epoch != before.session.epoch
+    let after = until(&c, "the stream reopened at 44.1 kHz", WAIT, |s| {
+        s.stream.stopped.is_none()
+            && s.stream.epoch != before.stream.epoch
             && s.measurements.iter().all(|m| m.running)
     })
     .await;
-    let now = after.session.open.clone().unwrap();
+    let now = after.stream.open.clone().unwrap();
     assert_eq!(
         now.driver_reset,
         Some(DriverReset {
@@ -410,17 +411,17 @@ async fn a_driver_panel_change_reopens_the_session_at_the_drivers_new_rate() {
         })
     );
 
-    // A client opening the session anew has seen the change: it is no longer reported.
-    c.call(Command::SessionOpen {
+    // A client opening the stream anew has seen the change: it is no longer reported.
+    c.call(Command::StreamOpen {
         config: now.config.clone(),
     })
     .await
     .unwrap();
-    let reopened = until(&c, "the new session", WAIT, |s| {
-        s.session.epoch != after.session.epoch && s.session.open.is_some()
+    let reopened = until(&c, "the new stream", WAIT, |s| {
+        s.stream.epoch != after.stream.epoch && s.stream.open.is_some()
     })
     .await;
-    let open = reopened.session.open.clone().unwrap();
+    let open = reopened.stream.open.clone().unwrap();
     assert_eq!(open.sample_rate_hz, 44_100);
     assert_eq!(open.driver_change, None);
     assert_eq!(open.driver_reset, None);
@@ -434,7 +435,7 @@ async fn a_panel_of_an_unknown_device_is_refused() {
     let h = Daemon::start(config(backend.clone(), local_tcp())).unwrap();
     let c = connect(&h).await;
     let e = c
-        .call(Command::SessionControlPanel {
+        .call(Command::StreamControlPanel {
             backend: ac2_proto::model::BackendKind::Fake,
             device: ac2_proto::model::DeviceId("no such card".into()),
         })

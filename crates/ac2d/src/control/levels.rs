@@ -53,7 +53,7 @@ impl Control {
         Ok(ReplyBody::Ack { rev })
     }
 
-    /// `levels.reset`: the session meters and the preview clear the max holds and over
+    /// `levels.reset`: the stream meters and the preview clear the max holds and over
     /// counts of `channels` (empty: every input) with their next frame.
     pub(super) fn levels_reset(&mut self, channels: Vec<u16>) -> Result<ReplyBody, ProtoError> {
         if channels.is_empty() {

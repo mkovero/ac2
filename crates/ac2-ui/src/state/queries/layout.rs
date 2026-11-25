@@ -1,4 +1,4 @@
-//! The remembered pane layout, the preferences, the session watch and the key hints.
+//! The remembered pane layout, the preferences, the stream watch and the key hints.
 
 use crate::state::*;
 
@@ -60,7 +60,7 @@ impl AppState {
                 .find(|m| m.config.name == name && kind.shows(&m.config.kind))
                 .map(|m| m.id);
             let Some(id) = id else {
-                // Gone for now (a session reopening, salvaged, a daemon restarting makes it
+                // Gone for now (a stream reopening, salvaged, a daemon restarting makes it
                 // again), or none made yet: it comes back. One the daemon never listed is
                 // not coming: the pane's usual choice is it, and nothing is saved for it.
                 if self.rig.choice.meas_seen.contains(&name) || self.measurements().is_empty() {
@@ -181,7 +181,7 @@ impl AppState {
     /// ([`Self::restore_meas_choices`]), and kept, it would come to mean whichever of them
     /// was left once the others went. A deleted one's name must not hide a new one of that
     /// name in a later run, so a waiting name is kept only while the daemon lists no
-    /// measurements at all (a session reopening): until the daemon's state is known, all.
+    /// measurements at all (a stream reopening): until the daemon's state is known, all.
     fn remembered_names(
         &self,
         ids: &BTreeSet<MeasId>,
@@ -214,7 +214,7 @@ impl AppState {
     /// hidden again with one key). Forgotten rather than kept waiting, so it never lands
     /// later on whichever duplicate is left after the others are deleted or renamed. A
     /// name no measurement has waits as a pane's remembered measurement does: while the
-    /// daemon lists none, or once listed (it comes back with a session reopening).
+    /// daemon lists none, or once listed (it comes back with a stream reopening).
     pub(in crate::state) fn restore_meas_choices(&mut self) {
         let p = &self.rig.pending;
         if self.daemon().is_none() || (p.hidden.is_empty() && p.folded.is_empty()) {
@@ -270,34 +270,33 @@ impl AppState {
         }
     }
 
-    /// What needs metering: the session's input meters while a session is open (the
+    /// What needs metering: the stream's input meters while a stream is open (the
     /// sidebar shows them all the time) or a dialog meters inputs, and a device preview (the
-    /// session dialog on a device the session does not capture).
+    /// stream dialog on a device the stream does not capture).
     pub(in crate::state) fn meter_wants(
         &self,
     ) -> (
         bool,
         Option<(ac2_proto::model::BackendKind, ac2_proto::model::DeviceId)>,
     ) {
-        let session = self.open_session().is_some();
+        let stream = self.open_stream().is_some();
         match &self.overlay {
-            _ if self.overlay.session().is_some() => (
-                true,
-                self.overlay.session().and_then(|d| d.preview_target()),
-            ),
+            _ if self.overlay.stream().is_some() => {
+                (true, self.overlay.stream().and_then(|d| d.preview_target()))
+            }
             Overlay::Form(_) => (true, None),
-            _ => (session, None),
+            _ => (stream, None),
         }
     }
 
     /// Follows what the always-on parts of the window need from the mirror: the device
-    /// list once per session (the inputs' channel names), and when the running sweep's
+    /// list once per stream (the inputs' channel names), and when the running sweep's
     /// step began.
-    pub(in crate::state) fn sync_session_watch(&mut self, out: &mut Vec<Request>) {
+    pub(in crate::state) fn sync_stream_watch(&mut self, out: &mut Vec<Request>) {
         let epoch = self
             .daemon()
-            .filter(|s| s.session.open.is_some())
-            .map(|s| s.session.epoch);
+            .filter(|s| s.stream.open.is_some())
+            .map(|s| s.stream.epoch);
         if let Some(e) = epoch
             && self.rig.devices.is_none()
             && self.rig.asked.devices_for != Some(e)

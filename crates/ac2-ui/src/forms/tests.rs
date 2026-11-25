@@ -1,15 +1,15 @@
 use ac2_proto::model::{
     BackendKind, ClockRelation, DeviceId, DeviceSelector, LoopbackRoute, PeakWeighting, Resolution,
-    SessionConfig, SpecAveraging, TfAveraging, Window,
+    SpecAveraging, StreamConfig, TfAveraging, Window,
 };
 use ac2_proto::units::{Hz, WallNs};
 
 use super::*;
 use ac2_proto::model::SmoothingMode;
 
-fn open(inputs: Vec<u16>, loopback: Option<LoopbackRoute>) -> OpenSession {
-    OpenSession {
-        config: SessionConfig {
+fn open(inputs: Vec<u16>, loopback: Option<LoopbackRoute>) -> OpenStream {
+    OpenStream {
+        config: StreamConfig {
             backend: None,
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
@@ -38,7 +38,7 @@ fn open(inputs: Vec<u16>, loopback: Option<LoopbackRoute>) -> OpenSession {
     }
 }
 
-fn names(o: &OpenSession) -> Vec<(u16, String)> {
+fn names(o: &OpenStream) -> Vec<(u16, String)> {
     o.config
         .input_channels
         .iter()
@@ -233,7 +233,7 @@ fn spectrum_and_rta_dialogs_set_averaging_and_edit_keeps_the_rest() {
     };
     assert_eq!(config.averaging, SpecAveraging::Off);
     assert_eq!((config.f_lo, config.weighting), (Hz(100.0), Weighting::A));
-    // An input the session no longer captures is not swapped for another.
+    // An input the stream no longer captures is not swapped for another.
     let mut gone = m.clone();
     if let MeasKind::Rta { config } = &mut gone.config.kind {
         config.input = 5;
@@ -251,7 +251,7 @@ fn spectrum_and_rta_dialogs_set_averaging_and_edit_keeps_the_rest() {
 fn a_spectrums_fft_size_and_window_are_editable() {
     let o = open(vec![0, 1], None);
     let at = |f: &Form, id| f.fields.iter().position(|x| x.id == id).expect("field");
-    // New: the default length and window, the resolution's hint at the session's rate.
+    // New: the default length and window, the resolution's hint at the stream's rate.
     let f = Form::measurement(FormKind::Spectrum, Some(&o), &[], &names(&o), &[]);
     let size = &f.fields[at(&f, FieldId::FftSize)];
     assert_eq!(size.display(), "65536 pt");
@@ -309,7 +309,7 @@ fn a_spectrums_fft_size_and_window_are_editable() {
         (SpecResolution::Fixed { fft_len: 16_384 }, Window::Hann)
     );
     assert_eq!(config.averaging, SpecAveraging::Fifo { frames: 8 });
-    // The full range, and no hint without a session rate.
+    // The full range, and no hint without a stream rate.
     e.focus = i;
     e.cycle(-20);
     assert_eq!(e.fields[i].display(), "64 pt");
@@ -417,7 +417,7 @@ fn measurement_choices() {
 }
 
 /// The settings of the sweep measurement the dialog makes.
-fn swept(f: &Form, o: &OpenSession) -> Result<SweepConfig, String> {
+fn swept(f: &Form, o: &OpenStream) -> Result<SweepConfig, String> {
     match f.sweep_meas(Some(o), None)?.kind {
         MeasKind::Sweep { config } => Ok(config),
         _ => Err("not a sweep".into()),
@@ -582,7 +582,7 @@ fn sweep_steppers_are_sorted_and_stop_at_the_ends() {
     }
 }
 
-/// Without a session loopback nothing guesses the reference: the dialog asks for it and
+/// Without a stream loopback nothing guesses the reference: the dialog asks for it and
 /// refuses to arm until it is chosen. With one, the loopback input is the default.
 #[test]
 fn sweep_reference_is_the_loopback_or_chosen() {

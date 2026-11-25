@@ -172,9 +172,9 @@ fn rig(name: &str, prefixes: &[&[u8]]) -> Rig {
     cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, prefixes);
-    let mut s = session(false);
+    let mut s = stream(false);
     s.input_channels = vec![0, 1, 2, 3];
-    c.ok(Command::SessionOpen { config: s });
+    c.ok(Command::StreamOpen { config: s });
     for (i, input) in [1u16, 2, 3].into_iter().enumerate() {
         c.ok(Command::MeasCreate {
             config: tf_on(&format!("Seat {}", i + 1), input),

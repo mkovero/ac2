@@ -21,13 +21,13 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     let tf = hint_line(&d.st);
     assert_eq!(tf.first().map(String::as_str), Some("V select trace"));
     assert_eq!(tf.last().map(String::as_str), Some("H all keys"));
-    // A session and its transfer measurement, from the app.
+    // A stream and its transfer measurement, from the app.
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
     d.until("the device list", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.session.device_info().is_some())
+            .is_some_and(|x| x.stream.device_info().is_some())
     })?;
     d.key("Enter");
     first_transfer(&mut d)?;
@@ -95,7 +95,7 @@ fn a_row_dropped_on_a_pane_turns_it_into_its_kind_from_an_empty_daemon() -> R {
     d.until("the device list", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.session.device_info().is_some())
+            .is_some_and(|x| x.stream.device_info().is_some())
     })?;
     d.key("Enter");
     first_transfer(&mut d)?;

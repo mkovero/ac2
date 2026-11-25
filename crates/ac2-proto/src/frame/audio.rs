@@ -153,7 +153,7 @@ pub fn decode_audio(parts: &[&[u8]]) -> Result<AudioFrame, DecodeError> {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use crate::units::{DaemonIncarnation, SessionEpoch};
+    use crate::units::{DaemonIncarnation, StreamEpoch};
 
     fn header(frames: u32) -> AudioHeader {
         AudioHeader {
@@ -165,7 +165,7 @@ mod tests {
             rate: 96_000,
             incarnation: StreamIncarnation {
                 daemon: DaemonIncarnation(7),
-                epoch: SessionEpoch(3),
+                epoch: StreamEpoch(3),
             },
         }
     }

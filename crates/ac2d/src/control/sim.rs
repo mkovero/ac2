@@ -1,6 +1,6 @@
 //! `sim.run`, `sim.fit`, `sim.cancel`: room simulations on a worker (`crate::sim`), their
 //! progress and results as `State.sim`. A change to the simulated plan, the deletion of the
-//! walk it is heard at, or a session close stops the run.
+//! walk it is heard at, or a stream close stops the run.
 
 use std::time::Duration;
 

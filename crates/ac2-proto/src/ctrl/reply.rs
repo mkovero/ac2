@@ -9,10 +9,10 @@ use crate::grid::GridDef;
 use crate::model::{
     BackendInfo, CalEntry, DelayFinding, DynamicsRun, Generator, InputSetups, Lease, LineCalEntry,
     LoopbackDetection, Measurement, Mic, OutputSetup, Preview, RecordingFile, RecordingRun,
-    ServerInfo, Session, SessionFile, SourceState, SplHistory, SplLogPage, SweepRun, TraceData,
+    ServerInfo, SessionFile, SourceState, SplHistory, SplLogPage, Stream, SweepRun, TraceData,
     TraceMeta,
 };
-use crate::units::{Blob, ClientId, DaemonIncarnation, RequestId, Rev, RigId, SessionEpoch};
+use crate::units::{Blob, ClientId, DaemonIncarnation, RequestId, Rev, RigId, StreamEpoch};
 
 /// Reply to `hello`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,8 +24,8 @@ pub struct Welcome {
     pub client_id: ClientId,
     /// Incarnation.
     pub daemon_incarnation: DaemonIncarnation,
-    /// Session epoch.
-    pub session_epoch: SessionEpoch,
+    /// Stream epoch.
+    pub stream_epoch: StreamEpoch,
     /// Current rev.
     pub rev: Rev,
     /// The daemon's identity, the same on every connect and after every restart.
@@ -50,14 +50,14 @@ pub enum ReplyBody {
     },
     /// `hello`.
     Welcome(Welcome),
-    /// `session.devices`: every backend the daemon offers, the default one first.
+    /// `stream.devices`: every backend the daemon offers, the default one first.
     Backends(Vec<BackendInfo>),
-    /// `session.preview`.
+    /// `stream.preview`.
     Preview(Preview),
-    /// `session.detect_loopback`.
+    /// `stream.detect_loopback`.
     LoopbackDetection(LoopbackDetection),
-    /// `session.open` / `session.status`.
-    Session(Session),
+    /// `stream.open` / `stream.status`.
+    Stream(Stream),
     /// `gen.acquire` / `gen.refresh`.
     Lease(Lease),
     /// `gen.set`.
@@ -95,9 +95,9 @@ pub enum ReplyBody {
         /// Mic library.
         mics: Vec<Mic>,
     },
-    /// `session.inputs`: the whole input setup and the pairs.
+    /// `stream.inputs`: the whole input setup and the pairs.
     Inputs(InputSetups),
-    /// `session.outputs`: every output label.
+    /// `stream.outputs`: every output label.
     Outputs(Vec<OutputSetup>),
     /// `server.info`, `server.authorize`, `server.revoke`, `auth.admit_rig`.
     Server(ServerInfo),

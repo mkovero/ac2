@@ -17,7 +17,7 @@ use crate::model::{
     DelayPick, DelayReference, DeviceId, DmxSet, ExportFormat, FinderBand, GeneratorDesired,
     InputSetup, MeasConfig, MicCurveId, NetBind, OscMessage, OutputSetup, OwnedTraces, Pair,
     PaneLayout, PlanSpec, PreviewInput, RecordRequest, RecordingRef, ReplayPace, RigPeer,
-    SessionConfig, SessionRef, SimFitRequest, SimMapRequest, SimRequest, SplLogWhich, TargetCurve,
+    SessionRef, SimFitRequest, SimMapRequest, SimRequest, SplLogWhich, StreamConfig, TargetCurve,
     TraceEdit, TraceOwner, WalkKind, WalkPointSpec,
 };
 use crate::units::{
@@ -37,38 +37,38 @@ pub enum Command {
         client: String,
     },
 
-    // -- session ------------------------------------------------------------------------
+    // -- stream ------------------------------------------------------------------------
     /// List the daemon's backends and their devices.
-    #[serde(rename = "session.devices")]
-    SessionDevices,
-    /// Meter every input of a device without opening a session on it: capture only, the
+    #[serde(rename = "stream.devices")]
+    StreamDevices,
+    /// Meter every input of a device without opening a stream on it: capture only, the
     /// outputs are never opened. Naming the same device again keeps the preview open;
-    /// another device replaces it. Closed by `session.preview_stop`, `session.open`,
-    /// `session.detect_loopback` or when not renewed within `expires_in_ms`. The declared
+    /// another device replaces it. Closed by `stream.preview_stop`, `stream.open`,
+    /// `stream.detect_loopback` or when not renewed within `expires_in_ms`. The declared
     /// kinds and pairs of the device's inputs travel back in the preview frames' meta so the
     /// rows can be labelled; the meters themselves read dBFS.
-    #[serde(rename = "session.preview")]
-    SessionPreview {
+    #[serde(rename = "stream.preview")]
+    StreamPreview {
         /// Backend.
         backend: BackendKind,
         /// Device.
         device: DeviceId,
         /// What is on the inputs (undeclared inputs are microphones).
         inputs: Vec<PreviewInput>,
-        /// Pairs among them; the rules of `session.inputs` apply.
+        /// Pairs among them; the rules of `stream.inputs` apply.
         pairs: Vec<Pair>,
     },
     /// Close the preview.
-    #[serde(rename = "session.preview_stop")]
-    SessionPreviewStop,
+    #[serde(rename = "stream.preview_stop")]
+    StreamPreviewStop,
     /// Open a device's driver control panel on the daemon's machine (ASIO: where pro
     /// interfaces set their rate, buffer size, clock and routing). Answered once the driver
     /// has shown it, or after a short wait while a modal panel stays open. A change there
-    /// may reset the open session's stream: it reopens at the driver's new settings
-    /// (`StopCause::DriverReset`, `OpenSession::driver_change`). Refused (`unsupported`)
+    /// may reset the open stream: it reopens at the driver's new settings
+    /// (`StopCause::DriverReset`, `OpenStream::driver_change`). Refused (`unsupported`)
     /// by backends without one.
-    #[serde(rename = "session.control_panel")]
-    SessionControlPanel {
+    #[serde(rename = "stream.control_panel")]
+    StreamControlPanel {
         /// Backend.
         backend: BackendKind,
         /// Device.
@@ -78,8 +78,8 @@ pub enum Command {
     /// find the input of `input_device` it returns on (the same device, or two of one
     /// backend). Needs the stimulus lease and an explicit level; refused while the stimulus
     /// is firing.
-    #[serde(rename = "session.detect_loopback")]
-    SessionDetectLoopback {
+    #[serde(rename = "stream.detect_loopback")]
+    StreamDetectLoopback {
         /// Lease.
         lease_token: LeaseToken,
         /// Backend.
@@ -94,24 +94,24 @@ pub enum Command {
         level: Option<Dbfs>,
     },
     /// Open the audio I/O (new epoch).
-    #[serde(rename = "session.open")]
-    SessionOpen {
+    #[serde(rename = "stream.open")]
+    StreamOpen {
         /// Configuration.
-        config: SessionConfig,
+        config: StreamConfig,
     },
     /// Close the audio I/O (new epoch).
-    #[serde(rename = "session.close")]
-    SessionClose,
-    /// Current session.
-    #[serde(rename = "session.status")]
-    SessionStatus,
+    #[serde(rename = "stream.close")]
+    StreamClose,
+    /// Current stream.
+    #[serde(rename = "stream.status")]
+    StreamStatus,
     /// Set the kind (and a mic's name and active curve) of the listed inputs (others
     /// unchanged) and the pairs among all inputs (the whole list). A chosen curve must be
     /// stored for the row's mic (unless the row is unchanged). Refused by name: a pair of
     /// two kinds, of an input twice, of an input with itself, or of an input the
-    /// open session does not capture; a row's `pair` side is set from the pair list.
-    #[serde(rename = "session.inputs")]
-    SessionInputs {
+    /// open stream does not capture; a row's `pair` side is set from the pair list.
+    #[serde(rename = "stream.inputs")]
+    StreamInputs {
         /// Rows to upsert, one per channel.
         inputs: Vec<InputSetup>,
         /// Every pair.
@@ -119,8 +119,8 @@ pub enum Command {
     },
     /// Set or clear the labels of the listed outputs (others unchanged). Kept by the daemon
     /// with the rig's settings.
-    #[serde(rename = "session.outputs")]
-    SessionOutputs {
+    #[serde(rename = "stream.outputs")]
+    StreamOutputs {
         /// Rows to upsert, one per channel; a `None` label clears it.
         outputs: Vec<OutputSetup>,
     },
@@ -213,7 +213,7 @@ pub enum Command {
         /// Levels.
         channels: Vec<DmxSet>,
     },
-    /// Whether the daemon reopens the last session's device capture-only when it starts,
+    /// Whether the daemon reopens the last stream's device capture-only when it starts,
     /// so the rig measurements meter with no client connected (`rig.monitor_at_start`).
     #[serde(rename = "rig.monitor_start")]
     RigMonitorStart {
@@ -245,7 +245,7 @@ pub enum Command {
         loudness_target: Option<Lufs>,
     },
     /// Clear the max hold of every ballistic and the over count of `channels` (device
-    /// inputs; empty: every captured input), on the session meters and the preview alike.
+    /// inputs; empty: every captured input), on the stream meters and the preview alike.
     /// No state changes: the next meter frame carries the cleared values.
     #[serde(rename = "levels.reset")]
     LevelsReset {
@@ -519,7 +519,7 @@ pub enum Command {
     /// Calibrate a line input: the operator feeds the input a steady tone and measures
     /// `volts` (RMS) at the input; the daemon measures the tone's level `L` the way
     /// `cal.spl_electrical` does (refused without signal, clipped or not steady yet) and
-    /// stores `V_FS = volts / 10^(L/20)`, the volts at 0 dBFS, under the open session's
+    /// stores `V_FS = volts / 10^(L/20)`, the volts at 0 dBFS, under the open stream's
     /// input device. On a `line` input only: a mic reads dB SPL and a digital feed has no
     /// volt.
     #[serde(rename = "cal.line")]
@@ -532,7 +532,7 @@ pub enum Command {
     /// List sensitivity and line calibrations and the mic library.
     #[serde(rename = "cal.list")]
     CalList,
-    /// Delete a sensitivity or line calibration, on any device (no open session needed).
+    /// Delete a sensitivity or line calibration, on any device (no open stream needed).
     #[serde(rename = "cal.delete")]
     CalDelete {
         /// Entry.
@@ -652,7 +652,7 @@ pub enum Command {
         overwrite: bool,
     },
     /// Replace measurements and traces with a saved session; always comes up disarmed with
-    /// no generator owner, in a new session epoch. Refused (`conflict`, `unsaved_changes`)
+    /// no generator owner, in a new stream epoch. Refused (`conflict`, `unsaved_changes`)
     /// while the working state has unsaved changes, unless `discard`; what it replaces is
     /// then kept for `file.recover`.
     #[serde(rename = "file.load")]
@@ -858,7 +858,7 @@ pub enum Command {
     /// Simulate the plan's speakers at the receivers on a worker; the reply is the started
     /// [`crate::model::SimState`], its progress and results follow as `sim` events. Refused
     /// with [`crate::ErrorDetail::Sim`] (an outdoor plan, an unknown material, a marker
-    /// outside, a run already going). A plan change, `sim.cancel` or a session close stops it.
+    /// outside, a run already going). A plan change, `sim.cancel` or a stream close stops it.
     #[serde(rename = "sim.run")]
     SimRun {
         /// What to simulate.
@@ -885,7 +885,7 @@ pub enum Command {
     SimCancel,
 
     // -- rec ----------------------------------------------------------------------------
-    /// Record inputs of the open session to a raw capture file (f32 WAV / RF64 and a JSON
+    /// Record inputs of the open stream to a raw capture file (f32 WAV / RF64 and a JSON
     /// sidecar) in the daemon's recording directory. One recording at a time; the reply is
     /// the started run, whose progress and end follow as `recording` events.
     #[serde(rename = "rec.start")]
@@ -902,7 +902,7 @@ pub enum Command {
     /// How the daemon serves clients (`ServerInfo`) and who may connect.
     #[serde(rename = "server.info")]
     ServerInfo,
-    /// Turn the network listener on or off live; the session and local clients run on.
+    /// Turn the network listener on or off live; the stream and local clients run on.
     /// Local clients only; refused while `ac2d --listen` fixes it. Replies `server.info`.
     #[serde(rename = "server.network")]
     ServerNetwork {
@@ -966,15 +966,15 @@ pub enum Command {
         rig: RigId,
     },
     /// What a rig taking this rig's inputs may know: its clocks with the stamp map, and its
-    /// session's rate and captured inputs with their setup and calibration.
+    /// stream's rate and captured inputs with their setup and calibration.
     #[serde(rename = "source.state")]
     SourceState,
-    /// Open a session that plays a recording instead of a device (new epoch): its inputs
+    /// Open a stream that plays a recording instead of a device (new epoch): its inputs
     /// are the recorded ones under their device numbers, it has no outputs, and the running
     /// measurements analyse it as they would the device. A replay never reopens itself: it
     /// stops after the last frame.
-    #[serde(rename = "session.replay")]
-    SessionReplay {
+    #[serde(rename = "stream.replay")]
+    StreamReplay {
         /// Which recording.
         recording: RecordingRef,
         /// How fast.

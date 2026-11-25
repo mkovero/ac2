@@ -270,22 +270,22 @@ fn a_transfer_pane_does_not_draw_imported_from_an_empty_daemon() -> R {
     Ok(())
 }
 
-/// The open session reopened with in 3 in it as a second mic: Shift+O, ↓ to its row, Space
+/// The open stream reopened with in 3 in it as a second mic: Shift+O, ↓ to its row, Space
 /// and M, Enter. An SPL meter needs a mic, so two meters on two inputs need two of them.
 fn second_mic(d: &mut Driver) -> R {
-    use ac2_ui::session_dialog::Row;
+    use ac2_ui::stream_dialog::Row;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
     d.until("the device list", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.session.device_info().is_some())
+            .is_some_and(|x| x.stream.device_info().is_some())
     })?;
     for _ in 0..16 {
         if d.st
             .overlay
             .settings()
-            .is_some_and(|x| x.session.focus == Row::Input(2))
+            .is_some_and(|x| x.stream.focus == Row::Input(2))
         {
             break;
         }
@@ -293,15 +293,15 @@ fn second_mic(d: &mut Driver) -> R {
     }
     d.key("Space");
     d.key("M");
-    d.until("in 3 a mic in the session", |s| {
+    d.until("in 3 a mic in the stream", |s| {
         s.overlay.settings().is_some_and(|x| {
-            let r = &x.session.inputs[2];
-            r.in_session && r.is_mic()
+            let r = &x.stream.inputs[2];
+            r.in_stream && r.is_mic()
         })
     })?;
     d.key("Enter");
-    d.until("the session with three inputs", |s| {
-        s.open_session()
+    d.until("the stream with three inputs", |s| {
+        s.open_stream()
             .is_some_and(|o| o.config.input_channels == [0, 1, 2])
     })?;
     Ok(())

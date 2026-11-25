@@ -21,7 +21,7 @@ use crate::grid::GridId;
 use crate::model::FreqRange;
 use crate::packing::{self, array_size};
 use crate::topic::Topic;
-use crate::units::{DaemonIncarnation, Rev, SampleIndex, Seconds, SessionEpoch, WallNs};
+use crate::units::{DaemonIncarnation, Rev, SampleIndex, Seconds, StreamEpoch, WallNs};
 
 use super::decode::topic_kind;
 use super::{
@@ -145,9 +145,9 @@ fn per_frame(m: &FrameMeta) -> PerFrame {
         | FrameMeta::Leq(_)
         | FrameMeta::BandLeq(_)
         | FrameMeta::Levels(_)
-        | FrameMeta::SessionLevels(_)
+        | FrameMeta::StreamLevels(_)
         | FrameMeta::PreviewLevels(_)
-        | FrameMeta::SessionGonio(_)
+        | FrameMeta::StreamGonio(_)
         | FrameMeta::PreviewGonio(_)
         | FrameMeta::Timing(_)
         | FrameMeta::Ka(_) => PerFrame::Static,
@@ -193,7 +193,7 @@ fn with_per_frame(base: &FrameMeta, p: PerFrame) -> Option<FrameMeta> {
 fn fits(f: &CodedFrame, base: &CodedFrame) -> bool {
     let (a, b) = (&f.stamp, &base.stamp);
     if f.topic != base.topic
-        || a.session_epoch != b.session_epoch
+        || a.stream_epoch != b.stream_epoch
         || a.daemon_incarnation != b.daemon_incarnation
         || a.config_rev != b.config_rev
         || a.config_applied_at != b.config_applied_at
@@ -221,7 +221,7 @@ struct KeyHeaderRef<'a> {
     kind: FrameKind,
     seq: u64,
     audio_sample: SampleIndex,
-    session_epoch: SessionEpoch,
+    stream_epoch: StreamEpoch,
     daemon_incarnation: DaemonIncarnation,
     config_rev: Rev,
     config_applied_at: SampleIndex,
@@ -271,7 +271,7 @@ pub fn encode_key(f: &CodedFrame) -> Result<Vec<Vec<u8>>, EncodeError> {
         kind: f.kind(),
         seq: s.seq,
         audio_sample: s.audio_sample,
-        session_epoch: s.session_epoch,
+        stream_epoch: s.stream_epoch,
         daemon_incarnation: s.daemon_incarnation,
         config_rev: s.config_rev,
         config_applied_at: s.config_applied_at,
@@ -610,7 +610,7 @@ fn decode_key(topic: Topic, kind: FrameKind, body: &[u8]) -> Result<CodedFrame, 
         stamp: super::FrameStamp {
             seq: h.seq,
             audio_sample: h.audio_sample,
-            session_epoch: h.session_epoch,
+            stream_epoch: h.stream_epoch,
             daemon_incarnation: h.daemon_incarnation,
             config_rev: h.config_rev,
             config_applied_at: h.config_applied_at,

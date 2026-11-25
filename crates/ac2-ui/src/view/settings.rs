@@ -169,7 +169,7 @@ fn page(
     );
     ui.add_space(8.0);
     // Audio I/O ends in what Enter does, kept in view below the scrolling settings.
-    let opens = s.page == Page::AudioIo && s.session.backends.is_some();
+    let opens = s.page == Page::AudioIo && s.stream.backends.is_some();
     // The scrolling part takes what the header left, less the footer as it will lay out
     // (the separator, its spacing and the keys line, wrapped): a fixed allowance for either
     // clipped the last line behind the separator while room was left below the keys.
@@ -231,9 +231,9 @@ fn page(
         });
     if opens {
         let mut m = None;
-        super::session::open_row(ui, &s.session, s.new_session, ch, &mut m);
+        super::stream::open_row(ui, &s.stream, s.new_session, ch, &mut m);
         if let Some(m) = m {
-            *msg = Some(Msg::Session(m));
+            *msg = Some(Msg::Stream(m));
         }
     }
     ui.add(egui::Separator::default().spacing(SEPARATOR_H));
@@ -278,16 +278,16 @@ pub(super) fn section(ui: &mut egui::Ui, title: &str, whose: &str, ch: &Chrome) 
 
 fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) {
     let mut m = None;
-    // One focus marker on the page: the max level row's, or a session row's.
-    let focus = (!s.on_ceiling && s.signal.focus.is_none()).then_some(s.session.focus);
+    // One focus marker on the page: the max level row's, or a stream row's.
+    let focus = (!s.on_ceiling && s.signal.focus.is_none()).then_some(s.stream.focus);
     section(ui, "Device", "", ch);
-    super::session::device_section(ui, &s.session, focus, ch, &mut m);
-    let remote = |ui: &mut egui::Ui, m: &mut Option<crate::state::SessionMsg>| {
+    super::stream::device_section(ui, &s.stream, focus, ch, &mut m);
+    let remote = |ui: &mut egui::Ui, m: &mut Option<crate::state::StreamMsg>| {
         super::remote::remote_section(app, ui, s, focus, ch, m);
     };
-    super::session::channels_section(app, ui, &s.session, focus, ch, &mut m, &remote);
+    super::stream::channels_section(app, ui, &s.stream, focus, ch, &mut m, &remote);
     if let Some(m) = m {
-        *msg = Some(Msg::Session(m));
+        *msg = Some(Msg::Stream(m));
     }
     signal_section(app, ui, s, ch, msg);
     section(ui, "System max level", crate::settings::THE_RIG, ch);
@@ -785,7 +785,7 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
         if let ConnLine::LinkOffset = l
             && let Some(d) = st.daemon()
         {
-            let set = st.open_session().and_then(|o| o.config.link_offset);
+            let set = st.open_stream().and_then(|o| o.config.link_offset);
             row(
                 ui,
                 i,

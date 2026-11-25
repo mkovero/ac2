@@ -50,7 +50,7 @@ struct Run {
     d: FakeDriver,
 }
 
-/// A session on the fake rig with transfer 1 at `resolution`, started; pink noise playing
+/// A stream on the fake rig with transfer 1 at `resolution`, started; pink noise playing
 /// when `play`.
 fn start(
     name: &str,
@@ -65,8 +65,8 @@ fn start(
     cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, prefixes);
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let mut m = transfer("main");
     if let MeasKind::Transfer { config } = &mut m.kind {
@@ -117,7 +117,7 @@ pub(crate) fn same_emit(s: &Frame, tf: &Frame) {
     assert_eq!(s.stamp.audio_sample, tf.stamp.audio_sample, "{}", s.topic());
     assert_eq!(s.stamp.config_rev, tf.stamp.config_rev);
     assert_eq!(s.stamp.config_applied_at, tf.stamp.config_applied_at);
-    assert_eq!(s.stamp.session_epoch, tf.stamp.session_epoch);
+    assert_eq!(s.stamp.stream_epoch, tf.stamp.stream_epoch);
     assert_eq!(s.stamp.protection, tf.stamp.protection);
     assert_eq!(s.stamp.grid_id, None);
 }
@@ -439,9 +439,9 @@ fn a_stop_leaves_every_stage_with_the_final_curve() {
     r.h.shutdown();
 }
 
-/// A session's close drops its stage frames with its curves.
+/// A stream's close drops its stage frames with its curves.
 #[test]
-fn a_session_close_leaves_no_stage() {
+fn a_stream_close_leaves_no_stage() {
     let (mut r, _b) = start(
         "bins-close",
         TransferResolution::Bins,
@@ -453,7 +453,7 @@ fn a_session_close_leaves_no_stage() {
     let end = end_sample(&r.d);
     covering(&r.sub, end, 0, &[stage(1, 0)]);
     assert!(!slots(&r, &STAGES).is_empty());
-    r.c.ok(Command::SessionClose);
+    r.c.ok(Command::StreamClose);
     let left = slots(&r, &STAGES);
     assert!(
         left.is_empty(),

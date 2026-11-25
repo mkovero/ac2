@@ -197,7 +197,7 @@ pub(crate) async fn sweep_meas_for(
     .await
 }
 
-/// Checks before the lease is taken: the level against the daemon's ceiling, an open session.
+/// Checks before the lease is taken: the level against the daemon's ceiling, an open stream.
 fn check_runnable(st: &State, config: &SweepConfig) -> Result<(), CliError> {
     let ceiling = st.generator.ceiling;
     if config.level.0 > ceiling.0 {
@@ -207,9 +207,9 @@ fn check_runnable(st: &State, config: &SweepConfig) -> Result<(), CliError> {
             ac2_scene::format::dbfs(ceiling.0)
         )));
     }
-    if st.session.open.is_none() {
+    if st.stream.open.is_none() {
         return Err(CliError::Usage(
-            "no audio I/O open; open it with `ac2 session open`".into(),
+            "no audio I/O open; open it with `ac2 stream open`".into(),
         ));
     }
     Ok(())
@@ -696,7 +696,7 @@ mod tests {
         Ok((code, String::from_utf8(so)? + &String::from_utf8_lossy(&se)))
     }
 
-    /// From an empty daemon on the simulated rig: open the session with the CLI, capture a
+    /// From an empty daemon on the simulated rig: open the stream with the CLI, capture a
     /// sweep (Enter plays it), read the summary, export every curve.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn slow_ir_capture_on_the_simulated_rig() -> R {
@@ -715,7 +715,7 @@ mod tests {
         let (code, text) = ac2(
             &ep,
             &[
-                "session",
+                "stream",
                 "open",
                 "--backend",
                 "fake",

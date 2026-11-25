@@ -1,11 +1,11 @@
-//! Reducer tests of the session meters, the sweep progress strip, recording and new measurements.
+//! Reducer tests of the stream meters, the sweep progress strip, recording and new measurements.
 
 use super::*;
 
 #[test]
 fn input_meters_follow_the_dialog() {
     use ac2_client::{Latest, TopicFrame};
-    use ac2_proto::frame::{ClipFlags, PreviewLevelsFrame, PreviewLevelsMeta, SessionLevelsFrame};
+    use ac2_proto::frame::{ClipFlags, PreviewLevelsFrame, PreviewLevelsMeta, StreamLevelsFrame};
     use ac2_proto::topic::Topic;
     use ac2_proto::{Frame, FrameData};
     let mut t = T::new();
@@ -22,8 +22,8 @@ fn input_meters_follow_the_dialog() {
     };
     let mut latest = Latest::default();
     for f in [
-        frame(FrameData::SessionLevels(SessionLevelsFrame {
-            meta: ac2_proto::frame::SessionLevelsMeta {
+        frame(FrameData::StreamLevels(StreamLevelsFrame {
+            meta: ac2_proto::frame::StreamLevelsMeta {
                 channels: vec![0, 1],
                 ballistic: Default::default(),
                 pair_levels: vec![],
@@ -65,14 +65,14 @@ fn input_meters_follow_the_dialog() {
         grids: Default::default(),
         drained: Instant::now(),
     }));
-    // A measurement dialog shows the session's meters.
+    // A measurement dialog shows the stream's meters.
     t.st.apply(Msg::Command(CommandId::NewTransfer), &t.keys);
     let m = t.st.input_meters();
     assert_eq!(m.len(), 2);
     assert_eq!(m[&0].text, "\u{2212}20.0");
     assert_eq!(m[&1].state, ac2_scene::meter::MeterState::Clip);
     t.key("Escape");
-    // The session dialog on a device the session does not capture: its preview.
+    // The stream dialog on a device the stream does not capture: its preview.
     open_dialog(&mut t, backends(true));
     let m = t.st.input_meters();
     assert_eq!(m.len(), 4);
@@ -83,14 +83,14 @@ fn input_meters_follow_the_dialog() {
 /// The sidebar's always-on meters: every captured input by name and role, its reading,
 /// and what the running sweep (else the selected measurement) uses it as.
 #[test]
-fn sidebar_meters_name_every_session_input_by_role() {
+fn sidebar_meters_name_every_stream_input_by_role() {
     use ac2_client::{Latest, TopicFrame};
-    use ac2_proto::frame::{ClipFlags, SessionLevelsFrame};
+    use ac2_proto::frame::{ClipFlags, StreamLevelsFrame};
     use ac2_proto::{Frame, FrameData};
     use ac2_scene::meter::{InputUse, MeterState};
     let mut t = T::new();
     let mut s = daemon_state();
-    if let Some(o) = &mut s.session.open {
+    if let Some(o) = &mut s.stream.open {
         o.backend = BackendKind::Fake;
         o.config.input_channels = vec![0, 1, 2];
         o.config.loopback = Some(LoopbackRoute {
@@ -111,7 +111,7 @@ fn sidebar_meters_name_every_session_input_by_role() {
     s.mics = vec![mm1()];
     t.conn(mirror(s.clone()));
     let labels = |t: &T| -> Vec<(String, Option<InputUse>)> {
-        t.st.session_inputs()
+        t.st.stream_inputs()
             .into_iter()
             .map(|r| (r.label, r.used))
             .collect()
@@ -145,10 +145,10 @@ fn sidebar_meters_name_every_session_input_by_role() {
             ("Line 3 · mic (in 3)".into(), None),
         ]
     );
-    // Readings from the session's meters; an input without one reads as no data.
+    // Readings from the stream's meters; an input without one reads as no data.
     let mut latest = Latest::default();
-    let data = FrameData::SessionLevels(SessionLevelsFrame {
-        meta: ac2_proto::frame::SessionLevelsMeta {
+    let data = FrameData::StreamLevels(StreamLevelsFrame {
+        meta: ac2_proto::frame::StreamLevelsMeta {
             channels: vec![0, 1],
             ballistic: Default::default(),
             pair_levels: vec![],
@@ -179,7 +179,7 @@ fn sidebar_meters_name_every_session_input_by_role() {
         grids: Default::default(),
         drained: Instant::now(),
     }));
-    let rows = t.st.session_inputs();
+    let rows = t.st.stream_inputs();
     assert_eq!(rows[0].reading.with_unit(), "\u{2212}20.0 dBFS");
     assert_eq!(rows[0].reading.state, MeterState::Signal);
     assert_eq!(rows[1].reading.state, MeterState::Clip);
@@ -197,10 +197,10 @@ fn sidebar_meters_name_every_session_input_by_role() {
     );
 }
 
-/// The meters stay subscribed while a session is open, whatever dialog opens and closes,
-/// and the subscription ends with the session.
+/// The meters stay subscribed while a stream is open, whatever dialog opens and closes,
+/// and the subscription ends with the stream.
 #[test]
-fn session_meters_stay_subscribed_while_a_session_is_open() {
+fn stream_meters_stay_subscribed_while_a_stream_is_open() {
     let mut t = T::disconnected();
     connected_to(&mut t, "local daemon");
     let r = t.conn(mirror(daemon_state()));
@@ -212,7 +212,7 @@ fn session_meters_stay_subscribed_while_a_session_is_open() {
     assert!(!r.iter().any(|x| matches!(x, Request::Meters(_))), "{r:?}");
     let r = t.key("Escape");
     assert!(!r.iter().any(|x| matches!(x, Request::Meters(_))), "{r:?}");
-    let r = t.conn(mirror(no_session_state()));
+    let r = t.conn(mirror(no_stream_state()));
     assert!(
         r.iter().any(|x| matches!(x, Request::Meters(false))),
         "{r:?}"
@@ -292,7 +292,7 @@ fn record_toggles_and_the_indicator_names_the_inputs() {
     else {
         panic!("{r:?}");
     };
-    assert_eq!(request.inputs, vec![0, 1], "every input of the session");
+    assert_eq!(request.inputs, vec![0, 1], "every input of the stream");
     assert_eq!(request.max_duration, Seconds(RECORD_MAX_S));
 
     let mut s = daemon_state();
@@ -301,7 +301,7 @@ fn record_toggles_and_the_indicator_names_the_inputs() {
         path: "/r/rec-x.wav".into(),
         inputs: vec![0, 1],
         sample_rate_hz: 48_000,
-        session_epoch: s.session.epoch,
+        stream_epoch: s.stream.epoch,
         start_sample: SampleIndex(0),
         started_at: WallNs(0),
         started_by: ClientId("c1".into()),
@@ -334,8 +334,8 @@ fn record_toggles_and_the_indicator_names_the_inputs() {
         "{r:?}"
     );
 
-    // No session, nothing recording: the toggle says how to open one.
-    t.conn(mirror(no_session_state()));
+    // No stream, nothing recording: the toggle says how to open one.
+    t.conn(mirror(no_stream_state()));
     assert!(
         t.st.apply(Msg::Command(CommandId::Record), &t.keys)
             .is_empty()
@@ -347,7 +347,7 @@ fn record_toggles_and_the_indicator_names_the_inputs() {
     t.text("rec-x");
     let r = t.key("Enter");
     assert!(
-        matches!(r.as_slice(), [Request::Call { cmd: Command::SessionReplay {
+        matches!(r.as_slice(), [Request::Call { cmd: Command::StreamReplay {
             recording: RecordingRef::Name { name },
             pace: ReplayPace::Realtime,
         }, .. }] if name == "rec-x"),
@@ -356,14 +356,14 @@ fn record_toggles_and_the_indicator_names_the_inputs() {
 }
 
 #[test]
-fn close_session_and_delete_measurement() {
+fn close_stream_and_delete_measurement() {
     let mut t = T::new();
-    let r = t.st.apply(Msg::Command(CommandId::CloseSession), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::CloseStream), &t.keys);
     assert!(
         matches!(
             r.as_slice(),
             [Request::Call {
-                cmd: Command::SessionClose,
+                cmd: Command::StreamClose,
                 ..
             }]
         ),
@@ -376,9 +376,9 @@ fn close_session_and_delete_measurement() {
             if what == "Main L deleted"),
         "{r:?}"
     );
-    t.conn(mirror(no_session_state()));
+    t.conn(mirror(no_stream_state()));
     assert!(
-        t.st.apply(Msg::Command(CommandId::CloseSession), &t.keys)
+        t.st.apply(Msg::Command(CommandId::CloseStream), &t.keys)
             .is_empty()
     );
     assert!(t.last_toast().contains("no audio I/O"));
@@ -398,7 +398,7 @@ fn new_measurements_start_and_become_selected() {
     assert_eq!(form(&t).kind, FormKind::Transfer);
     let r = t.key("Enter");
     let c = created(&r).expect("meas.create");
-    // One transfer exists, so this is the second; inputs from the session (1 → 2).
+    // One transfer exists, so this is the second; inputs from the stream (1 → 2).
     assert_eq!(c.name, "Reference → Input 2");
     assert!(matches!(
         &c.kind,
@@ -489,8 +489,8 @@ fn new_measurements_start_and_become_selected() {
     t.key("Escape");
     assert_eq!(t.st.overlay, Overlay::None);
 
-    // No session: nothing to measure on; the Sessions dialog, where one is started.
-    t.conn(mirror(no_session_state()));
+    // No stream: nothing to measure on; the Sessions dialog, where one is started.
+    t.conn(mirror(no_stream_state()));
     let r = t.st.apply(Msg::Command(CommandId::NewRta), &t.keys);
     assert!(matches!(r.as_slice(), [Request::SessionList]), "{r:?}");
     assert!(t.st.sessions_dialog().is_some(), "{:?}", t.st.overlay);
@@ -503,7 +503,7 @@ fn new_measurements_start_and_become_selected() {
 fn sidebar_meters_show_a_pair_as_one_row_and_line_inputs_in_dbfs_or_dbu() {
     let mut t = T::new();
     let mut s = daemon_state();
-    if let Some(o) = &mut s.session.open {
+    if let Some(o) = &mut s.stream.open {
         o.backend = BackendKind::Fake;
         o.config.input_channels = vec![0, 1, 2, 3];
         o.config.loopback = Some(LoopbackRoute {
@@ -546,7 +546,7 @@ fn sidebar_meters_show_a_pair_as_one_row_and_line_inputs_in_dbfs_or_dbu() {
     s.mics = vec![mm1()];
     t.conn(mirror(s.clone()));
     t.conn(ConnEvent::Devices(Ok(backends(true))));
-    let rows = t.st.session_inputs();
+    let rows = t.st.stream_inputs();
     let labels: Vec<&str> = rows.iter().map(|r| r.label.as_str()).collect();
     assert_eq!(
         labels,
@@ -565,7 +565,7 @@ fn sidebar_meters_show_a_pair_as_one_row_and_line_inputs_in_dbfs_or_dbu() {
     s.pairs[0].name = Some("Main".into());
     t.conn(mirror(s.clone()));
     assert_eq!(
-        t.st.session_inputs()[2].label,
+        t.st.stream_inputs()[2].label,
         "Main · line · pair (in 3, 4)"
     );
     // A line calibration of the reference: its level text is dBu, with the full scale.
@@ -582,6 +582,6 @@ fn sidebar_meters_show_a_pair_as_one_row_and_line_inputs_in_dbfs_or_dbu() {
         },
     }];
     t.conn(mirror(s));
-    let cal = t.st.session_inputs()[0].cal.clone().unwrap_or_default();
+    let cal = t.st.stream_inputs()[0].cal.clone().unwrap_or_default();
     assert!(cal.starts_with("dBu · full scale +13.0 dBu · "), "{cal}");
 }

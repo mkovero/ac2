@@ -1,6 +1,6 @@
 //! UI preferences kept between runs (`ui.toml` in the ac2 config directory): the stimulus
-//! outputs last used on each output device (decision K4), the session dialog's choices
-//! per device — which inputs and outputs were in the session, their roles and the mic
+//! outputs last used on each output device (decision K4), the stream dialog's choices
+//! per device — which inputs and outputs were in the stream, their roles and the mic
 //! names — the Leq view's layout, whether the panes show their key hints, how long the SPL
 //! meter's number holds a reading, the theme, the record toggle's time limit, the layout
 //! and window as last left: the pane tree, the
@@ -134,14 +134,14 @@ impl KindPref {
     }
 }
 
-/// The session dialog's choices for one device (zero-based channels).
+/// The stream dialog's choices for one device (zero-based channels).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DeviceRoles {
-    /// Inputs in the session.
+    /// Inputs in the stream.
     pub inputs: Vec<u16>,
-    /// Output channels of the session (a count: outputs `0 .. outputs`).
+    /// Output channels of the stream (a count: outputs `0 .. outputs`).
     pub outputs: u16,
-    /// Spare inputs the session opens (JACK); listed in `inputs` like any other.
+    /// Spare inputs the stream opens (JACK); listed in `inputs` like any other.
     pub spare_inputs: u16,
     /// The loopback return.
     pub reference: Option<u16>,
@@ -156,7 +156,7 @@ pub struct DeviceRoles {
     pub kinds: BTreeMap<u16, KindPref>,
     /// Left/right pairs among the inputs.
     pub pairs: Vec<ac2_proto::model::Pair>,
-    /// The device the session plays on when it is not the input device (its id); `None`:
+    /// The device the stream plays on when it is not the input device (its id); `None`:
     /// the input device's own outputs, or the system default where it has none.
     pub output_device: Option<String>,
 }
@@ -295,7 +295,7 @@ impl WindowPrefs {
 /// Bounds of the SPL meter's display hold, ms.
 pub const SPL_HOLD_MS: std::ops::RangeInclusive<u32> = 100..=10_000;
 
-/// What the UI remembers for one rig's devices: the session dialog reads it for the rig
+/// What the UI remembers for one rig's devices: the stream dialog reads it for the rig
 /// it opened on.
 #[derive(Clone, Copy, Debug)]
 pub struct RigPrefs<'a> {
@@ -309,7 +309,7 @@ impl RigPrefs<'_> {
         self.prefs.outputs_for(self.rig, device)
     }
 
-    /// The session dialog choices remembered for `key` ([`UiPrefs::device_key`]).
+    /// The stream dialog choices remembered for `key` ([`UiPrefs::device_key`]).
     pub fn roles_for(&self, key: &str) -> Option<&DeviceRoles> {
         self.prefs.roles_for(self.rig, key)
     }
@@ -376,7 +376,7 @@ pub struct UiPrefs {
     /// Zero-based stimulus outputs per rig and output device id: two rigs both have a
     /// `jack:system`, wired to different speakers.
     pub outputs: BTreeMap<(RigId, String), Vec<u16>>,
-    /// Session dialog choices per rig and `backend/device id` ([`UiPrefs::device_key`]).
+    /// Stream dialog choices per rig and `backend/device id` ([`UiPrefs::device_key`]).
     pub sessions: BTreeMap<(RigId, String), DeviceRoles>,
     /// How the SPL pane lays the Leq windows out.
     pub leq: LeqLayout,

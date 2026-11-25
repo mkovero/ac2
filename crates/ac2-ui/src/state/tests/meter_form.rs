@@ -8,7 +8,7 @@ use crate::forms::{FieldId, Form, FormKind};
 /// Inputs 1–4 captured, 3 + 4 the pair *Main*; the rig reads Type I, on rev 7.
 pub(super) fn rig_with_pair() -> State {
     let mut s = daemon_state();
-    if let Some(o) = &mut s.session.open {
+    if let Some(o) = &mut s.stream.open {
         o.config.input_channels = vec![0, 1, 2, 3];
     }
     s.inputs = [(2, PairSide::Left), (3, PairSide::Right)]

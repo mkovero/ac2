@@ -108,7 +108,7 @@ fn sweep_progress_strip() -> R {
 }
 
 /// With the stimulus armed by another client (said in brackets, with who holds it) and a
-/// session open, at every width from wide to narrow: the rig drop-down and the stop are
+/// stream open, at every width from wide to narrow: the rig drop-down and the stop are
 /// whole and in the window, every label in the bar keeps its own space, and the daemon's
 /// software name is not in the bar. Wide, the whole line is there.
 #[test]

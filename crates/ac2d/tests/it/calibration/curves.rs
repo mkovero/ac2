@@ -16,8 +16,8 @@ async fn two_curves_of_one_mic_switched_on_an_input() {
     let dir = tempfile::tempdir().unwrap();
     let h = start(&dir.path().join("calibrations.json"));
     let c = connect(&h).await;
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();

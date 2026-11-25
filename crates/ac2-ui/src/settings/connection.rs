@@ -39,7 +39,7 @@ pub enum ConnLine {
     PairWith,
     /// A rig in that pick (Enter pairs both ways).
     PairOffer(RigId),
-    /// *Wait for remote inputs*: the session's link offset (Enter types it), while it has
+    /// *Wait for remote inputs*: the stream's link offset (Enter types it), while it has
     /// remote inputs.
     LinkOffset,
 }
@@ -63,7 +63,7 @@ pub enum ConnAction {
         port: Option<u16>,
         change: NetChange,
     },
-    /// Reopen the session with this link offset, seconds (`None`: the least that works).
+    /// Reopen the stream with this link offset, seconds (`None`: the least that works).
     LinkOffset(Option<f64>),
     /// Open *Pair with rig…*'s pick.
     PairPick,
@@ -101,7 +101,7 @@ pub struct ConnectionPage {
     pub confirm: Option<String>,
     pub notice: Option<String>,
     pub error: Option<String>,
-    /// The open session takes remote inputs: the link offset line is listed.
+    /// The open stream takes remote inputs: the link offset line is listed.
     pub remote: bool,
     /// The network's interface and port as picked here, not yet in force.
     pub net: NetPicks,
@@ -504,7 +504,7 @@ pub fn conn_line_text(l: &ConnLine, server: Option<&ServerInfo>) -> String {
                     .map(ac2_scene::rig::authorized_row)
             })
             .unwrap_or_else(|| name.clone()),
-        // Drawn with what they need from the app (the prefs, the session, the page's picks:
+        // Drawn with what they need from the app (the prefs, the stream, the page's picks:
         // [`ConnectionPage::net_line_text`]).
         ConnLine::Network
         | ConnLine::Interface

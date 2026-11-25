@@ -56,7 +56,7 @@ pub(crate) async fn rig(cli: &Cli, cmd: &RigCmd, out: &mut Out<'_>) -> Result<()
             let rig = rig_edit(&c, |base| Command::RigMonitorStart { base, on }).await?;
             out.emit(&rig, || {
                 if rig.monitor_at_start {
-                    "monitor at start on: a restarted daemon reopens the last session's \
+                    "monitor at start on: a restarted daemon reopens the last stream's \
                      device capture-only for the rig SPL meters"
                         .to_owned()
                 } else {
@@ -486,7 +486,7 @@ pub(crate) fn warning_text(w: &Warning, st: Option<&State>) -> String {
     };
     match w {
         Warning::RigMonitorBlind { meas } => format!(
-            "rig SPL meter(s) {} stop metering until a session opens again; their cues report \
+            "rig SPL meter(s) {} stop metering until a stream opens again; their cues report \
              fault",
             names(meas)
         ),

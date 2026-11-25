@@ -7,7 +7,7 @@ fn capture_average_math_export_import() {
     let mut r = rig("traces");
     let c = &mut r.c;
     let gain_db = 20.0 * f32::log10(ACOUSTIC_GAIN);
-    let epoch = c.state().session.epoch;
+    let epoch = c.state().stream.epoch;
 
     // Unaligned capture into slot 1.
     let raw = c.trace(Command::TraceCapture {

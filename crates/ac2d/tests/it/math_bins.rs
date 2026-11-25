@@ -101,9 +101,9 @@ fn rig(name: &str, seats: &[(u16, TransferResolution, LfWindow, u32)], prefixes:
     cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, prefixes);
-    let mut s = session(false);
+    let mut s = stream(false);
     s.input_channels = vec![0, 1, 2, 3, 4];
-    c.ok(Command::SessionOpen { config: s });
+    c.ok(Command::StreamOpen { config: s });
     for (i, (input, res, lf, n)) in seats.iter().enumerate() {
         let m = MeasId(i as u32 + 1);
         c.ok(Command::MeasCreate {

@@ -8,7 +8,7 @@ use std::time::Duration;
 use ac2_audio::Backend;
 use ac2_cli::{Cli, Out, run_reporting};
 use ac2_client::{Client, ClientConfig, Endpoints};
-use ac2_proto::model::{DeviceSelector, SessionConfig};
+use ac2_proto::model::{DeviceSelector, StreamConfig};
 use ac2d::{BackendChoice, Daemon, DaemonConfig, Handle, Listen};
 use clap::Parser;
 use serde_json::Value;
@@ -55,8 +55,8 @@ pub async fn client(ep: &Endpoints, name: &str) -> Client {
 }
 
 /// The default devices with `inputs` captured and two outputs, nothing else asked for.
-pub fn session(inputs: Vec<u16>) -> SessionConfig {
-    SessionConfig {
+pub fn stream(inputs: Vec<u16>) -> StreamConfig {
+    StreamConfig {
         backend: None,
         input_device: DeviceSelector::Default,
         output_device: DeviceSelector::Default,

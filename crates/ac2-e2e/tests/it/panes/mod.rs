@@ -33,7 +33,7 @@ pub(super) fn hint_line(s: &AppState) -> Vec<String> {
 }
 
 /// A spectrum made from the palette's dialog, on the dialog's input or (`other`) the
-/// session's other one: its id once it runs.
+/// stream's other one: its id once it runs.
 pub(super) fn new_spectrum(d: &mut Driver, other: bool) -> R<MeasId> {
     let before: Vec<MeasId> = d.st.measurements().iter().map(|m| m.id).collect();
     let panes = d.st.visible_panes().len();
@@ -46,7 +46,7 @@ pub(super) fn new_spectrum(d: &mut Driver, other: bool) -> R<MeasId> {
         |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spectrum),
     )?;
     if other {
-        // The input is the dialog's first row, on the mic (the session's last input): ←
+        // The input is the dialog's first row, on the mic (the stream's last input): ←
         // steps it to the input before.
         d.key("ArrowLeft");
     }

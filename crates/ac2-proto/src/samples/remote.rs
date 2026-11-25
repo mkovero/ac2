@@ -1,13 +1,13 @@
-//! Remote inputs: the paired rigs, a session's remote rigs and inputs, a source rig's state.
+//! Remote inputs: the paired rigs, a stream's remote rigs and inputs, a source rig's state.
 
 use crate::model::{
     Anchor, ArrivalReason, CalBasis, CalStatus, CantTellReason, Clocks, CrossRigTransfer,
     CrossTfState, DelaySlip, MinuteCount, NotLockedReason, PeerClock, PeerRelation, Relock,
     RelockOutcome, RemoteAudio, RemoteInput, RemoteInputStatus, RemoteLink, RemoteRig, RemoteSide,
-    RemoteState, RigPeer, SourceCurve, SourceInput, SourceSession, SourceState, StampMap,
-    StandingRig, StandingSession, StopWhy, StreamIncarnation,
+    RemoteState, RigPeer, SourceCurve, SourceInput, SourceState, SourceStream, StampMap,
+    StandingRig, StandingStream, StopWhy, StreamIncarnation,
 };
-use crate::units::{DaemonIncarnation, DbSpl, MeasId, RigId, Seconds, SessionEpoch, WallNs};
+use crate::units::{DaemonIncarnation, DbSpl, MeasId, RigId, Seconds, StreamEpoch, WallNs};
 
 use super::builders::{cal_entry, mic_curve_ref};
 use super::state::{clocks, inputs};
@@ -58,10 +58,10 @@ pub fn source_state() -> SourceState {
         rig: ketunkolo(),
         name: "ketunkolo".into(),
         clocks: source_clocks(),
-        session: Some(SourceSession {
+        stream: Some(SourceStream {
             incarnation: StreamIncarnation {
                 daemon: DaemonIncarnation(0x1234),
-                epoch: SessionEpoch(3),
+                epoch: StreamEpoch(3),
             },
             sample_rate_hz: 96_000,
             buffer_frames: 256,
@@ -224,7 +224,7 @@ pub fn remote_state() -> RemoteState {
             ),
             input_status(
                 4,
-                RemoteAudio::NoSession,
+                RemoteAudio::NoStream,
                 Some(Anchor::Arrival {
                     reason: ArrivalReason::ClocksDisagree { by: Seconds(-0.01) },
                 }),
@@ -249,11 +249,11 @@ pub fn remote_state() -> RemoteState {
 /// Paired rigs as their levels frames show them, in every verdict the marks give.
 fn standing_rigs() -> Vec<StandingRig> {
     let s =
-        |link: RemoteLink, session: bool, relation: PeerRelation, ppm: Option<f64>| StandingRig {
+        |link: RemoteLink, stream: bool, relation: PeerRelation, ppm: Option<f64>| StandingRig {
             rig: ketunkolo(),
             name: "ketunkolo".into(),
             link,
-            session: session.then(|| StandingSession {
+            stream: stream.then(|| StandingStream {
                 sample_rate_hz: 96_000,
                 channels: vec![0, 1, 4],
             }),
@@ -336,7 +336,7 @@ fn standing_rigs() -> Vec<StandingRig> {
         s(
             RemoteLink::Up,
             false,
-            cant(CantTellReason::NoSession { rig: ketunkolo() }),
+            cant(CantTellReason::NoStream { rig: ketunkolo() }),
             None,
         ),
         s(

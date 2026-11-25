@@ -95,7 +95,7 @@ impl AppState {
 impl RigState {
     /// Starts each live curve's ease into a new frame from where it is drawn now, when the
     /// frame came slower than the display ([`curve_ease::eases`]); a faster one is drawn as
-    /// received. A frame from another session, daemon, configuration or grid is not the
+    /// received. A frame from another stream, daemon, configuration or grid is not the
     /// same curve moving: it is drawn as received.
     pub(super) fn keep_spec_glide(&mut self, d: &DataSnapshot, spec_ease: bool) {
         if !spec_ease {
@@ -118,7 +118,7 @@ impl RigState {
             if a.seq == b.seq {
                 continue;
             }
-            let same = a.session_epoch == b.session_epoch
+            let same = a.stream_epoch == b.stream_epoch
                 && a.daemon_incarnation == b.daemon_incarnation
                 && a.config_rev == b.config_rev
                 && a.grid_id == b.grid_id;

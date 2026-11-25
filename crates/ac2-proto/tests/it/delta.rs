@@ -192,7 +192,7 @@ fn a_base_that_does_not_fit_forces_a_keyframe() {
     let base = coded(&f);
     let mut misfits: Vec<CodedFrame> = Vec::new();
     let mut g = f.clone();
-    g.stamp.session_epoch = SessionEpoch(g.stamp.session_epoch.0 + 1);
+    g.stamp.stream_epoch = StreamEpoch(g.stamp.stream_epoch.0 + 1);
     misfits.push(coded(&g));
     let mut g = f.clone();
     g.stamp.grid_id = None;

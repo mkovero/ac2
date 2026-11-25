@@ -2,13 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::units::{ClientId, SampleIndex, Seconds, SessionEpoch, WallNs};
+use crate::units::{ClientId, SampleIndex, Seconds, StreamEpoch, WallNs};
 
 /// What `rec.start` records, and where it stops on its own.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordRequest {
-    /// Device inputs to record (zero-based), each captured by the open session; the file's
+    /// Device inputs to record (zero-based), each captured by the open stream; the file's
     /// channels follow this order.
     pub inputs: Vec<u16>,
     /// File name stem in the daemon's recording directory (letters, digits, ` `, `-`, `_`,
@@ -42,12 +42,12 @@ pub enum RecordingEnd {
         msg: String,
     },
     /// The audio I/O closed.
-    SessionClosed,
-    /// The audio I/O reopened (device or configuration change, `session.open`).
-    SessionReopened,
-    /// The session's audio stopped (the device stopped delivering or the host ended the
+    StreamClosed,
+    /// The audio I/O reopened (device or configuration change, `stream.open`).
+    StreamReopened,
+    /// The stream's audio stopped (the device stopped delivering or the host ended the
     /// stream); the file ends with the last audio received, and the audio after the outage,
-    /// once the daemon reopens the session, is not spliced onto it.
+    /// once the daemon reopens the stream, is not spliced onto it.
     AudioStopped,
     /// The daemon shut down.
     DaemonShutdown,
@@ -98,9 +98,9 @@ pub struct RecordingRun {
     pub inputs: Vec<u16>,
     /// Sample rate.
     pub sample_rate_hz: u32,
-    /// Session epoch it records.
-    pub session_epoch: SessionEpoch,
-    /// Session sample of the file's first frame.
+    /// Stream epoch it records.
+    pub stream_epoch: StreamEpoch,
+    /// Stream sample of the file's first frame.
     pub start_sample: SampleIndex,
     /// When it started.
     pub started_at: WallNs,
@@ -166,7 +166,7 @@ pub struct RemoteGaps {
     pub frames: u64,
 }
 
-/// Which recording `session.replay` plays.
+/// Which recording `stream.replay` plays.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RecordingRef {
@@ -192,7 +192,7 @@ pub enum ReplayPace {
     Fast,
 }
 
-/// The recording an open replay session plays.
+/// The recording an open replay stream plays.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplayInfo {
@@ -207,7 +207,7 @@ pub struct ReplayInfo {
     pub end_sample: SampleIndex,
     /// Pace.
     pub pace: ReplayPace,
-    /// Session sample of the file's first frame in the recorded session (replay sample 0).
+    /// Stream sample of the file's first frame in the recorded stream (replay sample 0).
     pub recorded_start_sample: SampleIndex,
     /// When the recording started.
     pub recorded_at: WallNs,

@@ -16,6 +16,7 @@ mod server;
 mod session;
 mod sim;
 mod spl;
+mod stream;
 mod trace;
 mod walk;
 
@@ -35,6 +36,7 @@ pub use server::*;
 pub use session::*;
 pub use sim::*;
 pub use spl::*;
+pub use stream::*;
 pub use trace::*;
 pub use walk::*;
 
@@ -85,7 +87,13 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: DaemonCmd,
     },
-    /// Audio I/O (open, close, status, inputs, replay) and saved session files.
+    /// The audio stream: open, close, status, inputs, replay.
+    Stream {
+        /// Action.
+        #[command(subcommand)]
+        cmd: StreamCmd,
+    },
+    /// Saved session files: new, save, load, recover, salvage, export, import, list.
     Session {
         /// Action.
         #[command(subcommand)]
@@ -161,8 +169,8 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: IrCmd,
     },
-    /// Raw capture files: record inputs of the open session losslessly, with a sidecar of
-    /// what was measured; play one back with `session replay`.
+    /// Raw capture files: record inputs of the open stream losslessly, with a sidecar of
+    /// what was measured; play one back with `stream replay`.
     Rec {
         /// Action.
         #[command(subcommand)]
@@ -206,7 +214,7 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: ArtnetCmd,
     },
-    /// The programme meters of the open session's inputs (one frame: ppm, true peak, max,
+    /// The programme meters of the open stream's inputs (one frame: ppm, true peak, max,
     /// overs, CLIP, each pair's correlation, the loudness of each pair and unpaired line or
     /// digital input); `set` their settings, `reset` their holds and loudness.
     Levels {
@@ -268,7 +276,7 @@ pub enum DaemonCmd {
     Start,
     /// Stop the local daemon (signals the pid in its pid file).
     Stop,
-    /// Version, build id (stale check), incarnation, session.
+    /// Version, build id (stale check), incarnation, stream.
     Status,
 }
 

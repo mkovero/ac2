@@ -187,14 +187,14 @@ pub fn kind_shown(t: &TraceMeta, p: PaneKind) -> bool {
     t.edit.visible && drawn_in(t, p)
 }
 
-pub fn open_session_hint(keymap: &Keymap) -> String {
+pub fn open_stream_hint(keymap: &Keymap) -> String {
     let first = |c| {
         keymap
             .chords(c, Scope::Global)
             .first()
             .map(|k: &Chord| k.label())
     };
-    match (first(CommandId::OpenSession), first(CommandId::Palette)) {
+    match (first(CommandId::OpenStream), first(CommandId::Palette)) {
         (Some(o), Some(p)) => format!("press {o} (or {p} → Open audio I/O)"),
         (Some(o), None) => format!("press {o}"),
         (None, Some(p)) => format!("{p} → Open audio I/O"),

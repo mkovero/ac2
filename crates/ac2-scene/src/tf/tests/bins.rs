@@ -58,7 +58,7 @@ fn stamp(at: u64, rev: u64) -> FrameStamp {
     FrameStamp {
         seq: 1,
         audio_sample: SampleIndex(at),
-        session_epoch: SessionEpoch(1),
+        stream_epoch: StreamEpoch(1),
         daemon_incarnation: DaemonIncarnation(1),
         config_rev: Rev(rev),
         config_applied_at: SampleIndex(0),

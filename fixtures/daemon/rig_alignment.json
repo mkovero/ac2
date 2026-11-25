@@ -1,5 +1,5 @@
 {
-  "proto_version": 104,
+  "proto_version": 105,
   "value": {
     "grids": [
       {
@@ -347,7 +347,59 @@
         "port": null,
         "status": "off"
       },
-      "session": {
+      "sim": null,
+      "sim_fit": null,
+      "sim_map": null,
+      "spl_logs": [
+        {
+          "alarms": [],
+          "meas": 4,
+          "peaks": {
+            "lafmax": {
+              "judgement": "no_limit",
+              "since": "now-18602545"
+            },
+            "lcpeak": {
+              "judgement": "no_limit",
+              "since": "now-18602545"
+            }
+          },
+          "started_at": null,
+          "windows": [
+            {
+              "duration": 60.0,
+              "judgement": "no_limit",
+              "since": "now-18602545",
+              "weighting": "a"
+            },
+            {
+              "duration": 300.0,
+              "judgement": "no_limit",
+              "since": "now-18602545",
+              "weighting": "a"
+            },
+            {
+              "duration": 600.0,
+              "judgement": "no_limit",
+              "since": "now-18602545",
+              "weighting": "a"
+            },
+            {
+              "duration": 1800.0,
+              "judgement": "no_limit",
+              "since": "now-18602545",
+              "weighting": "a"
+            },
+            {
+              "duration": 3600.0,
+              "judgement": "no_limit",
+              "since": "now-18602545",
+              "weighting": "a"
+            }
+          ]
+        }
+      ],
+      "stream": {
         "epoch": 1,
         "open": {
           "backend": "fake",
@@ -382,7 +434,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-115553540",
+          "opened_at": "now-60979671",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -391,58 +443,6 @@
         },
         "stopped": null
       },
-      "sim": null,
-      "sim_fit": null,
-      "sim_map": null,
-      "spl_logs": [
-        {
-          "alarms": [],
-          "meas": 4,
-          "peaks": {
-            "lafmax": {
-              "judgement": "no_limit",
-              "since": "now-29645790"
-            },
-            "lcpeak": {
-              "judgement": "no_limit",
-              "since": "now-29645790"
-            }
-          },
-          "started_at": null,
-          "windows": [
-            {
-              "duration": 60.0,
-              "judgement": "no_limit",
-              "since": "now-29645790",
-              "weighting": "a"
-            },
-            {
-              "duration": 300.0,
-              "judgement": "no_limit",
-              "since": "now-29645790",
-              "weighting": "a"
-            },
-            {
-              "duration": 600.0,
-              "judgement": "no_limit",
-              "since": "now-29645790",
-              "weighting": "a"
-            },
-            {
-              "duration": 1800.0,
-              "judgement": "no_limit",
-              "since": "now-29645790",
-              "weighting": "a"
-            },
-            {
-              "duration": 3600.0,
-              "judgement": "no_limit",
-              "since": "now-29645790",
-              "weighting": "a"
-            }
-          ]
-        }
-      ],
       "sweep": null,
       "timing": {
         "drift": null,
@@ -463,7 +463,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-11461453"
+        "saved_at": "now-9605867"
       }
     },
     "traces": []

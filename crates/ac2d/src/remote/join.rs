@@ -32,7 +32,7 @@ use ac2_proto::frame::{AudioFlags, AudioFrame};
 use ac2_proto::model::{
     Anchor, ArrivalReason, RemoteAudio, SourceState, StreamIncarnation, SystemClock,
 };
-use ac2_proto::units::{RigId, Seconds, SessionEpoch};
+use ac2_proto::units::{RigId, Seconds, StreamEpoch};
 
 use crate::control::ControlMsg;
 use crate::fanout::Block;
@@ -61,7 +61,7 @@ pub(crate) const CROSS_STEP_S: f64 = 0.05;
 /// The local blocks held back are bounded: past this the oldest go without remote audio.
 const MAX_HELD_S: f64 = 1.0;
 
-/// One remote input of the session, in `remote_inputs` order.
+/// One remote input of the stream, in `remote_inputs` order.
 pub(crate) struct JoinInput {
     pub(crate) slot: u16,
     pub(crate) rig: RigId,
@@ -78,12 +78,12 @@ pub(crate) struct JoinSetup {
     pub(crate) rate: u32,
     /// This rig's device period, frames.
     pub(crate) period: u32,
-    /// The link offset set for the session; `None`: the default.
+    /// The link offset set for the stream; `None`: the default.
     pub(crate) link_offset: Option<f64>,
     /// This rig's system clock is stated synced (kept current by the control thread).
     pub(crate) system_synced: Arc<AtomicBool>,
     pub(crate) to_control: Sender<ControlMsg>,
-    pub(crate) epoch: SessionEpoch,
+    pub(crate) epoch: StreamEpoch,
 }
 
 struct RigState {
@@ -183,7 +183,7 @@ pub(crate) struct Joiner {
     /// The newest local block with a capture stamp: (start, stamp).
     reference: Option<(u64, u64)>,
     to_control: Sender<ControlMsg>,
-    epoch: SessionEpoch,
+    epoch: StreamEpoch,
     next_report: Instant,
 }
 
@@ -255,7 +255,7 @@ impl Joiner {
         let theirs = self
             .rigs
             .iter()
-            .filter_map(|r| r.source.as_ref()?.session.as_ref())
+            .filter_map(|r| r.source.as_ref()?.stream.as_ref())
             .map(|s| period_s(s.buffer_frames))
             .fold(period_s(self.period), f64::max);
         let s = super::link_offset(self.set_offset, period_s(self.period), theirs);
@@ -392,7 +392,7 @@ impl Joiner {
             }
             if matches!(
                 i.audio,
-                RemoteAudio::NoSession
+                RemoteAudio::NoStream
                     | RemoteAudio::NotCaptured
                     | RemoteAudio::Replaying
                     | RemoteAudio::OnThisRig
@@ -657,8 +657,8 @@ fn source_fault(source: Option<&SourceState>, channel: u16, ours: u32) -> Option
     let Some(src) = source else {
         return Some(RemoteAudio::Waiting);
     };
-    let Some(s) = &src.session else {
-        return Some(RemoteAudio::NoSession);
+    let Some(s) = &src.stream else {
+        return Some(RemoteAudio::NoStream);
     };
     if s.replaying {
         return Some(RemoteAudio::Replaying);

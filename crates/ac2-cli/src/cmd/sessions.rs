@@ -175,6 +175,25 @@ pub(crate) async fn session(
 ) -> Result<(), CliError> {
     let here = same_host(cli);
     match cmd {
+        SessionCmd::Status => {
+            let st = state(c).await?;
+            let now = crate::watch::now_wall();
+            let logs = output::log_failures(&st.autosave, &st.measurements, now);
+            let (autosave, working) = (st.autosave, st.working);
+            let j = serde_json::json!({ "autosave": autosave, "working": working });
+            out.emit(&j, || {
+                let mut t = format!(
+                    "{}\n{}",
+                    status_lines(&working, now),
+                    output::autosave(&autosave, now)
+                );
+                for l in &logs {
+                    t.push('\n');
+                    t.push_str(l);
+                }
+                t
+            })?;
+        }
         SessionCmd::New { discard } => {
             let r = c
                 .call(Command::FileNew { discard: *discard })
@@ -307,15 +326,6 @@ pub(crate) async fn session(
             let r = c.call(Command::FileList).await?;
             let l = expect_body!("file.list", r, ReplyBody::Sessions(l) => l)?;
             out.emit(&l, || output::sessions(&l))?;
-        }
-        SessionCmd::Open(_)
-        | SessionCmd::Close
-        | SessionCmd::Status
-        | SessionCmd::Replay { .. }
-        | SessionCmd::LinkOffset { .. }
-        | SessionCmd::Panel { .. }
-        | SessionCmd::Inputs(_) => {
-            return Err(CliError::Usage("not a saved-session command".into()));
         }
     }
     Ok(())

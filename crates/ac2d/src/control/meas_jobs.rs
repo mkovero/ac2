@@ -1,4 +1,4 @@
-//! Measurement jobs on the open session: start and stop, timing, delay setting, finding and tracking.
+//! Measurement jobs on the open stream: start and stop, timing, delay setting, finding and tracking.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -6,7 +6,7 @@ use std::time::Instant;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{DelayOutcome, DelayState, FinderBand, MeasKind, Measurement};
-use ac2_proto::units::{MeasId, Rev, Seconds, SessionEpoch, WallNs};
+use ac2_proto::units::{MeasId, Rev, Seconds, StreamEpoch, WallNs};
 use ac2_proto::{ProtoError, ReplyBody};
 
 use crate::calstore::{self, InputCal};
@@ -14,7 +14,7 @@ use crate::conv;
 use crate::jobs::finder::Found;
 use crate::jobs::programme::{Captured, Declared, Programme};
 use crate::jobs::{self, Analysis, JobCmd, JobEnv, block_index};
-use crate::session::Runtime;
+use crate::stream::Runtime;
 use crate::util::{internal, invalid, wall_ns};
 
 use super::{
@@ -31,7 +31,7 @@ impl Control {
         self.env_at(rt.epoch)
     }
 
-    pub(super) fn env_at(&self, epoch: SessionEpoch) -> JobEnv {
+    pub(super) fn env_at(&self, epoch: StreamEpoch) -> JobEnv {
         JobEnv {
             ctx: self.s.ctx.clone(),
             endpoint: self.s.endpoint.clone(),
@@ -44,7 +44,7 @@ impl Control {
         }
     }
 
-    /// The calibration and mic curve a job on `input` of the open session uses (Q7 §3).
+    /// The calibration and mic curve a job on `input` of the open stream uses (Q7 §3).
     pub(super) fn input_cal(&self, rt: &Runtime, input: u16) -> InputCal {
         if ac2_proto::model::remote_slot(input).is_some() {
             return self.remote_input_cal(input);
@@ -54,7 +54,7 @@ impl Control {
 
     /// Hands every running job its input's current calibration and mic curve.
     pub(super) fn refresh_cal(&self) {
-        let Some(rt) = self.session.as_ref() else {
+        let Some(rt) = self.stream.as_ref() else {
             return;
         };
         for m in &self.store.state().measurements {
@@ -75,20 +75,20 @@ impl Control {
         }
     }
 
-    /// Starts the job of `m` on the open session; returns its grid when it has one.
+    /// Starts the job of `m` on the open stream; returns its grid when it has one.
     pub(super) fn start_job(&mut self, m: &Measurement) -> Result<Option<GridDef>, ProtoError> {
-        if self.session.is_none() || !m.config.kind.is_job() {
+        if self.stream.is_none() || !m.config.kind.is_job() {
             return Ok(None);
         }
         let mut leq = matches!(m.config.kind, MeasKind::Spl { .. }).then(|| self.leq_setup(m.id));
         // A spectrum publishes display columns but captures every bin: `trace.capture`
         // looks the capture's grid up by id.
-        if let (MeasKind::Spectrum { config }, Some(rt)) = (&m.config.kind, &self.session) {
+        if let (MeasKind::Spectrum { config }, Some(rt)) = (&m.config.kind, &self.stream) {
             let g = jobs::spectrum::capture_grid(config, rt.sample_rate);
             self.register_grid(g);
         }
         // A math trace combines on one grid and, a spectrum's, publishes on another.
-        let math = match (&m.config.kind, &self.session) {
+        let math = match (&m.config.kind, &self.stream) {
             (MeasKind::Math { config }, Some(rt)) => {
                 let (grids, stored) = self.math_setup(m.id, config, rt.sample_rate)?;
                 self.register_grid(grids.grid.clone());
@@ -99,7 +99,7 @@ impl Control {
             }
             _ => None,
         };
-        let Some(rt) = self.session.as_ref() else {
+        let Some(rt) = self.stream.as_ref() else {
             return Ok(None);
         };
         let fs = rt.sample_rate;
@@ -111,10 +111,7 @@ impl Control {
         let map = joined.as_deref().unwrap_or(&rt.input_map);
         let idx = |input: u16| {
             block_index(map, input).ok_or_else(|| {
-                invalid(format!(
-                    "input {} is not captured by the session",
-                    input + 1
-                ))
+                invalid(format!("input {} is not captured by the stream", input + 1))
             })
         };
         let (analysis, grid): (Box<dyn Analysis>, Option<GridDef>) = match &m.config.kind {
@@ -220,7 +217,7 @@ impl Control {
         }
         self.probes.set(m.id, handle.probe().filter(|_| probed));
         if let Some(old) = self.jobs.insert(m.id, handle)
-            && let Some(rt) = &self.session
+            && let Some(rt) = &self.stream
         {
             rt.fanout.detach(old.fanout_id);
         }
@@ -246,7 +243,7 @@ impl Control {
         self.probes.set(id, None);
         self.cross_stop(id);
         if let Some(h) = self.jobs.remove(&id) {
-            if let Some(rt) = &self.session {
+            if let Some(rt) = &self.stream {
                 rt.fanout.detach(h.fanout_id);
             }
             drop(h);
@@ -259,20 +256,20 @@ impl Control {
             self.stop_job(id);
         }
         if let Some(h) = self.timing_job.take() {
-            if let Some(rt) = &self.session {
+            if let Some(rt) = &self.stream {
                 rt.fanout.detach(h.fanout_id);
             }
             drop(h);
         }
     }
 
-    /// Starts the session input meters; the fan-out publishes them, they stop with it.
-    pub(super) fn start_session_levels(&self) {
-        let Some(rt) = self.session.as_ref() else {
+    /// Starts the stream input meters; the fan-out publishes them, they stop with it.
+    pub(super) fn start_stream_levels(&self) {
+        let Some(rt) = self.stream.as_ref() else {
             return;
         };
-        // The session's pairs follow `session.inputs` through the policy; the seed only
-        // decorrelates the goniometers' sampling positions between pairs and sessions.
+        // The stream's pairs follow `stream.inputs` through the policy; the seed only
+        // decorrelates the goniometers' sampling positions between pairs and streams.
         let programme = Programme::new(
             Captured {
                 idx: (0..rt.input_map.len()).collect(),
@@ -280,7 +277,7 @@ impl Control {
                 device: rt.open.input_device.clone(),
                 sample_rate: rt.sample_rate,
             },
-            Declared::Session,
+            Declared::Stream,
             Arc::clone(&self.levels),
             wall_ns() ^ u64::from(rt.epoch.0),
         );
@@ -301,7 +298,7 @@ impl Control {
         if t.drift.take().is_some() {
             self.commit(Change::Timing(t));
         }
-        let Some(rt) = self.session.as_ref() else {
+        let Some(rt) = self.stream.as_ref() else {
             return;
         };
         let Some(lb) = rt.open.config.loopback else {
@@ -348,9 +345,9 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         self.transfer_delay(meas)?;
         check_delay("delay", delay)?;
-        let Some(fs) = self.session.as_ref().map(|r| f64::from(r.sample_rate)) else {
+        let Some(fs) = self.stream.as_ref().map(|r| f64::from(r.sample_rate)) else {
             return Err(invalid(
-                "no open session: the delay in samples depends on its sample rate",
+                "no open stream: the delay in samples depends on its sample rate",
             ));
         };
         let samples = delay_samples(delay.0, fs);
@@ -408,10 +405,10 @@ impl Control {
             invalid("the measurement is not running; the finder needs live audio")
         })?;
         let fs = self
-            .session
+            .stream
             .as_ref()
             .map(|r| f64::from(r.sample_rate))
-            .ok_or_else(|| invalid("no open session"))?;
+            .ok_or_else(|| invalid("no open stream"))?;
         let band = conv::finder_band(band);
         check_find(band, observation.map(|o| o.0), fs)?;
         let token = self.ids.token();
@@ -427,10 +424,10 @@ impl Control {
         let Some(p) = self.pending.finds.remove(&token) else {
             return;
         };
-        let fs = self.session.as_ref().map(|r| f64::from(r.sample_rate));
+        let fs = self.stream.as_ref().map(|r| f64::from(r.sample_rate));
         let reply = match (result, fs) {
             (Err(e), _) => Err(invalid(format!("delay finder: {e}"))),
-            (Ok(_), None) => Err(invalid("the session closed")),
+            (Ok(_), None) => Err(invalid("the stream closed")),
             // Said in the reply alone: the finder did not run, so the measurement's finding,
             // an awaited pick and tracking stay as they were.
             (
@@ -464,9 +461,9 @@ impl Control {
         self.answer(&p.route, &p.client, p.id, reply, Instant::now());
     }
 
-    pub(super) fn tracked(&mut self, meas: MeasId, epoch: SessionEpoch, samples: f64) {
+    pub(super) fn tracked(&mut self, meas: MeasId, epoch: StreamEpoch, samples: f64) {
         let Some(fs) = self
-            .session
+            .stream
             .as_ref()
             .filter(|r| r.epoch == epoch)
             .map(|r| f64::from(r.sample_rate))
@@ -495,8 +492,8 @@ impl Control {
     }
 }
 
-/// The measurement `m` as its job starts with it, in session `epoch`.
-fn job_ctx<C>(m: &Measurement, epoch: SessionEpoch, cfg: C) -> jobs::JobCtx<C> {
+/// The measurement `m` as its job starts with it, in stream `epoch`.
+fn job_ctx<C>(m: &Measurement, epoch: StreamEpoch, cfg: C) -> jobs::JobCtx<C> {
     jobs::JobCtx {
         meas: m.id,
         cfg,

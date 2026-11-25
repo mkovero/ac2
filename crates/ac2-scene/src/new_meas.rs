@@ -273,7 +273,7 @@ mod tests {
             |_| None,
             |k| match k {
                 NewKind::Alignment => Some("an alignment needs two transfer curves".to_owned()),
-                NewKind::Programme => Some("no inputs in the session to meter".to_owned()),
+                NewKind::Programme => Some("no inputs in the stream to meter".to_owned()),
                 _ => None,
             },
         );
@@ -283,7 +283,7 @@ mod tests {
         );
         assert_eq!(
             q.choices[9].blocked.as_deref(),
-            Some("no inputs in the session to meter")
+            Some("no inputs in the stream to meter")
         );
         // The meter preselected but blocked: the first row that can be made.
         assert_eq!(q.default, 0);

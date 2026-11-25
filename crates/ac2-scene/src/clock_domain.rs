@@ -50,11 +50,11 @@ pub struct RigClockFacts<'a> {
     pub id: Option<RigId>,
     /// Its display name.
     pub name: &'a str,
-    /// Its session's sample rate, Hz; `None` with no audio session.
+    /// Its stream's sample rate, Hz; `None` with no audio stream.
     pub rate_hz: Option<u32>,
     /// Its clocks.
     pub clocks: &'a Clocks,
-    /// The rigs its session takes inputs from, each with the daemon's verdict on the clocks
+    /// The rigs its stream takes inputs from, each with the daemon's verdict on the clocks
     /// between the two (`State.remote.rigs`); empty when it takes none or is not known.
     pub between: &'a [RemoteRig],
     /// Its daemon's state of the rigs it is paired with, read for the clocks its levels
@@ -64,7 +64,7 @@ pub struct RigClockFacts<'a> {
 
 /// A daemon's standing relations ([`StandingRig`]): the clocks between it and each paired
 /// rig from their always-on levels. They stand in for a pair's evidence only where neither
-/// rig's session takes an input from the other: a stream's verdict is the one a
+/// rig's stream takes an input from the other: a stream's verdict is the one a
 /// measurement across the two rests on.
 #[derive(Debug, Clone, Copy)]
 pub struct Levels<'a> {
@@ -89,9 +89,9 @@ pub enum Basis {
 /// Where a rig stands among the rigs of the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Domain {
-    /// No audio session: no sample clock to speak of.
-    NoSession,
-    /// The only rig with a session: nothing to compare with.
+    /// No audio stream: no sample clock to speak of.
+    NoStream,
+    /// The only rig with a stream: nothing to compare with.
     NotCompared,
     /// One of a group of rigs whose clocks agree; `index` counts groups in list order of
     /// their first rig.
@@ -101,7 +101,7 @@ pub enum Domain {
         /// What the agreement rests on.
         basis: Basis,
     },
-    /// Shown to differ from every other rig with a session.
+    /// Shown to differ from every other rig with a stream.
     Own,
     /// The evidence does not say.
     CantTell,
@@ -111,7 +111,7 @@ pub enum Domain {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomainTag {
     /// The tag: `AGREE`, `AGREE A`, `FREE`, `UNKNOWN`; `None`
-    /// where there is nothing to say (no session, or no other rig to compare with).
+    /// where there is nothing to say (no stream, or no other rig to compare with).
     pub tag: Option<String>,
     /// The tooltip: the other rigs of the group and the basis, or what differs, or what is
     /// missing. `None` exactly when `tag` is.
@@ -166,7 +166,7 @@ struct Beside {
 /// What the evidence says of two rigs; ppm figures are the row rig against the column rig.
 #[derive(Debug, Clone, PartialEq)]
 enum Pair {
-    /// One of them has no session (or it is the rig itself).
+    /// One of them has no stream (or it is the rig itself).
     Skip,
     Agree {
         /// By a daemon's between-rigs verdict.
@@ -297,7 +297,7 @@ pub fn clock_domains(rigs: &[RigClockFacts<'_>]) -> ClockDomains {
                 tip: None,
                 domain: match r.rate_hz {
                     Some(_) => Domain::NotCompared,
-                    None => Domain::NoSession,
+                    None => Domain::NoStream,
                 },
             })
             .collect(),
@@ -413,9 +413,9 @@ impl ClockDomains {
             return SameDomain::Yes;
         }
         for i in [a, b] {
-            if self.rigs[i].domain == Domain::NoSession {
+            if self.rigs[i].domain == Domain::NoStream {
                 return SameDomain::CantTell {
-                    reason: format!("{} has no audio session", self.names[i]),
+                    reason: format!("{} has no audio stream", self.names[i]),
                 };
             }
         }
@@ -677,7 +677,7 @@ struct LevelsWords {
     rest: Vec<String>,
 }
 
-/// `by`'s session takes an input from `other`: its daemon has a stream's verdict on the two.
+/// `by`'s stream takes an input from `other`: its daemon has a stream's verdict on the two.
 fn takes_from(by: &RigClockFacts<'_>, other: &RigClockFacts<'_>) -> bool {
     other
         .id
@@ -767,7 +767,7 @@ fn judged(
         PeerRelation::CantTell { reason } => Pair::CantTell(vec![said(match reason {
             CantTellReason::NoAudio => format!("no audio between {} and {}", by.name, other.name),
             CantTellReason::NoMarks => between_rigs::no_marks(other.name),
-            CantTellReason::NoSession { rig } => between_rigs::no_session(name(*rig)),
+            CantTellReason::NoStream { rig } => between_rigs::no_stream(name(*rig)),
             CantTellReason::LinkDown => between_rigs::link_down(other.name),
             CantTellReason::MarksLate { by: late } => between_rigs::marks_late(other.name, late.0),
             CantTellReason::NotSteady {

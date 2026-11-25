@@ -4,11 +4,11 @@ use super::{ok, parse};
 use ac2_cli::args::*;
 use ac2_scene::unit_text::*;
 
-/// `session inputs --kind / --pair`, `cal line`, `cal rm --line`: typed forms, refused slips.
+/// `stream inputs --kind / --pair`, `cal line`, `cal rm --line`: typed forms, refused slips.
 #[test]
 fn input_kinds_pairs_and_line_cal_grammar() {
     let c = ok(&[
-        "session",
+        "stream",
         "inputs",
         "--kind",
         "3=line",
@@ -21,11 +21,11 @@ fn input_kinds_pairs_and_line_cal_grammar() {
         "--pair",
         "5,6",
     ]);
-    let Cmd::Session {
-        cmd: SessionCmd::Inputs(a),
+    let Cmd::Stream {
+        cmd: StreamCmd::Inputs(a),
     } = c.cmd
     else {
-        panic!("not session inputs");
+        panic!("not stream inputs");
     };
     assert_eq!(
         a.kinds,
@@ -73,21 +73,21 @@ fn input_kinds_pairs_and_line_cal_grammar() {
     // `=` with nothing after it: an unnamed pair, not a pair named "".
     assert_eq!("3,4=".parse::<PairArg>().map(|p| p.name), Ok(None));
     // Listing only.
-    let Cmd::Session {
-        cmd: SessionCmd::Inputs(a),
-    } = ok(&["session", "inputs"]).cmd
+    let Cmd::Stream {
+        cmd: StreamCmd::Inputs(a),
+    } = ok(&["stream", "inputs"]).cmd
     else {
-        panic!("not session inputs");
+        panic!("not stream inputs");
     };
     assert!(a.is_empty());
-    assert!(ok(&["session", "inputs", "--no-pairs"]).cmd.is_session());
+    assert!(ok(&["stream", "inputs", "--no-pairs"]).cmd.is_stream());
     // A kind is one of three words; a pair is two channels; the two pair forms exclude.
-    assert!(parse(&["session", "inputs", "--kind", "3=aes"]).is_err());
-    assert!(parse(&["session", "inputs", "--kind", "line"]).is_err());
-    assert!(parse(&["session", "inputs", "--kind", "0=line"]).is_err());
-    assert!(parse(&["session", "inputs", "--pair", "3"]).is_err());
-    assert!(parse(&["session", "inputs", "--pair", "3,x"]).is_err());
-    assert!(parse(&["session", "inputs", "--pair", "3,4", "--no-pairs"]).is_err());
+    assert!(parse(&["stream", "inputs", "--kind", "3=aes"]).is_err());
+    assert!(parse(&["stream", "inputs", "--kind", "line"]).is_err());
+    assert!(parse(&["stream", "inputs", "--kind", "0=line"]).is_err());
+    assert!(parse(&["stream", "inputs", "--pair", "3"]).is_err());
+    assert!(parse(&["stream", "inputs", "--pair", "3,x"]).is_err());
+    assert!(parse(&["stream", "inputs", "--pair", "3,4", "--no-pairs"]).is_err());
 
     let c = ok(&["cal", "line", "--input", "3", "--volts", "1.228v"]);
     let Cmd::Cal {
@@ -123,13 +123,13 @@ fn input_kinds_pairs_and_line_cal_grammar() {
 }
 
 trait CmdKind {
-    fn is_session(&self) -> bool;
+    fn is_stream(&self) -> bool;
     fn is_cal(&self) -> bool;
 }
 
 impl CmdKind for Cmd {
-    fn is_session(&self) -> bool {
-        matches!(self, Cmd::Session { .. })
+    fn is_stream(&self) -> bool {
+        matches!(self, Cmd::Stream { .. })
     }
     fn is_cal(&self) -> bool {
         matches!(self, Cmd::Cal { .. })

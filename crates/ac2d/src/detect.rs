@@ -25,7 +25,7 @@ use ac2_proto::units::{Db, Dbfs, Samples, Seconds};
 
 use crate::conv;
 use crate::fanout::pop_block;
-use crate::session::audio_err;
+use crate::stream::audio_err;
 use crate::util::{internal, invalid, missing, random_u64, refused};
 
 /// Burst length before the fade-out, s.

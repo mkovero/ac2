@@ -20,7 +20,7 @@ pub(crate) struct Due {
     /// Open the Sessions dialog once the daemon's state shows no audio I/O (one just started
     /// has none): its New leads on to the audio setup.
     pub(crate) open_session_when_empty: bool,
-    /// The session dialog's session opened: ask what to measure ([`Self::choose_first`])
+    /// The stream dialog's stream opened: ask what to measure ([`Self::choose_first`])
     /// once the daemon's state shows it open.
     pub(super) choose_when_open: bool,
     /// A row of the list was chosen: its measurement's own panes go on screen after the

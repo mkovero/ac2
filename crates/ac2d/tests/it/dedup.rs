@@ -73,7 +73,7 @@ fn held_panel() -> (ac2d::Handle, Arc<AtomicUsize>, Sender<()>) {
 }
 
 fn panel() -> Command {
-    Command::SessionControlPanel {
+    Command::StreamControlPanel {
         backend: BackendKind::Fake,
         device: DeviceId(ac2_audio::fake::FAKE_DEVICE_ID.into()),
     }
@@ -82,7 +82,7 @@ fn panel() -> Command {
 /// Every request sent before this one has been taken in: the control thread handles a
 /// connection's requests in order.
 fn barrier(c: &mut Client) {
-    c.ok(Command::SessionStatus);
+    c.ok(Command::StreamStatus);
 }
 
 #[test]

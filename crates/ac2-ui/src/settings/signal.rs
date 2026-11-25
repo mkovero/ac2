@@ -21,7 +21,7 @@ impl SignalRows {
     }
 
     /// Enter on the frequency row: the frequency typed, or the reason it is refused.
-    /// `rate_hz`: the open session's sample rate.
+    /// `rate_hz`: the open stream's sample rate.
     pub fn enter(&mut self, rate_hz: Option<u32>) -> Option<ac2_proto::units::Hz> {
         match ac2_scene::stimulus::typed_sine_freq(&self.text, rate_hz) {
             Ok(hz) => {
@@ -46,8 +46,8 @@ impl Settings {
         self.focus_want = None;
         self.on_ceiling = false;
         self.ceiling = CeilingEdit::default();
-        self.session.finish_edit();
-        self.session.detect_cancel();
+        self.stream.finish_edit();
+        self.stream.detect_cancel();
         self.signal.leave();
         self.signal.focus = Some(row);
     }

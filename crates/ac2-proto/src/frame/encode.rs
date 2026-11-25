@@ -18,7 +18,7 @@ enum Col<'a> {
     I(Vec<i8>),
 }
 
-/// The programme-meter columns of a session or preview levels frame.
+/// The programme-meter columns of a stream or preview levels frame.
 fn programme_cols<'a>(
     cols: &mut Vec<(ArrayDesc, Col<'a>)>,
     ppm: &'a [f32],
@@ -157,7 +157,7 @@ pub(super) fn quantise(frame: &Frame) -> Result<CodedFrame, EncodeError> {
             ));
             FrameMeta::Levels(f.meta.clone())
         }
-        FrameData::SessionLevels(f) => {
+        FrameData::StreamLevels(f) => {
             cols.push((desc(ArrayName::Peak, Unit::Dbfs), Col::F(&f.peak)));
             cols.push((desc(ArrayName::Rms, Unit::Dbfs), Col::F(&f.rms)));
             cols.push((
@@ -165,7 +165,7 @@ pub(super) fn quantise(frame: &Frame) -> Result<CodedFrame, EncodeError> {
                 Col::U(mask_slice(&f.clip)),
             ));
             programme_cols(&mut cols, &f.ppm, &f.true_peak, &f.max, &f.overs);
-            FrameMeta::SessionLevels(f.meta.clone())
+            FrameMeta::StreamLevels(f.meta.clone())
         }
         FrameData::PreviewLevels(f) => {
             cols.push((desc(ArrayName::Peak, Unit::Dbfs), Col::F(&f.peak)));
@@ -187,9 +187,9 @@ pub(super) fn quantise(frame: &Frame) -> Result<CodedFrame, EncodeError> {
             programme_cols(&mut cols, &f.ppm, &f.true_peak, &f.max, &f.overs);
             FrameMeta::SourceLevels(f.meta.clone())
         }
-        FrameData::SessionGonio(f) => {
+        FrameData::StreamGonio(f) => {
             gonio_cols(&mut cols, f);
-            FrameMeta::SessionGonio(f.meta())
+            FrameMeta::StreamGonio(f.meta())
         }
         FrameData::PreviewGonio(f) => {
             gonio_cols(&mut cols, f);

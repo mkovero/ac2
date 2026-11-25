@@ -39,33 +39,33 @@ impl Control {
                     ),
                     client_id: client.clone(),
                     daemon_incarnation: self.s.incarnation,
-                    session_epoch: self.epoch(),
+                    stream_epoch: self.epoch(),
                     rev: self.store.rev(),
                     rig_id: self.s.rig_id,
                     name: self.s.name.clone(),
                 }))
             }
-            Command::SessionDevices => Err(internal("session.devices is answered asynchronously")),
-            Command::SessionPreview { .. } => {
-                Err(internal("session.preview is answered asynchronously"))
+            Command::StreamDevices => Err(internal("stream.devices is answered asynchronously")),
+            Command::StreamPreview { .. } => {
+                Err(internal("stream.preview is answered asynchronously"))
             }
-            Command::SessionPreviewStop => {
+            Command::StreamPreviewStop => {
                 self.stop_preview();
                 ack(self.store.rev())
             }
-            Command::SessionDetectLoopback { .. } => Err(internal(
-                "session.detect_loopback is answered asynchronously",
+            Command::StreamDetectLoopback { .. } => Err(internal(
+                "stream.detect_loopback is answered asynchronously",
             )),
-            Command::SessionControlPanel { .. } => {
-                Err(internal("session.control_panel is answered asynchronously"))
+            Command::StreamControlPanel { .. } => {
+                Err(internal("stream.control_panel is answered asynchronously"))
             }
-            Command::SessionOpen { config } => self.rig_session_open(peer, config),
-            Command::SessionClose => {
-                self.rig_session_closing();
-                self.session_close(peer);
+            Command::StreamOpen { config } => self.rig_stream_open(peer, config),
+            Command::StreamClose => {
+                self.rig_stream_closing();
+                self.stream_close(peer);
                 ack(self.store.rev())
             }
-            Command::SessionStatus => Ok(ReplyBody::Session(self.store.state().session.clone())),
+            Command::StreamStatus => Ok(ReplyBody::Stream(self.store.state().stream.clone())),
 
             Command::GenAcquire { force } => self.gen_acquire(peer, force),
             Command::GenSet {
@@ -100,7 +100,7 @@ impl Control {
                 ceiling,
                 confirm_raise,
             } => self.gen_ceiling(peer, ceiling, confirm_raise),
-            Command::SessionOutputs { outputs } => self.session_outputs(outputs),
+            Command::StreamOutputs { outputs } => self.stream_outputs(outputs),
             Command::ServerInfo => Ok(ReplyBody::Server(self.server_info(peer))),
             Command::ServerNetwork {
                 enabled,
@@ -323,7 +323,7 @@ impl Control {
             Command::CalList => self.cal_list(),
             Command::CalLine { channel, volts } => self.cal_line(channel, volts),
             Command::CalDelete { key } => self.cal_delete(&key),
-            Command::SessionInputs { inputs, pairs } => self.session_inputs(inputs, pairs),
+            Command::StreamInputs { inputs, pairs } => self.stream_inputs(inputs, pairs),
 
             Command::SplLogGet {
                 meas,
@@ -408,9 +408,7 @@ impl Control {
             Command::RecStart { request } => self.rec_start(peer, request),
             Command::RecStop => self.rec_stop(),
             Command::RecList => self.rec_list(),
-            Command::SessionReplay { recording, pace } => {
-                self.session_replay(peer, &recording, pace)
-            }
+            Command::StreamReplay { recording, pace } => self.stream_replay(peer, &recording, pace),
             Command::PlanSave { plan } => self.plan_save(plan),
             Command::PlanList => Ok(ReplyBody::Plans(self.store.state().plans.clone())),
             Command::PlanDelete { name } => self.plan_delete(&name),
@@ -556,7 +554,7 @@ impl Control {
         // measurement's own commit comes after, under the rev it names.
         self.ensure_spl_log(&m, old_leq.as_ref());
         m.config_rev = Rev(self.store.rev().0 + 1);
-        if m.running && self.session.is_some() {
+        if m.running && self.stream.is_some() {
             self.stop_job(meas);
             if let Some(g) = self.start_job(&m)? {
                 m.grid_id = Some(self.register_grid(g));
@@ -568,12 +566,12 @@ impl Control {
         Ok(ReplyBody::Measurement(m))
     }
 
-    /// `meas.start`: its job runs while a session is open.
+    /// `meas.start`: its job runs while a stream is open.
     pub(super) fn meas_start(&mut self, meas: MeasId) -> Result<Measurement, ProtoError> {
         let mut m = self.meas(meas)?.clone();
         not_a_sweep(&m)?;
         if !m.running
-            && self.session.is_some()
+            && self.stream.is_some()
             && let Some(g) = self.start_job(&m)?
         {
             m.grid_id = Some(self.register_grid(g));

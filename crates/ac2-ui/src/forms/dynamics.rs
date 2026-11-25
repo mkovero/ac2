@@ -42,10 +42,10 @@ impl Form {
         matches!(self.kind, FormKind::Dynamics | FormKind::DynamicsEdit)
     }
 
-    /// The dialog over the session's captured `inputs` and its `outputs`, the reference and
-    /// outputs picked as for a sweep (the loopback's, when the session has one).
+    /// The dialog over the stream's captured `inputs` and its `outputs`, the reference and
+    /// outputs picked as for a sweep (the loopback's, when the stream has one).
     pub fn dynamics(
-        open: Option<&OpenSession>,
+        open: Option<&OpenStream>,
         made: usize,
         inputs: &[(u16, String)],
         outputs: &[(u16, String)],
@@ -106,7 +106,7 @@ impl Form {
     /// The dialog editing dynamics measurement `m`: its settings as the fields.
     pub fn edit_dynamics(
         m: &Measurement,
-        open: Option<&OpenSession>,
+        open: Option<&OpenStream>,
         inputs: &[(u16, String)],
         outputs: &[(u16, String)],
     ) -> Result<Self, String> {
@@ -165,7 +165,7 @@ impl Form {
     /// `meas.create` (or `meas.update`) of the dialog. The daemon checks the programme as a
     /// whole (carrier against the rate, burst counts); what is checked here is what a field
     /// alone can say. Levels above the maximum are kept: a run checks them when it plays.
-    pub fn dynamics_meas(&self, open: Option<&OpenSession>) -> Result<MeasConfig, String> {
+    pub fn dynamics_meas(&self, open: Option<&OpenStream>) -> Result<MeasConfig, String> {
         let open = open.ok_or("no audio I/O: open one first")?;
         let reference = self
             .channel(FieldId::Reference)

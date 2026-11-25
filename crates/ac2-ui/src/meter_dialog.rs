@@ -1,4 +1,4 @@
-//! The programme meter dialog: what a Programme pane meters (one of the session's pairs, or up
+//! The programme meter dialog: what a Programme pane meters (one of the stream's pairs, or up
 //! to eight inputs side by side, picked by name with their meters) and how the rig's
 //! programme meters read. The second part is the rig's (`levels.set`): the daemon computes the
 //! ballistics, so every app on the rig reads the same bar. It is marked as the rig's, and Enter
@@ -17,10 +17,10 @@ use crate::state::{MAX_METERED, Metered};
 /// The dialog's own state beside its fields.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeterForm {
-    /// The session's pairs (left, right) and their names: the Meter field's options, before
+    /// The stream's pairs (left, right) and their names: the Meter field's options, before
     /// the inputs.
     pairs: Vec<((u16, u16), String)>,
-    /// The session's inputs: channel and name as the dialogs show it.
+    /// The stream's inputs: channel and name as the dialogs show it.
     inputs: Vec<(u16, String)>,
     /// The over threshold's and the gate's options, dB; the loudness target's, LUFS.
     over: Vec<f64>,
@@ -50,7 +50,7 @@ struct What {
     bars: Vec<Option<u16>>,
 }
 
-/// The dialog over the session's `pairs` and `inputs`, starting from `now` (what to start
+/// The dialog over the stream's `pairs` and `inputs`, starting from `now` (what to start
 /// from, else the first pair, else the first input), and the rig's settings `rig`, and how
 /// this app's embers cool `embers` (decay and glow).
 pub fn form(

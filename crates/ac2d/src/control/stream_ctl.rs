@@ -1,4 +1,4 @@
-//! Session commands: open, close, reopen, preview, detection, and per-input calibration refresh.
+//! Stream commands: open, close, reopen, preview, detection, and per-input calibration refresh.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -6,15 +6,15 @@ use std::time::Instant;
 use ac2_audio::Backend;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
-    Availability, BackendInfo, GenAction, Measurement, Session, SessionConfig, SweepFailure,
+    Availability, BackendInfo, GenAction, Measurement, Stream, StreamConfig, SweepFailure,
 };
-use ac2_proto::units::{Dbfs, LeaseToken, Rev, Seconds, SessionEpoch};
+use ac2_proto::units::{Dbfs, LeaseToken, Rev, Seconds, StreamEpoch};
 use ac2_proto::{ProtoError, ReplyBody};
 
 use crate::conv;
 use crate::preview::Preview;
 use crate::route::Peer;
-use crate::session::{self, Runtime};
+use crate::stream::{self, Runtime};
 use crate::util::{internal, invalid, missing, refused};
 
 use super::{
@@ -22,41 +22,41 @@ use super::{
 };
 
 impl Control {
-    pub(super) fn session_open(
+    pub(super) fn stream_open(
         &mut self,
         client: &Peer,
-        config: SessionConfig,
+        config: StreamConfig,
     ) -> Result<ReplyBody, ProtoError> {
         if config.backend == Some(ac2_proto::model::BackendKind::Replay) {
-            return Err(invalid("a recording is played with session.replay"));
+            return Err(invalid("a recording is played with stream.replay"));
         }
-        // Refused when the operator opens the session only: one the daemon reopens on its
+        // Refused when the operator opens the stream only: one the daemon reopens on its
         // own (monitor at start, after a power cut) keeps its remote inputs, and the joiner
         // reports why one gives no audio.
         self.check_remote_inputs(&config)?;
-        self.open_session(client, config, None)
-            .map(ReplyBody::Session)
+        self.open_stream(client, config, None)
+            .map(ReplyBody::Stream)
     }
 
-    /// Opens a session on `config` (a replay of `replay`, on the replay backend).
-    pub(super) fn open_session(
+    /// Opens a stream on `config` (a replay of `replay`, on the replay backend).
+    pub(super) fn open_stream(
         &mut self,
         client: &Peer,
-        config: SessionConfig,
+        config: StreamConfig,
         replay: Option<ac2_proto::model::ReplayInfo>,
-    ) -> Result<Session, ProtoError> {
-        session::validate(&config)?;
+    ) -> Result<Stream, ProtoError> {
+        stream::validate(&config)?;
         let backend = self.backend_for(config.backend)?;
         let blocked = Instant::now();
-        // The preview may hold the very device the session is about to open.
+        // The preview may hold the very device the stream is about to open.
         if let Err(e) = self.close_preview() {
             self.excuse_blocked(blocked);
             return Err(e);
         }
-        if self.session.is_some() || self.audio_recovery.is_some() {
-            self.session_close(client);
+        if self.stream.is_some() || self.audio_recovery.is_some() {
+            self.stream_close(client);
         }
-        let epoch = SessionEpoch(self.epoch().0 + 1);
+        let epoch = StreamEpoch(self.epoch().0 + 1);
         let rt = Runtime::open(
             &*backend,
             &config,
@@ -71,28 +71,28 @@ impl Control {
         let mut rt = match rt {
             Ok(rt) => rt,
             Err(e) => {
-                tracing::warn!("session open failed: {}", e.msg);
+                tracing::warn!("stream open failed: {}", e.msg);
                 return Err(e);
             }
         };
         rt.open.replay = replay;
         rt.link_spares(&self.spare_links);
-        let s = Session {
+        let s = Stream {
             epoch,
             open: Some(rt.open.clone()),
             stopped: None,
         };
-        self.session = Some(rt);
-        self.commit(Change::Session(s.clone()));
+        self.stream = Some(rt);
+        self.commit(Change::Stream(s.clone()));
         self.after_open();
         self.release_replay();
         Ok(s)
     }
 
     /// Stops what runs on a stream about to close: the sweep, the jobs, the generator source
-    /// and the published frames of the session.
+    /// and the published frames of the stream.
     pub(super) fn wind_down(&mut self, recording: ac2_proto::model::RecordingEnd) {
-        self.abort_runs(SweepFailure::SessionClosed, "the audio I/O reopened");
+        self.abort_runs(SweepFailure::StreamClosed, "the audio I/O reopened");
         self.end_recording(recording);
         self.stop_all_jobs();
         self.out.level = None;
@@ -100,18 +100,18 @@ impl Control {
         self.s.outbox.clear(b"d/");
         self.s.outbox.clear(b"bins/");
         self.s.outbox.clear(b"timing");
-        self.s.outbox.clear(b"session/levels");
+        self.s.outbox.clear(b"stream/levels");
     }
 
     /// Starts jobs and re-derives sample-rate dependent state for a freshly opened stream.
     pub(super) fn after_open(&mut self) {
         // A stream opened on another thread (recovery) may predate a change of the system
         // max level.
-        if let Some(rt) = &self.session {
+        if let Some(rt) = &self.stream {
             rt.gen_handle.set_max_level(self.s.max_level);
         }
         self.remote_attach();
-        let Some(fs) = self.session.as_ref().map(|r| f64::from(r.sample_rate)) else {
+        let Some(fs) = self.stream.as_ref().map(|r| f64::from(r.sample_rate)) else {
             return;
         };
         let ms: Vec<Measurement> = self.store.state().measurements.clone();
@@ -148,13 +148,13 @@ impl Control {
         }
         self.resume_walks();
         self.start_timing_job();
-        self.start_session_levels();
+        self.start_stream_levels();
     }
 
-    pub(super) fn session_close(&mut self, client: &Peer) {
-        self.abort_runs(SweepFailure::SessionClosed, "the audio I/O closed");
-        self.end_recording(ac2_proto::model::RecordingEnd::SessionClosed);
-        self.stop_sim(ac2_proto::model::SimCancel::SessionClosed);
+    pub(super) fn stream_close(&mut self, client: &Peer) {
+        self.abort_runs(SweepFailure::StreamClosed, "the audio I/O closed");
+        self.end_recording(ac2_proto::model::RecordingEnd::StreamClosed);
+        self.stop_sim(ac2_proto::model::SimCancel::StreamClosed);
         self.stop_all_jobs();
         let g = self.store.state().generator.clone();
         if g.armed || g.firing {
@@ -167,23 +167,23 @@ impl Control {
         } else {
             self.stop_output();
         }
-        // A close ends the attempts to reopen a stopped session too; an attempt still
+        // A close ends the attempts to reopen a stopped stream too; an attempt still
         // running closes what it opens.
         let recovering = self.audio_recovery.take().is_some();
-        let rt = self.session.take();
+        let rt = self.stream.take();
         let had = rt.is_some() || recovering;
         if let Some(rt) = rt {
             self.keep_spare_links(&rt);
             recovery::close_bounded(rt, recovery::CLOSE_BOUND);
         }
         if had {
-            self.health.session_closed();
+            self.health.stream_closed();
             self.s.outbox.clear(b"d/");
             self.s.outbox.clear(b"bins/");
             self.s.outbox.clear(b"timing");
-            self.s.outbox.clear(b"session/levels");
-            let epoch = SessionEpoch(self.epoch().0 + 1);
-            self.commit(Change::Session(Session {
+            self.s.outbox.clear(b"stream/levels");
+            let epoch = StreamEpoch(self.epoch().0 + 1);
+            self.commit(Change::Stream(Stream {
                 epoch,
                 open: None,
                 stopped: None,
@@ -200,9 +200,9 @@ impl Control {
     }
 
     /// Reopens the stream with the same configuration and the given generator routes: a
-    /// device change is a configuration change, so it starts a new session epoch (5b).
+    /// device change is a configuration change, so it starts a new stream epoch (5b).
     pub(super) fn reopen(&mut self, routes: &[u16]) -> Result<(), ProtoError> {
-        let epoch = SessionEpoch(self.epoch().0 + 1);
+        let epoch = StreamEpoch(self.epoch().0 + 1);
         self.reopen_at(routes, epoch)
     }
 
@@ -210,10 +210,10 @@ impl Control {
     pub(super) fn reopen_at(
         &mut self,
         routes: &[u16],
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
     ) -> Result<(), ProtoError> {
-        let Some(rt) = self.session.take() else {
-            return Err(invalid("no open session"));
+        let Some(rt) = self.stream.take() else {
+            return Err(invalid("no open stream"));
         };
         let config = rt.open.config.clone();
         let replay = rt.open.replay.clone();
@@ -221,14 +221,14 @@ impl Control {
         let backend = match self.backend_for(Some(rt.open.backend)) {
             Ok(b) => b,
             Err(e) => {
-                self.session = Some(rt);
+                self.stream = Some(rt);
                 return Err(e);
             }
         };
         let blocked = Instant::now();
         // The stimulus source goes with the old stream; the reopened one plays none.
         self.disarm_for_outage();
-        self.wind_down(ac2_proto::model::RecordingEnd::SessionReopened);
+        self.wind_down(ac2_proto::model::RecordingEnd::StreamReopened);
         self.keep_spare_links(&rt);
         recovery::close_bounded(rt, recovery::CLOSE_BOUND);
         let rt = Runtime::open(
@@ -246,19 +246,19 @@ impl Control {
             Ok(mut rt) => {
                 rt.open.replay = replay;
                 rt.link_spares(&self.spare_links);
-                let s = Session {
+                let s = Stream {
                     epoch,
                     open: Some(rt.open.clone()),
                     stopped: None,
                 };
-                self.session = Some(rt);
-                self.commit(Change::Session(s));
+                self.stream = Some(rt);
+                self.commit(Change::Stream(s));
                 self.after_open();
                 self.release_replay();
                 Ok(())
             }
             Err(e) => {
-                // The session stays open, its audio stopped, and the attempts carry on.
+                // The stream stays open, its audio stopped, and the attempts carry on.
                 self.reopen_failed(last_open, routes.to_vec(), epoch, &e);
                 Err(e)
             }
@@ -301,7 +301,7 @@ impl Control {
         .ok_or_else(|| missing(format!("this daemon offers no {kind:?} backend")))
     }
 
-    /// Starts `session.devices` on its own thread: a driver may take its time to list its
+    /// Starts `stream.devices` on its own thread: a driver may take its time to list its
     /// devices. Answered with [`ControlMsg::Devices`]; a request while one runs waits for
     /// that one's answer.
     pub(super) fn start_devices(&mut self, waiter: PendingReply) -> Result<(), ProtoError> {
@@ -353,11 +353,11 @@ impl Control {
     pub(super) fn close_running_preview(&mut self) {
         if let Some(p) = self.preview.take() {
             p.close();
-            self.s.outbox.clear(b"session/preview");
+            self.s.outbox.clear(b"stream/preview");
         }
     }
 
-    /// `session.preview_stop`: the preview closes; one still opening closes once it has,
+    /// `stream.preview_stop`: the preview closes; one still opening closes once it has,
     /// without waiting for it here.
     pub(super) fn stop_preview(&mut self) {
         if let Some(o) = &mut self.pending.preview {
@@ -366,7 +366,7 @@ impl Control {
         self.close_running_preview();
     }
 
-    /// `session.preview`: the running preview renewed (`Some`), or `waiter` answered once
+    /// `stream.preview`: the running preview renewed (`Some`), or `waiter` answered once
     /// the device opens on its own thread (`None`).
     pub(super) fn start_preview(
         &mut self,
@@ -482,7 +482,7 @@ impl Control {
         }
     }
 
-    /// Checks a `session.detect_loopback` and starts it on its own thread.
+    /// Checks a `stream.detect_loopback` and starts it on its own thread.
     pub(super) fn start_detect(
         &mut self,
         client: &Peer,
@@ -518,7 +518,7 @@ impl Control {
             return Err(refused("a loopback detection is already running"));
         }
         let backend = self.backend_for(Some(kind))?;
-        // Waiting for a preview still opening blocks the loop as a session open does.
+        // Waiting for a preview still opening blocks the loop as a stream open does.
         let blocked = Instant::now();
         let closed = self.close_preview();
         self.excuse_blocked(blocked);
@@ -578,7 +578,7 @@ impl Control {
             .name("ac2d-panel-wait".into())
             .spawn(move || {
                 let result = match rx.recv_timeout(PANEL_WAIT) {
-                    Ok(r) => r.map_err(session::audio_err),
+                    Ok(r) => r.map_err(stream::audio_err),
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(()),
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                         Err(internal("the control panel call ended without an answer"))
@@ -629,6 +629,6 @@ fn backend_infos(backends: &[Arc<dyn Backend>]) -> Vec<BackendInfo> {
 /// hears the refusal and asks again instead of giving the daemon up.
 const PREVIEW_OPEN_WAIT: std::time::Duration = std::time::Duration::from_millis(1200);
 
-/// How long `session.control_panel` waits for the driver before answering that its panel
+/// How long `stream.control_panel` waits for the driver before answering that its panel
 /// is showing: within a client's reply deadline (1.5 s per try).
 const PANEL_WAIT: std::time::Duration = std::time::Duration::from_millis(1200);

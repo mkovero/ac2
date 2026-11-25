@@ -14,12 +14,12 @@ pub enum PromptKind {
     Delay(MeasId),
     /// A file to import as a trace or target curve.
     ImportFile(ImportRole),
-    /// A recording to replay as the session.
+    /// A recording to replay as the stream.
     ReplayRecording,
     InputMics,
     /// `input=curve` of the input setup.
     MicCurveInput,
-    /// `input=mic` of a sensitivity calibration on the session's capture device to delete.
+    /// `input=mic` of a sensitivity calibration on the stream's capture device to delete.
     CalDelete,
     /// Mic whose curve goes on a stored trace (`none` removes the applied one).
     TraceMicCurve(TraceId),
@@ -187,17 +187,17 @@ impl Overlay {
         }
     }
 
-    /// The session model while Settings shows the Audio I/O page.
-    pub fn session(&self) -> Option<&SessionDialog> {
+    /// The stream model while Settings shows the Audio I/O page.
+    pub fn stream(&self) -> Option<&StreamDialog> {
         match self {
-            Overlay::Settings(s) if matches!(s.page, Page::AudioIo) => Some(&s.session),
+            Overlay::Settings(s) if matches!(s.page, Page::AudioIo) => Some(&s.stream),
             _ => None,
         }
     }
 
-    pub fn session_mut(&mut self) -> Option<&mut SessionDialog> {
+    pub fn stream_mut(&mut self) -> Option<&mut StreamDialog> {
         match self {
-            Overlay::Settings(s) if matches!(s.page, Page::AudioIo) => Some(&mut s.session),
+            Overlay::Settings(s) if matches!(s.page, Page::AudioIo) => Some(&mut s.stream),
             _ => None,
         }
     }
@@ -459,8 +459,8 @@ pub enum Msg {
     },
     /// Mouse on an open dialog.
     Form(FormMsg),
-    /// Mouse on the session dialog.
-    Session(SessionMsg),
+    /// Mouse on the stream dialog.
+    Stream(StreamMsg),
     /// Mouse on the new SPL log confirmation: `true` starts it, `false` keeps the log.
     NewLog(bool),
     /// Mouse on the delete confirmation: `true` deletes, `false` keeps it.
@@ -522,13 +522,13 @@ pub enum LeqMsg {
     Cancel,
 }
 
-/// What the mouse does on the session dialog.
+/// What the mouse does on the stream dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SessionMsg {
+pub enum StreamMsg {
     Focus(Row),
     /// ‹/› on the backend or device row.
     Cycle(Row, i32),
-    /// The in-session box of an input or output.
+    /// The in-stream box of an input or output.
     Toggle(Row),
     Role(Row, RoleKey),
     /// The mic name of an input.

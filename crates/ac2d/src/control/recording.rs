@@ -1,13 +1,13 @@
-//! `rec.*` and `session.replay`: raw capture files (`docs/design/raw-capture.md`).
+//! `rec.*` and `stream.replay`: raw capture files (`docs/design/raw-capture.md`).
 //!
 //! A recording is a [`Recorder`] job on the capture fan-out; the control thread starts it,
 //! forwards every committed change of the measurements, generator, inputs and calibrations
 //! into its timeline, mirrors its progress as the `recording` entity, and ends it on
-//! `rec.stop`, on a session close or reopen, and at shutdown — always finalising the file
+//! `rec.stop`, on a stream close or reopen, and at shutdown — always finalising the file
 //! and saying why in the sidecar. A daemon that dies while recording leaves a sidecar
 //! without an end; the next start finishes it as `interrupted` ([`raw::recover`]).
 //!
-//! A replay opens a session on a [`ReplayBackend`] built from a recording: the recorded
+//! A replay opens a stream on a [`ReplayBackend`] built from a recording: the recorded
 //! inputs under their device numbers, on the recorded device's id (so its calibrations
 //! apply), no outputs. Measurements carry over like on any reopen.
 
@@ -20,9 +20,9 @@ use ac2_audio::{
 use ac2_proto::event::Change;
 use ac2_proto::model::{
     CalEntry, DeviceSelector, DiscontinuityCause, MeasKind, RecordRequest, RecordingEnd,
-    RecordingRef, RecordingRun, RecordingStatus, RemoteGaps, ReplayInfo, ReplayPace, SessionConfig,
+    RecordingRef, RecordingRun, RecordingStatus, RemoteGaps, ReplayInfo, ReplayPace, StreamConfig,
 };
-use ac2_proto::units::{SampleIndex, Seconds, SessionEpoch, WallNs};
+use ac2_proto::units::{SampleIndex, Seconds, StreamEpoch, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 use ac2_traces::raw::{
     self, AudioFile, ChannelRole, Initial, Limits, Mark, RawError, RecordedChannel, RecordedDevice,
@@ -34,7 +34,7 @@ use crate::jobs::record::{Progress, QUEUE_S, RecordCmd, Recorder, SharedProgress
 use crate::jobs::{self, JobHandle, block_index};
 use crate::remote::replay::ReplayMarks;
 use crate::route::Peer;
-use crate::session::Runtime;
+use crate::stream::Runtime;
 use crate::util::{internal, invalid, missing, perr, refused, wall_ns};
 
 /// How long an unfinished recording's audio file must have been left alone before it is
@@ -69,7 +69,7 @@ fn default_name(ns: u64) -> String {
     format!("rec-{}", iso.get(..19).unwrap_or(&iso).replace(':', "-"))
 }
 
-/// What a recorded input was used for, from the measurements and the session.
+/// What a recorded input was used for, from the measurements and the stream.
 fn roles(c: &Control, rt: &Runtime, input: u16) -> Vec<ChannelRole> {
     let mut out = Vec::new();
     if rt.open.config.loopback.is_some_and(|l| l.input == input) {
@@ -137,8 +137,8 @@ impl Control {
         if self.recording.is_some() {
             return Err(refused("a recording is running: stop it first (rec.stop)"));
         }
-        let Some(rt) = self.session.as_ref() else {
-            return Err(refused("no open session to record"));
+        let Some(rt) = self.stream.as_ref() else {
+            return Err(refused("no open stream to record"));
         };
         if req.inputs.is_empty() {
             return Err(invalid("no inputs to record"));
@@ -153,10 +153,7 @@ impl Control {
                 return Err(invalid(format!("input {} listed twice", input + 1)));
             }
             cols.push(block_index(map, input).ok_or_else(|| {
-                invalid(format!(
-                    "input {} is not captured by the session",
-                    input + 1
-                ))
+                invalid(format!("input {} is not captured by the stream", input + 1))
             })?);
         }
         let d = req.max_duration.0;
@@ -250,7 +247,7 @@ impl Control {
                 output_device: rt.open.output_device.clone(),
                 buffer_frames: rt.open.buffer_frames,
                 clock: rt.open.clock,
-                session_epoch: rt.epoch,
+                stream_epoch: rt.epoch,
                 loopback: rt.open.config.loopback,
             },
             start: Mark::new(latest, now),
@@ -320,7 +317,7 @@ impl Control {
             path: path.to_string_lossy().into_owned(),
             inputs: req.inputs.clone(),
             sample_rate_hz: rt.sample_rate,
-            session_epoch: rt.epoch,
+            stream_epoch: rt.epoch,
             start_sample: SampleIndex(latest),
             started_at: WallNs(now),
             started_by: client.id().clone(),
@@ -374,7 +371,7 @@ impl Control {
             return;
         };
         let _ = a.cmds.send(RecordCmd::End(reason.clone()));
-        if let Some(rt) = &self.session {
+        if let Some(rt) = &self.stream {
             rt.fanout.detach(a.job.fanout_id);
         }
         drop(a.job);
@@ -431,7 +428,7 @@ impl Control {
             Change::Calibration(c) => TimelineChange::Calibration(c.clone()),
             // Named one by one: a new kind of change has to say here whether a replay of
             // the recording needs it.
-            Change::Session(_)
+            Change::Stream(_)
             | Change::Trace(_)
             | Change::LineCalibration(_)
             | Change::Mic(_)
@@ -453,7 +450,7 @@ impl Control {
             | Change::SimFit(_)
             | Change::Server(_) => return,
         };
-        let at_sample = self.session.as_ref().map_or(0, |r| {
+        let at_sample = self.stream.as_ref().map_or(0, |r| {
             r.fanout.latest.load(std::sync::atomic::Ordering::Acquire)
         });
         let _ = a.cmds.send(RecordCmd::Note {
@@ -496,9 +493,9 @@ impl Control {
 
     // -- replay ------------------------------------------------------------------------------
 
-    /// Lets a replay session play once its measurements are attached to the fan-out.
+    /// Lets a replay stream play once its measurements are attached to the fan-out.
     pub(super) fn release_replay(&self) {
-        let (Some(rt), Some(b)) = (&self.session, &self.replay_backend) else {
+        let (Some(rt), Some(b)) = (&self.stream, &self.replay_backend) else {
             return;
         };
         if rt.open.replay.is_some() {
@@ -546,7 +543,7 @@ impl Control {
         }
     }
 
-    pub(super) fn session_replay(
+    pub(super) fn stream_replay(
         &mut self,
         client: &Peer,
         r: &RecordingRef,
@@ -630,7 +627,7 @@ impl Control {
             },
             open,
         }));
-        let config = SessionConfig {
+        let config = StreamConfig {
             backend: Some(ac2_proto::model::BackendKind::Replay),
             input_device: DeviceSelector::Id {
                 id: ac2_proto::model::DeviceId(device),
@@ -650,21 +647,21 @@ impl Control {
             path: path.to_string_lossy().into_owned(),
             frames: info.frames,
             end_sample: SampleIndex(
-                raw::session_sample_of(&s, info.frames) - s.start.session_sample.0,
+                raw::stream_sample_of(&s, info.frames) - s.start.stream_sample.0,
             ),
             pace,
-            recorded_start_sample: s.start.session_sample,
+            recorded_start_sample: s.start.stream_sample,
             recorded_at: s.start.wall_ns,
         };
         self.replay_backend = Some(backend);
         self.replay_marks = marks;
-        let r = self.open_session(client, config, Some(replay));
+        let r = self.open_stream(client, config, Some(replay));
         if r.is_err() {
             self.replay_backend = None;
             self.replay_marks = None;
         }
         tracing::info!("replaying {name} ({:?})", pace);
-        r.map(ReplyBody::Session)
+        r.map(ReplyBody::Stream)
     }
 }
 
@@ -694,15 +691,15 @@ fn replay_inputs(channels: &[raw::RecordedChannel]) -> Vec<u16> {
 /// A recording's remote-channel marks in replay samples (the replay starts at sample 0); the
 /// replay's block columns are the file's channels.
 fn replay_marks(s: &Sidecar) -> Option<Arc<ReplayMarks>> {
-    let at = |sample: SampleIndex| sample.0.saturating_sub(s.start.session_sample.0);
+    let at = |sample: SampleIndex| sample.0.saturating_sub(s.start.stream_sample.0);
     ReplayMarks::new(
         s.remote_gaps.iter().map(|g| {
-            let from = at(g.session_sample);
+            let from = at(g.stream_sample);
             (g.channel, from..from + g.frames, g.late)
         }),
         s.remote_slips
             .iter()
-            .map(|l| (l.channel, at(l.session_sample), l.samples)),
+            .map(|l| (l.channel, at(l.stream_sample), l.samples)),
     )
     .map(Arc::new)
 }
@@ -716,8 +713,8 @@ fn run_of(dir: &std::path::Path, name: &str, s: &Sidecar) -> RecordingRun {
         path: dir.join(&s.audio.file).to_string_lossy().into_owned(),
         inputs: s.audio.channels.iter().map(|c| c.input).collect(),
         sample_rate_hz: s.audio.sample_rate,
-        session_epoch: SessionEpoch(s.device.session_epoch.0),
-        start_sample: s.start.session_sample,
+        stream_epoch: StreamEpoch(s.device.stream_epoch.0),
+        start_sample: s.start.stream_sample,
         started_at: s.start.wall_ns,
         started_by: s.started_by.clone(),
         frames,

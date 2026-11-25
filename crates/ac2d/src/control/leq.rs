@@ -38,9 +38,9 @@ impl Control {
             })
     }
 
-    /// Whether `input` of the open session has a sensitivity calibration.
+    /// Whether `input` of the open stream has a sensitivity calibration.
     fn input_calibrated(&self, input: u16) -> bool {
-        self.session
+        self.stream
             .as_ref()
             .is_some_and(|rt| self.input_cal(rt, input).sensitivity.is_some())
     }

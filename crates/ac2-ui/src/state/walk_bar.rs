@@ -43,7 +43,7 @@ impl FillGlide {
 
 impl RigState {
     /// Starts each transfer topic's bar glide to a new frame from where the bar is drawn now.
-    /// A frame from another session, daemon or configuration is not the same averages
+    /// A frame from another stream, daemon or configuration is not the same averages
     /// filling: it is drawn as received.
     pub(super) fn keep_fill_glide(&mut self, d: &DataSnapshot) {
         let old = self.data.as_deref();
@@ -65,7 +65,7 @@ impl RigState {
             if a.seq == b.seq {
                 continue;
             }
-            let same = a.session_epoch == b.session_epoch
+            let same = a.stream_epoch == b.stream_epoch
                 && a.daemon_incarnation == b.daemon_incarnation
                 && a.config_rev == b.config_rev;
             let (Some(p), Some(to)) = (filled(&prev.frame), filled(&tf.frame)) else {

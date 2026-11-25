@@ -72,8 +72,8 @@ fn rig_meter(name: &str) -> MeasConfig {
 fn seed(dir: &Path) {
     let (h, backend) = start("power-cut-seed", dir);
     let (mut c, _sub) = connect(&h, &[b"evt"]);
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     c.ok(Command::MeasCreate {
         config: band_meter(),
@@ -107,8 +107,8 @@ fn meter_on(c: &mut Client, backend: &ac2_audio::FakeBackend) {
 }
 
 fn meter_for(c: &mut Client, backend: &ac2_audio::FakeBackend, seconds: f64) {
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     for m in c.state().measurements {
         if !m.running {

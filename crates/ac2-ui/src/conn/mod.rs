@@ -22,7 +22,7 @@ use ac2_client::{
 use ac2_proto::model::{
     BackendInfo, BackendKind, DelayFinding, DelayPick, DeviceId, FinderBand, GeneratorDesired,
     GeneratorSettings, ImportFormat, ImportRole, InputSetup, LoopbackDetection, MeasConfig,
-    Measurement, OwnedTraces, Preview, SessionConfig, Smoothing, SplHistory, TraceData, TraceMeta,
+    Measurement, OwnedTraces, Preview, Smoothing, SplHistory, StreamConfig, TraceData, TraceMeta,
     TraceMicCurve, TraceSource,
 };
 use ac2_proto::topic::{Stream, Topic};
@@ -127,18 +127,18 @@ pub enum ConnEvent {
         trace: Box<TraceMeta>,
     },
     Stimulus(StimEvent),
-    /// `session.devices` answered (or could not be asked).
+    /// `stream.devices` answered (or could not be asked).
     Devices(Result<Vec<BackendInfo>, String>),
-    /// `session.preview` of `backend`/`device` answered.
+    /// `stream.preview` of `backend`/`device` answered.
     Preview {
         backend: BackendKind,
         device: DeviceId,
         result: Result<Preview, String>,
     },
-    /// `session.detect_loopback` answered (or could not run).
+    /// `stream.detect_loopback` answered (or could not run).
     LoopbackDetected(Result<LoopbackDetection, String>),
-    /// The session dialog's session is open (and its mic names set).
-    SessionOpened,
+    /// The stream dialog's stream is open (and its mic names set).
+    StreamOpened,
     /// A measurement was created (and, unless a reply says otherwise, started).
     MeasCreated(Box<Measurement>),
     /// `walk.new` answered with the walk.
@@ -280,22 +280,22 @@ pub enum Request {
         name: String,
         path: std::path::PathBuf,
     },
-    /// `session.devices`, for the session dialog.
+    /// `stream.devices`, for the stream dialog.
     Devices,
-    /// `session.open`, then `session.inputs` with the mic names; [`ConnEvent::SessionOpened`]
+    /// `stream.open`, then `stream.inputs` with the mic names; [`ConnEvent::StreamOpened`]
     /// once both succeeded.
-    OpenSession {
-        config: SessionConfig,
+    OpenStream {
+        config: StreamConfig,
         inputs: Vec<InputSetup>,
         pairs: Vec<ac2_proto::model::Pair>,
         what: String,
     },
     /// Remote inputs changed: `rig.pair` first when `pair` is given (pairing with the
-    /// input's rig), then `session.open` with `config` (the open session with the remote
+    /// input's rig), then `stream.open` with `config` (the open stream with the remote
     /// input added or removed, everything else kept).
-    RemoteSession {
+    RemoteStream {
         pair: Option<ac2_proto::model::RigPeer>,
-        config: SessionConfig,
+        config: StreamConfig,
         what: String,
     },
     /// Open or renew the capture-only preview of a device, with what its inputs are
@@ -308,10 +308,10 @@ pub enum Request {
     },
     /// Close the preview.
     PreviewStop,
-    /// Subscribe to the input meters (`session/`), or stop.
+    /// Subscribe to the input meters (`stream/`), or stop.
     Meters(bool),
-    /// `session.detect_loopback` under the stimulus lease (taken for it when not held).
-    DetectLoopback(crate::session_dialog::DetectRequest),
+    /// `stream.detect_loopback` under the stimulus lease (taken for it when not held).
+    DetectLoopback(crate::stream_dialog::DetectRequest),
     /// `meas.create` then `meas.start` (as `ac2 meas new --start`).
     CreateMeas { config: MeasConfig },
     /// `walk.new` (a [`ac2_proto::Command::WalkNew`]); the walk comes back as
@@ -642,7 +642,7 @@ enum Next {
 /// What the UI asked to receive; kept across reconnects and applied to each connection.
 #[derive(Debug)]
 struct Wants {
-    /// The input meters (`session/`).
+    /// The input meters (`stream/`).
     meters: bool,
     topics: HashSet<Topic>,
     period: Duration,

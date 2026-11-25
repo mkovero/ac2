@@ -10,8 +10,8 @@ async fn slow_windows_go_over_and_recover_and_survive() {
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();
@@ -281,8 +281,8 @@ async fn slow_a_filling_window_goes_over_when_its_budget_is_spent() {
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();

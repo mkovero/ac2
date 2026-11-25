@@ -77,7 +77,7 @@ impl AppState {
         };
         let Some(device) = self
             .daemon()
-            .and_then(|s| s.session.open.as_ref())
+            .and_then(|s| s.stream.open.as_ref())
             .map(|o| o.input_device.clone())
         else {
             return Err(
@@ -101,13 +101,13 @@ impl AppState {
         Ok(())
     }
 
-    /// The stimulus outputs follow the open session's output device: the ones last used on
+    /// The stimulus outputs follow the open stream's output device: the ones last used on
     /// it, output 1 on a device never used (decision K4). Outputs never change under a held
-    /// stimulus; a device change re-opens the session, which disarms it anyway.
+    /// stimulus; a device change re-opens the stream, which disarms it anyway.
     pub(in crate::state) fn follow_output_device(&mut self) {
         let dev = self
             .daemon()
-            .and_then(|s| s.session.open.as_ref())
+            .and_then(|s| s.stream.open.as_ref())
             .map(|o| o.output_device.0.clone());
         let Some(dev) = dev else {
             return;
@@ -142,15 +142,15 @@ impl AppState {
     }
 
     /// The daemon's input setup row of `channel` (default: no mic name, no curve chosen).
-    /// The daemon's pairs (`session.inputs` carries the whole list, so a row change
+    /// The daemon's pairs (`stream.inputs` carries the whole list, so a row change
     /// resends them).
     pub(in crate::state) fn pairs(&self) -> Vec<ac2_proto::model::Pair> {
         self.daemon().map(|s| s.pairs.clone()).unwrap_or_default()
     }
 
-    /// `session.inputs` upserting `inputs`, the pairs as they are.
+    /// `stream.inputs` upserting `inputs`, the pairs as they are.
     pub(in crate::state) fn inputs_cmd(&self, inputs: Vec<InputSetup>) -> Command {
-        Command::SessionInputs {
+        Command::StreamInputs {
             inputs,
             pairs: self.pairs(),
         }
@@ -195,7 +195,7 @@ impl AppState {
             ));
             return;
         }
-        let Some(rate) = self.open_session().map(|s| f64::from(s.sample_rate_hz)) else {
+        let Some(rate) = self.open_stream().map(|s| f64::from(s.sample_rate_hz)) else {
             self.warn(format!(
                 "{}: no audio I/O (a delay is applied in samples of its rate)",
                 m.config.name

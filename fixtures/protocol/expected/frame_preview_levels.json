@@ -1,11 +1,11 @@
 {
- "topic": "session/preview",
+ "topic": "stream/preview",
  "header": {
-  "v": 104,
+  "v": 105,
   "kind": "preview_levels",
   "seq": 1234,
   "audio_sample": 172800000,
-  "session_epoch": 2,
+  "stream_epoch": 2,
   "daemon_incarnation": 6840227782638526189,
   "config_rev": 40,
   "config_applied_at": 168000000,

@@ -184,7 +184,7 @@ fn stored(id: u32, freqs: &[f64]) -> TraceData {
             source: TraceSource::Captured {
                 meas: MeasId(1),
                 meas_name: "live".into(),
-                epoch: SessionEpoch(1),
+                epoch: StreamEpoch(1),
                 at_sample: SampleIndex(0),
             },
             grid_id: grid().id(),
@@ -250,7 +250,7 @@ fn transfer_view_with_a_live_trace_and_eight_stored() {
         nudge: Seconds(0.0),
         delay_nudge: Seconds(0.0),
         time_base: TimeBase::Shared {
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
             delay: Seconds(0.001),
         },
         freshness: Some(Freshness::from_age(0.1)),

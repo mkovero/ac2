@@ -395,7 +395,7 @@ pub fn pane_banners(
 pub const LINK_OFFSET: &str = "Wait for remote inputs";
 
 /// The link offset control's line: *Wait for remote inputs (link offset): 30 ms*, or
-/// *…: default (10 ms)*. `set`: the session's own setting; `r`: what the daemon runs. A set
+/// *…: default (10 ms)*. `set`: the stream's own setting; `r`: what the daemon runs. A set
 /// value below the least that works is raised to it by the daemon (below it every remote
 /// sample is late), and then the line says both: *1 ms set · 17 ms in force, the least
 /// that works*.
@@ -438,7 +438,7 @@ pub fn parse_link_offset(s: &str) -> Result<Option<f64>, String> {
     Ok(Some(sec.0))
 }
 
-/// The toast after the link offset is set: the session reopens, its remote inputs anchor
+/// The toast after the link offset is set: the stream reopens, its remote inputs anchor
 /// again.
 pub fn link_offset_toast(offset_s: Option<f64>) -> String {
     let v = offset_s.map_or_else(|| "default".to_owned(), |s| format::ms(s, 0));

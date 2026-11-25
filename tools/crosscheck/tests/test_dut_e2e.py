@@ -82,7 +82,7 @@ def test_sine_stage_reads_the_dut_s_truth(dummy, tmp_path):
 
 def test_patch_on_a_real_server(dummy, tmp_path):
     """The patch against real JACK connections: a stand-in `ac2` client with the ports ac2d
-    registers, wired as a session open leaves them."""
+    registers, wired as a stream open leaves them."""
     import jack
 
     from crosscheck import dut, dutrun

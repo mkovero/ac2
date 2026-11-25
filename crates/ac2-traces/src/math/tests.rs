@@ -16,7 +16,7 @@ fn grid() -> GridDef {
     }
 }
 
-const EPOCH: Option<SessionEpoch> = Some(SessionEpoch(3));
+const EPOCH: Option<StreamEpoch> = Some(StreamEpoch(3));
 
 /// Columns of `h(f)` (with its own delay already removed).
 fn tf(freqs: &[f64], h: impl Fn(f64) -> Complex64, coh: f32) -> Columns {
@@ -38,7 +38,7 @@ fn highpass(fc: f64) -> impl Fn(f64) -> Complex64 {
     move |f| Complex64::new(0.0, f / fc) / Complex64::new(1.0, f / fc)
 }
 
-fn input(c: &Columns, delay: f64, time_base: Option<SessionEpoch>) -> Input<'_> {
+fn input(c: &Columns, delay: f64, time_base: Option<StreamEpoch>) -> Input<'_> {
     Input {
         columns: c,
         delay,
@@ -204,7 +204,7 @@ fn sum_without_a_shared_time_base_is_refused() {
     let a = tf(&f, lowpass(1000.0), 0.9);
     let mut target = tf(&f, lowpass(500.0), 0.9);
     target.phase_deg = None;
-    let other_epoch = Some(SessionEpoch(2));
+    let other_epoch = Some(StreamEpoch(2));
     for op in [MathOp::Add, MathOp::Subtract] {
         assert_eq!(
             transfer(

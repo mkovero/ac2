@@ -6,11 +6,11 @@ use ac2_scene::recording::{RecordingLabel, recording_label, replay_label};
 use crate::state::AppState;
 
 impl AppState {
-    /// The latest recording as shown, with the inputs named as the session names them;
+    /// The latest recording as shown, with the inputs named as the stream names them;
     /// `None` when nothing was recorded (or nothing is connected).
     pub fn recording_label(&self) -> Option<RecordingLabel> {
         let r = self.daemon()?.recording.as_ref()?;
-        let names = self.session_input_labels();
+        let names = self.stream_input_labels();
         Some(recording_label(r, |input| {
             names
                 .iter()
@@ -19,8 +19,8 @@ impl AppState {
         }))
     }
 
-    /// `REPLAY <name> · <length>` while the session plays a recording.
+    /// `REPLAY <name> · <length>` while the stream plays a recording.
     pub fn replay_label(&self) -> Option<String> {
-        replay_label(self.open_session()?, None)
+        replay_label(self.open_stream()?, None)
     }
 }

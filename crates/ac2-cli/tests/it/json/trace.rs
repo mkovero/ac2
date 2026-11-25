@@ -22,7 +22,7 @@ async fn trace_commands_json() -> R {
     ok_json(
         &f,
         &[
-            "session",
+            "stream",
             "open",
             "--backend",
             "fake",

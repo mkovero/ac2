@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use ac2_audio::BlockFlags;
 use ac2_proto::model::{LeqConfig, PeakWeighting, SplConfig, TimeWeighting, Weighting};
-use ac2_proto::units::{MeasId, Rev, SessionEpoch};
+use ac2_proto::units::{MeasId, Rev, StreamEpoch};
 
 use super::{LeqSetup, Spl};
 use crate::calstore::InputCal;
@@ -31,7 +31,7 @@ fn spl(log: &leq_log::SharedLog) -> Spl {
                 position: None,
             },
             config_rev: Rev(1),
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
         },
         FS,
         0,

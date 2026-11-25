@@ -129,7 +129,7 @@ async fn capture(c: &Client, meas: u32, name: &str) -> TraceMeta {
 }
 
 async fn set_curve(c: &Client, mic: &str, curve: CurveChoice) {
-    c.call(Command::SessionInputs {
+    c.call(Command::StreamInputs {
         inputs: vec![InputSetup {
             channel: 1,
             kind: InputKind::Mic {

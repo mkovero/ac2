@@ -40,11 +40,11 @@ fn empty_local_daemon_measures_from_the_app() -> R {
 }
 
 /// From an empty daemon whose rig is listed as an input-only and an output-only device (as
-/// an OS lists a built-in mic and speakers): the dialog picks the output device by itself, the session
+/// an OS lists a built-in mic and speakers): the dialog picks the output device by itself, the stream
 /// opens with the two, and the stimulus routed to the output device's output 1 reaches the
 /// measurement (the simulated rig only: nothing plays on hardware).
 #[test]
-fn a_session_plays_on_another_device_than_it_captures_from() -> R {
+fn a_stream_plays_on_another_device_than_it_captures_from() -> R {
     use ac2_proto::model::ClockRelation;
     let dir = tempfile::tempdir()?;
     let listen = ac2d::Listen::Local {
@@ -61,7 +61,7 @@ fn a_session_plays_on_another_device_than_it_captures_from() -> R {
     };
     let mut d = Driver::connect(ClientConfig::new(ep, NAME), "local daemon")?;
     measure_from_empty(&mut d)?;
-    let open = d.st.open_session().cloned().ok_or("session")?;
+    let open = d.st.open_stream().cloned().ok_or("stream")?;
     assert_eq!(open.input_device.0, "fake:in");
     assert_eq!(open.output_device.0, "fake:out");
     assert_eq!(open.config.output_channels, 2);
@@ -141,7 +141,7 @@ fn a_captured_trace_survives_a_daemon_restart() -> R {
     d.synced()?;
     let st = d.st.daemon().ok_or("state")?;
     assert_eq!(st.traces, traces);
-    assert!(st.session.open.is_none());
+    assert!(st.stream.open.is_none());
     assert!(!st.generator.armed && !st.generator.firing);
     assert_eq!(st.measurements.len(), 1);
     assert_eq!(
@@ -153,7 +153,7 @@ fn a_captured_trace_survives_a_daemon_restart() -> R {
     Ok(())
 }
 
-/// The session dialog's meters come back at once every time it is closed and opened again
+/// The stream dialog's meters come back at once every time it is closed and opened again
 /// (Esc, Shift+O, with no frame in between). Its stop and its new preview reach the daemon
 /// in that order; were they to cross, the daemon would close the new preview and the meters
 /// would stay blank until a renewal.
@@ -162,7 +162,7 @@ fn a_captured_trace_survives_a_daemon_restart() -> R {
 /// from the preview opened by the reopening, however long (within the daemon's 5 s preview
 /// expiry) a loaded machine takes to show them.
 #[test]
-fn slow_session_dialog_meters_return_every_round() -> R {
+fn slow_stream_dialog_meters_return_every_round() -> R {
     let (daemon, mut d) = connected()?;
     d.synced()?;
     let tick = |d: &mut Driver| {

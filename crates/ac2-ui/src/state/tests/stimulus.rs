@@ -157,7 +157,7 @@ fn space_during_a_stop_arms_once_the_stop_lands() {
     let mut t = T::new();
     stopping(&mut t);
     let mut s = daemon_state();
-    s.session.stopped = Some(ac2_proto::model::AudioStopped {
+    s.stream.stopped = Some(ac2_proto::model::AudioStopped {
         since: WallNs(0),
         cause: ac2_proto::model::StopCause::HostEnded,
         recovery: ac2_proto::model::Recovery::Opening {
@@ -956,7 +956,7 @@ fn a_driver_clock_change_is_told_with_whether_output_stopped() {
     let stopped = |s: &mut State, reason| {
         s.generator.firing = false;
         s.generator.armed = false;
-        s.session.stopped = Some(ac2_proto::model::AudioStopped {
+        s.stream.stopped = Some(ac2_proto::model::AudioStopped {
             since: WallNs(0),
             cause: ac2_proto::model::StopCause::DriverReset { reason },
             recovery: ac2_proto::model::Recovery::Opening {

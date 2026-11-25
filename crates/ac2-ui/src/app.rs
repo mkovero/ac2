@@ -887,7 +887,7 @@ impl ClockTexts {
         let mut texts = Vec::new();
         let mut changes: Vec<(f64, f64)> = Vec::new();
         // The AUDIO STOPPED countdown ticks by the second.
-        if let Some(stopped) = st.daemon().and_then(|d| d.session.stopped.as_ref()) {
+        if let Some(stopped) = st.daemon().and_then(|d| d.stream.stopped.as_ref()) {
             let wall = crate::scenes::daemon_wall(st, crate::view::now().wall);
             let in_s = ac2_scene::audio::changes_in(stopped, wall);
             texts.push(format!("{}", wall.0 / 1_000_000_000));

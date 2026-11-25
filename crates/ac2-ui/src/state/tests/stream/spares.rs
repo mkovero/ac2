@@ -1,5 +1,5 @@
 //! Reducer tests of spare inputs on the Audio I/O page: a JACK device offers them, ← → on
-//! their row add or remove input rows after the physical ones, and the opened session
+//! their row add or remove input rows after the physical ones, and the opened stream
 //! carries the count and the spare channels as ordinary inputs.
 
 use super::*;
@@ -22,9 +22,9 @@ fn jack_with_spares() -> Vec<BackendInfo> {
     }]
 }
 
-fn opened_config(r: &[Request]) -> Option<&SessionConfig> {
+fn opened_config(r: &[Request]) -> Option<&StreamConfig> {
     r.iter().find_map(|r| match r {
-        Request::OpenSession { config, .. } => Some(config),
+        Request::OpenStream { config, .. } => Some(config),
         _ => None,
     })
 }
@@ -48,7 +48,7 @@ fn spare_inputs_are_rows_after_the_physical_ones() {
     assert_eq!((d.spares, d.inputs.len()), (2, 6));
     let spare = &d.inputs[4];
     assert_eq!(spare.channel, 4);
-    assert!(spare.in_session, "a spare is there to be metered");
+    assert!(spare.in_stream, "a spare is there to be metered");
     assert_eq!(spare.device_name.as_deref(), Some("spare 1"));
     assert_eq!(
         d.spares_text(),
@@ -71,7 +71,7 @@ fn spare_inputs_are_rows_after_the_physical_ones() {
     assert_eq!(d.spares_text().split(" · ").next(), Some("input 5"));
 
     let r = t.key("Enter");
-    let c = opened_config(&r).expect("session.open");
+    let c = opened_config(&r).expect("stream.open");
     assert_eq!(c.spare_inputs, 1);
     assert!(c.input_channels.contains(&4), "{:?}", c.input_channels);
 }

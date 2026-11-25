@@ -11,7 +11,7 @@ impl AppState {
     pub(super) fn signal_row(&mut self, row: SignalRow, d: i32, out: &mut Vec<Request>) {
         let rate = self
             .daemon()
-            .and_then(|s| s.session.open.as_ref())
+            .and_then(|s| s.stream.open.as_ref())
             .map(|o| o.sample_rate_hz);
         let mut sine = self.rig.stimulus.sine;
         let kind = match row {

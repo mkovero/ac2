@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use ac2_proto::ProtoError;
 use ac2_proto::model::{
     ArtnetFade, ArtnetTarget, ColourFamily, LevelsSettings, MeasConfig, Measurement, OutputSetup,
-    PaneLayout, RigPeer, SessionConfig, StateFile,
+    PaneLayout, RigPeer, StateFile, StreamConfig,
 };
 use ac2_proto::units::{Db, MeasId};
 use ac2_traces::session::SavedMeasurement;
@@ -39,7 +39,7 @@ use file::{Read, VERSION};
 pub(crate) struct RigMeter {
     pub(crate) id: MeasId,
     pub(crate) config: MeasConfig,
-    /// Running when last changed (restarted at start when a session opens).
+    /// Running when last changed (restarted at start when a stream opens).
     pub(crate) running: bool,
     /// Colour family the operator chose; `None`: the one the id gives.
     pub(crate) colour: Option<ColourFamily>,
@@ -83,10 +83,10 @@ pub(crate) struct RigSettings {
     pub(crate) outputs: Vec<OutputSetup>,
     /// The rig's SPL meters, by id; session files never hold them.
     pub(crate) meters: Vec<RigMeter>,
-    /// Reopen `monitor_session` capture-only when the daemon starts.
+    /// Reopen `monitor_stream` capture-only when the daemon starts.
     pub(crate) monitor_at_start: bool,
-    /// The audio configuration of the last `session.open` while rig meters existed.
-    pub(crate) monitor_session: Option<SessionConfig>,
+    /// The audio configuration of the last `stream.open` while rig meters existed.
+    pub(crate) monitor_stream: Option<StreamConfig>,
     /// Where OSC cues go; `None`: nowhere.
     pub(crate) osc_target: Option<SocketAddr>,
     /// Where the Art-Net universe goes; `None`: nowhere.

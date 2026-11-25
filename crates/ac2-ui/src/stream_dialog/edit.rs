@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl SessionDialog {
+impl StreamDialog {
     // ----- focus -------------------------------------------------------------------------
 
     /// Focus order, as the page reads top to bottom: the device rows, one row per input, the
@@ -48,17 +48,17 @@ impl SessionDialog {
 
     // ----- roles, kinds and pairs ----------------------------------------------------------
 
-    /// Space: puts the focused input or output in the session, or takes it out. An input
+    /// Space: puts the focused input or output in the stream, or takes it out. An input
     /// taken out leaves its pair, the pair pick and the reference role: all are the
-    /// session's.
+    /// stream's.
     pub fn toggle(&mut self) {
         self.notice = None;
         self.error = None;
         match self.focus {
             Row::Input(i) => {
                 if let Some(r) = self.inputs.get_mut(i) {
-                    r.in_session = !r.in_session;
-                    if !r.in_session {
+                    r.in_stream = !r.in_stream;
+                    if !r.in_stream {
                         r.reference = false;
                         let c = r.channel;
                         self.unpair(c);
@@ -134,7 +134,7 @@ impl SessionDialog {
             return;
         };
         r.reference = true;
-        r.in_session = true;
+        r.in_stream = true;
         if r.is_mic() {
             r.kind = InputKind::Line;
             let c = r.channel;
@@ -155,7 +155,7 @@ impl SessionDialog {
         }
     }
 
-    /// M / L / A: declares the row's kind (and puts it in the session). The kind applies
+    /// M / L / A: declares the row's kind (and puts it in the stream). The kind applies
     /// to both rows of the row's pair (a pair is two of one kind), except that a mic kind
     /// never reaches the reference: then the row leaves the pair instead. A mic row gets
     /// the mic name last used on this input.
@@ -201,7 +201,7 @@ impl SessionDialog {
                 row.kind = kind_of(k, mic);
             }
             if own {
-                row.in_session = true;
+                row.in_stream = true;
             }
             if k == KindPref::Mic {
                 mics.push(j);
@@ -219,7 +219,7 @@ impl SessionDialog {
     }
 
     /// *pair* / Shift+P: on a paired row, unpairs it; else the first pick waits for a
-    /// second, which makes the pair (the lower input left, both in the session) or is
+    /// second, which makes the pair (the lower input left, both in the stream) or is
     /// refused with the first pick kept. The picked row again cancels the pick. Both
     /// inputs must be of one kind (mic, line or digital): a kind is the operator's to
     /// declare, so a refusal never changes one.
@@ -267,7 +267,7 @@ impl SessionDialog {
         let (left, right) = (first.min(c), first.max(c));
         for row in &mut self.inputs {
             if row.channel == left || row.channel == right {
-                row.in_session = true;
+                row.in_stream = true;
             }
         }
         self.pairs.push(Pair {
@@ -317,7 +317,7 @@ impl SessionDialog {
             self.set_kind(i, KindPref::Mic);
             self.edit_text = self.inputs[i].mic().unwrap_or_default().to_owned();
         }
-        self.inputs[i].in_session = true;
+        self.inputs[i].in_stream = true;
         self.edit = Some(Edit::Mic(i));
         true
     }
@@ -474,7 +474,7 @@ impl SessionDialog {
     }
 
     /// ←/→ on a mic's input row: the next of its curves (off, then the library's curves of
-    /// the mic in import order). Returns the row to send now when the open session captures
+    /// the mic in import order). Returns the row to send now when the open stream captures
     /// this input with this mic already (`live` is the daemon's input setup): the change then
     /// applies to the running measurements without reopening anything.
     pub fn step_curve(

@@ -11,7 +11,7 @@ use ac2_proto::model::{RemoteAudio, RemoteInput, RemoteLink, RemoteState};
 use ac2_proto::units::RigId;
 
 /// A rig with no measurements and no audio I/O open, as the top bar says it.
-pub const NO_SESSION: &str = "no session";
+pub const NO_STREAM: &str = "no stream";
 
 /// A rig whose measurements have no audio I/O open, as the top bar says it.
 pub const NO_AUDIO: &str = "no audio I/O";
@@ -19,13 +19,13 @@ pub const NO_AUDIO: &str = "no audio I/O";
 /// A pairing its rig reports nothing wrong with.
 pub const PAIRED: &str = "paired";
 
-/// What a rig's audio session runs at, beside its name.
+/// What a rig's audio stream runs at, beside its name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RigAudio {
-    /// Its session's sample rate, Hz.
+    /// Its stream's sample rate, Hz.
     Rate(u32),
     /// No audio I/O open and nothing measured.
-    NoSession,
+    NoStream,
     /// Measurements, and no audio I/O open.
     NoAudio,
 }
@@ -36,7 +36,7 @@ impl RigAudio {
     pub fn text(self) -> String {
         match self {
             RigAudio::Rate(hz) => crate::audio::rate_text(hz),
-            RigAudio::NoSession => NO_SESSION.to_owned(),
+            RigAudio::NoStream => NO_STREAM.to_owned(),
             RigAudio::NoAudio => NO_AUDIO.to_owned(),
         }
     }
@@ -56,7 +56,7 @@ pub struct RigRoot<'a> {
     pub measurements: u32,
     /// Every stored trace on the rig.
     pub traces: u32,
-    /// Its audio session, said beside the name.
+    /// Its audio stream, said beside the name.
     pub audio: RigAudio,
     /// Its clock domain's tag, said after the rate; `None`: no tag.
     pub clock: Option<ClockTag<'a>>,
@@ -149,12 +149,12 @@ impl Pairing {
     }
 }
 
-/// The pairing with `rig` as the rig shown's daemon reports it (`r`, with its session's
+/// The pairing with `rig` as the rig shown's daemon reports it (`r`, with its stream's
 /// remote inputs `inputs`), in the words the lines between rigs use: a link that is not up,
 /// else the first of that rig's inputs whose audio does not stream (*cm4 runs 48 kHz, this
 /// rig 96 kHz*), else that its audio streams and, as `clocks` has it, how the clocks
 /// between the two stand (*paired · streaming · clocks agree*, *CLOCKS NOT LOCKED +5.6 ppm
-/// · paired · streaming*). A daemon says nothing of a paired rig its session takes no
+/// · paired · streaming*). A daemon says nothing of a paired rig its stream takes no
 /// input from: that one reads *paired*, no more.
 pub fn pairing_text(
     r: &RemoteState,
@@ -192,7 +192,7 @@ pub fn pairing_text(
     }
 }
 
-/// The heading's second line at its narrowest: its session's rate and its clock tag,
+/// The heading's second line at its narrowest: its stream's rate and its clock tag,
 /// `48 kHz FREE`. Between two rigs' headings these say what a pairing refused for the rate
 /// would.
 fn audio_line(root: &RigRoot<'_>) -> String {
@@ -263,11 +263,11 @@ pub enum Away {
 }
 
 /// What the rig shown's daemon hears of a paired rig in its levels
-/// (`State.remote.standing`) while the link between the two is up: its session, and the
+/// (`State.remote.standing`) while the link between the two is up: its stream, and the
 /// clock tag that rests on it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Heard<'a> {
-    /// Its session's rate, or [`RigAudio::NoSession`].
+    /// Its stream's rate, or [`RigAudio::NoStream`].
     pub audio: RigAudio,
     /// Its clock domain's tag; `None`: no tag.
     pub clock: Option<ClockTag<'a>>,
@@ -375,7 +375,7 @@ mod tests {
     }
 
     /// The rig shown and a rig paired with it: each is a root over its own rows, a level in,
-    /// its session's rate under its name; the folded one lists only its heading, saying how
+    /// its stream's rate under its name; the folded one lists only its heading, saying how
     /// many measurements and traces it hides. Plain *paired* is not said: a rig listed under
     /// the rig shown is paired with it.
     #[test]
@@ -493,7 +493,7 @@ mod tests {
         (state, inputs)
     }
 
-    /// A rig's name stands alone on its heading's first line; the second says its session's
+    /// A rig's name stands alone on its heading's first line; the second says its stream's
     /// rate, or what the top bar says of a rig without one, and its clock tag after the rate.
     /// The rig shown says nothing more: where new measurements and the keys go is its
     /// tooltip's.
@@ -516,7 +516,7 @@ mod tests {
         let says = |line: &str| ("pupu".to_owned(), vec![line.to_owned()]);
         assert_eq!(lines(RigAudio::Rate(96_000), None), says("96 kHz"));
         assert_eq!(lines(RigAudio::Rate(44_100), None), says("44.1 kHz"));
-        assert_eq!(lines(RigAudio::NoSession, None), says("no session"));
+        assert_eq!(lines(RigAudio::NoStream, None), says("no stream"));
         assert_eq!(lines(RigAudio::NoAudio, None), says("no audio I/O"));
         assert_eq!(
             lines(RigAudio::Rate(96_000), Some("FREE")),
@@ -710,7 +710,7 @@ mod tests {
              frames, no audio streamed"
         ));
         let idle = Heard {
-            audio: RigAudio::NoSession,
+            audio: RigAudio::NoStream,
             clock: None,
         };
         let h = rig_away_heading(
@@ -722,7 +722,7 @@ mod tests {
         );
         assert_eq!(
             h.details,
-            ["no session · paired · unreachable · retrying", "no session"]
+            ["no stream · paired · unreachable · retrying", "no stream"]
         );
         // The link between the daemons down: its words, nothing heard.
         let h = rig_away_heading(

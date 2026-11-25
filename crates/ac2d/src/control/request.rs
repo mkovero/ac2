@@ -12,7 +12,7 @@ use ac2_proto::{
 };
 
 use crate::dedup::{Admit, Retry};
-use crate::health::SessionStream;
+use crate::health::StreamState;
 use crate::util::{internal, invalid, perr, refused, wall_ns};
 
 use super::{Control, PendingFind, PendingReply, PreviewKey, mutation_conflict};
@@ -26,23 +26,23 @@ impl Control {
             return;
         }
         self.ka.seq += 1;
-        let stream = match (&self.session, &self.audio_recovery) {
-            (Some(rt), _) => SessionStream::Running(&rt.health),
-            (None, Some(_)) => SessionStream::Recovering,
-            (None, None) => SessionStream::Closed,
+        let stream = match (&self.stream, &self.audio_recovery) {
+            (Some(rt), _) => StreamState::Running(&rt.health),
+            (None, Some(_)) => StreamState::Recovering,
+            (None, None) => StreamState::Closed,
         };
         self.health.tick(Instant::now(), stream);
         let st = self.store.state();
         let now = wall_ns();
         let latest = self
-            .session
+            .stream
             .as_ref()
             .map_or(0u64, |r| r.fanout.latest.load(Ordering::Acquire));
         let frame = Frame {
             stamp: FrameStamp {
                 seq: self.ka.seq,
                 audio_sample: SampleIndex(latest.saturating_sub(1)),
-                session_epoch: st.session.epoch,
+                stream_epoch: st.stream.epoch,
                 daemon_incarnation: self.s.incarnation,
                 config_rev: self.store.rev(),
                 config_applied_at: SampleIndex(0),
@@ -207,7 +207,7 @@ impl Control {
                 // and other clients are served meanwhile.
                 // The burst and its capture take about a second on their own thread; the
                 // reply follows the result.
-                Command::SessionDetectLoopback {
+                Command::StreamDetectLoopback {
                     lease_token,
                     backend,
                     input_device,
@@ -240,7 +240,7 @@ impl Control {
                 // Asking a driver for its devices, or opening one, can outlast a stimulus
                 // lease's refresh margin: on their own threads, so a running sweep's refreshes
                 // are answered meanwhile.
-                Command::SessionDevices => match self.start_devices(PendingReply {
+                Command::StreamDevices => match self.start_devices(PendingReply {
                     route: route.clone(),
                     client: client.clone(),
                     id: req.id,
@@ -248,7 +248,7 @@ impl Control {
                     Ok(()) => return,
                     Err(e) => Err(e),
                 },
-                Command::SessionPreview {
+                Command::StreamPreview {
                     backend,
                     device,
                     inputs,
@@ -274,7 +274,7 @@ impl Control {
                     }
                 }
                 // A driver's panel may be a modal dialog: the call runs on its own thread.
-                Command::SessionControlPanel { backend, device } => {
+                Command::StreamControlPanel { backend, device } => {
                     match self.start_panel(backend, device) {
                         Ok(token) => {
                             self.pending.panels.insert(
@@ -368,11 +368,11 @@ impl Control {
 fn retry(cmd: &Command) -> Retry {
     let acts = matches!(
         cmd,
-        Command::SessionDevices
-            | Command::SessionPreview { .. }
-            | Command::SessionPreviewStop
-            | Command::SessionControlPanel { .. }
-            | Command::SessionDetectLoopback { .. }
+        Command::StreamDevices
+            | Command::StreamPreview { .. }
+            | Command::StreamPreviewStop
+            | Command::StreamControlPanel { .. }
+            | Command::StreamDetectLoopback { .. }
             | Command::DelayFind { .. }
             | Command::TraceExport { .. }
             | Command::FileUploadBegin { .. }

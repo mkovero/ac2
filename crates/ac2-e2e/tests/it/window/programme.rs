@@ -46,7 +46,7 @@ fn line(channel: u16) -> InputSetup {
 /// In 2 a mic; in 3 + 4 the line pair `Main`, its right side (nothing patched to in 4)
 /// silent.
 fn pair_rig_on(rig: &Rig) -> R {
-    rig.call(Command::SessionInputs {
+    rig.call(Command::StreamInputs {
         inputs: vec![mic(1), line(2), line(3)],
         pairs: vec![Pair {
             left: 2,
@@ -126,7 +126,7 @@ fn programme_pane_of_a_pair() -> R {
     let _tone = rig.cli.lease(tone(-10.0))?;
     let mut h = harness(options(&rig));
     step_until(&mut h, "the pair's levels", |a| {
-        a.state.session_inputs().iter().any(|r| r.right.is_some())
+        a.state.stream_inputs().iter().any(|r| r.right.is_some())
             && a.state.row_meters(2).is_some_and(|m| {
                 a.state
                     .programme_of(m)
@@ -138,7 +138,7 @@ fn programme_pane_of_a_pair() -> R {
     let label = h
         .state()
         .state
-        .session_inputs()
+        .stream_inputs()
         .into_iter()
         .find(|r| r.channel == 2)
         .map(|r| r.label)
@@ -566,7 +566,7 @@ fn a_mic_pair_on_short_loudness_reads_true_peak() -> R {
         return Ok(());
     }
     let rig = Rig::start()?;
-    rig.call(Command::SessionInputs {
+    rig.call(Command::StreamInputs {
         inputs: vec![mic(2), mic(3)],
         pairs: vec![Pair {
             left: 2,

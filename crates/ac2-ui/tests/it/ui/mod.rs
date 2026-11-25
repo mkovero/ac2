@@ -106,8 +106,8 @@ const WAIT: Duration = Duration::from_secs(60);
 fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> bool) {
     let t0 = Instant::now();
     // The sidebar's input labels take the device's channel names once the list arrives:
-    // with a session open, a screenshot waits for it.
-    let named = |a: &App| a.state.open_session().is_none() || a.state.rig.devices.is_some();
+    // with a stream open, a screenshot waits for it.
+    let named = |a: &App| a.state.open_stream().is_none() || a.state.rig.devices.is_some();
     while !(cond(h.state()) && named(h.state())) {
         if t0.elapsed() > WAIT {
             let a = h.state();

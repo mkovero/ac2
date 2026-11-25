@@ -314,7 +314,7 @@ impl RigState {
 
     /// Folds the newest `leq` frame of each SPL meter into its history.
     /// Keeps, per Leq and band Leq topic, the frame a new one replaces, for its bars to
-    /// ease from. A frame from another session, daemon or configuration is not the same
+    /// ease from. A frame from another stream, daemon or configuration is not the same
     /// bars moving: none is kept, and the new one is drawn as received.
     pub(super) fn keep_bar_from(&mut self, d: &DataSnapshot) {
         let old = self.data.as_deref();
@@ -336,7 +336,7 @@ impl RigState {
             if a.seq == b.seq {
                 continue;
             }
-            if a.session_epoch == b.session_epoch
+            if a.stream_epoch == b.stream_epoch
                 && a.daemon_incarnation == b.daemon_incarnation
                 && a.config_rev == b.config_rev
             {

@@ -66,7 +66,7 @@ fn pin_host(mut v: Value) -> Value {
 }
 
 /// Wall-clock instants (`…_at`, `since`, `at`: nanoseconds since 1970) as how long before
-/// `now` they were, `"now-<ns>"`: the app reads them against its own clock (a session open
+/// `now` they were, `"now-<ns>"`: the app reads them against its own clock (a stream open
 /// for 3 h, calibrated yesterday), so a test rebases them on its own now
 /// (`ac2-ui/tests/it/recorded.rs`).
 fn pin_times(mut v: Value, now: i128) -> Value {
@@ -166,19 +166,19 @@ fn differs(a: &Value, b: &Value, at: &str) -> Option<String> {
     }
 }
 
-/// Records every fixture from a fresh daemon with no session (as on real audio).
+/// Records every fixture from a fresh daemon with no stream (as on real audio).
 fn record() -> R<Vec<(&'static str, Value)>> {
     let d = sim_daemon(Setup::Empty)?;
     let cli = Cli::connect(d.endpoints())?;
     let state: State = (*cli.state().ok_or("no state")?).clone();
-    let backends = match cli.call(Command::SessionDevices)? {
+    let backends = match cli.call(Command::StreamDevices)? {
         ReplyBody::Backends(b) => b,
-        other => return Err(format!("session.devices: {other:?}").into()),
+        other => return Err(format!("stream.devices: {other:?}").into()),
     };
     let device = only_fake(&backends)?;
     // A quiet burst on the simulated rig (never real audio): out 1 returns on in 1.
     let lease = cli.block_on(cli_lease(&cli))?;
-    let detection = match cli.call(Command::SessionDetectLoopback {
+    let detection = match cli.call(Command::StreamDetectLoopback {
         lease_token: lease.token(),
         backend: BackendKind::Fake,
         input_device: device.clone(),
@@ -187,7 +187,7 @@ fn record() -> R<Vec<(&'static str, Value)>> {
         level: Some(Dbfs(-30.0)),
     })? {
         ReplyBody::LoopbackDetection(x) => x,
-        other => return Err(format!("session.detect_loopback: {other:?}").into()),
+        other => return Err(format!("stream.detect_loopback: {other:?}").into()),
     };
     drop(lease);
     Ok(vec![
@@ -195,7 +195,7 @@ fn record() -> R<Vec<(&'static str, Value)>> {
             "empty_state.json",
             doc(&pin_host(serde_json::to_value(&state)?))?,
         ),
-        ("session_devices.json", doc(&backends)?),
+        ("stream_devices.json", doc(&backends)?),
         ("detect_loopback.json", doc(&detection)?),
     ])
 }
@@ -368,7 +368,7 @@ fn fixtures_parse() -> R {
         Ok(serde_json::from_value(doc["value"].clone())?)
     }
     let _: State = value("empty_state.json")?;
-    let _: Vec<BackendInfo> = value("session_devices.json")?;
+    let _: Vec<BackendInfo> = value("stream_devices.json")?;
     let _: LoopbackDetection = value("detect_loopback.json")?;
     Ok(())
 }

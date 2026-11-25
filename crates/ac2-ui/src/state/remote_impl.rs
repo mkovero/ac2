@@ -1,12 +1,12 @@
 //! Remote inputs in the reducer (`docs/design/remote-inputs.md` §2.3, §5): the add dialog
 //! over the rigs this app holds, pairing two rigs (the source admits this rig, this rig
-//! pairs with the source) and reopening this rig's session with the input, removal, the
+//! pairs with the source) and reopening this rig's stream with the input, removal, the
 //! refusal of a setup change on one, and the words its rows and the Connection page show.
 
 use super::*;
 use crate::remote_inputs::{PickLine, RemotePick, RemoteRow, admit_name, peer_endpoints};
 use ac2_proto::model::{
-    InputSetup, NetworkServer, OpenSession, RemoteInput, RemoteState, RigPeer, ServerInfo,
+    InputSetup, NetworkServer, OpenStream, RemoteInput, RemoteState, RigPeer, ServerInfo,
     remote_slot,
 };
 use ac2_scene::pairing::PairRefusal;
@@ -37,10 +37,10 @@ impl Source {
 }
 
 impl AppState {
-    /// The open session's remote input on session channel `ch`.
+    /// The open stream's remote input on stream channel `ch`.
     pub fn remote_input(&self, ch: u16) -> Option<&RemoteInput> {
         let slot = remote_slot(ch)?;
-        self.open_session()?
+        self.open_stream()?
             .config
             .remote_inputs
             .iter()
@@ -84,9 +84,9 @@ impl AppState {
         ac2_scene::time::local_clock(t, now, |x| self.local_zone.offset_s(x))
     }
 
-    /// The Audio I/O page's remote input rows, in the session's order.
+    /// The Audio I/O page's remote input rows, in the stream's order.
     pub fn remote_rows(&self) -> Vec<RemoteRow> {
-        let (Some(st), Some(o)) = (self.daemon(), self.open_session()) else {
+        let (Some(st), Some(o)) = (self.daemon(), self.open_stream()) else {
             return Vec::new();
         };
         let meters = self.input_meters();
@@ -96,11 +96,11 @@ impl AppState {
             .remote_inputs
             .iter()
             .map(|r| {
-                let ch = r.session_channel();
+                let ch = r.stream_channel();
                 let status = st.remote.inputs.iter().find(|s| s.slot == r.slot);
                 let setup = status.and_then(|s| s.setup.as_ref());
                 let role = setup
-                    .map(|s| crate::session_dialog::kind_role(crate::prefs::KindPref::of(&s.kind)));
+                    .map(|s| crate::stream_dialog::kind_role(crate::prefs::KindPref::of(&s.kind)));
                 let mut text = words::source_row(r.channel, role, setup.and_then(InputSetup::mic));
                 if let Some(s) = status {
                     if let Some(c) = &s.curve {
@@ -129,10 +129,10 @@ impl AppState {
             .collect()
     }
 
-    /// The Connection page's *Between rigs* blocks, one per rig the session takes inputs
+    /// The Connection page's *Between rigs* blocks, one per rig the stream takes inputs
     /// from.
     pub fn between_rigs(&self) -> Vec<Vec<String>> {
-        let (Some(st), Some(o)) = (self.daemon(), self.open_session()) else {
+        let (Some(st), Some(o)) = (self.daemon(), self.open_stream()) else {
             return Vec::new();
         };
         st.remote
@@ -253,8 +253,8 @@ impl AppState {
     /// Rig `b` as a source this rig can take inputs from, or why not.
     fn source(&self, b: &RigState) -> Result<Source, SourceRefusal> {
         let src = self.pair_end(b, &self.rig).map_err(SourceRefusal::Pair)?;
-        match b.daemon().and_then(|s| s.session.open.as_ref()) {
-            None => Err(SourceRefusal::NoSession),
+        match b.daemon().and_then(|s| s.stream.open.as_ref()) {
+            None => Err(SourceRefusal::NoStream),
             Some(o) if o.replay.is_some() => Err(SourceRefusal::Replaying),
             Some(_) => Ok(src),
         }
@@ -267,8 +267,8 @@ impl AppState {
         if self.others.background.is_empty() {
             return vec![text(words::NO_OTHER_RIG.into(), false)];
         }
-        let Some(open) = self.open_session() else {
-            return vec![text(words::NO_SESSION_HERE.into(), true)];
+        let Some(open) = self.open_stream() else {
+            return vec![text(words::NO_STREAM_HERE.into(), true)];
         };
         let mut v = Vec::new();
         if let Err(e) = self.own_key() {
@@ -357,14 +357,14 @@ impl AppState {
             }
             return true;
         }
-        let focus = s.session.focus;
+        let focus = s.stream.focus;
         match focus {
             Row::AddRemote if chord.key == Key::Enter && plain => {
                 self.open_remote_pick(out);
                 true
             }
             Row::Remote(i) => {
-                let Some(r) = s.session.remote.get(i).cloned() else {
+                let Some(r) = s.stream.remote.get(i).cloned() else {
                     return false;
                 };
                 match chord.key {
@@ -388,13 +388,13 @@ impl AppState {
                             || r.rig_name.clone(),
                             |st| ac2_scene::between_rigs::rig_name(&st.remote, &r),
                         );
-                        if let Some(d) = self.overlay.session_mut() {
+                        if let Some(d) = self.overlay.stream_mut() {
                             d.error = Some(words::set_on(&rig));
                         }
                         true
                     }
                     Key::P if plain && chord.shift => {
-                        if let Some(d) = self.overlay.session_mut() {
+                        if let Some(d) = self.overlay.stream_mut() {
                             d.error = Some(words::set_on(&r.rig_name));
                         }
                         true
@@ -420,7 +420,7 @@ impl AppState {
     }
 
     /// Picks input `channel` of rig `rig` (another rig held): that rig admits this one, this
-    /// rig pairs with it, and this rig's session reopens with the input added, everything
+    /// rig pairs with it, and this rig's stream reopens with the input added, everything
     /// else of it kept.
     pub(super) fn pick_remote(&mut self, rig: RigId, channel: u16, out: &mut Vec<Request>) {
         let key = match self.own_key() {
@@ -437,8 +437,8 @@ impl AppState {
                 return self.pick_error(words::source_refusal(&name, &why));
             }
         };
-        let Some(open) = self.open_session().cloned() else {
-            return self.pick_error(words::NO_SESSION_HERE.into());
+        let Some(open) = self.open_stream().cloned() else {
+            return self.pick_error(words::NO_STREAM_HERE.into());
         };
         let used: Vec<u16> = self
             .measurements()
@@ -446,7 +446,7 @@ impl AppState {
             .flat_map(|m| crate::remote_inputs::meas_channels(&m.config.kind))
             .collect();
         let Some(slot) = crate::remote_inputs::next_slot(&open.config.remote_inputs, used) else {
-            return self.pick_error("this session has no remote slot left".into());
+            return self.pick_error("this stream has no remote slot left".into());
         };
         let input = RemoteInput {
             slot,
@@ -455,7 +455,7 @@ impl AppState {
             channel,
         };
         let mut config = open.config.clone();
-        config.input_channels.push(input.session_channel());
+        config.input_channels.push(input.stream_channel());
         config.remote_inputs.push(input);
         let me = self.rig_label(&self.rig);
         self.others.elsewhere.push((
@@ -470,7 +470,7 @@ impl AppState {
             },
         ));
         let name = words::remote_name(&src.name, channel, None);
-        out.push(Request::RemoteSession {
+        out.push(Request::RemoteStream {
             pair: Some(src.peer()),
             config,
             what: words::added_toast(&name),
@@ -481,28 +481,28 @@ impl AppState {
     }
 
     /// Delete on a remote input's row: the first press asks, the second reopens the
-    /// session without it.
+    /// stream without it.
     pub(super) fn remove_remote(&mut self, slot: u16, out: &mut Vec<Request>) {
-        let Some(open) = self.open_session().cloned() else {
+        let Some(open) = self.open_stream().cloned() else {
             return;
         };
         let Some(r) = open.config.remote_inputs.iter().find(|r| r.slot == slot) else {
             return;
         };
         let name = self
-            .remote_input_name(r.session_channel())
+            .remote_input_name(r.stream_channel())
             .unwrap_or_else(|| words::remote_name(&r.rig_name, r.channel, None));
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
         if s.remote.confirm != Some(slot) {
             s.remote.confirm = Some(slot);
-            s.session.notice = Some(words::remove_confirm(&name));
+            s.stream.notice = Some(words::remove_confirm(&name));
             return;
         }
         s.remote.confirm = None;
-        s.session.notice = None;
-        out.push(Request::RemoteSession {
+        s.stream.notice = None;
+        out.push(Request::RemoteStream {
             pair: None,
             config: without(&open, slot),
             what: words::removed_toast(&name),
@@ -511,7 +511,7 @@ impl AppState {
 }
 
 /// `open`'s configuration without remote slot `slot`.
-fn without(open: &OpenSession, slot: u16) -> ac2_proto::model::SessionConfig {
+fn without(open: &OpenStream, slot: u16) -> ac2_proto::model::StreamConfig {
     let mut c = open.config.clone();
     c.remote_inputs.retain(|r| r.slot != slot);
     let ch = ac2_proto::model::REMOTE_BASE + slot;
@@ -520,12 +520,12 @@ fn without(open: &OpenSession, slot: u16) -> ac2_proto::model::SessionConfig {
 }
 
 /// Rig `b`'s captured inputs with the row text it gives them (`in 1 · mic MM1 34804`): a
-/// rig streams only what its own session captures.
+/// rig streams only what its own stream captures.
 fn source_inputs(b: &RigState) -> Vec<(u16, String)> {
     let Some(st) = b.daemon() else {
         return Vec::new();
     };
-    let Some(o) = st.session.open.as_ref() else {
+    let Some(o) = st.stream.open.as_ref() else {
         return Vec::new();
     };
     let loopback = o.config.loopback.map(|l| l.input);
@@ -538,7 +538,7 @@ fn source_inputs(b: &RigState) -> Vec<(u16, String)> {
             let role = if loopback == Some(c) {
                 ac2_scene::meter::InputRole::Reference
             } else {
-                crate::session_dialog::kind_role(crate::prefs::KindPref::of(&setup.kind))
+                crate::stream_dialog::kind_role(crate::prefs::KindPref::of(&setup.kind))
             };
             (c, words::source_row(c, Some(role), setup.mic()))
         })

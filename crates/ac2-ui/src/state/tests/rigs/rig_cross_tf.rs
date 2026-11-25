@@ -1,7 +1,7 @@
 //! Multi-rig stage 3c (`docs/design/remote-inputs.md` §5): a transfer function with one
 //! channel on another rig says its clock relation wherever it appears — the top bar's chip
 //! and banner, the pane's title, caption, banner strip and faint phase, its cue in the
-//! measurement list — and the Connection page sets the link offset as `ac2 session
+//! measurement list — and the Connection page sets the link offset as `ac2 stream
 //! link-offset` does.
 
 use super::rig_remote::with_remote;
@@ -18,7 +18,7 @@ fn key(t: &mut T, s: &str) -> Vec<(RigId, Request)> {
     t.st.update(Msg::Key(c), &t.keys)
 }
 
-/// This rig's session with pupu's input 2 (see `with_remote`), the clocks between the rigs
+/// This rig's stream with pupu's input 2 (see `with_remote`), the clocks between the rigs
 /// `relation`, and Main L a transfer function measuring on pupu's input, `state`.
 fn cross_tf(t: &mut T, relation: PeerRelation, state: CrossTfState) {
     with_remote(t, RemoteLink::Up, RemoteAudio::Streaming);
@@ -341,7 +341,7 @@ fn an_ambiguous_relock_opens_the_pick() {
 }
 
 /// The chip opens the Connection page; its link offset line types a time and reopens the
-/// session with it, everything else as it was; a bad time is refused in words.
+/// stream with it, everything else as it was; a bad time is refused in words.
 #[test]
 fn the_connection_page_sets_the_link_offset() {
     let mut t = two_mirrored();
@@ -376,25 +376,25 @@ fn the_connection_page_sets_the_link_offset() {
     }
     t.st.update(Msg::Text("30ms".into()), &t.keys);
     let r = key(&mut t, "Enter");
-    let before = t.st.open_session().expect("open").config.clone();
+    let before = t.st.open_stream().expect("open").config.clone();
     let (config, what) = r
         .iter()
         .find_map(|(_, q)| match q {
-            Request::RemoteSession {
+            Request::RemoteStream {
                 pair: None,
                 config,
                 what,
             } => Some((config.clone(), what.clone())),
             _ => None,
         })
-        .expect("reopens the session");
+        .expect("reopens the stream");
     assert_eq!(
         what,
         "link offset 30 ms: the remote inputs anchor again, their averages restart"
     );
     assert_eq!(config.link_offset, Some(Seconds(0.03)));
     assert_eq!(
-        ac2_proto::model::SessionConfig {
+        ac2_proto::model::StreamConfig {
             link_offset: None,
             ..config
         },

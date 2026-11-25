@@ -1,6 +1,6 @@
 //! Remote inputs between two in-process daemons on fake devices: pairing, the filtered
 //! state an admitted rig sees, the joined feed under a spectrum, an SPL meter and the
-//! session meters, the refusals, and removal ending the stream.
+//! stream meters, the refusals, and removal ending the stream.
 #![allow(clippy::unwrap_used)]
 
 use crate::common;
@@ -11,7 +11,7 @@ use ac2_proto::frame::FrameData;
 use ac2_proto::model::SessionRef;
 use ac2_proto::model::{
     MeasConfig, MeasKind, MeasScope, REMOTE_BASE, RemoteAudio, RemoteInput, RemoteLink,
-    RemoteState, RigPeer, SessionConfig, SpectrumConfig, SystemClock,
+    RemoteState, RigPeer, SpectrumConfig, StreamConfig, SystemClock,
 };
 use ac2_proto::units::{MeasId, RigId};
 use ac2_proto::{Command, ErrorCode};
@@ -154,8 +154,8 @@ pub(super) fn wait_remote(c: &mut Client, what: &str, mut pred: impl FnMut(&Remo
 }
 
 /// This rig's inputs 0 and the other rig's input 1 as remote slot 0.
-fn with_remote(rig: RigId, sample_rate_hz: u32) -> SessionConfig {
-    SessionConfig {
+fn with_remote(rig: RigId, sample_rate_hz: u32) -> StreamConfig {
+    StreamConfig {
         input_channels: vec![0, REMOTE_BASE],
         sample_rate_hz: Some(sample_rate_hz),
         remote_inputs: vec![RemoteInput {
@@ -164,7 +164,7 @@ fn with_remote(rig: RigId, sample_rate_hz: u32) -> SessionConfig {
             rig_name: "rig-b".into(),
             channel: 1,
         }],
-        ..session(false)
+        ..stream(false)
     }
 }
 
@@ -193,7 +193,7 @@ struct Paired {
 }
 
 /// Rig A takes rig B's input 1 as remote slot 0: B admits A, A pairs with B and opens its
-/// session, checking on the way what an admitted rig may and may not do on B.
+/// stream, checking on the way what an admitted rig may and may not do on B.
 fn paired() -> Paired {
     init_log();
     let dir = tempfile::tempdir().unwrap();
@@ -205,8 +205,8 @@ fn paired() -> Paired {
     let ctx = Context::new().unwrap();
     let (mut cb, b_id) = client(&ctx, &b, &app);
     let (mut ca, a_id) = client(&ctx, &a, &app);
-    cb.ok(Command::SessionOpen {
-        config: session(false),
+    cb.ok(Command::StreamOpen {
+        config: stream(false),
     });
 
     // B admits A's key as a rig: A may read B's source state and nothing else.
@@ -218,22 +218,16 @@ fn paired() -> Paired {
     let (mut as_rig, _) = client(&ctx, &b, &a_keys);
     let s = as_rig.source_state(Command::SourceState);
     assert_eq!(s.rig, b_id);
-    let inputs: Vec<u16> = s
-        .session
-        .unwrap()
-        .inputs
-        .iter()
-        .map(|i| i.channel)
-        .collect();
+    let inputs: Vec<u16> = s.stream.unwrap().inputs.iter().map(|i| i.channel).collect();
     assert_eq!(inputs, vec![0, 1]);
-    let e = as_rig.call(Command::SessionStatus).unwrap_err();
+    let e = as_rig.call(Command::StreamStatus).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     let e = as_rig.call(Command::StateSnapshot).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
 
     // An input of this rig is no remote input.
     let e = ca
-        .call(Command::SessionOpen {
+        .call(Command::StreamOpen {
             config: with_remote(a_id, FS),
         })
         .unwrap_err();
@@ -248,7 +242,7 @@ fn paired() -> Paired {
             key: b.server_public_key().unwrap().to_z85(),
         },
     });
-    ca.ok(Command::SessionOpen {
+    ca.ok(Command::StreamOpen {
         config: with_remote(b_id, FS),
     });
     Paired {
@@ -277,9 +271,9 @@ fn pairing_admits_a_rig_to_its_inputs_only() {
             .first()
             .is_some_and(|i| i.audio != RemoteAudio::Waiting)
     });
-    // B's rate is known now: a session at another one is refused before anything closes.
+    // B's rate is known now: a stream at another one is refused before anything closes.
     let e = ca
-        .call(Command::SessionOpen {
+        .call(Command::StreamOpen {
             config: with_remote(b_id, 2 * FS),
         })
         .unwrap_err();
@@ -322,7 +316,7 @@ fn pairing_admits_a_rig_to_its_inputs_only() {
 
     // The remote input's calibration is its rig's.
     let e = ca
-        .call(Command::SessionInputs {
+        .call(Command::StreamInputs {
             inputs: vec![ac2_proto::model::InputSetup {
                 channel: REMOTE_BASE,
                 kind: ac2_proto::model::InputKind::Line,
@@ -336,8 +330,8 @@ fn pairing_admits_a_rig_to_its_inputs_only() {
     // A new link offset reopens the audio I/O: the remote input anchors again, at it, and
     // the transfer function across the rigs waits for the clocks again.
     let before = remote(&mut ca).link_offset;
-    ca.ok(Command::SessionOpen {
-        config: SessionConfig {
+    ca.ok(Command::StreamOpen {
+        config: StreamConfig {
             link_offset: Some(ac2_proto::units::Seconds(0.08)),
             ..with_remote(b_id, FS)
         },
@@ -384,11 +378,11 @@ fn slow_spectrum_spl_and_meters_read_a_remote_input() {
         r.inputs.first().map(|i| i.audio) == Some(RemoteAudio::Streaming)
             && r.rigs.first().map(|r| &r.link) == Some(&RemoteLink::Up)
     });
-    // A spectrum and an SPL meter on the remote input, and the session meters, all read it.
+    // A spectrum and an SPL meter on the remote input, and the stream meters, all read it.
     let sub = Sub::connect_with(
         a.context(),
         net_endpoints(&a).1.as_str(),
-        &[b"d/", b"session/levels"],
+        &[b"d/", b"stream/levels"],
         Some(&CurveClient {
             keys: app.clone(),
             server_key: a.server_public_key().unwrap(),
@@ -410,7 +404,7 @@ fn slow_spectrum_spl_and_meters_read_a_remote_input() {
         match &f.data {
             FrameData::Spec(_) => seen.0 = true,
             FrameData::Spl(_) => seen.1 = true,
-            FrameData::SessionLevels(l) => {
+            FrameData::StreamLevels(l) => {
                 seen.2 = seen.2 || l.meta.channels == vec![0, REMOTE_BASE];
             }
             _ => {}
@@ -444,7 +438,7 @@ fn a_rig_whose_key_changed_is_named() {
             key: other.to_z85(),
         },
     });
-    ca.ok(Command::SessionOpen {
+    ca.ok(Command::StreamOpen {
         config: with_remote(b_id, FS),
     });
     wait_remote(&mut ca, "key changed", |r| {
@@ -467,8 +461,8 @@ fn slow_a_rig_admitted_as_an_app_is_told_so_until_admitted_as_a_rig() {
     let ctx = Context::new().unwrap();
     let (mut cb, b_id) = client(&ctx, &b, &app);
     let (mut ca, a_id) = client(&ctx, &a, &app);
-    cb.ok(Command::SessionOpen {
-        config: session(false),
+    cb.ok(Command::StreamOpen {
+        config: stream(false),
     });
     cb.ok(Command::ServerAuthorize {
         name: "rig-a".into(),
@@ -483,7 +477,7 @@ fn slow_a_rig_admitted_as_an_app_is_told_so_until_admitted_as_a_rig() {
             key: b.server_public_key().unwrap().to_z85(),
         },
     });
-    ca.ok(Command::SessionOpen {
+    ca.ok(Command::StreamOpen {
         config: with_remote(b_id, FS),
     });
     wait_remote(&mut ca, "not admitted", |r| {
@@ -502,16 +496,16 @@ fn slow_a_rig_admitted_as_an_app_is_told_so_until_admitted_as_a_rig() {
     b.shutdown();
 }
 
-/// The open session's input channels and remote inputs.
-fn session_inputs(c: &mut Client) -> (Vec<u16>, Vec<RemoteInput>) {
-    let s = c.snapshot(Command::StateSnapshot).state.session;
-    let cfg = s.open.expect("an open session").config;
+/// The open stream's input channels and remote inputs.
+fn stream_inputs(c: &mut Client) -> (Vec<u16>, Vec<RemoteInput>) {
+    let s = c.snapshot(Command::StateSnapshot).state.stream;
+    let cfg = s.open.expect("an open stream").config;
     (cfg.input_channels, cfg.remote_inputs)
 }
 
 /// A session file names its remote inputs and its measurements name their channels: loading
-/// it gives the open session those remote inputs back, and a file with none takes the open
-/// session's away. The local inputs stay the device's.
+/// it gives the open stream those remote inputs back, and a file with none takes the open
+/// stream's away. The local inputs stay the device's.
 #[test]
 fn a_session_load_gives_back_its_remote_inputs() {
     init_log();
@@ -534,25 +528,25 @@ fn a_session_load_gives_back_its_remote_inputs() {
     };
     // Rig B is not paired: its input waits for it, and the file still records it.
     let b = RigId(0xb);
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     save(&mut c, "local");
     let with = with_remote(b, FS);
-    c.ok(Command::SessionOpen {
+    c.ok(Command::StreamOpen {
         config: with.clone(),
     });
     create(&mut c, spectrum(REMOTE_BASE));
     save(&mut c, "remote");
 
     load(&mut c, "local");
-    assert_eq!(session_inputs(&mut c), (vec![0], Vec::new()));
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    assert_eq!(stream_inputs(&mut c), (vec![0], Vec::new()));
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     load(&mut c, "remote");
     assert_eq!(
-        session_inputs(&mut c),
+        stream_inputs(&mut c),
         (vec![0, 1, REMOTE_BASE], with.remote_inputs.clone())
     );
     wait_remote(&mut c, "the loaded input is run", |r| {
@@ -560,7 +554,7 @@ fn a_session_load_gives_back_its_remote_inputs() {
     });
     // Loaded again: the same remote inputs, nothing reopened for them.
     load(&mut c, "remote");
-    assert_eq!(session_inputs(&mut c).1, with.remote_inputs);
+    assert_eq!(stream_inputs(&mut c).1, with.remote_inputs);
     h.shutdown();
 }
 
@@ -618,8 +612,8 @@ fn slow_a_paired_rig_is_followed_to_its_new_address() {
             client: "test".into(),
         })
         .rig_id;
-    cb.ok(Command::SessionOpen {
-        config: session(false),
+    cb.ok(Command::StreamOpen {
+        config: stream(false),
     });
     cb.ok(Command::AuthAdmitRig {
         key: a_keys.public.to_z85(),
@@ -637,7 +631,7 @@ fn slow_a_paired_rig_is_followed_to_its_new_address() {
             key: b.server_public_key().unwrap().to_z85(),
         },
     });
-    ca.ok(Command::SessionOpen {
+    ca.ok(Command::StreamOpen {
         config: with_remote(b_id, FS),
     });
 
@@ -677,7 +671,7 @@ fn slow_a_paired_rig_is_followed_to_its_new_address() {
     b.shutdown();
 }
 
-/// A recording of a remote input: while its rig's session is closed the file holds zeros on
+/// A recording of a remote input: while its rig's stream is closed the file holds zeros on
 /// that channel, and the sidecar marks them; a replay offers the channel as a device input
 /// named as recorded.
 #[test]
@@ -707,11 +701,11 @@ fn slow_a_remote_input_is_recorded_with_its_gaps_marked() {
         },
     });
     std::thread::sleep(Duration::from_millis(700));
-    cb.ok(Command::SessionClose);
+    cb.ok(Command::StreamClose);
     wait_remote(&mut ca, "the source gone", |r| !streaming(r));
     std::thread::sleep(Duration::from_millis(700));
-    cb.ok(Command::SessionOpen {
-        config: session(false),
+    cb.ok(Command::StreamOpen {
+        config: stream(false),
     });
     wait_remote(&mut ca, "streaming again", streaming);
     std::thread::sleep(Duration::from_millis(700));
@@ -757,11 +751,11 @@ fn slow_a_remote_input_is_recorded_with_its_gaps_marked() {
     }
 
     // The replay offers the remote channel as input 1, named as recorded.
-    let session = ca.session(Command::SessionReplay {
+    let stream = ca.stream(Command::StreamReplay {
         recording: RecordingRef::Name { name: rec.name },
         pace: ReplayPace::Fast,
     });
-    let open = session.open.expect("open");
+    let open = stream.open.expect("open");
     assert_eq!(open.config.input_channels, vec![0, 1]);
     assert!(open.config.remote_inputs.is_empty());
     a.shutdown();
@@ -895,7 +889,7 @@ fn revoking_a_rig_by_identity_leaves_apps_alone() {
     b.shutdown();
 }
 
-/// Pairing and unpairing a rig the session takes nothing from leaves the joined feed
+/// Pairing and unpairing a rig the stream takes nothing from leaves the joined feed
 /// running: B's stream ended first, so a feed started over could never anchor again,
 /// and the anchor the running one keeps stays.
 #[test]

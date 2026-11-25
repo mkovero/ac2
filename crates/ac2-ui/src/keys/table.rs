@@ -107,8 +107,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::PlotChrome, S::Global, k(K::T)),
         (C::ZoomIn, S::Global, k(K::I)),
         (C::ZoomOut, S::Global, k(K::O)),
-        // Plain O zooms out; the session dialog takes Shift+O.
-        (C::OpenSession, S::Global, sh(K::O)),
+        // Plain O zooms out; the stream dialog takes Shift+O.
+        (C::OpenStream, S::Global, sh(K::O)),
         // Alt+S: the saved sessions (S alone is start/stop, Shift+S a sweep).
         (C::Sessions, S::Global, alt(K::S)),
         // Ctrl+S: save is rare enough for a Ctrl chord, and it is the key every editor uses.

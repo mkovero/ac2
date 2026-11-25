@@ -25,7 +25,7 @@ impl Form {
 
     /// The resolution (one FFT's size, or the multi-resolution bands) and window fields
     /// of a spectrum dialog showing `r` and `w`, with the resolution's hint stated at the
-    /// session's rate and period (set [`Form::stream`] first).
+    /// stream's rate and period (set [`Form::stream`] first).
     pub(super) fn fft_fields(&self, r: SpecResolution, w: Window, level: SpecLevel) -> [Field; 3] {
         let all = spec_resolutions();
         let labels: Vec<String> = all
@@ -66,7 +66,7 @@ impl Form {
             .map_or(SpecLevel::Tone, |l| l.1)
     }
 
-    /// Bin width and update rate of an `n`-point spectrum at the session's rate; what the
+    /// Bin width and update rate of an `n`-point spectrum at the stream's rate; what the
     /// multi-resolution bands trade.
     pub(super) fn fft_hint(&self, r: SpecResolution) -> String {
         match r {
@@ -102,14 +102,14 @@ impl Form {
         }
     }
 
-    /// The dialog editing transfer measurement, spectrum or RTA `m` over the session's
+    /// The dialog editing transfer measurement, spectrum or RTA `m` over the stream's
     /// captured `inputs`: a transfer's inputs, name, smoothing, depth and resolution; a
     /// spectrum's or RTA's input, name, smoothing or bands (a spectrum's FFT size and
     /// window too, its bin width stated at `open`'s rate), and averaging.
     pub fn edit_spec(
         m: &Measurement,
         inputs: &[(u16, String)],
-        open: Option<&OpenSession>,
+        open: Option<&OpenStream>,
     ) -> Result<Self, String> {
         if let MeasKind::Transfer { config } = &m.config.kind {
             return Ok(Self::edit_transfer(m, config, inputs));
@@ -123,8 +123,8 @@ impl Form {
         };
         let mut f = Self::new(kind, Vec::new());
         f.stream = open.map(|o| (o.sample_rate_hz, o.buffer_frames));
-        // An input the session no longer captures stays listed, so the edit does not move
-        // the measurement to another input unasked (Enter then says to reopen the session).
+        // An input the stream no longer captures stays listed, so the edit does not move
+        // the measurement to another input unasked (Enter then says to reopen the stream).
         let mut inputs = inputs.to_vec();
         if !inputs.iter().any(|(c, _)| *c == input) {
             inputs.push((input, format!("In {} (not captured)", input + 1)));
@@ -168,7 +168,7 @@ impl Form {
         c: &TransferConfig,
         inputs: &[(u16, String)],
     ) -> Self {
-        // Inputs the session no longer captures stay listed, as for a spectrum's.
+        // Inputs the stream no longer captures stay listed, as for a spectrum's.
         let mut inputs = inputs.to_vec();
         for i in [c.reference_input, c.measurement_input] {
             if !inputs.iter().any(|(x, _)| *x == i) {
@@ -224,12 +224,12 @@ impl Form {
         self.math_edit().or(self.meas_edit.as_ref().map(|m| m.id))
     }
 
-    /// A measurement dialog over the session's captured `inputs` (channel, name). The
-    /// reference defaults to the session's loopback input, the measurement input to the
+    /// A measurement dialog over the stream's captured `inputs` (channel, name). The
+    /// reference defaults to the stream's loopback input, the measurement input to the
     /// first mic (`mics`: the inputs of mic kind), else the first other captured input.
     pub fn measurement(
         kind: FormKind,
-        open: Option<&OpenSession>,
+        open: Option<&OpenStream>,
         existing: &[&Measurement],
         inputs: &[(u16, String)],
         mics: &[u16],
@@ -330,15 +330,15 @@ impl Form {
         f
     }
 
-    /// The sweep dialog over the session's captured `inputs` and its `outputs` (channel,
-    /// name). The reference is the session's loopback input; without one it is left for the
+    /// The sweep dialog over the stream's captured `inputs` and its `outputs` (channel,
+    /// name). The reference is the stream's loopback input; without one it is left for the
     /// operator to choose, because the analysis divides by it and an input picked by channel
     /// order would give a plausible but meaningless result. Mic and speaker output default
-    /// as for a transfer measurement; the loopback output (when the session has one) always
+    /// as for a transfer measurement; the loopback output (when the stream has one) always
     /// plays the sweep too. `level` is the operator's typed stimulus level, if any: there is
     /// no default.
     pub fn sweep(
-        open: Option<&OpenSession>,
+        open: Option<&OpenStream>,
         sweeps: usize,
         inputs: &[(u16, String)],
         outputs: &[(u16, String)],
@@ -423,14 +423,14 @@ impl Form {
     /// the measurement's.
     pub fn edit_sweep(
         m: &Measurement,
-        open: Option<&OpenSession>,
+        open: Option<&OpenStream>,
         inputs: &[(u16, String)],
         outputs: &[(u16, String)],
     ) -> Result<Self, String> {
         let MeasKind::Sweep { config: c } = &m.config.kind else {
             return Err(format!("{} is not a sweep measurement", m.config.name));
         };
-        // Inputs the session no longer captures stay listed, as for a transfer's.
+        // Inputs the stream no longer captures stay listed, as for a transfer's.
         let mut inputs = inputs.to_vec();
         for &i in std::iter::once(&c.reference_input).chain(&c.measurement_inputs) {
             if !inputs.iter().any(|(x, _)| *x == i) {
@@ -509,10 +509,10 @@ impl Form {
     }
 
     /// The sweep measurement the dialog makes (or its new settings), checked against the
-    /// session and the daemon's ceiling.
+    /// stream and the daemon's ceiling.
     pub fn sweep_meas(
         &self,
-        open: Option<&OpenSession>,
+        open: Option<&OpenStream>,
         ceiling: Option<Dbfs>,
     ) -> Result<MeasConfig, String> {
         let open = open.ok_or("audio I/O not open")?;
@@ -642,8 +642,8 @@ impl Form {
 }
 
 impl Form {
-    /// `meas.create` of the dialog. Inputs must be captured by the open session.
-    pub fn meas_config(&self, open: Option<&OpenSession>) -> Result<MeasConfig, String> {
+    /// `meas.create` of the dialog. Inputs must be captured by the open stream.
+    pub fn meas_config(&self, open: Option<&OpenStream>) -> Result<MeasConfig, String> {
         let captured = open.map(|o| o.config.input_channels.as_slice());
         let input = |id: FieldId, what: &str| -> Result<u16, String> {
             let c = self

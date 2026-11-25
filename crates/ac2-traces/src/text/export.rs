@@ -41,7 +41,7 @@ fn source_text(s: &TraceSource) -> String {
             epoch,
             at_sample,
         } => format!(
-            "captured from {meas_name:?} (measurement {meas}), session epoch {}, sample {}",
+            "captured from {meas_name:?} (measurement {meas}), stream epoch {}, sample {}",
             epoch.0, at_sample.0
         ),
         TraceSource::Imported {
@@ -95,7 +95,7 @@ fn source_text(s: &TraceSource) -> String {
             operands,
             phase,
         } => format!(
-            "captured from math trace {meas_name:?} (measurement {meas}) of {}, phase {phase:?}, session epoch {}, sample {}",
+            "captured from math trace {meas_name:?} (measurement {meas}) of {}, phase {phase:?}, stream epoch {}, sample {}",
             operands
                 .iter()
                 .map(|m| format!("{:?}", m.name))
@@ -117,7 +117,7 @@ fn source_text(s: &TraceSource) -> String {
             reference_input,
             measurement_input,
         } => format!(
-            "run {number} of sweep measurement {meas_name:?} (measurement {meas}, sweep {}; {} Hz – {} Hz, {} s, {} dBFS, {repeats}×{}), input {} re {}, session epoch {}",
+            "run {number} of sweep measurement {meas_name:?} (measurement {meas}, sweep {}; {} Hz – {} Hz, {} s, {} dBFS, {repeats}×{}), input {} re {}, stream epoch {}",
             run.0,
             sweep.start.0,
             sweep.end.0,
@@ -138,7 +138,7 @@ fn source_text(s: &TraceSource) -> String {
             number,
             epoch,
         } => format!(
-            "run {number} of dynamics measurement {meas_name:?} (measurement {meas}, run {}), session epoch {}",
+            "run {number} of dynamics measurement {meas_name:?} (measurement {meas}, run {}), stream epoch {}",
             run.0, epoch.0
         ),
     }
@@ -166,7 +166,7 @@ pub fn export_csv(t: &StoredTrace) -> String {
     line(
         "time_base",
         if m.source.shared_epoch().is_some() {
-            "shared within its session epoch".into()
+            "shared within its stream epoch".into()
         } else {
             "independent".into()
         },

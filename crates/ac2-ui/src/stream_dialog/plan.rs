@@ -1,9 +1,9 @@
-//! The session the dialog opens: Enter turns the rows into a plan.
+//! The stream the dialog opens: Enter turns the rows into a plan.
 
 use super::*;
 
-impl SessionDialog {
-    // ----- the session -------------------------------------------------------------------
+impl StreamDialog {
+    // ----- the stream -------------------------------------------------------------------
 
     /// A detection burst is playing.
     pub fn detecting(&self) -> bool {
@@ -13,7 +13,7 @@ impl SessionDialog {
     }
 
     /// Enter: what to open, or why not (in plain words).
-    pub fn plan(&self) -> Result<SessionPlan, String> {
+    pub fn plan(&self) -> Result<StreamPlan, String> {
         if self.detecting() {
             return Err(
                 "The loopback detection is still playing: wait for its result, then Enter.".into(),
@@ -44,7 +44,7 @@ impl SessionDialog {
         let inputs: Vec<u16> = self
             .inputs
             .iter()
-            .filter(|r| r.in_session)
+            .filter(|r| r.in_stream)
             .map(|r| r.channel)
             .collect();
         if inputs.is_empty() {
@@ -55,12 +55,12 @@ impl SessionDialog {
         let reference = self
             .inputs
             .iter()
-            .find(|r| r.reference && r.in_session)
+            .find(|r| r.reference && r.in_stream)
             .map(|r| r.channel);
         let mics: Vec<&InputRow> = self
             .inputs
             .iter()
-            .filter(|r| r.in_session && r.is_mic())
+            .filter(|r| r.in_stream && r.is_mic())
             .collect();
         let stimulus: Vec<u16> = self
             .outputs
@@ -94,7 +94,7 @@ impl SessionDialog {
             .inputs
             .iter()
             .enumerate()
-            .filter(|(_, r)| r.in_session)
+            .filter(|(_, r)| r.in_stream)
             .filter_map(|(i, _)| self.row_setup(i))
             .collect();
         // The daemon's own rules of a pair, applied here first so the refusal names the
@@ -116,17 +116,17 @@ impl SessionDialog {
                 out_dev.name
             ));
         }
-        let config = SessionConfig {
+        let config = StreamConfig {
             backend: Some(b.kind),
             input_device: DeviceSelector::Id { id: dev.id.clone() },
             output_device: DeviceSelector::Id {
                 id: out_dev.id.clone(),
             },
-            // The remote inputs stay: they are the session's channels whatever the device.
+            // The remote inputs stay: they are the stream's channels whatever the device.
             input_channels: inputs
                 .iter()
                 .copied()
-                .chain(self.remote.iter().map(RemoteInput::session_channel))
+                .chain(self.remote.iter().map(RemoteInput::stream_channel))
                 .collect(),
             spare_inputs: self.spares,
             output_channels: self.out_count,
@@ -165,7 +165,7 @@ impl SessionDialog {
             output_device: (out_dev.id != dev.id).then(|| out_dev.id.0.clone()),
             inputs,
         };
-        Ok(SessionPlan {
+        Ok(StreamPlan {
             config,
             device_name: if out_dev.id == dev.id {
                 dev.name.clone()

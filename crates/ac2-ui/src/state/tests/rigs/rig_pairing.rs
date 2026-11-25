@@ -1,5 +1,5 @@
 //! Settings › Connection pairs the rig shown with another rig the app holds, both ways in
-//! one act and without a session, and unpairs it; the *Paired rigs* rows say each half as
+//! one act and without a stream, and unpairs it; the *Paired rigs* rows say each half as
 //! the daemons' state shows it.
 
 use super::rig_remote::{KEY_A, KEY_B, local_only, network, server};
@@ -189,7 +189,7 @@ fn revokes(r: &[(RigId, Request)], on: RigId) -> Vec<RigId> {
 }
 
 /// *Pair with rig…* lists pupu by name; picking it has each rig admit the other and list
-/// the other, in one act and with no session reopened; once both daemons show it, the row
+/// the other, in one act and with no stream reopened; once both daemons show it, the row
 /// says paired both ways and pupu is offered no more.
 #[test]
 fn pair_with_rig_pairs_both_ways_in_one_act() {
@@ -240,11 +240,9 @@ fn pair_with_rig_pairs_both_ways_in_one_act() {
     assert_eq!(there[0].0.key, KEY_A);
     assert_eq!(there[0].1, words::listed_toast("pupu", &me));
     assert!(
-        !r.iter().any(|(_, q)| matches!(
-            q,
-            Request::RemoteSession { .. } | Request::OpenSession { .. }
-        )),
-        "no session touched: {r:?}"
+        !r.iter()
+            .any(|(_, q)| matches!(q, Request::RemoteStream { .. } | Request::OpenStream { .. })),
+        "no stream touched: {r:?}"
     );
     assert!(conn_page(&t).pairing.offers.is_none(), "the pick closed");
     // This rig's half is in place, pupu's not yet: the row says what is missing.
@@ -371,14 +369,14 @@ fn delete_twice_unpairs_both_ways() {
     assert_eq!(conn_page(&t).notice, None);
 }
 
-/// A session taking an input from the other rig refuses the unpairing, naming it.
+/// A stream taking an input from the other rig refuses the unpairing, naming it.
 #[test]
-fn unpairing_is_refused_while_a_session_takes_that_rigs_input() {
+fn unpairing_is_refused_while_a_stream_takes_that_rigs_input() {
     let mut t = unpaired();
     let me = t.st.rig_label(&t.st.rig);
     paired_both(&mut t);
     remirror(&mut t, |s| {
-        if let Some(o) = &mut s.session.open {
+        if let Some(o) = &mut s.stream.open {
             o.config.remote_inputs = vec![RemoteInput {
                 slot: 0,
                 rig: PUPU,
@@ -453,7 +451,7 @@ fn a_rig_not_held_is_unpaired_on_this_side_only() {
     delete_on(&mut t, &ConnLine::Paired(KETUNKOLO));
     let ask = words::unpair_confirm("ketunkolo", Some(words::Unseen::NotHeld), &row.halves);
     assert!(
-        ask.contains("Can't tell whether ketunkolo's session"),
+        ask.contains("Can't tell whether ketunkolo's stream"),
         "{ask}"
     );
     assert_eq!(conn_page(&t).notice.as_deref(), Some(ask.as_str()));

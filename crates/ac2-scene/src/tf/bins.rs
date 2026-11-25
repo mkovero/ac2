@@ -211,7 +211,7 @@ pub fn fresh<'s, 'a>(src: &'s BinSource<'a>, b: usize) -> Option<&'s StageFrame<
     let s = src.stages.get(b)?.as_ref()?;
     let m = &s.frame.meta;
     let same = s.stamp.config_rev == src.tf_stamp.config_rev
-        && s.stamp.session_epoch == src.tf_stamp.session_epoch
+        && s.stamp.stream_epoch == src.tf_stamp.stream_epoch
         && m.delay == src.tf_meta.delay
         && m.nudged == src.tf_meta.nudged
         && m.blocks > 0

@@ -72,7 +72,7 @@ pub(super) fn cal_page(app: &App, ui: &mut egui::Ui, v: &CalView, ch: &Chrome) {
     if rows.is_empty() {
         ui.label(
             RichText::new(
-                "Nothing stored and no session open: open a session (Audio I/O page), name the mic \
+                "Nothing stored and no stream open: open a stream (Audio I/O page), name the mic \
                  on its input (N), import its curve (I).",
             )
             .color(ch.dim),
@@ -136,7 +136,7 @@ fn line(app: &App, ctx: &egui::Context, ch: &Chrome, d: &crate::line_dialog::Lin
                     .spacing(egui::vec2(12.0, 6.0))
                     .show(ui, |ui| {
                         ui.label(RichText::new("Input level now").color(ch.text));
-                        ui.horizontal(|ui| super::session::meter(ui, &meter, ch));
+                        ui.horizontal(|ui| super::stream::meter(ui, &meter, ch));
                         ui.label(
                             RichText::new("dBFS · steady, not clipping")
                                 .small()
@@ -234,7 +234,7 @@ fn acoustic(app: &App, ctx: &egui::Context, ch: &Chrome, d: &AcousticDialog) {
                             );
                         };
                         row(ui, None, "Input level now");
-                        ui.horizontal(|ui| super::session::meter(ui, &meter, ch));
+                        ui.horizontal(|ui| super::stream::meter(ui, &meter, ch));
                         ui.label(
                             RichText::new("dBFS · steady, not clipping")
                                 .small()
@@ -352,7 +352,7 @@ fn electrical(app: &App, ctx: &egui::Context, ch: &Chrome, d: &ElectricalDialog)
                         ui.label(RichText::new("←/→").small().color(ch.dim));
                         ui.end_row();
                         row(ui, None, "Input level now");
-                        ui.horizontal(|ui| super::session::meter(ui, &meter, ch));
+                        ui.horizontal(|ui| super::stream::meter(ui, &meter, ch));
                         ui.label(
                             RichText::new("dBFS · steady, not clipping")
                                 .small()

@@ -114,8 +114,8 @@ async fn start(clock: LocalClock) -> (Handle, Client, tempfile::TempDir) {
     cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();
@@ -774,7 +774,7 @@ async fn slow_a_recorders_wav_replayed_gives_the_bedroom_spans_of_a_transfer() {
     ac2_traces::raw::import_wav(&src, dir.path(), "bedroom", wall_now_ns()).unwrap();
 
     let t0 = wall_now_ns();
-    c.call(Command::SessionReplay {
+    c.call(Command::StreamReplay {
         recording: RecordingRef::Path {
             path: ac2_traces::raw::sidecar_path(dir.path(), "bedroom")
                 .to_string_lossy()
@@ -784,7 +784,7 @@ async fn slow_a_recorders_wav_replayed_gives_the_bedroom_spans_of_a_transfer() {
     })
     .await
     .unwrap()
-    .session();
+    .stream();
     let mut cfg = meter(Some(bands()));
     cfg.name = "Recorder".into();
     if let MeasKind::Spl { config } = &mut cfg.kind {

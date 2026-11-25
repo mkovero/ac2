@@ -376,7 +376,7 @@ fn audio_parts(channel: u16, start: u64, frames: u32) -> (Topic, Vec<Part>) {
         rate: 48_000,
         incarnation: ac2_proto::model::StreamIncarnation {
             daemon: ac2_proto::units::DaemonIncarnation(1),
-            epoch: ac2_proto::units::SessionEpoch(1),
+            epoch: ac2_proto::units::StreamEpoch(1),
         },
     };
     let samples = vec![0.25f32; frames as usize];

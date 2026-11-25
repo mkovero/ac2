@@ -36,11 +36,11 @@ impl AppState {
         }));
     }
 
-    /// After the session dialog opened a session, once the daemon's state shows it (the
-    /// chooser says which kinds can be made from that state): a fresh session's first step
+    /// After the stream dialog opened a stream, once the daemon's state shows it (the
+    /// chooser says which kinds can be made from that state): a fresh stream's first step
     /// is choosing what to measure; one with measurements, or a window open, asks nothing.
     pub(super) fn choose_first(&mut self) {
-        if !self.rig.due.choose_when_open || self.open_session().is_none() {
+        if !self.rig.due.choose_when_open || self.open_stream().is_none() {
             return;
         }
         self.rig.due.choose_when_open = false;
@@ -91,47 +91,47 @@ impl AppState {
             NewKind::Math => self.math_form().err(),
             NewKind::Alignment => self.alignment_form().err(),
             NewKind::SpatialAverage => self.spatial_average_form().err(),
-            NewKind::Programme if self.open_session().is_none() => Some(format!(
+            NewKind::Programme if self.open_stream().is_none() => Some(format!(
                 "no audio I/O to meter: {}",
-                open_session_hint(keymap)
+                open_stream_hint(keymap)
             )),
             NewKind::Programme => self.meter_form().err(),
             NewKind::Transfer | NewKind::Sweep | NewKind::Dynamics
-                if self.open_session().is_some() =>
+                if self.open_stream().is_some() =>
             {
                 self.two_input_refusal(k != NewKind::Transfer, keymap)
             }
-            _ if self.open_session().is_some() => None,
+            _ if self.open_stream().is_some() => None,
             NewKind::Sweep | NewKind::Dynamics => Some(format!(
                 "no audio I/O to play on: {}",
-                open_session_hint(keymap)
+                open_stream_hint(keymap)
             )),
             _ => Some(format!(
                 "no audio I/O to measure: {}",
-                open_session_hint(keymap)
+                open_stream_hint(keymap)
             )),
         }
     }
 
-    /// Why a transfer (or, `sweep`, a sweep) cannot be made on the open session: both
+    /// Why a transfer (or, `sweep`, a sweep) cannot be made on the open stream: both
     /// divide a measured input by a reference input, so one input alone gives nothing to
-    /// divide by, and a sweep is played, so it needs an output. A session may open without
+    /// divide by, and a sweep is played, so it needs an output. A stream may open without
     /// either (a lone mic meters SPL and spectra), so this is where the need is said.
     pub(super) fn two_input_refusal(&self, sweep: bool, keymap: &Keymap) -> Option<String> {
-        let o = self.open_session()?;
+        let o = self.open_stream()?;
         let what = if sweep { "a sweep" } else { "a transfer" };
         if o.config.input_channels.len() < 2 {
             return Some(format!(
                 "{what} compares the measured input with a reference input, and the audio \
                  I/O captures one input: add the reference (R on its row) — {}",
-                open_session_hint(keymap)
+                open_stream_hint(keymap)
             ));
         }
         if sweep && o.config.output_channels == 0 {
             return Some(format!(
                 "a sweep is played on an output, and the audio I/O has none: add the \
                  stimulus output (S on its row) — {}",
-                open_session_hint(keymap)
+                open_stream_hint(keymap)
             ));
         }
         None

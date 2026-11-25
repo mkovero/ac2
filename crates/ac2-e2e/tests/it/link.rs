@@ -240,7 +240,7 @@ fn quit_waits_at_most_the_grace_period_for_a_silent_daemon() -> R {
 }
 
 /// The reducer's preview requests reach the daemon in the order it issued them. Closing and
-/// reopening the session dialog sends `preview_stop` then `preview` back to back; were they
+/// reopening the stream dialog sends `preview_stop` then `preview` back to back; were they
 /// to cross on the way, the daemon would close the preview just asked for and the meters
 /// would stay blank until the next renewal: after the last round the device's meters
 /// still arrive.
@@ -337,9 +337,9 @@ fn the_leq_log_exports_as_csv_in_a_new_folder() -> R {
         mic: None,
     };
     let dir = tempfile::tempdir()?;
-    let session = dir.path().join("long");
+    let stream = dir.path().join("long");
     ac2_traces::session::save(
-        &session,
+        &stream,
         &Session {
             saved_at: WallNs(t0),
             measurements: vec![SavedMeasurement {
@@ -380,7 +380,7 @@ fn the_leq_log_exports_as_csv_in_a_new_folder() -> R {
     )?;
     cli.call(ac2_proto::Command::FileLoad {
         session: SessionRef::Path {
-            path: session.to_string_lossy().into_owned(),
+            path: stream.to_string_lossy().into_owned(),
         },
         discard: true,
     })?;

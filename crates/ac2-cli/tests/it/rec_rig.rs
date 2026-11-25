@@ -1,5 +1,5 @@
-//! `ac2 rec …` and `ac2 session replay` against a real daemon on the simulated rig: a
-//! recording bounded by its time limit ends by itself, is listed, and replays as a session
+//! `ac2 rec …` and `ac2 stream replay` against a real daemon on the simulated rig: a
+//! recording bounded by its time limit ends by itself, is listed, and replays as a stream
 //! on the recorded inputs; a recorder's WAV imported beside it does too.
 #![allow(clippy::unwrap_used)]
 
@@ -30,16 +30,12 @@ async fn record_list_and_replay() {
         cfg.recording_dir = Some(dir.path().to_owned())
     });
 
-    // Without a session there is nothing to record.
+    // Without a stream there is nothing to record.
     let (code, _, err) = ac2(&ep, &["rec", "start", "--max", "1s"]).await;
     assert_ne!(code, 0);
-    assert!(err.contains("session"), "{err}");
+    assert!(err.contains("stream"), "{err}");
 
-    json(
-        &ep,
-        &["session", "open", "--backend", "fake", "--in", "1,2"],
-    )
-    .await;
+    json(&ep, &["stream", "open", "--backend", "fake", "--in", "1,2"]).await;
     let run = json(
         &ep,
         &[
@@ -88,14 +84,14 @@ async fn record_list_and_replay() {
     assert_eq!(l[0]["name"], "short");
     assert_eq!(l[0]["end"]["type"], "duration_limit");
 
-    let s = json(&ep, &["session", "replay", "short", "--fast"]).await;
+    let s = json(&ep, &["stream", "replay", "short", "--fast"]).await;
     assert_eq!(s["open"]["backend"], "replay");
     assert_eq!(s["open"]["replay"]["frames"], 24_000);
     assert_eq!(s["open"]["replay"]["pace"], "fast");
-    let (_, text, _) = ac2(&ep, &["session", "status"]).await;
+    let (_, text, _) = ac2(&ep, &["stream", "status"]).await;
     assert!(text.contains("replaying short"), "{text}");
     assert!(text.contains("recorded short"), "{text}");
-    let (code, _, err) = ac2(&ep, &["session", "replay", "missing"]).await;
+    let (code, _, err) = ac2(&ep, &["stream", "replay", "missing"]).await;
     assert_ne!(code, 0);
     assert!(err.contains("missing"), "{err}");
 
@@ -123,7 +119,7 @@ async fn record_list_and_replay() {
     .await;
     assert_eq!(code, 0, "{err}");
     assert!(text.contains("1 channel(s) at 48000 Hz, 0.1 s"), "{text}");
-    assert!(text.contains("ac2 session replay"), "{text}");
+    assert!(text.contains("ac2 stream replay"), "{text}");
     let (code, _, err) = ac2(
         &ep,
         &["rec", "import", wav.to_str().unwrap(), "--name", "bedroom"],
@@ -136,7 +132,7 @@ async fn record_list_and_replay() {
         l.as_array().unwrap().iter().any(|r| r["name"] == "bedroom"),
         "{l}"
     );
-    let s = json(&ep, &["session", "replay", "bedroom", "--fast"]).await;
+    let s = json(&ep, &["stream", "replay", "bedroom", "--fast"]).await;
     assert_eq!(s["open"]["replay"]["frames"], 4800);
     h.shutdown();
 }

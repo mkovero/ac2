@@ -462,7 +462,7 @@ fn admits_clause(rig: &str, side: Side, why: Unseen) -> String {
 }
 
 /// The first Delete on a *Paired rigs* row. `unreached`: why the app cannot reach the
-/// other rig, so only this rig's side is unpaired; `None`: both sides are. A session there
+/// other rig, so only this rig's side is unpaired; `None`: both sides are. A stream there
 /// cannot be seen, so the confirm says what revoking its admission here does to it. An
 /// admission on a side whose admitted rigs are not seen is not revoked, so the confirm
 /// promises no more than is sent.
@@ -491,7 +491,7 @@ pub fn unpair_confirm(rig: &str, unreached_why: Option<Unseen>, h: &Halves) -> S
         None => format!("Delete again unpairs {rig} as far as the app sees{stays}"),
         Some(u) => format!(
             "Delete again unpairs this rig's side only ({}; its side stays). Can't tell \
-             whether {rig}'s session takes this rig's inputs: if it does, they stop{stays}",
+             whether {rig}'s stream takes this rig's inputs: if it does, they stop{stays}",
             unreached(rig, u)
         ),
     }
@@ -526,7 +526,7 @@ fn upper_first(s: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Unpairing refused while the session of rig `taker` takes inputs `inputs` from the
+/// Unpairing refused while the stream of rig `taker` takes inputs `inputs` from the
 /// other rig: those go first.
 pub fn unpair_inputs(taker: &str, inputs: &[String]) -> String {
     format!(
@@ -810,7 +810,7 @@ mod tests {
                 &halves(Half::Yes, Half::Yes, Half::Yes, Half::Yes)
             ),
             "Delete again unpairs this rig's side only (the app is not connected to ketunkolo \
-             now; its side stays). Can't tell whether ketunkolo's session takes this rig's \
+             now; its side stays). Can't tell whether ketunkolo's stream takes this rig's \
              inputs: if it does, they stop"
         );
         assert!(

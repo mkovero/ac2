@@ -307,7 +307,7 @@ impl AppState {
     pub(super) fn command(&mut self, c: CommandId, keymap: &Keymap, out: &mut Vec<Request>) {
         use CommandId as C;
         self.history.ran_command.get_or_insert(c);
-        if needs_session(c) && self.sessions_first(out) {
+        if needs_stream(c) && self.sessions_first(out) {
             return;
         }
         match c {
@@ -414,7 +414,7 @@ impl AppState {
                 self.open_settings(Page::AudioIo, out);
                 if let Overlay::Settings(s) = &mut self.overlay {
                     s.focus_want = None;
-                    s.focus_session_row(Row::AddRemote);
+                    s.focus_stream_row(Row::AddRemote);
                 }
                 self.open_remote_pick(out);
             }
@@ -724,10 +724,10 @@ impl AppState {
             | C::SessionLoad
             | C::SessionExport
             | C::Reconnect
-            | C::OpenSession
+            | C::OpenStream
             | C::Record
             | C::ReplayRecording
-            | C::CloseSession
+            | C::CloseStream
             | C::NewMeasurement
             | C::NewTransfer
             | C::NewSpectrum
@@ -824,7 +824,7 @@ impl AppState {
 
 /// Commands that make a measurement on the audio I/O: with none open they lead to the
 /// Sessions dialog rather than a form or chooser that could only refuse.
-fn needs_session(c: CommandId) -> bool {
+fn needs_stream(c: CommandId) -> bool {
     use CommandId as C;
     matches!(
         c,

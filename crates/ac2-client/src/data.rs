@@ -10,7 +10,7 @@
 //! built on the wrong base, and an old one reads as old. A delta with no frame held yet
 //! waits for the keyframe its subscription brings without asking. Values are built only
 //! for the newest frame per topic of a drain. Malformed frames are counted, frames of older
-//! session epochs or another daemon incarnation discarded.
+//! stream epochs or another daemon incarnation discarded.
 //!
 //! Flow control (`docs/protocol.md` §5.8): the connection states its window, and every
 //! drain returns credit for what it read, so the daemon sends this consumer what it takes:
@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::flow::{FLOW_TOPIC, frame_charge, outside_window};
 use ac2_proto::frame::{FrameStamp, MAX_PARTS};
-use ac2_proto::units::{DaemonIncarnation, SessionEpoch};
+use ac2_proto::units::{DaemonIncarnation, StreamEpoch};
 use ac2_proto::{
     CodedFrame, DataRequest, DataUp, FlowNotice, Frame, GridId, Subscription, Topic, WireFrame,
     decode_notice, decode_wire, encode_data_request,
@@ -216,8 +216,8 @@ impl Latest {
     }
 }
 
-fn current(s: &FrameStamp, inc: Option<DaemonIncarnation>, epoch: Option<SessionEpoch>) -> bool {
-    inc.is_none_or(|i| s.daemon_incarnation == i) && epoch.is_none_or(|e| s.session_epoch >= e)
+fn current(s: &FrameStamp, inc: Option<DaemonIncarnation>, epoch: Option<StreamEpoch>) -> bool {
+    inc.is_none_or(|i| s.daemon_incarnation == i) && epoch.is_none_or(|e| s.stream_epoch >= e)
 }
 
 /// Frame age in seconds at local wall time `now_wall_ns`, given the `daemon − local` offset.
@@ -242,7 +242,7 @@ fn decode(parts: &[Part]) -> Option<WireFrame> {
 /// another incarnation or epoch.
 fn newer(s: &FrameStamp, held: &FrameStamp) -> bool {
     s.daemon_incarnation != held.daemon_incarnation
-        || s.session_epoch != held.session_epoch
+        || s.stream_epoch != held.stream_epoch
         || s.seq > held.seq
 }
 
@@ -322,7 +322,7 @@ impl DataState {
         let topic = w.topic();
         match w {
             WireFrame::Key(k) => {
-                if !current(&k.stamp, view.incarnation, view.session_epoch) {
+                if !current(&k.stamp, view.incarnation, view.stream_epoch) {
                     self.discarded += 1;
                     return None;
                 }
@@ -434,7 +434,7 @@ impl DataState {
         out: &mut Latest,
     ) -> Result<(), ClientError> {
         let inc = view.incarnation;
-        let epoch = view.session_epoch;
+        let epoch = view.stream_epoch;
         if handshook(&self.monitor) {
             self.restate()?;
             self.heard = now;
@@ -619,7 +619,7 @@ mod chain_tests {
         let s = samples::stamp(None);
         let mut v = Mirror::new(true).view();
         v.incarnation = Some(s.daemon_incarnation);
-        v.session_epoch = Some(s.session_epoch);
+        v.stream_epoch = Some(s.stream_epoch);
         v.last_ka = Some(now);
         v.clock_offset_ns = Some(offset_ns);
         v
@@ -797,7 +797,7 @@ mod chain_tests {
         assert!(d.apply(key(&tf[0]), &v, t0).is_none(), "an older seq");
         let mut old = tf[3].clone();
         old.stamp.seq += 100;
-        old.stamp.session_epoch = SessionEpoch(old.stamp.session_epoch.0 - 1);
+        old.stamp.stream_epoch = StreamEpoch(old.stamp.stream_epoch.0 - 1);
         assert!(d.apply(key(&old), &v, t0).is_none());
         let mut other = tf[3].clone();
         other.stamp.seq += 200;

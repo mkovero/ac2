@@ -20,7 +20,7 @@ pub fn name_of(r: &RemoteState, rig: RigId) -> String {
         .map_or_else(|| rig.to_string(), |x| x.name.clone())
 }
 
-/// The name of remote input `i`'s rig: as it answers, else as the session keeps it (it is
+/// The name of remote input `i`'s rig: as it answers, else as the stream keeps it (it is
 /// named while unreachable too).
 pub fn rig_name(r: &RemoteState, i: &RemoteInput) -> String {
     r.rigs
@@ -87,7 +87,7 @@ pub fn cant_tell_why(r: &RemoteState, other: &str, reason: &CantTellReason) -> S
     match reason {
         CantTellReason::NoAudio => "no audio".to_owned(),
         CantTellReason::NoMarks => no_marks(other),
-        CantTellReason::NoSession { rig } => no_session(&who(r, *rig)),
+        CantTellReason::NoStream { rig } => no_stream(&who(r, *rig)),
         CantTellReason::LinkDown => link_down(other),
         CantTellReason::MarksLate { by } => marks_late(other, by.0),
         CantTellReason::NotSteady {
@@ -150,9 +150,9 @@ pub fn no_marks(other: &str) -> String {
     format!("no timing in {other}'s levels")
 }
 
-/// *ketunkolo has no audio session*, *this rig has no audio session*.
-pub fn no_session(who: &str) -> String {
-    format!("{who} has no audio session")
+/// *ketunkolo has no audio stream*, *this rig has no audio stream*.
+pub fn no_stream(who: &str) -> String {
+    format!("{who} has no audio stream")
 }
 
 /// *no link to ketunkolo*.
@@ -231,7 +231,7 @@ pub fn audio_text(a: RemoteAudio, rig: &str, channel: u16) -> String {
     match a {
         RemoteAudio::Waiting => format!("waiting for {rig}"),
         RemoteAudio::OnThisRig => "that input is on this rig".into(),
-        RemoteAudio::NoSession => format!("no audio from {rig} (no session)"),
+        RemoteAudio::NoStream => format!("no audio from {rig} (no stream)"),
         RemoteAudio::NotCaptured => format!("{rig} does not capture in {n} (open it there)"),
         RemoteAudio::Replaying => format!("{rig} is replaying a recording"),
         RemoteAudio::RateMismatch { theirs, ours } => {
@@ -438,7 +438,7 @@ pub fn rig_block(
 }
 
 /// `between rigs` lines: one per remote rig, then one per remote input of `inputs` (the
-/// session's, in order). Empty without remote inputs.
+/// stream's, in order). Empty without remote inputs.
 pub fn status_lines(r: &RemoteState, inputs: &[RemoteInput]) -> Vec<String> {
     let mut out = Vec::new();
     for rig in &r.rigs {
@@ -605,7 +605,7 @@ mod tests {
             "{s:?}"
         );
         assert!(s.tone.is_problem());
-        // Unknown to the remote state (not answered yet): the session's name for it.
+        // Unknown to the remote state (not answered yet): the stream's name for it.
         let (mut r, i) = state(PeerRelation::Measuring, RemoteAudio::Streaming);
         r.rigs.clear();
         r.inputs.clear();

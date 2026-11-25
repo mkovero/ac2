@@ -274,8 +274,8 @@ pub(super) fn texts(s: &crate::primitives::Scene) -> Vec<String> {
 
 #[test]
 fn missing_inputs_say_which() {
-    assert_eq!(missing_text(&[2]), "input 3 not in this session");
-    assert_eq!(missing_text(&[2, 3]), "inputs 3+4 not in this session");
+    assert_eq!(missing_text(&[2]), "input 3 not in this stream");
+    assert_eq!(missing_text(&[2, 3]), "inputs 3+4 not in this stream");
 }
 
 #[test]
@@ -344,9 +344,9 @@ fn scene_draws_bars_readouts_chip_and_field() {
             theme: &theme,
         },
         size,
-        Some("inputs 3+4 not in this session"),
+        Some("inputs 3+4 not in this stream"),
     );
-    assert_eq!(texts(&gone.scene), vec!["inputs 3+4 not in this session"]);
+    assert_eq!(texts(&gone.scene), vec!["inputs 3+4 not in this stream"]);
     assert!(gone.gonio.is_none());
 }
 

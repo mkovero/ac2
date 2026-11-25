@@ -16,7 +16,7 @@ use ac2_core::timing::{LoopbackTiming, Outcome, TimingConfig, TimingEvent};
 use ac2_proto::frame::{FrameData, ProtectionFlags, TimingMeta, TimingWindow};
 use ac2_proto::model::{Drift, TimingStatus};
 use ac2_proto::topic::Topic;
-use ac2_proto::units::{Db, Dbfs, Rev, SampleIndex, Samples, Seconds, SessionEpoch, WallNs};
+use ac2_proto::units::{Db, Dbfs, Rev, SampleIndex, Samples, Seconds, StreamEpoch, WallNs};
 
 use super::{Analysis, Due, Emitter, Flush, JobCmd, Pace, StampArgs};
 use crate::control::ControlMsg;
@@ -46,7 +46,7 @@ pub(crate) struct Timing {
     drift_end: Option<u64>,
     drift_wall: u64,
     to_control: Sender<ControlMsg>,
-    epoch: SessionEpoch,
+    epoch: StreamEpoch,
     /// Windows measured; the `timing` result changes with each.
     generation: u64,
     pace: Pace,
@@ -58,7 +58,7 @@ impl Timing {
         idx: usize,
         history: HistoryReader,
         to_control: Sender<ControlMsg>,
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         initial: TimingStatus,
     ) -> Self {
         let cfg = TimingConfig::for_rate(f64::from(sample_rate));

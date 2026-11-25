@@ -88,7 +88,7 @@ pub struct Samples(pub i64);
 #[serde(transparent)]
 pub struct WallNs(pub u64);
 
-/// Index in the session's sample clock; origin = session open.
+/// Index in the stream's sample clock; origin = stream open.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
 )]
@@ -134,8 +134,8 @@ impl fmt::Display for RigId {
 }
 
 id_type!(
-    /// Per incarnation; changes on session open/close, device, rate or buffer change.
-    SessionEpoch(u32)
+    /// Per incarnation; changes on stream open/close, device, rate or buffer change.
+    StreamEpoch(u32)
 );
 id_type!(
     /// A measurement job.

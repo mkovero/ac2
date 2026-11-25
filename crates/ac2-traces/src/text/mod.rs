@@ -6,7 +6,7 @@
 //! # ac2 trace export v6
 //! # name: Main L pre EQ
 //! # kind: transfer
-//! # source: captured from "main-l" (measurement 1), session epoch 3, sample 480000
+//! # source: captured from "main-l" (measurement 1), stream epoch 3, sample 480000
 //! # delay_ms: 12.5
 //! # …                      (every metadata field, one per line)
 //! # grid: {"type":"log","ppo":48,"k_min":-240,"k_max":239}

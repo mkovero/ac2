@@ -30,8 +30,8 @@ async fn ac2_client_drives_the_daemon() {
     assert_eq!(c.welcome().daemon_incarnation.0, h.incarnation());
     c.wait_synced(Duration::from_secs(5)).await.unwrap();
 
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();

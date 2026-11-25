@@ -40,8 +40,8 @@ pub(super) fn token() -> LeaseToken {
     LeaseToken(0x0123_4567_89ab_cdef_fedc_ba98_7654_3210)
 }
 
-pub(super) fn session_config() -> SessionConfig {
-    SessionConfig {
+pub(super) fn stream_config() -> StreamConfig {
+    StreamConfig {
         backend: Some(BackendKind::CoreAudio),
         input_device: DeviceSelector::Id {
             id: DeviceId("hw:UMC1820".into()),
@@ -61,11 +61,11 @@ pub(super) fn session_config() -> SessionConfig {
     }
 }
 
-/// A session taking one input of another rig.
-pub(super) fn remote_session_config() -> SessionConfig {
+/// A stream taking one input of another rig.
+pub(super) fn remote_stream_config() -> StreamConfig {
     let r = super::remote::remote_input();
-    let mut c = session_config();
-    c.input_channels.push(r.session_channel());
+    let mut c = stream_config();
+    c.input_channels.push(r.stream_channel());
     c.remote_inputs = vec![r];
     c.link_offset = Some(crate::units::Seconds(0.02));
     c
@@ -436,7 +436,7 @@ pub(super) fn math_trace_meta() -> TraceMeta {
         source: TraceSource::Math {
             meas: MeasId(6),
             meas_name: "Main L ÷ Sub".into(),
-            epoch: SessionEpoch(2),
+            epoch: StreamEpoch(2),
             at_sample: SampleIndex(4_800_000),
             expr: MathExpr::Binary {
                 a: Operand::Meas { meas: MeasId(1) },

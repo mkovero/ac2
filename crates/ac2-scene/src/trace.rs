@@ -23,7 +23,7 @@
 //! path whose true response is `H(f)` the trace holds `H_k(f) = H(f) · e^{+jωτ_k}`
 //! (`ω = 2πf`): its own propagation delay is compensated, and two traces of identical
 //! boxes at different distances would look identical. To keep relative arrival visible,
-//! every trace in the shared time base of the session epoch is drawn as if it had been
+//! every trace in the shared time base of the stream epoch is drawn as if it had been
 //! measured with the *reference trace's* delay `τ_ref` (plus its own nudge `ν_k`,
 //! decision 8a):
 //!
@@ -35,7 +35,7 @@
 //! For the reference trace itself `Δ = −ν` (normally 0). A trace that arrives 1 ms later
 //! than the reference therefore shows an extra phase lag of 360° per kHz, and its group
 //! delay reads 1 ms higher. Traces without a shared time base (imported, averaged, math,
-//! another session epoch — decision 8a "marked independent") keep their own alignment:
+//! another stream epoch — decision 8a "marked independent") keep their own alignment:
 //! `Δ = −ν`. The rotation changes phase only; magnitude and coherence are untouched.
 //!
 //! # A measurement's own delay steps
@@ -55,7 +55,7 @@ use ac2_proto::frame::{FrameStamp, TfFrame, ValidityMask};
 use ac2_proto::model::{
     ImportNote, MicState, Polarity, Smoothing, SmoothingMode, TraceData, TraceMicCurve, TraceSource,
 };
-use ac2_proto::units::{MeasId, Seconds, SessionEpoch, TraceId};
+use ac2_proto::units::{MeasId, Seconds, StreamEpoch, TraceId};
 use std::sync::{Arc, Mutex};
 
 use crate::primitives::Color;
@@ -74,8 +74,8 @@ pub enum TraceKey {
 /// Time base of a trace's phase.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TimeBase {
-    /// Phase measured with `delay` in the shared time reference of session `epoch`.
-    Shared { epoch: SessionEpoch, delay: Seconds },
+    /// Phase measured with `delay` in the shared time reference of stream `epoch`.
+    Shared { epoch: StreamEpoch, delay: Seconds },
     /// Own alignment only; never compared against the shared reference.
     Independent,
 }
@@ -194,7 +194,7 @@ impl<'a> TfTrace<'a> {
             delay_nudge: frame.meta.nudged,
             // The arrival: see "A measurement's own delay steps" in the module docs.
             time_base: TimeBase::Shared {
-                epoch: stamp.session_epoch,
+                epoch: stamp.stream_epoch,
                 delay: Seconds(frame.meta.delay.0 - frame.meta.nudged.0),
             },
             freshness: Some(freshness),
@@ -303,7 +303,7 @@ impl<'a> TfTrace<'a> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PhaseReference {
     pub key: TraceKey,
-    pub epoch: SessionEpoch,
+    pub epoch: StreamEpoch,
     pub delay: Seconds,
 }
 

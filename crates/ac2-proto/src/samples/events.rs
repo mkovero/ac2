@@ -14,7 +14,7 @@ pub fn events() -> Vec<Event> {
         change,
     };
     vec![
-        ev(42, Change::Session(session())),
+        ev(42, Change::Stream(stream())),
         ev(43, Change::Measurement(Patch::Set(measurement()))),
         ev(44, Change::Measurement(Patch::Deleted(MeasId(3)))),
         ev(45, Change::Trace(Patch::Set(trace_meta()))),
@@ -49,7 +49,7 @@ pub fn events() -> Vec<Event> {
         ev(58, Change::Mic(Patch::Deleted("ECM".into()))),
         ev(59, Change::Measurement(Patch::Set(spl_measurement()))),
         ev(60, Change::Recording(recording_run())),
-        ev(61, Change::Session(replay_session())),
+        ev(61, Change::Stream(replay_stream())),
         ev(62, Change::Measurement(Patch::Set(math_measurement()))),
         ev(63, Change::Trace(Patch::Set(math_trace_meta()))),
         ev(64, Change::Outputs(outputs())),

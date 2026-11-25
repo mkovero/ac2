@@ -18,7 +18,7 @@
 //! measurement it does not have; a load replaces such traces like any other. A math
 //! trace filed under a rig meter is saved the same way.
 //!
-//! The monitor at start: with `rig.monitor_start` on, each successful `session.open` while
+//! The monitor at start: with `rig.monitor_start` on, each successful `stream.open` while
 //! rig meters exist is recorded in the rig settings, and a restarted daemon reopens that
 //! device capture-only (no output channels, no loopback), so the rig meters meter with no
 //! client connected. With no output stream the generator cannot be routed anywhere
@@ -32,8 +32,7 @@ use std::time::Instant;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::layout::{EntryRef, PaneContent, RigRef};
 use ac2_proto::model::{
-    MathExpr, MeasKind, MeasScope, Measurement, Operand, Rig, SessionConfig, TraceOwner,
-    TraceSource,
+    MathExpr, MeasKind, MeasScope, Measurement, Operand, Rig, StreamConfig, TraceOwner, TraceSource,
 };
 use ac2_proto::units::{Db, MeasId, Rev, WallNs};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, Warning};
@@ -50,7 +49,7 @@ pub(crate) struct RigMeas {
     /// What the rig settings hold of the rig's meters, by id.
     saved: Vec<RigMeter>,
     /// The audio configuration the monitor at start reopens.
-    session: Option<SessionConfig>,
+    stream: Option<StreamConfig>,
     /// Their logs on disk; `None`: in memory only.
     logs: Option<RigLogs>,
     /// The next attempt of the monitor at start to open the audio, and its number.
@@ -74,7 +73,7 @@ impl RigMeas {
         saved.sort_by_key(|m| m.id);
         Self {
             saved,
-            session: s.monitor_session.clone(),
+            stream: s.monitor_stream.clone(),
             logs,
             retry: None,
         }
@@ -110,8 +109,8 @@ pub(super) fn saved_of(m: &Measurement) -> SavedMeasurement {
 
 /// A `rig.*` command made on rig settings that have changed since.
 /// `cfg` without outputs: the monitor at start opens the capture side only.
-fn capture_only(cfg: &SessionConfig) -> SessionConfig {
-    SessionConfig {
+fn capture_only(cfg: &StreamConfig) -> StreamConfig {
+    StreamConfig {
         output_channels: 0,
         loopback: None,
         ..cfg.clone()
@@ -165,7 +164,7 @@ impl Control {
             outputs: self.store.state().outputs.clone(),
             meters: self.rig.meas.saved.clone(),
             monitor_at_start: self.store.state().rig.monitor_at_start,
-            monitor_session: self.rig.meas.session.clone(),
+            monitor_stream: self.rig.meas.stream.clone(),
             osc_target: self.store.state().rig.osc_target,
             artnet_target: self.store.state().rig.artnet_target,
             artnet_fade: self.store.state().rig.artnet_fade,
@@ -216,16 +215,16 @@ impl Control {
             // Named one by one: a new command that changes a rig meter has to be put
             // above, and the compiler asks for the decision.
             Command::Hello { .. }
-            | Command::SessionDevices
-            | Command::SessionPreview { .. }
-            | Command::SessionPreviewStop
-            | Command::SessionControlPanel { .. }
-            | Command::SessionDetectLoopback { .. }
-            | Command::SessionOpen { .. }
-            | Command::SessionClose
-            | Command::SessionStatus
-            | Command::SessionInputs { .. }
-            | Command::SessionOutputs { .. }
+            | Command::StreamDevices
+            | Command::StreamPreview { .. }
+            | Command::StreamPreviewStop
+            | Command::StreamControlPanel { .. }
+            | Command::StreamDetectLoopback { .. }
+            | Command::StreamOpen { .. }
+            | Command::StreamClose
+            | Command::StreamStatus
+            | Command::StreamInputs { .. }
+            | Command::StreamOutputs { .. }
             | Command::GenAcquire { .. }
             | Command::GenSet { .. }
             | Command::GenRefresh { .. }
@@ -293,7 +292,7 @@ impl Control {
             | Command::RecStart { .. }
             | Command::RecStop
             | Command::RecList
-            | Command::SessionReplay { .. }
+            | Command::StreamReplay { .. }
             | Command::ServerInfo
             | Command::ServerNetwork { .. }
             | Command::ServerAuthorize { .. }
@@ -498,16 +497,16 @@ impl Control {
             });
         }
         // Turned on with the audio open: that is the device to come back to.
-        let session = match self.open_config() {
+        let stream = match self.open_config() {
             Some(c) if on && self.has_rig_meters() => Some(c),
-            _ => self.rig.meas.session.clone(),
+            _ => self.rig.meas.stream.clone(),
         };
         self.rig.settings.persist(&RigSettings {
             monitor_at_start: on,
-            monitor_session: session.clone(),
+            monitor_stream: stream.clone(),
             ..self.rig_settings_now()
         })?;
-        self.rig.meas.session = session;
+        self.rig.meas.stream = stream;
         let rev = self.commit_rig(|r| r.monitor_at_start = on);
         tracing::info!(
             target: "ac2d::audit",
@@ -517,29 +516,29 @@ impl Control {
         Ok(ReplyBody::Ack { rev })
     }
 
-    /// The configuration the open session was opened with by a client (never a replay).
-    fn open_config(&self) -> Option<SessionConfig> {
-        self.session
+    /// The configuration the open stream was opened with by a client (never a replay).
+    fn open_config(&self) -> Option<StreamConfig> {
+        self.stream
             .as_ref()
             .filter(|rt| rt.open.replay.is_none())
             .map(|rt| rt.open.config.clone())
     }
 
-    /// `session.open`: warns when rig meters move to another device, records the
+    /// `stream.open`: warns when rig meters move to another device, records the
     /// configuration for the monitor at start.
-    pub(super) fn rig_session_open(
+    pub(super) fn rig_stream_open(
         &mut self,
         client: &Peer,
-        config: SessionConfig,
+        config: StreamConfig,
     ) -> Result<ReplyBody, ProtoError> {
         let moved = self.has_rig_meters()
             && self.open_config().is_some_and(|old| {
                 old.backend != config.backend || old.input_device != config.input_device
             });
-        let r = self.session_open(client, config.clone())?;
+        let r = self.stream_open(client, config.clone())?;
         if moved {
             tracing::warn!(
-                "session.open on another device while {} rig SPL meter(s) run: they meter its \
+                "stream.open on another device while {} rig SPL meter(s) run: they meter its \
                  inputs from now on",
                 self.rig.meas.saved.len()
             );
@@ -550,26 +549,26 @@ impl Control {
         self.rig.meas.retry = None;
         if self.store.state().rig.monitor_at_start
             && self.has_rig_meters()
-            && self.rig.meas.session.as_ref() != Some(&config)
+            && self.rig.meas.stream.as_ref() != Some(&config)
         {
             let s = RigSettings {
-                monitor_session: Some(config.clone()),
+                monitor_stream: Some(config.clone()),
                 ..self.rig_settings_now()
             };
             match self.rig.settings.persist(&s) {
-                Ok(()) => self.rig.meas.session = Some(config),
-                Err(e) => tracing::warn!("monitor at start: session not recorded: {}", e.msg),
+                Ok(()) => self.rig.meas.stream = Some(config),
+                Err(e) => tracing::warn!("monitor at start: stream not recorded: {}", e.msg),
             }
         }
         Ok(r)
     }
 
-    /// `session.close` is about to end the audio the rig meters meter.
-    pub(super) fn rig_session_closing(&mut self) {
+    /// `stream.close` is about to end the audio the rig meters meter.
+    pub(super) fn rig_stream_closing(&mut self) {
         self.rig.meas.retry = None;
-        if self.has_rig_meters() && (self.session.is_some() || self.audio_recovery.is_some()) {
+        if self.has_rig_meters() && (self.stream.is_some() || self.audio_recovery.is_some()) {
             tracing::warn!(
-                "session.close: {} rig SPL meter(s) stop metering until a session opens again",
+                "stream.close: {} rig SPL meter(s) stop metering until a stream opens again",
                 self.rig.meas.saved.len()
             );
             self.reply_warnings.push(Warning::RigMonitorBlind {
@@ -588,9 +587,9 @@ impl Control {
             tracing::info!("monitor at start: no rig SPL meters; the audio stays closed");
             return;
         }
-        if self.rig.meas.session.is_none() {
+        if self.rig.meas.stream.is_none() {
             tracing::info!(
-                "monitor at start: no session recorded yet (one is, at the next session.open); \
+                "monitor at start: no stream recorded yet (one is, at the next stream.open); \
                  the audio stays closed"
             );
             return;
@@ -601,11 +600,11 @@ impl Control {
     /// Attempt `attempt` of the monitor at start to open the audio.
     fn monitor_open(&mut self, attempt: u32) {
         self.rig.meas.retry = None;
-        let Some(cfg) = self.rig.meas.session.as_ref().map(capture_only) else {
+        let Some(cfg) = self.rig.meas.stream.as_ref().map(capture_only) else {
             return;
         };
         let daemon = Peer::Local(ac2_proto::units::ClientId("ac2d".into()));
-        match self.open_session(&daemon, cfg, None) {
+        match self.open_stream(&daemon, cfg, None) {
             Ok(s) => {
                 let dev = s
                     .open
@@ -636,12 +635,12 @@ impl Control {
         self.rig.meas.retry.map(|(at, _)| at)
     }
 
-    /// The monitor at start's next attempt, when due and no session came meanwhile.
+    /// The monitor at start's next attempt, when due and no stream came meanwhile.
     pub(super) fn rig_tick(&mut self, now: Instant) {
         let Some((at, attempt)) = self.rig.meas.retry else {
             return;
         };
-        if self.session.is_some() || self.audio_recovery.is_some() {
+        if self.stream.is_some() || self.audio_recovery.is_some() {
             self.rig.meas.retry = None;
         } else if now >= at {
             self.monitor_open(attempt);

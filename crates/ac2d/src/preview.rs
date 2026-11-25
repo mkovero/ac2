@@ -1,9 +1,9 @@
-//! Device preview: meters of every input of a device before a session opens on it, so the
+//! Device preview: meters of every input of a device before a stream opens on it, so the
 //! operator can see which input carries the loopback and which the mics.
 //!
 //! The preview opens the device for capture only. Its request has no output channels and a
 //! silent output source, so there is no output stream at all: nothing can be emitted,
-//! whatever else happens in the daemon. It lives until it is stopped, replaced, a session
+//! whatever else happens in the daemon. It lives until it is stopped, replaced, a stream
 //! opens, or it is not renewed in time ([`PREVIEW_EXPIRY`]).
 //!
 //! A renewal checks the stream is still delivering: a stream the host ended or that has
@@ -30,7 +30,7 @@ use crate::fanout::pop_block;
 use crate::jobs::meters::{meter_period, meter_stamp};
 use crate::jobs::programme::{Captured, Declared, Programme, SharedPolicy};
 use crate::jobs::{Emitter, JobEnv, LevelsMeter, Meters};
-use crate::session::audio_err;
+use crate::stream::audio_err;
 use crate::util::{internal, invalid, missing};
 
 /// A preview not renewed within this closes.
@@ -108,7 +108,7 @@ impl Preview {
         let last_block_ms = Arc::new(AtomicU64::new(NEVER));
         let ended_flag = Arc::new(AtomicBool::new(false));
         let (lb, ef) = (Arc::clone(&last_block_ms), Arc::clone(&ended_flag));
-        // The declaration follows the rules of `session.inputs`, over the device's inputs.
+        // The declaration follows the rules of `stream.inputs`, over the device's inputs.
         let rows: Vec<InputSetup> = declared
             .iter()
             .map(|d| InputSetup {
@@ -142,7 +142,7 @@ impl Preview {
             loudness: Vec::new(),
         };
         let frame_meta = meta.clone();
-        // The declared pairs stay as the dialog declared them; the pairs of a session do
+        // The declared pairs stay as the dialog declared them; the pairs of a stream do
         // not apply to a device that is only being looked at.
         let mut programme = Programme::new(
             Captured {
@@ -268,7 +268,7 @@ impl Preview {
         self.deadline = Instant::now() + PREVIEW_EXPIRY;
     }
 
-    /// The reply of `session.preview`.
+    /// The reply of `stream.preview`.
     pub(crate) fn wire(&self) -> WirePreview {
         WirePreview {
             backend: self.backend,

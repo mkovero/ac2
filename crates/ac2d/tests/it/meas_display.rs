@@ -1,7 +1,7 @@
 //! What a measurement keeps about how clients draw it: a spectrum's display settings
 //! (`meas.update` in place), its display offset (`meas.offset`) and the curves each pane of
 //! its own layout draws (`meas.layout`). None of it touches the job; all of it is saved in
-//! the session, and a deleted measurement, trace or walk leaves every stored layout.
+//! the stream, and a deleted measurement, trace or walk leaves every stored layout.
 #![allow(clippy::unwrap_used)]
 
 use crate::common;
@@ -117,7 +117,7 @@ fn display_settings_keep_the_job_and_survive_a_reload() {
     assert_eq!(
         a.layout.map(|l| l.panes()[0].content.clone()),
         Some(drawn),
-        "a pane's curves come back with the session"
+        "a pane's curves come back with the stream"
     );
     assert_eq!(b.offset, Db(6.0));
     assert_eq!(b.config.kind.display(), Some(&SpectrumDisplay::default()));
@@ -125,7 +125,7 @@ fn display_settings_keep_the_job_and_survive_a_reload() {
 }
 
 /// P on a transfer function changes what is drawn over it, never what is measured: the
-/// job and its averages stay, and the mode comes back with the session.
+/// job and its averages stay, and the mode comes back with the stream.
 #[test]
 fn a_transfers_peak_mode_keeps_the_job_and_survives_a_reload() {
     use ac2_proto::model::PeakMode;

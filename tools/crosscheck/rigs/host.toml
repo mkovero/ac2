@@ -87,7 +87,7 @@ pre = [{ type = "hp1", hz = 20.0 },
 [ac2]
 cmd = ["ac2"]
 timeout = "5s"
-session_open = ["session", "open", "--backend", "jack", "--in", "1-8", "--outputs", "6",
+stream_open = ["stream", "open", "--backend", "jack", "--in", "1-8", "--outputs", "6",
                 "--loopback-out", "2", "--loopback-in", "2"]
 dropin = "/nonexistent/crosscheck-host-{uid}.conf"   # never installed: the bound already is the emit ceiling
 

@@ -1,5 +1,5 @@
 //! The rig's settings and server features: the system max level (`gen.ceiling`), the
-//! output labels (`session.outputs`) and who may connect (`server.*`).
+//! output labels (`stream.outputs`) and who may connect (`server.*`).
 //!
 //! The system max level protects ears and speakers, so the asymmetry is deliberate: any
 //! client may lower it and that applies at once, while raising it takes an explicit
@@ -96,7 +96,7 @@ impl Control {
         self.out.ceiling_set = Some(new);
         self.s.ceiling_dbfs = new;
         self.s.max_level = peak;
-        if let Some(rt) = &self.session {
+        if let Some(rt) = &self.stream {
             rt.gen_handle.set_max_level(peak);
         }
         let mut g = self.store.state().generator.clone();
@@ -147,8 +147,8 @@ impl Control {
         Ok(ReplyBody::Generator(g))
     }
 
-    /// `session.outputs`.
-    pub(super) fn session_outputs(
+    /// `stream.outputs`.
+    pub(super) fn stream_outputs(
         &mut self,
         rows: Vec<OutputSetup>,
     ) -> Result<ReplyBody, ProtoError> {

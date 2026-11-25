@@ -3,7 +3,7 @@
 //! [`super::working`]; archives from and to clients: [`super::transfer`]).
 //!
 //! A load replaces every measurement and trace, stops and disarms the generator and drops
-//! its owner, and starts a new session epoch newer than any epoch recorded in the loaded
+//! its owner, and starts a new stream epoch newer than any epoch recorded in the loaded
 //! traces: a trace captured in another run must never look like it shares the live time
 //! base just because the epoch counters happen to match.
 
@@ -12,10 +12,10 @@ use std::path::{Path, PathBuf};
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
     DelayState, GenAction, ImportFormat, ImportRole, MeasKind, MeasScope, Measurement, RemoteInput,
-    Salvage, SalvageRefusal, Session, SessionConfig, SessionFile, SessionOrigin, SessionRef,
+    Salvage, SalvageRefusal, SessionFile, SessionOrigin, SessionRef, Stream, StreamConfig,
     SweepFailure, TraceKind, TraceOwner,
 };
-use ac2_proto::units::{Db, MeasId, Rev, Seconds, SessionEpoch, TransferId, WallNs};
+use ac2_proto::units::{Db, MeasId, Rev, Seconds, StreamEpoch, TransferId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
 use ac2_traces::session::{
     self, Manifest, SavedDelay, SavedMeasurement, Session as SessionData, SessionError,
@@ -147,7 +147,7 @@ impl Control {
             walks: self.store.state().walks.clone(),
             plans: self.store.state().walk_plans.clone(),
             remote_inputs: self
-                .session
+                .stream
                 .as_ref()
                 .map(|rt| rt.open.config.remote_inputs.clone())
                 .unwrap_or_default(),
@@ -443,15 +443,15 @@ impl Control {
         }))
     }
 
-    /// The session configuration a load of `remote` reopens on: the open (or stopped)
-    /// session's, its remote inputs replaced by the loaded ones, since the loaded
+    /// The stream configuration a load of `remote` reopens on: the open (or stopped)
+    /// stream's, its remote inputs replaced by the loaded ones, since the loaded
     /// measurements name their channels. `None` when nothing changes: the same remote inputs,
-    /// a replay (it plays a recording, not inputs), or no session to take them.
+    /// a replay (it plays a recording, not inputs), or no stream to take them.
     fn config_after_load(
         &self,
         remote: &[RemoteInput],
-    ) -> Result<Option<SessionConfig>, ProtoError> {
-        let now = match &self.session {
+    ) -> Result<Option<StreamConfig>, ProtoError> {
+        let now = match &self.stream {
             Some(rt) if rt.open.replay.is_some() => {
                 if !remote.is_empty() {
                     tracing::info!("session load: a replay takes no remote inputs");
@@ -464,7 +464,7 @@ impl Control {
                 None => {
                     if !remote.is_empty() {
                         tracing::warn!(
-                            "session load: no open session to take its {} remote inputs",
+                            "session load: no open stream to take its {} remote inputs",
                             remote.len()
                         );
                     }
@@ -475,18 +475,18 @@ impl Control {
         if now.remote_inputs == remote {
             return Ok(None);
         }
-        let next = crate::session::with_remote_inputs(now, remote);
-        crate::session::validate(&next)?;
+        let next = crate::stream::with_remote_inputs(now, remote);
+        crate::stream::validate(&next)?;
         Ok(Some(next))
     }
 
     /// Replaces every session measurement and every trace with `data`, disarmed (module
-    /// docs); the rig meters go on ([`super::rig_meas`]). Returns the new session epoch.
+    /// docs); the rig meters go on ([`super::rig_meas`]). Returns the new stream epoch.
     pub(super) fn replace_session(
         &mut self,
         client: Option<&Peer>,
         mut data: SessionData,
-    ) -> Result<SessionEpoch, ProtoError> {
+    ) -> Result<StreamEpoch, ProtoError> {
         // Everything is checked before anything changes: a refused load leaves the state
         // as it was.
         self.prepare_load(&mut data)?;
@@ -507,8 +507,8 @@ impl Control {
             .0
             .max(newest)
             .checked_add(1)
-            .map(SessionEpoch)
-            .ok_or_else(|| internal("the session epoch is exhausted"))?;
+            .map(StreamEpoch)
+            .ok_or_else(|| internal("the stream epoch is exhausted"))?;
 
         // Disarmed, no owner; a sweep run in progress is discarded.
         self.abort_runs(SweepFailure::Stopped, "a session was loaded");
@@ -545,22 +545,22 @@ impl Control {
         }
         self.traces.clear();
 
-        if let Some(rt) = &mut self.session {
+        if let Some(rt) = &mut self.stream {
             if let Some(c) = config {
                 rt.open.config = c;
             }
             // The stream reopens without generator routes: nothing is armed after a load.
-            // A device that fails to reopen leaves the session open with its audio stopped
+            // A device that fails to reopen leaves the stream open with its audio stopped
             // and being reopened (`reopen_at`); the saved state still loads.
             if let Err(e) = self.reopen_at(&[], epoch) {
                 tracing::warn!("session load: the audio stream did not reopen: {}", e.msg);
             }
         } else if self.audio_recovery.is_some() {
-            // The session's audio is stopped: it stays open and keeps being reopened, now in
+            // The stream's audio is stopped: it stays open and keeps being reopened, now in
             // the loaded state's epoch.
             self.rebase_recovery(epoch, config);
         } else {
-            self.commit(Change::Session(Session {
+            self.commit(Change::Stream(Stream {
                 epoch,
                 open: None,
                 stopped: None,
@@ -582,7 +582,7 @@ impl Control {
             self.traces.set_dynamics(t.meta.id, t.dynamics);
             self.commit(Change::Trace(Patch::Set(t.meta)));
         }
-        let fs = self.session.as_ref().map(|r| f64::from(r.sample_rate));
+        let fs = self.stream.as_ref().map(|r| f64::from(r.sample_rate));
         let mut loaded = Vec::with_capacity(data.measurements.len());
         for sm in data.measurements {
             self.ids.meas_past(sm.id);
@@ -640,7 +640,7 @@ impl Control {
         }
         // Then the jobs, once every measurement is there: a math trace looks its live
         // operands up whatever their order.
-        if self.session.is_some() {
+        if self.stream.is_some() {
             for mut meas in loaded.into_iter().filter(|m| m.running) {
                 match self.start_job(&meas) {
                     Ok(Some(g)) => {

@@ -238,7 +238,7 @@ impl Control {
     /// the matching rules pick. A calibration of another mic or input keeps its own key, so
     /// the trace shows that it was not this mic's.
     pub(super) fn cal_and_mic(&self, input: u16) -> (CalState, Option<MicState>) {
-        let Some(rt) = self.session.as_ref() else {
+        let Some(rt) = self.stream.as_ref() else {
             return (CalState::Uncalibrated, None);
         };
         let c = self.input_cal(rt, input);
@@ -268,7 +268,7 @@ impl Control {
         &self,
         input: u16,
     ) -> Option<(Box<TraceMicCurve>, Correction)> {
-        let rt = self.session.as_ref()?;
+        let rt = self.stream.as_ref()?;
         let c = self.input_cal(rt, input);
         let curve = c.curve?;
         let row = ac2_proto::cal::input_setup(&self.store.state().inputs, input);
@@ -303,10 +303,8 @@ impl Control {
                     m.config.name
                 ))
             })?;
-        if frame.stamp.session_epoch != self.epoch() {
-            return Err(invalid(
-                "the newest result is from an earlier session epoch",
-            ));
+        if frame.stamp.stream_epoch != self.epoch() {
+            return Err(invalid("the newest result is from an earlier stream epoch"));
         }
         let (kind, columns) = ops::capture_columns(&frame.data).ok_or_else(|| {
             invalid("only transfer, spectrum and RTA measurements can be captured")
@@ -374,7 +372,7 @@ impl Control {
             source: TraceSource::Captured {
                 meas,
                 meas_name: m.config.name.clone(),
-                epoch: frame.stamp.session_epoch,
+                epoch: frame.stamp.stream_epoch,
                 at_sample: frame.stamp.audio_sample,
             },
             grid_id: grid.id(),
@@ -482,7 +480,7 @@ impl Control {
             source: TraceSource::Math {
                 meas: m.id,
                 meas_name: m.config.name.clone(),
-                epoch: frame.stamp.session_epoch,
+                epoch: frame.stamp.stream_epoch,
                 at_sample: frame.stamp.audio_sample,
                 expr: config.expr.clone(),
                 operands: included,

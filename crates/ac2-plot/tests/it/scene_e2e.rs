@@ -9,7 +9,7 @@ use ac2_plot::Viewport;
 use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::Polarity;
 use ac2_proto::model::SpectrumStyle;
-use ac2_proto::units::{MeasId, Seconds, SessionEpoch};
+use ac2_proto::units::{MeasId, Seconds, StreamEpoch};
 use ac2_scene::banner::Status;
 use ac2_scene::theme::Theme;
 use ac2_scene::time::Freshness;
@@ -89,7 +89,7 @@ fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
         nudge: Seconds(0.0),
         delay_nudge: Seconds(0.0),
         time_base: TimeBase::Shared {
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
             delay: Seconds(delay),
         },
         freshness: Some(Freshness::from_age(0.1)),

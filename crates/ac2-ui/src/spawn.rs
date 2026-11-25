@@ -8,7 +8,7 @@
 //!   [`ac2_client::endpoint::LockHolder`]) without owning it.
 //! - **Ownership**: an owned child holds the read end of a pipe the app writes nothing to and
 //!   runs with `--stop-on-stdin-eof`. Its end (the app dropping it, quitting or crashing on
-//!   any OS) stops the daemon through its orderly shutdown: the stimulus faded, the session
+//!   any OS) stops the daemon through its orderly shutdown: the stimulus faded, the stream
 //!   closed, the autosave flushed. A child started without (Settings › Connection *Stop
 //!   ac2d when the app quits* off) is detached and outlives the app.
 

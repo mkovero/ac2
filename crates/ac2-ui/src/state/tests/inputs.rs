@@ -152,7 +152,7 @@ fn own_client_id_follows_the_daemon_incarnation() {
 fn inputs_call(r: &[Request]) -> Option<Vec<InputSetup>> {
     r.iter().find_map(|r| match r {
         Request::Call {
-            cmd: Command::SessionInputs { inputs, .. },
+            cmd: Command::StreamInputs { inputs, .. },
             ..
         } => Some(inputs.clone()),
         _ => None,
@@ -296,7 +296,7 @@ fn mic_text_round_trips() {
 
 fn with_output_device(dev: &str) -> State {
     let mut s = daemon_state();
-    if let Some(o) = &mut s.session.open {
+    if let Some(o) = &mut s.stream.open {
         o.output_device = DeviceId(dev.into());
     }
     s
@@ -312,10 +312,10 @@ fn stimulus_outputs_are_remembered_per_device() {
     assert!(t.st.prefs.outputs.is_empty());
     t.st.prefs_dirty = false;
     // Choosing outputs (S on an output in Settings › Audio I/O, opened on the
-    // stimulus output) remembers them for the session's output device and applies them
-    // now: the open session (on the simulated rig the dialog lists) has them.
+    // stimulus output) remembers them for the stream's output device and applies them
+    // now: the open stream (on the simulated rig the dialog lists) has them.
     let mut s = daemon_state();
-    if let Some(o) = &mut s.session.open {
+    if let Some(o) = &mut s.stream.open {
         o.backend = BackendKind::Fake;
     }
     t.conn(mirror(s));
@@ -426,9 +426,9 @@ fn calibrations_are_deleted_from_the_palette() {
     let r = prompt_text(&mut t, CommandId::CalDelete, "2=");
     assert!(cal_delete(&r).is_none());
     assert!(matches!(&t.st.overlay, Overlay::Prompt(p) if p.error.is_some()));
-    // Without a session there is no device to name.
+    // Without a stream there is no device to name.
     let mut s = daemon_state();
-    s.session.open = None;
+    s.stream.open = None;
     t.conn(mirror(s));
     let r = prompt_text(&mut t, CommandId::CalDelete, "2=M30");
     assert!(cal_delete(&r).is_none());
@@ -732,11 +732,11 @@ fn input_setup_names_a_missing_curve_and_the_meter_label_follows() {
     let mut s = mm1_state(CurveChoice::Curve {
         label: "45°".into(),
     });
-    if let Some(o) = &mut s.session.open {
+    if let Some(o) = &mut s.stream.open {
         o.config.input_channels = vec![0, 1];
     }
     t.conn(mirror(s));
-    let label = |t: &T| t.st.session_inputs()[1].label.clone();
+    let label = |t: &T| t.st.stream_inputs()[1].label.clone();
     assert_eq!(label(&t), "MM1 34804 · 45° not stored · mic (in 2)");
     assert_eq!(
         t.st.curve_note(1, false).as_deref(),
@@ -755,9 +755,9 @@ fn input_setup_names_a_missing_curve_and_the_meter_label_follows() {
 }
 
 #[test]
-fn session_dialog_steps_the_mic_curve_of_a_named_mic() {
+fn stream_dialog_steps_the_mic_curve_of_a_named_mic() {
     let mut t = T::new();
-    // The session runs on the rig with MM1 34804 on input 2, 0° chosen.
+    // The stream runs on the rig with MM1 34804 on input 2, 0° chosen.
     t.conn(mirror(mm1_state(CurveChoice::Curve {
         label: "0°".into()
     })));
@@ -776,7 +776,7 @@ fn session_dialog_steps_the_mic_curve_of_a_named_mic() {
             false
         )
     );
-    // → applies at once: the session captures this mic already.
+    // → applies at once: the stream captures this mic already.
     let r = t.key("ArrowRight");
     assert_eq!(
         inputs_call(&r),
@@ -876,7 +876,7 @@ fn pane_keys_act_on_the_panes_own_measurement() {
 #[test]
 fn line_calibration_from_the_calibrations_view() {
     use ac2_client::{Latest, TopicFrame};
-    use ac2_proto::frame::{ClipFlags, SessionLevelsFrame};
+    use ac2_proto::frame::{ClipFlags, StreamLevelsFrame};
     use ac2_proto::units::Volts;
     use ac2_proto::{Frame, FrameData};
     let mut t = T::new();
@@ -894,11 +894,11 @@ fn line_calibration_from_the_calibrations_view() {
     assert_eq!(d.title(), "Line calibration · in 1");
     assert_eq!(d.volts, "");
     t.text("1.228 V");
-    // The session's meters running, the dialog shows the input's level; Enter sends the
+    // The stream's meters running, the dialog shows the input's level; Enter sends the
     // volts alone, the daemon measures the level itself.
     let mut latest = Latest::default();
-    let data = FrameData::SessionLevels(SessionLevelsFrame {
-        meta: ac2_proto::frame::SessionLevelsMeta {
+    let data = FrameData::StreamLevels(StreamLevelsFrame {
+        meta: ac2_proto::frame::StreamLevelsMeta {
             channels: vec![0, 1],
             ballistic: Default::default(),
             pair_levels: vec![],

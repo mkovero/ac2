@@ -589,7 +589,7 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
     Ok(config)
 }
 
-/// Refuses a measurement whose job would read an input the open session does not capture,
+/// Refuses a measurement whose job would read an input the open stream does not capture,
 /// before anything is created: the daemon would refuse its start in the same words.
 pub(crate) fn uncaptured(kind: &MeasKind, captured: &[u16]) -> Result<(), CliError> {
     let inputs: &[u16] = match kind {

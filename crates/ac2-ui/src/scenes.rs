@@ -95,7 +95,7 @@ pub fn freshness(st: &AppState, tf: &TopicFrame) -> Freshness {
         };
     }
     // Late because the audio stopped: the AUDIO STOPPED banner explains it.
-    if tf.stale && st.daemon().is_some_and(|s| s.session.stopped.is_some()) {
+    if tf.stale && st.daemon().is_some_and(|s| s.stream.stopped.is_some()) {
         return Freshness::AudioStopped {
             age_s: age.max(since),
         };
@@ -220,13 +220,13 @@ fn clock_offset(st: &AppState) -> ClockOffset {
     )
 }
 
-/// What the AUDIO STOPPED banner and the top bar say while the open session's audio is
+/// What the AUDIO STOPPED banner and the top bar say while the open stream's audio is
 /// stopped and the daemon reopens it; `None` while it runs.
 pub fn audio_stopped(
     st: &AppState,
     client_now: WallNs,
 ) -> Option<ac2_scene::audio::AudioStoppedText> {
-    let stopped = st.daemon()?.session.stopped.as_ref()?;
+    let stopped = st.daemon()?.stream.stopped.as_ref()?;
     Some(ac2_scene::audio::audio_stopped_text(
         stopped,
         daemon_wall(st, client_now),
@@ -520,7 +520,7 @@ fn with_transfer<R>(
             t.delay_between = Some((ours, ac2_scene::between_rigs::name_of(r, x.rig)));
         }
         // A ratio or cascade of operands without a shared time base has each operand's
-        // own alignment in its phase, not a time base of this session.
+        // own alignment in its phase, not a time base of this stream.
         if f.meta
             .math
             .as_ref()
@@ -542,7 +542,7 @@ fn with_transfer<R>(
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
         if let (Some(epoch), Some(cur)) = (
             data.meta.source.shared_epoch(),
-            st.rig.mirror.as_ref().and_then(|m| m.session_epoch),
+            st.rig.mirror.as_ref().and_then(|m| m.stream_epoch),
         ) && epoch != cur
         {
             t.time_base = TimeBase::Independent;

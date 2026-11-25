@@ -111,8 +111,8 @@ fn lease_acquire_force_expiry_and_universal_stop() {
     let id_a = client_id(&mut a);
     let id_b = client_id(&mut b);
 
-    a.ok(Command::SessionOpen {
-        config: session(false),
+    a.ok(Command::StreamOpen {
+        config: stream(false),
     });
     a.ok(Command::MeasCreate {
         config: spl("loopback meter", 0),
@@ -343,8 +343,8 @@ fn same_key_new_connection_acquires_disarmed() {
         ),
         seen_end: 0,
     };
-    a.ok(Command::SessionOpen {
-        config: session(false),
+    a.ok(Command::StreamOpen {
+        config: stream(false),
     });
     a.ok(Command::MeasCreate {
         config: spl("loopback meter", 0),
@@ -423,8 +423,8 @@ fn lease_refresh_with_token_survives_a_new_socket() {
     let dir = tempfile::tempdir().unwrap();
     let (_backend, h, curve) = curve_rig(dir.path());
     let mut a = Client::connect_with(h.context(), net_endpoints(&h).0.as_str(), Some(&curve));
-    a.ok(Command::SessionOpen {
-        config: session(false),
+    a.ok(Command::StreamOpen {
+        config: stream(false),
     });
     let tok = acquire(&mut a, false).unwrap();
     a.ok(Command::GenSet {
@@ -461,8 +461,8 @@ fn a_device_change_disarms_the_stimulus() {
     let backend = FakeBackend::new(rig_config).unwrap();
     let h = Daemon::start(config(backend.clone(), inproc("reopen-disarms"))).unwrap();
     let mut c = Client::connect(h.context(), h.ctrl_endpoint());
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let mut d = driver(&backend);
     let tok = acquire(&mut c, false).unwrap();
@@ -471,12 +471,12 @@ fn a_device_change_disarms_the_stimulus() {
         desired: fire(-20.0),
     });
     assert!(c.state().generator.firing);
-    let epoch = c.state().session.epoch;
+    let epoch = c.state().stream.epoch;
     d.run_blocks(8);
     let deadline = Instant::now() + T;
     let s = loop {
         let s = c.state();
-        if s.session.epoch != epoch {
+        if s.stream.epoch != epoch {
             break s;
         }
         assert!(Instant::now() < deadline, "the stream did not reopen");

@@ -206,7 +206,7 @@ impl Driver {
     }
 }
 
-/// A session just opened on a daemon without measurements: the New measurement chooser it
+/// A stream just opened on a daemon without measurements: the New measurement chooser it
 /// opens, Enter on Transfer (highlighted on the transfer pane), Enter on its form; until the
 /// measurement runs. The form lays out the transfer stack (magnitude, phase, coherence) in
 /// the focused transfer pane: Q on phase and coherence, so the tests that follow start on
@@ -238,16 +238,16 @@ pub fn first_transfer(d: &mut Driver) -> R {
     Ok(())
 }
 
-/// From a daemon with no session to an open one and no measurement: Shift+O, Enter on the
-/// simulated rig's roles, Esc on the New measurement chooser the session opens.
-pub fn session_from_empty(d: &mut Driver) -> R {
+/// From a daemon with no stream to an open one and no measurement: Shift+O, Enter on the
+/// simulated rig's roles, Esc on the New measurement chooser the stream opens.
+pub fn stream_from_empty(d: &mut Driver) -> R {
     d.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
     d.until("the device list", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.session.device_info().is_some())
+            .is_some_and(|x| x.stream.device_info().is_some())
     })?;
     d.key("Enter");
     d.until(
@@ -258,7 +258,7 @@ pub fn session_from_empty(d: &mut Driver) -> R {
     Ok(())
 }
 
-/// The app connected to a simulated rig with no session. Bind the daemon first, as the
+/// The app connected to a simulated rig with no stream. Bind the daemon first, as the
 /// pattern `(daemon, mut d)` does: the app then goes before the daemon it talks to.
 pub fn connected() -> R<(SimDaemon, Driver)> {
     let daemon = sim_daemon(Setup::Empty)?;
@@ -266,7 +266,7 @@ pub fn connected() -> R<(SimDaemon, Driver)> {
     Ok((daemon, d))
 }
 
-/// The app without its window on the window tests' rig (session, four measurements running),
+/// The app without its window on the window tests' rig (stream, four measurements running),
 /// its panes given the rig's measurements by name as the operator dropped them; once every
 /// pane holds a frame.
 pub fn on_rig(rig: &crate::window::Rig) -> R<Driver> {
@@ -294,7 +294,7 @@ pub fn noise(cli: &Cli) -> R<ac2_client::StimulusLease> {
     })
 }
 
-/// [`connected`], then a session opened and a measurement made and started, all from the
+/// [`connected`], then a stream opened and a measurement made and started, all from the
 /// app.
 pub fn measuring() -> R<(SimDaemon, Driver)> {
     let (daemon, mut d) = connected()?;
@@ -302,12 +302,12 @@ pub fn measuring() -> R<(SimDaemon, Driver)> {
     Ok((daemon, d))
 }
 
-/// From a daemon with no session to frames, using only the app: the hint, Alt+S and its
+/// From a daemon with no stream to frames, using only the app: the hint, Alt+S and its
 /// New session, the audio dialog's roles for the simulated rig with its meters, Enter; the chooser's transfer
 /// measurement, Enter twice; the stimulus.
 pub fn measure_from_empty(d: &mut Driver) -> R {
     d.synced()?;
-    assert!(d.st.open_session().is_none());
+    assert!(d.st.open_stream().is_none());
     let hint =
         d.st.empty_hint(d.st.layout.focus, &d.keys)
             .map(|h| h.text)
@@ -332,14 +332,14 @@ pub fn measure_from_empty(d: &mut Driver) -> R {
     d.until("the device list", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.session.device_info().is_some())
+            .is_some_and(|x| x.stream.device_info().is_some())
     })?;
     // The rig's own wiring as roles: in 1 the reference (loopback of out 1), in 2 the mic;
-    // every input of the device metered before the session opens.
+    // every input of the device metered before the stream opens.
     d.until("the meters of the device", |s| s.input_meters().len() == 4)?;
     d.key("Enter");
-    d.until("the session", |s| s.open_session().is_some())?;
-    let open = d.st.open_session().cloned().ok_or("session")?;
+    d.until("the stream", |s| s.open_stream().is_some())?;
+    let open = d.st.open_stream().cloned().ok_or("stream")?;
     assert_eq!(open.config.input_channels, vec![0, 1]);
     assert_eq!(
         open.config.loopback.map(|l| (l.output, l.input)),

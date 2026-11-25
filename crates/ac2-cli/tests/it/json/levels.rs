@@ -20,11 +20,11 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
         paths: vec![FakePath::loopback(0, 0, 32), FakePath::loopback(0, 2, 32)],
         ..FakeConfig::default()
     })?;
-    // Without a session, there is nothing to meter.
+    // Without a stream, there is nothing to meter.
     let r = ac2(&f, &["levels", "--json"]).await?;
     assert_ne!(r.code, 0);
     assert!(
-        r.stdout.contains("no session is open"),
+        r.stdout.contains("no stream is open"),
         "{} {}",
         r.stdout,
         r.stderr
@@ -32,7 +32,7 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
     ok_json(
         &f,
         &[
-            "session",
+            "stream",
             "open",
             "--backend",
             "fake",
@@ -45,7 +45,7 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
     ok_json(
         &f,
         &[
-            "session", "inputs", "--kind", "1=line", "--kind", "2=line", "--kind", "3=line",
+            "stream", "inputs", "--kind", "1=line", "--kind", "2=line", "--kind", "3=line",
             "--pair", "1,2=Main", "--json",
         ],
     )

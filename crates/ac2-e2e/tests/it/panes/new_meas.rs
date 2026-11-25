@@ -17,11 +17,11 @@ fn chooser(s: &AppState) -> Option<&ChoicePrompt> {
     }
 }
 
-/// First run: a session opened on an empty daemon asks what to measure with the chooser;
+/// First run: a stream opened on an empty daemon asks what to measure with the chooser;
 /// Esc leaves the empty transfer pane naming Ctrl+M; Q down to the last pane keeps it and
 /// names the keys that bring more (N, Ctrl+M), never Tab.
 #[test]
-fn a_fresh_session_asks_what_to_measure() -> R {
+fn a_fresh_stream_asks_what_to_measure() -> R {
     let (_daemon, mut d) = connected()?;
     d.synced()?;
     d.key("Shift+O");
@@ -29,14 +29,14 @@ fn a_fresh_session_asks_what_to_measure() -> R {
     d.until("the device list", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.session.device_info().is_some())
+            .is_some_and(|x| x.stream.device_info().is_some())
     })?;
     d.key("Enter");
-    d.until("the session", |s| s.open_session().is_some())?;
+    d.until("the stream", |s| s.open_stream().is_some())?;
     d.until("the chooser", |s| chooser(s).is_some())?;
     let c = chooser(&d.st).ok_or("the chooser")?;
     assert_eq!(c.index, 0, "Transfer, on the transfer pane");
-    // The session is open by the time it asks: every kind can be made (dynamics too) but math,
+    // The stream is open by the time it asks: every kind can be made (dynamics too) but math,
     // alignment and the spatial average, which need two curves first; its inputs can be
     // metered.
     let blocked: Vec<bool> = c.choices.iter().map(|x| x.blocked.is_some()).collect();

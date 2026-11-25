@@ -27,7 +27,7 @@ pub struct SignalForm {
     /// The FFT whose bins a sine goes onto and the sample rate, as the app resolved them
     /// when the dialog opened.
     bins: Option<(usize, f64)>,
-    /// The open session's sample rate: a sine must stay below half of it.
+    /// The open stream's sample rate: a sine must stay below half of it.
     rate: Option<u32>,
 }
 

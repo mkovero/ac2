@@ -68,7 +68,7 @@ fn run() -> TraceData {
                 meas_name: "Sweep".into(),
                 number: 1,
                 run: SweepId(1),
-                epoch: SessionEpoch(1),
+                epoch: StreamEpoch(1),
                 sweep: EssSpec::with_fades(Hz(20.0), Hz(4000.0), Seconds(3.0)),
                 level: Dbfs(-50.0),
                 repeats: 2,

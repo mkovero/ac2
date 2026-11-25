@@ -66,7 +66,7 @@ pub enum DelayBand {
 pub struct DelayArrival {
     /// Delay of the measurement re the reference.
     pub delay: Seconds,
-    /// The same delay in (fractional) samples at the session rate.
+    /// The same delay in (fractional) samples at the stream rate.
     pub delay_samples: f64,
     /// Level relative to the strongest arrival.
     pub level: Db,
@@ -229,7 +229,7 @@ impl DelayFinding {
 pub struct DelayState {
     /// Delay applied to the reference before the estimator.
     pub applied: Seconds,
-    /// Applied delay in samples at the session rate (exact value used by DSP, fractions
+    /// Applied delay in samples at the stream rate (exact value used by DSP, fractions
     /// included: the whole samples shift the reference, the fraction rotates the phase).
     pub applied_samples: f64,
     /// The applied delay's offset from the arrival: what `delay.nudge` steps and typed
@@ -239,7 +239,7 @@ pub struct DelayState {
     /// like a stored trace's display nudge, instead of being undone by the time base
     /// (decision 8a).
     pub nudged: Seconds,
-    /// `nudged` in samples at the session rate, fractions included.
+    /// `nudged` in samples at the stream rate, fractions included.
     pub nudged_samples: f64,
     /// Tracking enabled.
     pub tracking: bool,

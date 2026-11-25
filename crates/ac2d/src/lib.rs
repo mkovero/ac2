@@ -12,13 +12,13 @@
 //!                         │ requests (mpsc)
 //!                 ┌───────▼────── ac2d-control ──────┐
 //!                 │ decode, dedup, serial commits,    │── events/replies/ka ──► PUSH
-//!                 │ lease, session, job lifecycle     │
+//!                 │ lease, stream, job lifecycle     │
 //!                 └───────┬───────────────────────────┘
 //!                         │ open / close
 //!  audio callback ──► capture ring ──► ac2d-fanout ──► channel per job ──► ac2d-meas-N ──► PUSH
 //!  (no allocation)                     one Arc<Batch>                      ac2d-timing
 //!                                      per hand-off,
-//!                                      session meters ──────────────────────────────────► PUSH
+//!                                      stream meters ──────────────────────────────────► PUSH
 //! ```
 //!
 //! Only the I/O thread touches client-facing sockets, and it never blocks on anything but
@@ -71,10 +71,10 @@ mod rig_id;
 mod route;
 #[cfg(unix)]
 mod runtime_dir;
-mod session;
 mod sim;
 mod state;
 mod stimulus;
+mod stream;
 mod sweep;
 mod sysclock;
 mod util;
@@ -388,7 +388,7 @@ pub(crate) fn data_socket_options(data: &Socket, network: bool) -> Result<(), St
 
 impl Daemon {
     /// Binds the sockets and starts the I/O and control threads. No audio I/O is open
-    /// until a client sends `session.open`.
+    /// until a client sends `stream.open`.
     pub fn start(config: DaemonConfig) -> Result<Handle, StartError> {
         config
             .listen

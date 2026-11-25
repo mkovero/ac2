@@ -1,4 +1,4 @@
-//! The session dialog and the Sessions dialog against a real daemon: a mic named, the
+//! The stream dialog and the Sessions dialog against a real daemon: a mic named, the
 //! loopback detected, kinds and a pair; Save as by name.
 
 use crate::harness::{Driver, NAME, R, connected, measure_from_empty};
@@ -6,14 +6,14 @@ use ac2_ui::forms::FormKind;
 use ac2_ui::keys::CommandId;
 use ac2_ui::state::{AppState, Msg, Overlay};
 
-/// The session dialog of the shown rig, if open.
-fn dialog(s: &AppState) -> Option<&ac2_ui::session_dialog::SessionDialog> {
-    s.overlay.settings().map(|x| &x.session)
+/// The stream dialog of the shown rig, if open.
+fn dialog(s: &AppState) -> Option<&ac2_ui::stream_dialog::StreamDialog> {
+    s.overlay.settings().map(|x| &x.stream)
 }
 
-/// Shift+O on a daemon without a session: the dialog with the device and its four inputs
+/// Shift+O on a daemon without a stream: the dialog with the device and its four inputs
 /// metered.
-fn open_session_dialog(d: &mut Driver) -> R {
+fn open_stream_dialog(d: &mut Driver) -> R {
     d.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
@@ -23,7 +23,7 @@ fn open_session_dialog(d: &mut Driver) -> R {
 }
 
 /// ↓ until the dialog's focus is on `row`.
-fn down_to(d: &mut Driver, row: ac2_ui::session_dialog::Row) -> R {
+fn down_to(d: &mut Driver, row: ac2_ui::stream_dialog::Row) -> R {
     for _ in 0..16 {
         if dialog(&d.st).is_some_and(|x| x.focus == row) {
             return Ok(());
@@ -33,21 +33,21 @@ fn down_to(d: &mut Driver, row: ac2_ui::session_dialog::Row) -> R {
     Err(format!("row {row:?} never reached").into())
 }
 
-/// The New measurement chooser a fresh session opens.
+/// The New measurement chooser a fresh stream opens.
 fn new_meas_chooser(s: &AppState) -> bool {
     matches!(&s.overlay, Overlay::Choose(c)
         if c.purpose == ac2_ui::state::ChoicePurpose::NewMeasurement)
 }
 
-/// From an empty daemon, in the session dialog: in 2 named `M30 FOH` (N), the loopback
+/// From an empty daemon, in the stream dialog: in 2 named `M30 FOH` (N), the loopback
 /// detected at a typed −30 dBFS (D, Enter: the daemon plays its burst and finds out 1 on in
-/// 1, then gives the stimulus back); Enter opens the session on the reference and the mic,
+/// 1, then gives the stimulus back); Enter opens the stream on the reference and the mic,
 /// metering those two; the chooser's transfer measurement is named after the mic.
 #[test]
-fn a_mic_named_and_the_loopback_detected_from_the_session_dialog() -> R {
-    use ac2_ui::session_dialog::{DetectPhase, Row};
+fn a_mic_named_and_the_loopback_detected_from_the_stream_dialog() -> R {
+    use ac2_ui::stream_dialog::{DetectPhase, Row};
     let (_daemon, mut d) = connected()?;
-    open_session_dialog(&mut d)?;
+    open_stream_dialog(&mut d)?;
     down_to(&mut d, Row::Input(1))?;
     d.key("N");
     d.send(Msg::Text("n".into()));
@@ -92,10 +92,10 @@ fn a_mic_named_and_the_loopback_detected_from_the_session_dialog() -> R {
     })?;
 
     d.key("Enter");
-    d.until("the session, the chooser, its two inputs metered", |s| {
-        s.open_session().is_some() && new_meas_chooser(s) && s.input_meters().len() == 2
+    d.until("the stream, the chooser, its two inputs metered", |s| {
+        s.open_stream().is_some() && new_meas_chooser(s) && s.input_meters().len() == 2
     })?;
-    let open = d.st.open_session().cloned().ok_or("session")?;
+    let open = d.st.open_stream().cloned().ok_or("stream")?;
     assert_eq!(open.config.input_channels, vec![0, 1]);
     assert_eq!(
         open.config.loopback.map(|l| (l.output, l.input)),
@@ -112,7 +112,7 @@ fn a_mic_named_and_the_loopback_detected_from_the_session_dialog() -> R {
             .iter()
             .any(|m| m.config.name == "Reference → M30 FOH" && m.running)
     })?;
-    // The transfer dialog meters the session's inputs too.
+    // The transfer dialog meters the stream's inputs too.
     d.send(Msg::Command(CommandId::NewTransfer));
     d.until("the transfer dialog with its meters", |s| {
         matches!(s.overlay, Overlay::Form(_)) && s.input_meters().len() == 2
@@ -195,17 +195,17 @@ fn sessions_dialog_save_as() -> R {
     Ok(())
 }
 
-/// In the session dialog: in 3 and in 4 paired (Shift+P on each), the pair named `Main`, A
-/// makes both sides digital and L line again. Enter opens the session with the pair: the
+/// In the stream dialog: in 3 and in 4 paired (Shift+P on each), the pair named `Main`, A
+/// makes both sides digital and L line again. Enter opens the stream with the pair: the
 /// daemon keeps the kinds and the sides, the Inputs list shows the pair as one row. An SPL
 /// meter on the line input (in 1) is refused: it needs a microphone.
 #[test]
-fn kinds_and_a_pair_from_the_session_dialog() -> R {
+fn kinds_and_a_pair_from_the_stream_dialog() -> R {
     use ac2_proto::model::{InputKind, Pair, PairSide};
     use ac2_ui::prefs::KindPref;
-    use ac2_ui::session_dialog::Row;
+    use ac2_ui::stream_dialog::Row;
     let (_daemon, mut d) = connected()?;
-    open_session_dialog(&mut d)?;
+    open_stream_dialog(&mut d)?;
     let kinds = |d: &Driver, a: usize, b: usize| {
         dialog(&d.st).map(|x| (x.inputs[a].kind_pref(), x.inputs[b].kind_pref()))
     };
@@ -220,7 +220,7 @@ fn kinds_and_a_pair_from_the_session_dialog() -> R {
     {
         let x = dialog(&d.st).ok_or("the dialog")?;
         assert_eq!(x.pairs.len(), 1);
-        assert!(x.inputs[2].in_session && x.inputs[3].in_session);
+        assert!(x.inputs[2].in_stream && x.inputs[3].in_stream);
     }
     d.key("Up");
     d.key("N");
@@ -251,10 +251,10 @@ fn kinds_and_a_pair_from_the_session_dialog() -> R {
 
     d.key("Enter");
     d.until(
-        "the session with the pair, the chooser, four inputs metered",
+        "the stream with the pair, the chooser, four inputs metered",
         |s| {
             s.daemon()
-                .is_some_and(|x| x.session.open.is_some() && x.pairs.len() == 1)
+                .is_some_and(|x| x.stream.open.is_some() && x.pairs.len() == 1)
                 && new_meas_chooser(s)
                 && s.input_meters().len() == 4
         },
@@ -274,7 +274,7 @@ fn kinds_and_a_pair_from_the_session_dialog() -> R {
     assert_eq!(state.pairs[0].name.as_deref(), Some("Main"));
     d.key("Escape");
     assert_eq!(d.st.overlay, Overlay::None);
-    let rows = d.st.session_inputs();
+    let rows = d.st.stream_inputs();
     let labels: Vec<&str> = rows.iter().map(|r| r.label.as_str()).collect();
     assert_eq!(labels.len(), 3, "{labels:?}");
     assert!(labels[0].ends_with(" · reference (in 1)"), "{labels:?}");

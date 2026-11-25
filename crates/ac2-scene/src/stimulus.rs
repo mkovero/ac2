@@ -200,7 +200,7 @@ pub enum SignalChoice {
 }
 
 /// A sine's frequency as its settings row and the signal dialog read it: as every
-/// frequency field does (`997`, `1k`, `1.5 kHz`). `rate_hz` is the open session's sample
+/// frequency field does (`997`, `1k`, `1.5 kHz`). `rate_hz` is the open stream's sample
 /// rate when known: a sine at or above half of it cannot be played.
 pub fn parse_sine_freq(text: &str, rate_hz: Option<u32>) -> Result<Hz, String> {
     let hz = crate::unit_text::in_field::<crate::unit_text::Freq>(text, "hz")?
@@ -599,7 +599,7 @@ mod tests {
     }
 
     /// The frequency row reads a frequency as every frequency field does, refuses one the
-    /// session cannot play, and says what to type when Enter finds it empty.
+    /// stream cannot play, and says what to type when Enter finds it empty.
     #[test]
     fn the_frequency_row_reads_a_frequency() {
         for (text, hz) in [

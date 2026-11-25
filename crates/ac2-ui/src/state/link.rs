@@ -24,7 +24,7 @@ pub(crate) struct Pending {
     /// restarted numbers afresh), else keeps its id.
     pub(super) with_names: BTreeMap<PaneId, Vec<(Pick, String)>>,
     /// Hidden measurements by name, waiting for the daemon to list one of that name: read
-    /// from `ui.toml`, or a hidden one the daemon took away (a session reopening, a daemon
+    /// from `ui.toml`, or a hidden one the daemon took away (a stream reopening, a daemon
     /// restarting renumbers them).
     pub(super) hidden: BTreeSet<String>,
     /// Folded measurements by name, waiting as the hidden ones do: a fold is the
@@ -65,7 +65,7 @@ impl AppState {
                 });
                 self.remember_rig();
                 if let Overlay::Settings(s) = &mut self.overlay {
-                    s.session.backends = None;
+                    s.stream.backends = None;
                     out.push(Request::Devices);
                 }
             }
@@ -96,7 +96,7 @@ impl AppState {
                 // id it has may be another measurement than the one shown.
                 let reborn = incarnation.is_some() && v.incarnation != incarnation;
                 let (was_stopped, was_firing) = self.daemon().map_or((true, false), |s| {
-                    (s.session.stopped.is_some(), s.generator.firing)
+                    (s.stream.stopped.is_some(), s.generator.firing)
                 });
                 let traces_before: BTreeSet<TraceId> = self
                     .daemon()
@@ -116,7 +116,7 @@ impl AppState {
                 if !was_stopped
                     && let Some(ac2_proto::model::StopCause::DriverReset { reason }) = self
                         .daemon()
-                        .and_then(|s| s.session.stopped.as_ref())
+                        .and_then(|s| s.stream.stopped.as_ref())
                         .map(|s| s.cause)
                 {
                     let line = ac2_scene::audio::driver_reset_line(reason, was_firing);
@@ -133,9 +133,9 @@ impl AppState {
                     .collect();
                 self.rig.choice.meas_seen.extend(seen);
                 // The daemon disarmed the generator when the audio stopped; an arm queued
-                // behind a stop must not follow it into a session that is reopening.
+                // behind a stop must not follow it into a stream that is reopening.
                 if self.rig.stimulus.arm_after_stop
-                    && self.daemon().is_some_and(|s| s.session.stopped.is_some())
+                    && self.daemon().is_some_and(|s| s.stream.stopped.is_some())
                 {
                     self.rig.stimulus.arm_after_stop = false;
                     self.warn(
@@ -233,14 +233,14 @@ impl AppState {
                 if let Ok(d) = &r {
                     self.rig.devices = Some(d.clone());
                 }
-                let names = self.session_input_names();
+                let names = self.stream_input_names();
                 match (&mut self.overlay, r) {
                     (Overlay::Settings(s), Ok(d)) => {
-                        s.session.set_backends(d, self.prefs.of_rig(self.rig.id));
+                        s.stream.set_backends(d, self.prefs.of_rig(self.rig.id));
                         s.follow_focus_want();
                     }
                     (Overlay::Settings(s), Err(e)) => {
-                        s.session.error = Some(format!("cannot list devices: {e}"));
+                        s.stream.error = Some(format!("cannot list devices: {e}"));
                     }
                     (Overlay::Form(f), Ok(_)) => {
                         // Channel names arrived: relabel the inputs.
@@ -257,7 +257,7 @@ impl AppState {
             } => {
                 // The answer for a device the dialog has since left says nothing about the
                 // one it shows now.
-                if let Some(s) = self.overlay.session_mut()
+                if let Some(s) = self.overlay.stream_mut()
                     && s.preview_target() == Some((backend, device))
                 {
                     s.preview_error = result.err().map(|e| format!("meters unavailable: {e}"));
@@ -265,14 +265,14 @@ impl AppState {
             }
             ConnEvent::LoopbackDetected(r) => {
                 if let Overlay::Settings(s) = &mut self.overlay {
-                    s.session.detect_result(r);
+                    s.stream.detect_result(r);
                     // The detection closed the preview on the daemon: reopen it now.
                     self.rig.asked.preview_sent_s = f64::NEG_INFINITY;
                 } else if let Err(e) = r {
                     self.fault(format!("detect loopback: {e}"));
                 }
             }
-            ConnEvent::SessionOpened => {
+            ConnEvent::StreamOpened => {
                 self.rig.due.choose_when_open = true;
                 self.choose_first();
             }
@@ -552,7 +552,7 @@ impl AppState {
     /// Measurements `gone` from the daemon (`names`: what they were called). `same_ids`: the
     /// daemon keeps numbering as before, so a gone id is one it deleted: it leaves every
     /// pane of this rig, which says what was deleted, and a lead waits for one of its name
-    /// (a session reopened makes them again under new ids). Otherwise (a restart, another
+    /// (a stream reopened makes them again under new ids). Otherwise (a restart, another
     /// daemon) each pane that showed one waits for one of that name, and the entries behind
     /// a lead wait by id. A trace entry the daemon deleted (`gone_traces`) leaves too. The
     /// selection waits by name too (a stand-in may take its place).
@@ -715,7 +715,7 @@ impl RigState {
     /// Folds the newest spectrum / RTA frames into the spectrograph histories. A stream
     /// that is STALE, or whose measurement is not running, marks a break: the time until
     /// its next frame is a gap in the picture. Frames are placed by their audio time
-    /// (`audio_sample ÷` the session's rate); with `ease`, each history's time axis follows
+    /// (`audio_sample ÷` the stream's rate); with `ease`, each history's time axis follows
     /// them on the display's clock ([`super::scroll`]).
     pub(super) fn fold_spectrographs(&mut self, d: &DataSnapshot, ease: bool) {
         use ac2_proto::FrameData;
@@ -735,10 +735,10 @@ impl RigState {
         } else {
             self.folded.scroll.clear();
         }
-        // Without an open session there is no sample clock to place frames on.
+        // Without an open stream there is no sample clock to place frames on.
         let Some(rate) = self
             .daemon()
-            .and_then(|s| s.session.open.as_ref())
+            .and_then(|s| s.stream.open.as_ref())
             .map(|o| f64::from(o.sample_rate_hz))
             .filter(|r| *r > 0.0)
         else {

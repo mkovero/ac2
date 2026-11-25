@@ -26,14 +26,14 @@ pub enum FrameKind {
     BandLeq,
     /// Input meters.
     Levels,
-    /// Input meters of the open session.
-    SessionLevels,
+    /// Input meters of the open stream.
+    StreamLevels,
     /// Input meters of a device preview.
     PreviewLevels,
     /// A rig's own input meters with its timing mark, for another rig.
     SourceLevels,
-    /// Goniometer points of the open session's pairs.
-    SessionGonio,
+    /// Goniometer points of the open stream's pairs.
+    StreamGonio,
     /// Goniometer points of a device preview's pairs.
     PreviewGonio,
     /// Loopback timing.

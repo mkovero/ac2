@@ -19,8 +19,8 @@
 //!   pair; on a paired row it unpairs. N on a paired row names the pair.
 //! - **S — Stimulus**: an output that feeds the speakers and the loopback.
 //!
-//! The session's inputs, outputs and loopback follow from the roles (and the rows put in
-//! the session with Space). Choices are remembered per rig and device ([`UiPrefs::sessions`]).
+//! The stream's inputs, outputs and loopback follow from the roles (and the rows put in
+//! the stream with Space). Choices are remembered per rig and device ([`UiPrefs::sessions`]).
 //! Outputs carry the rig's labels (`Main L`), kept by the daemon for every client; N on an
 //! output row names it.
 
@@ -30,8 +30,8 @@ use ac2_proto::cal::MAX_MIC_NAME;
 use ac2_proto::model::{
     Availability, BackendInfo, BackendKind, ClockRelation, CurveChoice, DeviceId, DeviceInfo,
     DeviceSelector, InputKind, InputSetup, InputSetups, LoopbackDetection, LoopbackRoute,
-    MAX_OUTPUT_LABEL, Mic, OpenSession, OutputSetup, Pair, PairSide, PreviewInput, RemoteInput,
-    SessionConfig,
+    MAX_OUTPUT_LABEL, Mic, OpenStream, OutputSetup, Pair, PairSide, PreviewInput, RemoteInput,
+    StreamConfig,
 };
 use ac2_proto::units::Dbfs;
 use ac2_scene::format;
@@ -82,7 +82,7 @@ pub struct InputRow {
     pub channel: u16,
     /// What the backend calls it, if anything.
     pub device_name: Option<String>,
-    pub in_session: bool,
+    pub in_stream: bool,
     /// The loopback return of the stimulus.
     pub reference: bool,
     /// What is on it: a mic (with its name and curve), a line input or a digital feed.
@@ -165,10 +165,10 @@ pub enum Row {
     Device,
     /// The output (playback) device.
     OutputDevice,
-    /// How many spare inputs the session opens (JACK only).
+    /// How many spare inputs the stream opens (JACK only).
     Spares,
     Input(usize),
-    /// A remote input (an index into [`SessionDialog::remote`]).
+    /// A remote input (an index into [`StreamDialog::remote`]).
     Remote(usize),
     /// *Add an input from another rig…*
     AddRemote,
@@ -177,7 +177,7 @@ pub enum Row {
     Buffer,
 }
 
-/// Text being typed into ([`SessionDialog::edit_text`]).
+/// Text being typed into ([`StreamDialog::edit_text`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Edit {
     /// The mic name of input row `.0`.
@@ -190,7 +190,7 @@ pub enum Edit {
     DetectLevel,
 }
 
-/// The device the session plays on.
+/// The device the stream plays on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputDevice {
     /// The input device (one device for both directions).
@@ -223,8 +223,8 @@ pub struct DetectPanel {
 
 /// What the dialog asks the daemon to do on Enter.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SessionPlan {
-    pub config: SessionConfig,
+pub struct StreamPlan {
+    pub config: StreamConfig,
     /// Device display name, for the toast.
     pub device_name: String,
     /// Input device id (the roles are remembered per input device).
@@ -233,7 +233,7 @@ pub struct SessionPlan {
     pub output_device_id: String,
     /// Remembered for this device.
     pub roles: DeviceRoles,
-    /// The kinds and pairs of the session's inputs (`session.inputs`).
+    /// The kinds and pairs of the stream's inputs (`stream.inputs`).
     pub inputs: InputSetups,
 }
 
@@ -249,23 +249,23 @@ pub struct DetectRequest {
 
 /// The dialog.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SessionDialog {
-    /// `None` while `session.devices` is on its way.
+pub struct StreamDialog {
+    /// `None` while `stream.devices` is on its way.
     pub backends: Option<Vec<BackendInfo>>,
     pub backend: usize,
     /// The input device (an index into the backend's devices).
     pub device: usize,
     pub out_device: OutputDevice,
     pub inputs: Vec<InputRow>,
-    /// Spare inputs the session opens: the last rows of `inputs`, numbered after the
+    /// Spare inputs the stream opens: the last rows of `inputs`, numbered after the
     /// device's physical inputs.
     pub spares: u16,
-    /// Left/right pairs among the inputs in the session (sorted by left channel).
+    /// Left/right pairs among the inputs in the stream (sorted by left channel).
     pub pairs: Vec<Pair>,
     /// The input picked for a pair, waiting for the second pick.
     pub pair_pick: Option<u16>,
     pub outputs: Vec<OutputRow>,
-    /// Output channels of the session: outputs `0 .. out_count`.
+    /// Output channels of the stream: outputs `0 .. out_count`.
     pub out_count: u16,
     pub rate: String,
     pub buffer: String,
@@ -280,8 +280,8 @@ pub struct SessionDialog {
     pub detect: Option<DetectPanel>,
     /// Why the meters of a device cannot be shown.
     pub preview_error: Option<String>,
-    /// The session open when the dialog opened.
-    open: Option<OpenSession>,
+    /// The stream open when the dialog opened.
+    open: Option<OpenStream>,
     /// The daemon's input setup (kinds, mic names, curves) when the dialog opened.
     setup: Vec<InputSetup>,
     /// The daemon's pairs when the dialog opened.
@@ -291,7 +291,7 @@ pub struct SessionDialog {
     mic_names: BTreeMap<u16, String>,
     /// The rig's output labels as last mirrored.
     labels: Vec<OutputSetup>,
-    /// The open session's remote inputs as last mirrored: Enter reopens with them.
+    /// The open stream's remote inputs as last mirrored: Enter reopens with them.
     pub remote: Vec<RemoteInput>,
 }
 
@@ -335,9 +335,9 @@ pub fn device_summary(d: &DeviceInfo) -> String {
     s
 }
 
-impl SessionDialog {
-    /// The dialog over the open session (if any), until the device list arrives.
-    pub fn new(open: Option<&OpenSession>, setup: &InputSetups) -> Self {
+impl StreamDialog {
+    /// The dialog over the open stream (if any), until the device list arrives.
+    pub fn new(open: Option<&OpenStream>, setup: &InputSetups) -> Self {
         let c = open.map(|o| &o.config);
         Self {
             backends: None,
@@ -374,7 +374,7 @@ impl SessionDialog {
         }
     }
 
-    /// The open session's remote inputs changed (or arrived): their rows follow.
+    /// The open stream's remote inputs changed (or arrived): their rows follow.
     pub fn set_remote(&mut self, remote: &[RemoteInput]) {
         if self.remote != remote {
             self.remote = remote.to_vec();
@@ -419,7 +419,7 @@ impl SessionDialog {
     /// frames then say what each column is.
     pub fn preview_setup(&self) -> (Vec<PreviewInput>, Vec<Pair>) {
         // The preview opens the device's physical inputs only: a spare input exists once a
-        // session opens it.
+        // stream opens it.
         let physical = self.physical_inputs();
         let inputs = self
             .inputs

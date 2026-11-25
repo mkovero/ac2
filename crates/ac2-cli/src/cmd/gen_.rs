@@ -91,7 +91,7 @@ pub(crate) struct Lock {
     pub freq: f64,
     /// The FFT length the bin belongs to.
     pub fft_len: u32,
-    /// The session's sample rate, Hz.
+    /// The stream's sample rate, Hz.
     pub sample_rate: u32,
 }
 
@@ -106,7 +106,7 @@ pub(crate) fn lock(st: &State, meas: &MeasRef, freq: f64) -> Result<Lock, CliErr
         )));
     };
     let sample_rate = rate(st).ok_or_else(|| {
-        CliError::Usage("no audio I/O open; open it with `ac2 session open`".into())
+        CliError::Usage("no audio I/O open; open it with `ac2 stream open`".into())
     })?;
     let fs = f64::from(sample_rate);
     let n = config.resolution.sine_fft_len(fs);
@@ -284,9 +284,9 @@ pub(crate) async fn run(cli: &Cli, cmd: &GenCmd, out: &mut Out<'_>) -> Result<()
             ac2_scene::format::dbfs(ceiling.0)
         )));
     }
-    if st.session.open.is_none() {
+    if st.stream.open.is_none() {
         return Err(CliError::Usage(
-            "no audio I/O open; open it with `ac2 session open`".into(),
+            "no audio I/O open; open it with `ac2 stream open`".into(),
         ));
     }
     if let GenCmd::Sine {
@@ -388,7 +388,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use ac2_client::{ClientConfig, Endpoints};
-    use ac2_proto::model::{DeviceSelector, Generator, SessionConfig, SpecResolution};
+    use ac2_proto::model::{DeviceSelector, Generator, SpecResolution, StreamConfig};
     use ac2_proto::units::Dbfs;
 
     use super::*;
@@ -415,7 +415,7 @@ mod tests {
         Ok(())
     }
 
-    /// The daemon on its simulated rig (no audio leaves the process), a session open on
+    /// The daemon on its simulated rig (no audio leaves the process), a stream open on
     /// both outputs.
     async fn daemon() -> R<(ac2d::Handle, Client)> {
         let listen = ac2d::Listen::Local {
@@ -430,8 +430,8 @@ mod tests {
         };
         let c = Client::connect(ClientConfig::new(ep, "gen-test")).await?;
         c.wait_synced(Duration::from_secs(5)).await?;
-        c.call(Command::SessionOpen {
-            config: SessionConfig {
+        c.call(Command::StreamOpen {
+            config: StreamConfig {
                 backend: None,
                 input_device: DeviceSelector::Default,
                 output_device: DeviceSelector::Default,
@@ -543,7 +543,7 @@ mod tests {
     }
 
     /// `--lock` puts the sine on a bin of the named spectrum (its one FFT, or the longest
-    /// of a multi-resolution spectrum) at the session's rate, and refuses anything else.
+    /// of a multi-resolution spectrum) at the stream's rate, and refuses anything else.
     #[tokio::test(flavor = "multi_thread")]
     async fn lock_moves_the_sine_onto_a_bin_of_a_spectrum() -> R {
         use ac2_core::harmonics::is_on_bin;
@@ -575,7 +575,7 @@ mod tests {
             c.call(Command::MeasCreate { config }).await?;
         }
         let st = c.snapshot().await?.state;
-        let fs = rate(&st).ok_or("no session")?;
+        let fs = rate(&st).ok_or("no stream")?;
         let bin = f64::from(fs) / 4096.0;
 
         let l = lock(&st, &MeasRef("fft".into()), 1000.0)?;

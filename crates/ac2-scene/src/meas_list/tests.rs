@@ -322,7 +322,7 @@ pub(crate) fn captured() -> TraceSource {
     TraceSource::Captured {
         meas: MeasId(1),
         meas_name: "Main L".into(),
-        epoch: SessionEpoch(1),
+        epoch: StreamEpoch(1),
         at_sample: SampleIndex(0),
     }
 }
@@ -333,7 +333,7 @@ pub(crate) fn run(number: u32) -> TraceSource {
         meas_name: "Genelec 1 m".into(),
         run: SweepId(number),
         number,
-        epoch: SessionEpoch(1),
+        epoch: StreamEpoch(1),
         sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
         level: Dbfs(-50.0),
         repeats: 1,

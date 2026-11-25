@@ -644,7 +644,7 @@ impl UiPrefs {
             .map(Vec::as_slice)
     }
 
-    /// The session dialog choices remembered for `key` ([`Self::device_key`]) of `rig`.
+    /// The stream dialog choices remembered for `key` ([`Self::device_key`]) of `rig`.
     pub fn roles_for(&self, rig: RigId, key: &str) -> Option<&DeviceRoles> {
         self.sessions.get(&(rig, key.to_owned()))
     }

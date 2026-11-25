@@ -25,7 +25,7 @@ use crate::line_dialog::LineDialog;
 /// One line of the view.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CalLine {
-    /// An input: the session's, or one with a mic name.
+    /// An input: the stream's, or one with a mic name.
     Input(u16),
     /// A curve of the mic library.
     Curve(MicCurveId),
@@ -35,7 +35,7 @@ pub enum CalLine {
     Line(LineCalKey),
 }
 
-/// The lines of `s`: inputs (the open session's captured inputs and every input with a mic
+/// The lines of `s`: inputs (the open stream's captured inputs and every input with a mic
 /// name), then the mic library curve by curve, then the sensitivity calibrations.
 pub fn lines(s: &State) -> Vec<CalLine> {
     let mut inputs: Vec<u16> = s
@@ -44,7 +44,7 @@ pub fn lines(s: &State) -> Vec<CalLine> {
         .filter(|i| i.mic().is_some())
         .map(|i| i.channel)
         .collect();
-    if let Some(o) = &s.session.open {
+    if let Some(o) = &s.stream.open {
         inputs.extend(o.config.input_channels.iter().copied());
     }
     inputs.sort_unstable();
@@ -91,7 +91,7 @@ pub struct CalEdit {
 /// What the reducer does for the view.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CalAction {
-    /// `session.inputs` with this row.
+    /// `stream.inputs` with this row.
     Inputs(InputSetup, String),
     /// Read the file and `cal.curve_import` it.
     Import {
@@ -256,7 +256,7 @@ impl CalView {
             || self.line.take().is_some()
     }
 
-    /// C on an input of the open session: the acoustic calibration dialog (the mic named
+    /// C on an input of the open stream: the acoustic calibration dialog (the mic named
     /// there, or typed in it).
     pub fn start_acoustic(&mut self, s: &State) -> bool {
         self.clear();
@@ -265,7 +265,7 @@ impl CalView {
             return false;
         };
         let captured = s
-            .session
+            .stream
             .open
             .as_ref()
             .is_some_and(|o| o.config.input_channels.contains(&c));
@@ -277,7 +277,7 @@ impl CalView {
         true
     }
 
-    /// E on an input of the open session: the electrical calibration dialog of a named mic,
+    /// E on an input of the open stream: the electrical calibration dialog of a named mic,
     /// the line calibration dialog of a line input. A digital input has nothing to
     /// calibrate: its reference is the word's full scale.
     pub fn start_electrical(&mut self, s: &State) -> bool {
@@ -287,7 +287,7 @@ impl CalView {
             return false;
         };
         let captured = s
-            .session
+            .stream
             .open
             .as_ref()
             .is_some_and(|o| o.config.input_channels.contains(&c));
@@ -500,7 +500,7 @@ pub fn line_texts(
             CalLine::Input(c) => {
                 let u = cal::state_input_use(s, *c);
                 let captured = s
-                    .session
+                    .stream
                     .open
                     .as_ref()
                     .is_some_and(|o| o.config.input_channels.contains(c));

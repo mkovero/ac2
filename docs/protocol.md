@@ -43,7 +43,7 @@ daemon answered there.
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 104`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 105`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -60,7 +60,7 @@ fields first:
 The first request on a connection is `hello` {`client`: string, the client software's
 name}; its reply `welcome` carries `server` (`ac2d <version> (build <id>)`), `client_id`
 (`ClientId`, a string: the identity the daemon bound to the connection: the ZAP User-Id under CURVE, otherwise a
-daemon-assigned id), `daemon_incarnation`, `session_epoch`, `rev`, `rig_id` and `name`.
+daemon-assigned id), `daemon_incarnation`, `stream_epoch`, `rev`, `rig_id` and `name`.
 A `hello` that is not the first request gets another `welcome`.
 
 `rig_id` (u64, never 0) is the daemon's identity: random, made once and kept in a file
@@ -89,8 +89,8 @@ Warning { type: "<name>", … }
 
 - `warnings` lists what a command that succeeded did that the caller should know about;
   it is empty for almost every reply, and always present. `type` is one of
-  `rig_monitor_blind` {meas: [MeasId]} (`session.close` while rig measurements run) and
-  `rig_monitor_moved` {meas: [MeasId]} (`session.open` of another backend or input device
+  `rig_monitor_blind` {meas: [MeasId]} (`stream.close` while rig measurements run) and
+  `rig_monitor_moved` {meas: [MeasId]} (`stream.open` of another backend or input device
   while they run). A client shows them to the operator; they change nothing in `result`.
 
 - `args` is absent for commands without arguments.
@@ -100,15 +100,15 @@ Warning { type: "<name>", … }
   since processes sharing one key share one window. A copy of an id sent while the request
   still runs (a panel, the delay finder, loopback detection) runs nothing: when the request
   completes, the reply goes to every copy, on whichever connection each arrived. A mutation
-  or a read that acts (`session.devices`, `session.preview`, `session.preview_stop`,
-  `session.control_panel`, `session.detect_loopback`, `delay.find`, `trace.export`,
+  or a read that acts (`stream.devices`, `stream.preview`, `stream.preview_stop`,
+  `stream.control_panel`, `stream.detect_loopback`, `delay.find`, `trace.export`,
   `file.upload_begin`, `file.upload_chunk`, `file.import`, `file.download_begin`) executes
   once per id, whichever command it carries: its reply is stored, the last 256 stored
   replies each kept 30 s, and a copy sent after the reply gets the stored reply. Any other
   read is not stored: a copy of it sent after the reply runs again. Requests refused before
   execution (protocol version, undecodable, revoked key) are not remembered. Revoking a
   client forgets its stored replies and running ids.
-- `session.control_panel`, `delay.find`, `session.detect_loopback` and the file jobs
+- `stream.control_panel`, `delay.find`, `stream.detect_loopback` and the file jobs
   (`file.list`, `file.save`, `file.load`, `file.new`, `file.recover`, `file.salvage`,
   `file.import`, `file.download_begin`) run beside the ctrl loop: other requests are
   answered while they run.
@@ -136,16 +136,16 @@ mutation.
 | op | args | reply body | lease |
 |---|---|---|---|
 | `hello` | `client` | `welcome` | non-mutating |
-| `session.devices` | — | `backends` | non-mutating |
-| `session.preview` | `backend: BackendKind`, `device: DeviceId`, `inputs: [PreviewInput]` ({`channel`, `kind: InputKind`}), `pairs: [Pair]` | `preview` | non-mutating |
-| `session.preview_stop` | — | `ack` | non-mutating |
-| `session.control_panel` | `backend: BackendKind`, `device: DeviceId` | `ack` | non-mutating |
-| `session.detect_loopback` | `lease_token`, `backend`, `input_device`, `output_device`, `output: u16`, `level: Dbfs \| nil` | `loopback_detection` | L, non-mutating |
-| `session.open` | `config: SessionConfig` | `session` | |
-| `session.close` | — | `ack` | |
-| `session.status` | — | `session` | non-mutating |
-| `session.inputs` | `inputs: [InputSetup]` (upserted by channel), `pairs: [Pair]` (the whole list) | `inputs` (`inputs`: the whole setup, `pairs`) | |
-| `session.outputs` | `outputs: [OutputSetup]` (upserted by channel; `label: nil` clears) | `outputs` (every label) | |
+| `stream.devices` | — | `backends` | non-mutating |
+| `stream.preview` | `backend: BackendKind`, `device: DeviceId`, `inputs: [PreviewInput]` ({`channel`, `kind: InputKind`}), `pairs: [Pair]` | `preview` | non-mutating |
+| `stream.preview_stop` | — | `ack` | non-mutating |
+| `stream.control_panel` | `backend: BackendKind`, `device: DeviceId` | `ack` | non-mutating |
+| `stream.detect_loopback` | `lease_token`, `backend`, `input_device`, `output_device`, `output: u16`, `level: Dbfs \| nil` | `loopback_detection` | L, non-mutating |
+| `stream.open` | `config: StreamConfig` | `stream` | |
+| `stream.close` | — | `ack` | |
+| `stream.status` | — | `stream` | non-mutating |
+| `stream.inputs` | `inputs: [InputSetup]` (upserted by channel), `pairs: [Pair]` (the whole list) | `inputs` (`inputs`: the whole setup, `pairs`) | |
+| `stream.outputs` | `outputs: [OutputSetup]` (upserted by channel; `label: nil` clears) | `outputs` (every label) | |
 | `gen.acquire` | `force: bool` | `lease` (`lease_token`, `expires_in_ms`) | |
 | `gen.set` | `lease_token`, `desired: {settings, armed, firing}` | `generator` | L |
 | `gen.refresh` | `lease_token` | `lease` | L |
@@ -235,7 +235,7 @@ mutation.
 | `rec.start` | `request: RecordRequest` | `recording` (the run as started) | |
 | `rec.stop` | — | `recording` (the run, finished) | |
 | `rec.list` | — | `recordings` | non-mutating |
-| `session.replay` | `recording: RecordingRef`, `pace: realtime \| fast` | `session` | |
+| `stream.replay` | `recording: RecordingRef`, `pace: realtime \| fast` | `stream` | |
 | `server.info` | — | `server` | non-mutating |
 | `server.network` | `enabled: bool`, `bind: NetBind \| nil`, `port: u16 \| nil` | `server` | local clients only |
 | `server.authorize` | `name`, `key` (Z85) | `server` | |
@@ -246,7 +246,7 @@ mutation.
 | `rig.unpair` | `rig: RigId` | `ack` | |
 | `source.state` | — | `source_state` | non-mutating; with `hello`, the only command an admitted rig may send |
 
-`session.status` returns `state.session`. `trace.list` returns `state.traces`. `plan.list`
+`stream.status` returns `state.stream`. `trace.list` returns `state.traces`. `plan.list`
 returns `state.plans`. `gen.refresh` checks the lease, moves its deadline out by the lease
 expiry and, while the generator fires, keeps the output gate open until that deadline.
 `delay.track` sets `delay.tracking` on a transfer measurement and tells its job.
@@ -276,21 +276,21 @@ Every acquire, force, arm, fire, set, stop, release
 and expiry is a `generator` event naming the client (`last_action.client`; for `expiry` the
 owner whose lease expired). The output path enforces the deadline itself; if it mutes on an
 expired deadline before the control side noticed, the daemon disarms with the same `expiry`
-event, so the state never says firing while the output is silent. `session.devices` and
-`session.preview` ask the driver on their own threads, so refreshes are answered while it
-takes its time; a `session.devices` while a listing runs is answered with that listing.
-Opening a stream (`session.open`, a reopen) holds the daemon until the driver answers, and
-`session.open` or `session.detect_loopback` while a preview is still opening waits for it
+event, so the state never says firing while the output is silent. `stream.devices` and
+`stream.preview` ask the driver on their own threads, so refreshes are answered while it
+takes its time; a `stream.devices` while a listing runs is answered with that listing.
+Opening a stream (`stream.open`, a reopen) holds the daemon until the driver answers, and
+`stream.open` or `stream.detect_loopback` while a preview is still opening waits for it
 up to 1.2 s: that time is not counted against the lease (its deadline moves out by it),
 since a refresh that waited unanswered is no sign the holder walked away. A preview still
 opening after that wait is closed once it opens, and the request that needed its device is
 `refused`, to be asked again. A reopen after a device or configuration change disarms the
 generator (`stop` event, no owner change): the stimulus does not survive the old stream. A
-`session.preview` for another device while one is still opening is `refused`; the same one
+`stream.preview` for another device while one is still opening is `refused`; the same one
 asked again is answered with it.
 
 **System max level (`gen.ceiling`).** `generator.ceiling` (dBFS RMS) is the system
-maximum: `gen.set`, `sweep.run`, `dynamics.run` and `session.detect_loopback` above it are
+maximum: `gen.set`, `sweep.run`, `dynamics.run` and `stream.detect_loopback` above it are
 `refused`, and the output path limits every sample to 6 × the ceiling's RMS in amplitude
 (+15.6 dB of crest; at most full scale) on the running stream at once; generators already
 refuse a level whose own crest would pass it. `generator.ceiling_bound` is the hard upper bound fixed at
@@ -309,7 +309,7 @@ daemon start (`ac2d --max-level`); `gen.ceiling` above it, above 0 dBFS or not f
   later, lower `--max-level` comes up at that bound. A change that cannot be written is
   `internal` and leaves the maximum as it was.
 
-**Output labels (`session.outputs`).** `OutputSetup` = {`channel`: u16 (zero-based), `label`: string |
+**Output labels (`stream.outputs`).** `OutputSetup` = {`channel`: u16 (zero-based), `label`: string |
 nil}. Labels name the rig's outputs (`Main L`, `Sub`) for every client; they are kept with
 the rig settings (not in sessions) by channel number, whatever the device. A label is 1–32
 characters, no control characters, no surrounding space (`invalid` otherwise); `nil` clears
@@ -320,7 +320,7 @@ to the daemon's machine rather than to a session: `rev` (the rev of its last set
 `osc_target` (`"ip:port"` \| nil: where OSC cues go; an IP literal, never a name to look up),
 `artnet_target` (`ArtnetTarget` \| nil: where the Art-Net universe goes), `artnet_fade` (f64
 seconds, 0–60: how long the DMX channels take to move to a new cue frame; 0 jumps; 1 until
-set), `monitor_at_start` (at start the daemon reopens the last session's device capture-only so the
+set), `monitor_at_start` (at start the daemon reopens the last stream's device capture-only so the
 rig measurements meter with no client connected; the generator stays disarmed), `levels`
 (`LevelsSettings` {`ballistic`: `Ballistic`, `correlation_window`: `CorrelationWindow`,
 `over_threshold`: Dbtp, `correlation_gate`: Dbfs, `loudness_target`: Lufs}: the programme meters' settings, below), `osc` and
@@ -350,7 +350,7 @@ an unspecified address or port 0, persists, and sends the current frame at once.
 `invalid`. It applies from the next change of the cue frame (a fade in progress keeps its
 length).
 **Programme meters (`levels.*`).** `rig.levels` holds what the input meters of §5.4
-(`session_levels`, `preview_levels`) read beyond peak and RMS: `ballistic` is what the bars
+(`stream_levels`, `preview_levels`) read beyond peak and RMS: `ballistic` is what the bars
 read — a peak detector in `ppm`: `true_peak` (BS.1770 Annex 2, 4× oversampled; the
 default), `type1` (IEC 60268-10 Type I quasi-peak), `type2` (Type II) or `vu` (IEC 60268-17;
 offered on a `line` input with a line calibration only — elsewhere `ppm` carries the true
@@ -371,7 +371,7 @@ settled value at once; it keeps the fields given (nil keeps a field), persists t
 settings first, and refuses a threshold, gate or target outside its range or not finite
 (`invalid`).
 `levels.reset` clears the max hold of every ballistic and the over count of `channels`
-(device inputs; empty = every captured input) on the session meters and the preview alike,
+(device inputs; empty = every captured input) on the stream meters and the preview alike,
 and resets every loudness source with an input in `channels` (integrated, range, the maxima,
 `duration` and `since` restart; momentary and short-term are signal state and carry on);
 nothing in the state changes, the next meter frame carries the cleared values.
@@ -381,7 +381,7 @@ when a cue changes state meanwhile); `invalid` without a target or with a channe
 twice, `internal` when the send fails.
 Cue rules: a state change is sent at once, and every cued subject's current message is sent
 again every second, so a lost datagram heals within a second and a receiver can treat
-silence (a few seconds) as a fault. A meter whose job is not running (no session, the device
+silence (a few seconds) as a fault. A meter whose job is not running (no stream, the device
 lost and being reopened, the meter stopped, or no judgement from it for 3 s: a stalled
 device) is `fault` on every cue, with no level appended;
 a running meter's subjects follow its judgements (`no_limit` → `ok`, `not_calibrated` →
@@ -412,14 +412,14 @@ the whole universe and is resent within a second, so a reordered datagram heals 
 a restarted daemon is never ignored by a node that remembers a higher sequence. Mix ac2's
 universe with a lighting desk at the receiver (an Art-Net input merged HTP, or a node's HTP
 merge). A daemon stopping cleanly sends one frame of every cue's `ok` levels.
-With `monitor_at_start` on, each `session.open` that succeeds while rig measurements exist is
-recorded in the rig settings (turning it on with a session open records that one). A daemon
-started with it on and a recorded session opens that device itself, after restoring the
+With `monitor_at_start` on, each `stream.open` that succeeds while rig measurements exist is
+recorded in the rig settings (turning it on with a stream open records that one). A daemon
+started with it on and a recorded stream opens that device itself, after restoring the
 autosave: the same inputs, rate and buffer, no output channels and no loopback, so the
-generator has nothing to play on (`gen.set` is `invalid`) until a client opens a session of
+generator has nothing to play on (`gen.set` is `invalid`) until a client opens a stream of
 its own. A failed open is logged and tried again on the audio recovery's backoff (1 s
-doubling to 30 s) until it opens or a client opens or closes a session. `session.close`, and
-a `session.open` of another backend or input device, are allowed while rig measurements
+doubling to 30 s) until it opens or a client opens or closes a stream. `stream.close`, and
+a `stream.open` of another backend or input device, are allowed while rig measurements
 run; the daemon logs a warning and the reply carries one (§3.1): `rig_monitor_blind` (the rig
 meters stop metering) or `rig_monitor_moved` (they meter the new device's inputs), each
 listing the rig measurements (`meas`).
@@ -500,7 +500,7 @@ nothing it keeps. Only a client of the local pair may send it (`refused` over th
 one) or one the local endpoints use, and an empty interface name or one with control
 characters, are `invalid`. The first turn-on makes the server key; when it cannot be made
 the turn-on is `refused` with the reason and the setting is left as it was. Turning on binds a new CURVE pair beside the local one, the
-session untouched: an open session is served to the new pair's clients at once. Turning
+stream untouched: an open stream is served to the new pair's clients at once. Turning
 off sends every network data connection the `network_off` notice (§5.8), then closes the
 pair: their subscriptions end and a lease they held runs out as on any lost connection
 (fading out). Turning on at another bind or port moves the pair. The daemon keeps the
@@ -522,28 +522,28 @@ same name stays (`not_found` when no entry is that rig's). An
 admitted rig may send `hello` and `source.state` and nothing else (`refused`), and is sent
 only `audio/<channel>` and `source/levels` frames (§5.1) and the §5.8 notices (`network_off`,
 `rejoin`); no `ka`. `source.state` → `SourceState` {`rig`, `name`,
-`clocks` (`Clocks`, with its `stamp_map`), `session`: `SourceSession` \| nil
+`clocks` (`Clocks`, with its `stamp_map`), `stream`: `SourceStream` \| nil
 {`incarnation` (`StreamIncarnation` {`daemon`, `epoch`}), `sample_rate_hz`,
 `buffer_frames`, `replaying`, `capture_stamps` (whether its backend stamps capture
 times), `inputs`: [`SourceInput` {`channel`, `setup`: `InputSetup` \| nil,
 `cal_status`, `calibration`: `CalEntry` \| nil, `curve`: `SourceCurve` \| nil
-{`reference`: `MicCurveRef`, `freq`: [f64], `gain_db`: [f64]}}]}}: all of the session an
+{`reference`: `MicCurveRef`, `freq`: [f64], `gain_db`: [f64]}}]}}: all of the stream an
 admitted rig sees. `rig.pair` {`peer`: `RigPeer` {`rig`, `name`, `ctrl`, `data`, `key` (the
 other rig's server key, Z85)}} adds one rig this rig takes inputs from, in place of an entry
 for the same rig; a name another paired rig holds is `invalid` (unpair that rig first: an
 entry is found by its name, and replacing it would drop that rig and its feed); `rig.unpair` {`rig`} removes that rig's entry
 (`not_found` when there is none). Either leaves the other entries as they are, kept in the rig
-settings; the links follow at once. A running session's joined feed starts over only when
+settings; the links follow at once. A running stream's joined feed starts over only when
 an entry it takes inputs from changed or went; pairing or unpairing another rig leaves it
 running. A rig whose network was never turned
 on has no key yet, so its links stay `no_server_key`; once it has one they link with the
 network off too (a link is an outgoing connection).
 
-The stream carries every output of the session: arming routes the generator to
-`settings.outputs` without reopening the stream (same session epoch; running measurements,
+The stream carries every output it opened: arming routes the generator to
+`settings.outputs` without reopening the stream (same stream epoch; running measurements,
 and on JACK every port connection, stay). Re-routing while firing fades out, switches and
 fades back in. On JACK the daemon connects the outputs the operator chose for the stimulus
-(the generator's outputs and the session's loopback output), and only those, to the
+(the generator's outputs and the stream's loopback output), and only those, to the
 physical playback ports of the same number as the device listing names them (output 1 →
 the first playback port), removes the connections it made for outputs no longer chosen,
 never touches connections made by anyone else, and connects again after any reopen.
@@ -637,7 +637,7 @@ within ±200 dB; a session file's that is not is 0 on load.
 `meas.eq` edits the measurement's EQ what-if sets (`Measurement.eq: [EqSet]`, transfer and
 sweep measurements; `docs/design/eq-overlay.md`); the job and `config_rev` are untouched.
 `EqEdit` (tagged by `type`): `new` {`name` \| nil (the next free `EQ n`), `realisation` \|
-nil (digital at the session rate), `peak_q` \| nil (`half_gain`), `sections`} — also
+nil (digital at the stream rate), `peak_q` \| nil (`half_gain`), `sections`} — also
 predicts the live curve —, `put` {`set`, `body`: `EqBody`} (replaces what the set holds,
 `rev` + 1), `delete` {`set`} (its filter curve and predictions go with it), `mark` {`set`,
 `clear`} (snapshots the set as `in_console`, or clears it), `predict` {`set`, `curve`:
@@ -794,7 +794,7 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
     applied to the result; the operands are combined unsmoothed. Only `smoothing` changes
     in place; any other change restarts the channel.
   - Transfer phase and time base (decision 8a): every operand is converted from its own
-    inserted delay, so operands of one session epoch (live ones, and captures of that
+    inserted delay, so operands of one stream epoch (live ones, and captures of that
     epoch) combine with their relative arrival. A ratio states `delay` 0 (its phase keeps
     A's arrival relative to B), a cascade `τa + τb`; neither needs a shared time base, and
     without one its phase is of each operand's own alignment (`PhaseBasis`
@@ -836,8 +836,8 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   `invalid` at create / update: no measurement input or more than 16, one listed twice or
   equal to the reference, outputs empty or repeated, repeats outside
   1…8, a non-finite or positive level, a gate ≤ 0, a tail above 20 s, sweep parameters the
-  generator refuses at the session's rate (checked again at every run, as are the
-  session's inputs and outputs and the ceiling).
+  generator refuses at the stream's rate (checked again at every run, as are the
+  stream's inputs and outputs and the ceiling).
 
 - **Dynamics measurement** (`dynamics`, `DynamicsConfig`: `reference_input`,
   `measurement_inputs` ([u16], 1…8, each a part of the same trace; none twice, none the
@@ -1119,11 +1119,11 @@ column, in the configuration's order (the front end groups and ranks them), `pre
 f64 (dB SPL; NaN uncalibrated), `limit`: DbSpl \| nil, `judgement`} \| nil without a transfer
 or a predicted window.
 
-#### Devices, preview and loopback detection (`session.*`)
+#### Devices, preview and loopback detection (`stream.*`)
 
-`session.devices` answers `[BackendInfo]`, one per backend the daemon offers, the one it was
+`stream.devices` answers `[BackendInfo]`, one per backend the daemon offers, the one it was
 started on first: `kind: BackendKind` (`jack` \| `coreaudio` \| `asio` \| `fake`; `replay` is the
-kind of a replay session and is never listed), `description` (for the
+kind of a replay stream and is never listed), `description` (for the
 operator), `availability` (tagged by `type`: `available` \| `unavailable` {`reason`}: why,
 in plain words with the remedy, e.g. `No JACK server: start JACK (e.g. `jackd -d alsa`) or
 use PipeWire`) and `devices: [DeviceInfo]` (empty while unavailable). A daemon started on
@@ -1141,17 +1141,17 @@ panel), `notes`. `DirectionInfo`: `max_channels`,
 `rates_hz` ([{min, max}]), `buffer_frames` ({min, max} \| nil), `default_rate_hz`,
 `default_buffer_frames` (u32 \| nil), `channel_names` ([string], one per channel, \| nil
 where the backend does not name channels: JACK gives the port alias or short name, ASIO
-the driver's channel name, Core Audio the device's channel name where it has one), `system_default` (bool: the host's default device for this direction), `spare_channels` (u16: spare inputs a session can
+the driver's channel name, Core Audio the device's channel name where it has one), `system_default` (bool: the host's default device for this direction), `spare_channels` (u16: spare inputs a stream can
 open beyond `max_channels`: ports tied to no physical channel, which the operator connects
 other sources to with the host's own tools; spare `k` (zero-based) is input channel
 `max_channels + k`; JACK and the simulated rig only, 0 elsewhere and for outputs). A host
 whose devices are single-direction lists an interface (or a built-in mic and speakers) as an
 input-only and an output-only device, each with `duplex_clock: unknown`.
 
-`SessionConfig`: `backend: BackendKind | nil` (nil = the default backend), `input_device`,
+`StreamConfig`: `backend: BackendKind | nil` (nil = the default backend), `input_device`,
 `output_device` (`DeviceSelector`: `default` \| `id` {`id`}), `input_channels` ([u16],
 zero-based; spare inputs listed like any other), `spare_inputs` (u16: spare inputs the
-session opens; input channels from the device's `max_channels` up to `max_channels +
+stream opens; input channels from the device's `max_channels` up to `max_channels +
 spare_inputs` may then be captured; more than `spare_channels`, or a channel past them,
 is `unsupported`), `output_channels` (u16, a count), `sample_rate_hz`, `buffer_frames`,
 `loopback` ({`output`, `input`} \| nil), `remote_inputs` ([`RemoteInput` {`slot`, `rig`,
@@ -1161,69 +1161,69 @@ one; at least one local input is required, the loopback input must be local, slo
 rig/channel pairs are unique, an input of this rig is `invalid` ("that input is on this
 rig"), a remote rig at another rate or replaying is `refused`), `link_offset` (s \| nil:
 how long the joined feed waits for remote audio; nil = two remote periods, one of this
-rig's and 2 ms, at most 0.5 s). A remote input carries the session's measurements like a
+rig's and 2 ms, at most 0.5 s). A remote input carries the stream's measurements like a
 local one, except calibration (`refused`: set on the rig the input is on); a recording
 takes it from the joined feed, its gaps marked; a transfer function with one channel on a remote rig averages only while the two
-rigs' clocks agree (`remote.transfers`, §4.1). `OpenSession` adds `backend` (the one used),
+rigs' clocks agree (`remote.transfers`, §4.1). `OpenStream` adds `backend` (the one used),
 `input_device`, `output_device`, `sample_rate_hz`, `buffer_frames`, `clock`, `opened_at`,
-`replay` (`ReplayInfo` \| nil: the recording a replay session plays, §3.2 raw capture
+`replay` (`ReplayInfo` \| nil: the recording a replay stream plays, §3.2 raw capture
 files), `clock_source` (string \| nil: the clock source the device ran on when opened,
 ASIO), `driver_change` (`DriverChange` \| nil: {`from_rate_hz`, `from_buffer_frames`},
-set when the session reopened after its driver reset itself at another rate or buffer
-size, §4.1.1; nil after a `session.open`), `driver_reset` (`DriverReset` \| nil:
+set when the stream reopened after its driver reset itself at another rate or buffer
+size, §4.1.1; nil after a `stream.open`), `driver_reset` (`DriverReset` \| nil:
 {`reason`: `DriverResetReason`, `output_stopped`: bool, the generator was emitting and its
-output was cut}, set when the session reopened after a `driver_reset` stop, kept through
-later recoveries, nil after a `session.open`), `stated_latency` (`StatedLatency` \| nil:
+output was cut}, set when the stream reopened after a `driver_reset` stop, kept through
+later recoveries, nil after a `stream.open`), `stated_latency` (`StatedLatency` \| nil:
 {`input_frames`, `output_frames`: the driver's `getLatencies` at the open buffer size,
 `driver_buffering`: {`input_frames`, `output_frames`} \| nil, the ASIO 2.3 buffering inside
 the driver, part of the two, nil when the driver does not report it}; ASIO only),
 `spare_ports` ([{`input`: u16, `port`: string}]: each spare input captured and the full
 name of its port in the host's graph, e.g. `ac2:in_19`; empty without spares). JACK ports
-are named by input channel (`in_19` is input 19). On its own reopen (a new `session.open`
+are named by input channel (`in_19` is input 19). On its own reopen (a new `stream.open`
 on the same daemon, a device change) the daemon reads what is connected to the spare
 ports before closing and connects it again to the new ones; after the JACK server or the
-daemon restarts it cannot, so the operator keeps such routes in a patchbay. `session.open` with `backend: replay` is `invalid`: recordings open with
-`session.replay`. Input and output may be two devices of one backend; an output device
+daemon restarts it cannot, so the operator keeps such routes in a patchbay. `stream.open` with `backend: replay` is `invalid`: recordings open with
+`stream.replay`. Input and output may be two devices of one backend; an output device
 without outputs (or an `output_device: default` the host has none for) is `not_found`
 when `output_channels > 0`. Two devices open with `clock: unknown`: they may drift, which
 the loopback monitor measures while a stimulus plays (`timing.drift`, §4.1).
 
-While a session is open the daemon meters every captured input on `session/levels` (§5.1)
+While a stream is open the daemon meters every captured input on `stream/levels` (§5.1)
 whether or not a measurement runs: per-interval sample peak, 300 ms integrated RMS and clip
 (held 1 s), and the programme meters of `rig.levels` (the chosen ballistic's reading, the
 true peak, the max hold and the over count per input; the correlation per declared pair whose
 both inputs are captured), at most 30 frames per second, published only while subscribed.
-Beside them `session/gonio` carries each such pair's goniometer points (§5.4
-`session_gonio`) at the same rate.
+Beside them `stream/gonio` carries each such pair's goniometer points (§5.4
+`stream_gonio`) at the same rate.
 
-**Driver control panel.** `session.control_panel` opens the named device's driver
+**Driver control panel.** `stream.control_panel` opens the named device's driver
 settings window on the daemon's machine (ASIO's `controlPanel`, where pro interfaces set
-rate, buffer size, clock and routing), on the driver's own COM thread. While a session runs
-on that driver the call goes to it; with no session the driver is loaded and stays loaded
-(listed in full, every other ASIO driver by name only) until a session or another panel
-needs the process's one driver. A session open on another ASIO driver makes it
+rate, buffer size, clock and routing), on the driver's own COM thread. While a stream runs
+on that driver the call goes to it; with no stream the driver is loaded and stays loaded
+(listed in full, every other ASIO driver by name only) until a stream or another panel
+needs the process's one driver. A stream open on another ASIO driver makes it
 `unsupported`. On `coreaudio` it brings up Audio MIDI Setup (where a Core Audio device's
 rate, format and clock source are set) for a device that is present, `not_found`
 for one that is not. The reply follows the driver's answer, or a short wait while a modal
 panel stays open (`ack`, after 1.2 s); a backend without a panel is `unsupported`. A change there may make
-the driver reset the session's stream (§4.1.1, `driver_reset`).
+the driver reset the stream (§4.1.1, `driver_reset`).
 
-**Preview.** `session.preview` opens a device for capture only — no output stream exists,
-so nothing can be emitted — and publishes meters of every input on `session/preview`
-(meta names the device; `audio_sample` counts from the preview's start, `session_epoch` is
-the epoch it opened in), with the same programme meters as the session's over the kinds and
+**Preview.** `stream.preview` opens a device for capture only — no output stream exists,
+so nothing can be emitted — and publishes meters of every input on `stream/preview`
+(meta names the device; `audio_sample` counts from the preview's start, `stream_epoch` is
+the epoch it opened in), with the same programme meters as the stream's over the kinds and
 pairs declared, and the pairs' goniometer points on `preview/gonio`. Reply `Preview`: `backend`, `device`, `channels` (inputs metered,
 `0 .. channels`), `sample_rate_hz`, `expires_in_ms`. There is one preview per daemon, and
 the last caller wins: naming the same device again renews it, another device replaces it,
 whichever client asks. It closes on
-`session.preview_stop`, `session.open`, `session.detect_loopback`, or when not renewed
+`stream.preview_stop`, `stream.open`, `stream.detect_loopback`, or when not renewed
 within `expires_in_ms` (5 s). Opening it may fail where the host allows a device only one
 stream (`unsupported` / `not_found` with the host's reason).
 
-**Loopback detection.** `session.detect_loopback` needs the stimulus lease (`lease_required`
+**Loopback detection.** `stream.detect_loopback` needs the stimulus lease (`lease_required`
 otherwise) and an explicit `level` (`refused` when nil; there is no default level); a level
 above the global ceiling, or a request while the stimulus is armed or firing, is `refused`.
-It is allowed with a session open. The daemon closes the preview, opens `input_device` with every input and `output_device`
+It is allowed with a stream open. The daemon closes the preview, opens `input_device` with every input and `output_device`
 with `output + 1` outputs (the same id for one device),
 plays a 0.5 s pink-noise burst band-limited to 100 Hz – 10 kHz at `level` (RMS) on `output`
 only — faded in and out (20 ms), under the global ceiling and the output path's peak limit —
@@ -1300,7 +1300,7 @@ turned to the new delay, while the change is small next to its window, and only 
 stages show `settling` again (`docs/design/delay-no-resettle.md`).
 
 `DelayState` (a transfer measurement's `delay`): `applied: Seconds`, `applied_samples`
-(f64: samples at the session rate, fraction included), `nudged: Seconds` and
+(f64: samples at the stream rate, fraction included), `nudged: Seconds` and
 `nudged_samples` (f64; the offset of `applied` from the arrival, which `delay.nudge` steps
 and `delay.set` move),
 `tracking` (the operator's switch), `awaiting_pick`, `last_finding: DelayFinding | nil`. An
@@ -1356,7 +1356,7 @@ display edits and are never applied to the stored data.
   `t0` re the trace's `delay`), every sample (one FFT length of the full-rate stage: 4096 points, ±42.7 ms at 48 kHz). It is nil
   when the measurement has no IR yet (no block accepted with a reference); traces made by
   `trace.average`, math traces, imports of other formats and targets have none.
-  It needs a result in the current session epoch (`invalid` otherwise: not running, no
+  It needs a result in the current stream epoch (`invalid` otherwise: not running, no
   frame yet, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
   `target`, `spectrum` {`scale`, `level`: `SpecLevel`}, `rta` {`scale`}), `source.captured` {`meas`, `meas_name`,
   `epoch`, `at_sample`}, `edit.owner` the measurement, `delay` (the delay the DSP used),
@@ -1382,7 +1382,7 @@ display edits and are never applied to the stored data.
   `owner` and `locked` (not `smoothing`); `trace.delete` and `trace.mic_curve` of a locked trace are
   `refused`.
 - **Time base (decisions 8a / 8b).** Captured traces (`captured`, `sweep`) share the
-  time base of their session epoch, and so does a `math` capture whose `phase` is
+  time base of their stream epoch, and so does a `math` capture whose `phase` is
   `shared_time_base` and whose expression is a sum, difference or average (a ratio or a
   cascade is relative, in no time base); every other source (`imported`, `generated`,
   `average`, other `math`) is independent.
@@ -1583,7 +1583,7 @@ the session. One runs at a time (runs, fits and maps share the worker).
 - `sim.cancel` stops the running simulation (`refused` when none runs) and replies `sim`
   with it `cancelled` {`why`: `operator`}. A run also stops `cancelled` when its plan changes
   or is deleted (`plan_changed`; saving it unchanged does not), when the fit's walk is
-  deleted (`walk_deleted`) and at `session.close` (`session_closed`).
+  deleted (`walk_deleted`) and at `stream.close` (`stream_closed`).
 - Progress: `sim` events with `status` `running` {`stage` `image_sources` \|
   `ray_tracing` \| `analysis`, `done`, `total`, `source` (index), `pass` (fit pass, 1-based; 0 for a run)}, at
   most five a second, then `done`, `cancelled` {`why`} or `failed` {`msg`}.
@@ -1633,9 +1633,9 @@ start); otherwise the onset fade is derived. `name` nil names the trace `Run <nu
 
 - Refused (`refused`) above the ceiling, or while the generator is not armed by the caller
   (arm with `gen.set` first: like firing, the run needs it), while it fires, while a
-  loopback detection or another sweep runs, or without an open session. `invalid`: not a
-  sweep measurement, inputs not captured, outputs not in the session, sweep parameters the
-  generator refuses at the session's rate.
+  loopback detection or another sweep runs, or without an open stream. `invalid`: not a
+  sweep measurement, inputs not captured, outputs not in the stream, sweep parameters the
+  generator refuses at the stream's rate.
 - The daemon routes the generator to `outputs`, plays `repeats` synchronised sweeps each
   followed by its silence (`post_roll`, ≥ 1 s and ≥ `tail`), records the reference and every
   measurement input, analyses each against the reference on a job thread and stores one trace
@@ -1657,7 +1657,7 @@ start); otherwise the onset fade is derived. `name` nil names the trace `Run <nu
   `type`): `playing` {`repeat`, 1-based} → `analysing` → `done` {`traces`: one per measurement input, in
   `measurement_inputs` order} or `failed`
   {`reason`, `msg`}. `SweepFailure`: `stopped` (`gen.stop`, `gen.release`, forced takeover),
-  `lease_expired`, `session_closed`, `dropout` (audio lost while recording), `no_reference`
+  `lease_expired`, `stream_closed`, `dropout` (audio lost while recording), `no_reference`
   (the reference carries no sweep), `analysis`. A failed run's audio is discarded.
 - `trace.get` of a sweep trace: `mag_db` / `phase_deg` are the fundamental's response (mic re
   reference, phase referred to the arrival; NaN outside the sweep), `coherence` nil, and
@@ -1699,7 +1699,7 @@ the dynamics measurement `meas`'s programme, all in whole carrier periods: a lin
 (`pilot − 6 dB`, then `pilot`, 2 s each), then for each burst level (outer) and length (inner)
 a burst at that level followed by a rest at the pilot, then a 20 ms fade. The carrier is
 snapped to the nearest frequency whose period is a whole, even number of samples (a multiple
-of 4 for `peak` onset) at the session's rate; every burst starts and ends on an onset point.
+of 4 for `peak` onset) at the stream's rate; every burst starts and ends on an onset point.
 A rest ends at the first onset point after the analysis has seen the processor recover
 (gain within 0.05 dB of its baseline, at least 2 s), or at `rest_max`, which the source counts
 itself; with `rests_from` (a dynamics trace) the rests are those of that trace, replayed, so
@@ -1709,12 +1709,12 @@ an A/B pair plays an identical programme. The generator's level is the highest b
 
 - Refused (`refused`) above the ceiling, while the generator is not armed by the caller,
   while it fires, while a loopback detection, a sweep or another dynamics run plays, or
-  without an open session. `invalid`: not a dynamics measurement, inputs not captured,
-  outputs not in the session, a carrier the session's rate cannot play (period below 12
+  without an open stream. `invalid`: not a dynamics measurement, inputs not captured,
+  outputs not in the stream, a carrier the stream's rate cannot play (period below 12
   samples), `rests_from` not a dynamics trace or with another step count.
 - While it plays the generator is `firing` with `sine` {`freq`: the carrier played} at the
   highest level as its settings, and `gen.set` is `refused`; stop, release, lease expiry
-  and a closed session abort it with the ordinary fade-out. When the last rest is in, the
+  and a closed stream abort it with the ordinary fade-out. When the last rest is in, the
   generator is disarmed (as after a sweep) and one trace of `kind: dynamics` is stored, owned
   by the measurement (source `dynamics` {`meas`, `meas_name`, `run`, `number` — one more than
   the highest run number of the measurement's stored runs —, `epoch`}), `cal`
@@ -1727,7 +1727,7 @@ an A/B pair plays an identical programme. The generator's level is the highest b
   replayed length), `started_at`, `status` (`DynamicsStatus`, tagged by `type`): `playing`
   {`step` (1-based; 0 before the first burst), `steps`, `phase` (`DynamicsPhase`: `waiting`
   \| `check` \| `burst` \| `rest`)} → `done` {`trace`} or `failed` {`reason`, `msg`}.
-  `DynamicsFailure`: `stopped`, `lease_expired`, `session_closed`, `dropout`, `no_reference`
+  `DynamicsFailure`: `stopped`, `lease_expired`, `stream_closed`, `dropout`, `no_reference`
   (the reference carries no programme), `pilot_not_below_threshold` (the gain at the pilot
   differs from the gain 6 dB below it), `mismatch` (the reference's edges do not match the
   programme, or its end never came).
@@ -1784,7 +1784,7 @@ with the autosave (§7.3).
   {type: unsaved_changes, origin}`, nothing changed. Otherwise it checks the whole session
   first (a refusal changes nothing), keeps a dirty working state for `file.recover`, then
   stops and disarms the generator and drops its owner (the old lease is gone), deletes
-  every session measurement and every trace (rig measurements stay), starts a new session epoch newer than every epoch recorded
+  every session measurement and every trace (rig measurements stay), starts a new stream epoch newer than every epoch recorded
   in the loaded traces (an open stream reopens without generator routes), and recreates
   the measurements (same ids, restarted when they were running) and traces (same ids).
   `working.origin` becomes the session (`client` {file name} for an upload), clean. Errors:
@@ -1830,40 +1830,40 @@ with the autosave (§7.3).
 - The daemon also keeps an autosave of the same content (§7.3); its status is the
   `autosave` entity.
 
-#### Raw capture files (`rec.*`, `session.replay`)
+#### Raw capture files (`rec.*`, `stream.replay`)
 
 Design: `docs/design/raw-capture.md`; file format §7.5. A daemon has a recording directory
 (`ac2d`: `recordings` in the data directory, `--recordings <dir>`); one without (`ac2d --ephemeral`,
 or an in-process test daemon not given one) answers `rec.start` `unsupported`, `rec.list` with
-nothing and `session.replay` by name `not_found`.
+nothing and `stream.replay` by name `not_found`.
 
-`RecordRequest`: `inputs` ([u16] session channels, each captured by the open session, in
+`RecordRequest`: `inputs` ([u16] stream channels, each captured by the open stream, in
 file channel order; a remote input is recorded from the joined feed, its gaps marked), `name` (string \| nil: a file stem like a session name; nil =
 `rec-<UTC date>T<hh-mm-ss>`, made unique), `max_duration` (Seconds, 0 < d ≤ 86 400),
 `max_bytes` (u64 \| nil, at least one second of audio).
 
-- `rec.start` refuses (`refused`) without an open session, while another recording runs,
+- `rec.start` refuses (`refused`) without an open stream, while another recording runs,
   or when a recording of that name exists (never overwritten); `invalid` for an empty,
   repeated or uncaptured input, a bound out of range, a bad name. The file and sidecar are
   created before the reply; the first captured block after the reply is the file's first
   frame.
 - The recording ends with `rec.stop` (everything captured until the request is kept), at
-  its bounds, on a write failure (disk full), when the session closes or reopens (device
-  or configuration change, `session.open`, `session.replay`, `file.load`) and at daemon
+  its bounds, on a write failure (disk full), when the stream closes or reopens (device
+  or configuration change, `stream.open`, `stream.replay`, `file.load`) and at daemon
   shutdown; the file and sidecar are always finalised and say why. A daemon that dies while
   recording leaves a sidecar without an end; the next one to start with that directory
   finishes it (`interrupted`) once its audio file has not been written for 30 s, and
   mirrors it as the `recording` entity.
 - `rec.stop` without a recording is `refused`.
 - Progress and outcome are the `recording` entity (§4.1), `RecordingRun`: `name`, `path`
-  (the audio file on the daemon host), `inputs`, `sample_rate_hz`, `session_epoch`,
-  `start_sample` (session sample of the file's first frame), `started_at`, `started_by`,
+  (the audio file on the daemon host), `inputs`, `sample_rate_hz`, `stream_epoch`,
+  `start_sample` (stream sample of the file's first frame), `started_at`, `started_by`,
   `frames`, `bytes` (file size), `discontinuities`, `remote_gaps` (`RemoteGaps` {`spans`,
   `frames`}: the remote inputs' marked gaps, frames summed over channels), `max_duration`,
   `max_bytes`, `status` (tagged by `type`: `recording` \| `ended` {`reason`:
   `RecordingEnd`}). `frames`, `bytes`, `discontinuities` and `remote_gaps` are updated about once a second while recording. `RecordingEnd`
   (tagged by `type`): `stopped`, `duration_limit`, `size_limit`, `write_failed` {`msg`},
-  `session_closed`, `session_reopened`, `audio_stopped` (the session's audio stopped, §4.1.1;
+  `stream_closed`, `stream_reopened`, `audio_stopped` (the stream's audio stopped, §4.1.1;
   the file ends at the last audio received), `daemon_shutdown`, `interrupted`.
 - `rec.list` → [`RecordingFile`]: `name`, `path`, `sample_rate_hz`, `inputs`, `frames`,
   `started_at`, `discontinuities`, `remote_gaps`, `end` (`RecordingEnd` \| nil while being
@@ -1878,7 +1878,7 @@ file channel order; a remote input is recorded from the joined feed, its gaps ma
 
 `RecordingRef` (tagged by `type`): `name` {`name`} in the recording directory, or `path`
 {`path`}: the absolute path of the `.wav` or `.ac2rec.json` file, local transports only
-(`refused` to a network client). `session.replay` closes any session and opens a new epoch on a
+(`refused` to a network client). `stream.replay` closes any stream and opens a new epoch on a
 `replay` backend: the recorded device's id (so its calibrations apply), the recorded inputs
 under their device numbers (an input not recorded cannot be captured), the recorded rate
 and period, no outputs (the generator cannot be armed). Running measurements restart on it
@@ -1888,15 +1888,15 @@ the block carries the recorded flags (a configuration change replays as a plain
 discontinuity), so analyses reset where they reset live. `pace`: `realtime` (one second
 per second) or `fast` (as fast as every running measurement takes the audio; nothing is
 dropped). The replay starts once the measurements are attached and stops after the last
-frame; the session stays open. `ReplayInfo`: `name`, `path`, `frames`, `end_sample` (one
+frame; the stream stays open. `ReplayInfo`: `name`, `path`, `frames`, `end_sample` (one
 past the last sample index), `pace`, `recorded_start_sample`, `recorded_at`. Errors:
 `not_found` (no such recording), `refused` (still being recorded), `invalid` (a sidecar or
 audio file this build does not read, or that disagree).
-#### Calibration (`cal.*`, `session.inputs`)
+#### Calibration (`cal.*`, `stream.inputs`)
 
 Design: `docs/design/q7-calibration.md`. Two stores: **sensitivity calibrations**, keyed by
-the open session's capture device, the input channel and the mic name (`CalKey`), so
-`cal.spl` needs an open session; and the **mic library**: named curves per mic (`Mic`
+the open stream's capture device, the input channel and the mic name (`CalKey`), so
+`cal.spl` needs an open stream; and the **mic library**: named curves per mic (`Mic`
 {`name`, `curves: [MicCurveRef]`}), which follow the mic name across inputs and devices.
 Each input chooses which of its mic's curves applies (`InputSetup.curve`).
 
@@ -1941,30 +1941,30 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
 - `cal.curve_rename` relabels a curve (`invalid` when the mic has the new label already);
   inputs that chose it follow. `cal.curve_delete` removes it (a mic left without curves is
   deleted, event `mic` `deleted`); inputs that chose it keep the label and show it as not
-  stored. `not_found` for an unknown mic or label. Neither needs an open session.
+  stored. `not_found` for an unknown mic or label. Neither needs an open stream.
 - `cal.line` (`docs/design/programme-meter.md` §1.1) calibrates a `line` input: the
   operator measured `volts` (RMS) of a steady tone at the input; the daemon measures the
   tone's level `L` as `cal.spl_electrical` does (`refused` below −80 dBFS, when the input
   clipped in the last 2 s, while the level is not steady, and when `L` is outside
   −70 … −3 dBFS) and stores `LineCalEntry` {`key: LineCalKey` {device, channel},
   `line: LineCal` {`v_fs`: Volts (`volts / 10^(L/20)`, the volts at 0 dBFS), `volts`,
-  `measured`: Dbfs (`L`), `calibrated_at`}} under the open session's input device,
+  `measured`: Dbfs (`L`), `calibrated_at`}} under the open stream's input device,
   replacing the input's earlier one. dBu of 0 dBFS is `20·lg(v_fs / 0.7746 V)`; `invalid`
   when it falls outside +4 … +30 dBu (a unit slip) or when the input is a `mic` or
   `digital` one (named by channel).
 - `cal.delete` removes the sensitivity (`spl`) or line (`line`) calibration `key` (any
-  device; no open session needed); `not_found` when there is none. The input setup is not
+  device; no open stream needed); `not_found` when there is none. The input setup is not
   changed.
 - `InputSetup` = {`channel`, `kind: InputKind`, `pair`: `left` | `right` | nil}; `InputKind`
   is tagged by `kind`: `mic` {`mic`: string | nil, `curve: CurveChoice`} | `line` |
   `digital` (`docs/design/programme-meter.md` §1: the kind is declared, never inferred, and
   fixes the dB reference; an input with no row is an unnamed `mic`). `CurveChoice` is
   tagged by `type`: `not_chosen` | `off` | `curve` {`label`}. `Pair` = {`left`, `right`,
-  `name`: string | nil} (channels). `session.inputs` upserts its rows and replaces the pair
+  `name`: string | nil} (channels). `stream.inputs` upserts its rows and replaces the pair
   list (last write wins: it carries no `base`, `expect_rev` is the only guard); the daemon sets every row's `pair` side from the list. It refuses (`invalid`, naming
   the inputs by channel) a mic row whose chosen label is not stored for its mic (unless the
   row is unchanged), a pair of an input with itself, of two kinds, of an input
-  in two pairs, or of an input the open session does not capture. The daemon chooses a
+  in two pairs, or of an input the open stream does not capture. The daemon chooses a
   mic's only curve on a row where none is chosen (on every change of the setup or the
   library); with several, the row stays `not_chosen` and no curve applies until the
   operator chooses. A new mic name on a row starts `not_chosen`. Mic and pair names are 1–64
@@ -1974,7 +1974,7 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
   microphone*). Transfer, spectrum, RTA and sweeps take any kind.
 - When the daemon's calibration store file cannot be read it is never written: `cal.spl`,
   `cal.spl_electrical`, `cal.line`,
-  `cal.curve_*`, `cal.delete`, `cal.list` and `session.inputs` are `refused` with `detail:
+  `cal.curve_*`, `cal.delete`, `cal.list` and `stream.inputs` are `refused` with `detail:
   {type: cal_store, path, reason}`.
 
 Which calibration a measurement uses (shown as `CalStatus` in `spl`, `rta` and `spec`
@@ -2002,7 +2002,7 @@ the pure functions of `ac2_proto::cal`, which clients use to word what is in use
 `{type: grid, grid: forty_eighth}`) set the stored column grid (`bins`: the `ninety_sixth`
 one, which a `bins` transfer measures, captures and compares on): a transfer function's is fifteen
 octaves, 7.8 Hz … 256 kHz (`{type: log, ppo, k_min: −7·ppo, k_max: 8·ppo − 1}`), the same at
-every sample rate (columns above the band a session's rate measures are invalid), a sweep's covers its
+every sample rate (columns above the band a stream's rate measures are invalid), a sweep's covers its
 `start … end`. It is not smoothing (a display edit over these columns). `meas.update` with a
 new transfer resolution restarts the job (new columns, averages start over); a sweep's
 applies to its next run, and stored traces keep their grid.
@@ -2137,7 +2137,7 @@ other kinds).
 ### 3.3 Reply bodies
 
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `backends`, `preview`,
-`loopback_detection`, `session`,
+`loopback_detection`, `stream`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
 `dynamics_table`, `dynamics_envelope`, `calibration`, `line_calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`, `source_state`,
 `spl_log_page`, `spl_history`, `spl_band_log`,
@@ -2162,7 +2162,7 @@ saved_at} (§3.2 sessions), `mic_curve_file` {line, reason} and
 
 ### 4.1 Entities
 
-The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`, `stopped:
+The mirrored `State` holds: `stream` (`epoch`, `open: OpenStream | nil`, `stopped:
 AudioStopped | nil`; §4.1.1),
 `measurements` (`id`, `config`, `config_rev`, `running`, `delay`, `grid_id`, `colour`,
 `layout`, `offset`, `eq`),
@@ -2187,7 +2187,7 @@ meter: `meas`, `started_at`, `windows`, `peaks`, `alarms`; §3.2), `timing` (`Ti
 `state` {no_stimulus | acquiring | locked{offset} | jumped{from, to} | lost}, `last_lock`,
 `drift` (`Drift` | nil: `ppm` output-vs-input clock drift from the loopback offset's slope,
 `span` s regressed, `warning` true when output and input are on different clocks, `at`
-WallNs of the newest window; kept after the stimulus stops and for the rest of the session;
+WallNs of the newest window; kept after the stimulus stops and while the stream stays open;
 committed when the warning flips, the span first reaches the judged length or the shown value changes: 1 ppm, 0.1 ppm below 10 ppm while warning), `internal_reference`), `clocks` (`Clocks`, what the host can say about its
 clocks and nothing inferred from them: `system` {synced{maxerror_us} | unsynced{maxerror_us} |
 not_stated} — the system clock as the OS states it (Linux: `adjtimex` read with no mode bits,
@@ -2215,11 +2215,11 @@ key_changed | other_rig{found}}, `clock`: `PeerClock`
 {`relation` {measuring | agree | not_locked{reason: cross_rate{ppm, over} |
 own_clock{rig, ppm} | other_rate{theirs, ours}} | cant_tell{reason: system_clock_unsynced{rig} |
 system_clock_not_stated{rig} | not_against_system_clock{rig} | no_capture_stamps |
-clocks_disagree{by} | no_audio | no_marks | no_session{rig} | link_down | marks_late{by} |
+clocks_disagree{by} | no_audio | no_marks | no_stream{rig} | link_down | marks_late{by} |
 not_steady{low, high, line} | marks_keep_breaking}}, `ppm`, `span`, `last_change`},
 `bytes_per_s`, `window` (bytes of frames the link may have in flight)}], one per rig the
-session's remote inputs are on),
-`inputs` ([`RemoteInputStatus` {`slot`, `audio` {waiting | on_this_rig | no_session |
+stream's remote inputs are on),
+`inputs` ([`RemoteInputStatus` {`slot`, `audio` {waiting | on_this_rig | no_stream |
 not_captured | replaying | rate_mismatch{theirs, ours} | starting | streaming}, `anchor`
 (nil | system_time | arrival{reason: system_clock | no_capture_stamps | no_stamp_map |
 clocks_disagree{by}}: how remote samples are placed against this rig's), `late_frames`,
@@ -2236,7 +2236,7 @@ and `find_again` stay until a pick, a typed delay or a find), `slip` (`DelaySlip
 `delay_drift` (s per minute \| nil: the delay drifts above 0.05 ms/min over 2 min),
 `late` (remote audio keeps arriving after the link offset: raise it)}], one per transfer
 function with exactly one channel on a remote rig), `standing` ([`StandingRig` {`rig`,
-`name`, `link` (as `RemoteRig`), `session` (`StandingSession` \| nil {`sample_rate_hz`,
+`name`, `link` (as `RemoteRig`), `stream` (`StandingStream` \| nil {`sample_rate_hz`,
 `channels` (its captured inputs)}: while its `source/levels` frames come), `clock`
 (`PeerClock` from the marks on those frames alone, §5.1, by the same windows and rules as
 `rigs`, held as §5.1 of `docs/design/remote-auto.md` says. Minutes are measured minutes:
@@ -2258,12 +2258,12 @@ line came and went, `not_steady{low, high, line}` names that rig (`line`) and it
 spread. Three counts started within 30 min show `not_steady` with their spread in place of
 `agree` until 30 min pass with none started. A thin minute, more than one minute closed
 between two reports, or anything the judge cannot tell clears the count (the minute open
-then is dropped); evidence that only stops (`no_marks`, `no_session`, `link_down`, a hole of
+then is dropped); evidence that only stops (`no_marks`, `no_stream`, `link_down`, a hole of
 a few seconds) keeps it, and `agree` and a verdict at ten both wait for a minute closing
 after it; `marks_keep_breaking` while holes of a few seconds have kept any minute from
-closing for 5 min; a respawned link starts it all again; `other_rate` when the two sessions' nominal rates differ, nothing
-fitted; `no_marks` while frames come without marks or not at all from a rig whose session
-is open; `no_session` naming the rig without one; `link_down` while the link is not up;
+closing for 5 min; a respawned link starts it all again; `other_rate` when the two streams' nominal rates differ, nothing
+fitted; `no_marks` while frames come without marks or not at all from a rig whose stream
+is open; `no_stream` naming the rig without one; `link_down` while the link is not up;
 `clocks_disagree` when its marks land in this rig's future for a second; `marks_late{by}`
 when they arrive later than the link offset in force (else the longest one, 0.5 s) allows
 for 3 s running, until 3 s clean, by `by` s: a slow network and a system clock behind look
@@ -2303,10 +2303,10 @@ client sees of the network, so a change made elsewhere shows at once; details in
 
 #### 4.1.1 Audio stopped and recovery
 
-While a session is open the daemon watches its audio (`docs/design/audio-recovery.md`).
-`session.stopped` is set when the stream stops delivering and stays set until the same
-configuration is open again or a client closes the session; `session.open` keeps the
-session as last opened throughout. `AudioStopped`: `since` (WallNs, the last audio
+While a stream is open the daemon watches its audio (`docs/design/audio-recovery.md`).
+`stream.stopped` is set when the stream stops delivering and stays set until the same
+configuration is open again or a client closes the stream; `stream.open` keeps the
+stream as last opened throughout. `AudioStopped`: `since` (WallNs, the last audio
 received, or the open when none came), `cause` (tagged by `type`): `not_delivering`
 {`after_ms`: u32, the silence that counts as stopped: max(1 s, 20 periods)} \| `host_ended`
 (the audio host ended the stream: server shut down, device removed) \| `driver_reset`
@@ -2321,9 +2321,9 @@ string (what the backend said, e.g. that no JACK server runs), `next_at`: WallNs
 
 The daemon tears the stopped stream down off its control thread (closing a client of a hung
 server may block) and reopens the same configuration attempt after attempt, backing off
-1, 2, 4, 8, 16 then every 30 s, until it succeeds or a client sends `session.close` or
-`session.open`. Running measurements stay `running` and pause: no frames, nothing averaged
-across the gap. When an attempt succeeds the session gets a new epoch with `stopped: nil`,
+1, 2, 4, 8, 16 then every 30 s, until it succeeds or a client sends `stream.close` or
+`stream.open`. Running measurements stay `running` and pause: no frames, nothing averaged
+across the gap. When an attempt succeeds the stream gets a new epoch with `stopped: nil`,
 the same measurements restart from fresh averages (an SPL meter's log shows the outage as
 gap time), and the generator is disarmed (it was disarmed when the audio stopped).
 
@@ -2331,15 +2331,15 @@ After a `driver_reset` the reopen does not ask for the configuration's rate and 
 size: it takes the driver's current ones, because the operator changed them in the
 driver's panel (setting the old rate back would undo that, or fail for good on a driver
 following an external clock at the new rate). A configuration that named a rate or
-buffer size names the new one from then on; `OpenSession.driver_change` says what it ran
+buffer size names the new one from then on; `OpenStream.driver_change` says what it ran
 at before, and the measurements restart at the new rate (delays are re-derived in
 samples). Every later recovery reopens the configuration as it then stands.
 
 ### 4.2 Snapshot and events
 
-`state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
+`state.snapshot` → `{state, rev, daemon_incarnation, stream_epoch}`.
 
-An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
+An event is `{rev, kind, payload}`. `kind` is one of `stream`, `measurement`, `trace`,
 `generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `remote`, `sweep`, `dynamics`, `autosave`, `recording`, `working`, `rig`, `plan`, `walk`, `walk_plan`, `sim`, `sim_fit`, `server`. `payload` is the entity's
 full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the whole list;
 `sim`: the `SimState`, which `State.sim` becomes, or `State.sim_map` for a map; `sim_fit`: the `SimFitKept` or nil); for keyed entities (`measurement`, `trace`,
@@ -2390,9 +2390,9 @@ Replay buffer: last 1024 events or 60 s, whichever holds fewer.
 | `d/<meas>/band_leq` | an SPL meter's band meter (1/3-octave band Leq per band window), once a second |
 | `d/<meas>/levels` | input meters of the measurement's channels |
 | `bins/<meas>/<stage>` | a transfer's bins of one analysis stage (§5.4 `bins`), at the `bins` resolution only, or a transfer math's whose `tf` states a layout; `<stage>` one digit, 0 = full rate |
-| `session/levels` | input meters of every input of the open session |
-| `session/preview` | input meters of every input of the previewed device |
-| `session/gonio` | goniometer points of every pair of the open session |
+| `stream/levels` | input meters of every input of the open stream |
+| `stream/preview` | input meters of every input of the previewed device |
+| `stream/gonio` | goniometer points of every pair of the open stream |
 | `preview/gonio` | goniometer points of every pair of the previewed device |
 | `timing` | loopback timing monitor |
 | `evt` | state events (§4.2) |
@@ -2409,8 +2409,8 @@ fresh header every 250 ms, so only a stream without audio goes STALE.
 `<meas>` is the decimal measurement id without sign or leading zeros; a topic has exactly
 one spelling. A subscription (§5.8) is one topic or one of the prefixes `d/` (all measurement streams), `d/<meas>/` (one measurement —
 the trailing slash keeps `d/1/` from matching `d/12/…`; neither takes a `bins/` stage, which
-is subscribed to by its full topic, so a client receives a stage only while it draws it), `session/` (both input-meter
-topics and the session's goniometer; the preview's goniometer is under `preview/`, so a
+is subscribed to by its full topic, so a client receives a stage only while it draws it), `stream/` (both input-meter
+topics and the stream's goniometer; the preview's goniometer is under `preview/`, so a
 client metering alone does not receive its points). Longest topic: 32 bytes.
 
 An `audio/<channel>` frame carries one device block of raw capture to an admitted rig
@@ -2423,16 +2423,16 @@ The kind a topic carries (§5.3 `kind`, and the `meta` key):
 |---|---|
 | `d/<meas>/<stream>` | that stream's kind (`tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`) |
 | `bins/<meas>/<stage>` | `bins` |
-| `session/levels` | `session_levels` |
-| `session/preview` | `preview_levels` |
+| `stream/levels` | `stream_levels` |
+| `stream/preview` | `preview_levels` |
 | `source/levels` | `source_levels` |
-| `session/gonio` | `session_gonio` |
+| `stream/gonio` | `stream_gonio` |
 | `preview/gonio` | `preview_gonio` |
 | `timing` | `timing` |
 | `ka` | `ka` |
 | `evt`, `audio/<channel>` | none (not a frame of §5.2) |
 
-`source/levels` is formed while a session is open whether or not anyone subscribes, every
+`source/levels` is formed while a stream is open whether or not anyone subscribes, every
 second meter frame (15 a second), and sent only to connections admitted as a rig; anyone else subscribing to it
 receives nothing. A paired rig subscribes it whenever its link is up, with or without remote
 inputs: each frame's `mark` (§5.4) pairs with this rig's own capture at the same system
@@ -2563,10 +2563,10 @@ layout as code.
 |---|---|---|
 | `v` | u16 | protocol version |
 | `form` | u8 | 0 (a keyframe; §5.2) |
-| `kind` | FrameKind | `tf`, `bins`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`, `session_levels`, `preview_levels`, `source_levels`, `session_gonio`, `preview_gonio`, `timing`, `ka`; the kind its topic carries (§5.1) and the `meta` key |
+| `kind` | FrameKind | `tf`, `bins`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`, `stream_levels`, `preview_levels`, `source_levels`, `stream_gonio`, `preview_gonio`, `timing`, `ka`; the kind its topic carries (§5.1) and the `meta` key |
 | `seq` | u64 | per topic per incarnation, increasing; not contiguous (a frame replaced before it was sent never goes), so a delta names its base's |
-| `audio_sample` | u64 | session sample index (origin = session open) of the newest sample in the frame |
-| `session_epoch` | u32 | frames from older epochs are discarded |
+| `audio_sample` | u64 | stream sample index (origin = stream open) of the newest sample in the frame |
+| `stream_epoch` | u32 | frames from older epochs are discarded |
 | `daemon_incarnation` | u64 | random per daemon start |
 | `config_rev` | u64 | rev of the config the DSP actually used (`ka`: current state rev) |
 | `config_applied_at` | u64 | sample index from which that config took effect |
@@ -2602,11 +2602,11 @@ newest frame's age is over that, or when the daemon stopped responding.
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
 | `band_leq` | one column per band window, in configuration order: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
-| `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask, `ppm`: dbfs (the `ballistic`'s reading; the true peak where VU is chosen but not offered on the input, and under `momentary` / `short_term`), `true_peak`: dbtp, `max`: dbfs (highest `ppm` of the chosen ballistic since `levels.reset`), `overs`: count (since `levels.reset`) | `channels` (device input per column; length n), `ballistic` (`Ballistic`), `pair_levels` ([`PairLevels`] {`left`, `right`, `correlation`: f32 \| nil (−1 … 1 over the rig's window), `quiet`: `left` \| `right` \| nil (the side below the gate; then `correlation` is nil)}: every declared pair whose both inputs are captured), `loudness` ([`SourceLoudness`], below) |
-| `preview_levels` | as `session_levels` | `backend`, `device`, `channels` (device input per column; length n), `inputs` ([PreviewInput] as `session.preview` declared them), `pairs` ([Pair]), `ballistic`, `pair_levels` ([`PairLevels`], one per declared pair), `loudness` ([`SourceLoudness`]; a preview's sources never carry into the session) |
-| `source_levels` | as `session_levels`, over the rig's own captured inputs (no remote input) | `channels`, `ballistic`, `pair_levels`, `loudness` as `session_levels`; `sample_rate_hz` (the session's nominal rate); `mark` (`LevelsMark` \| nil {`sample` (session sample index of the newest block's first frame), `system_ns` (its capture time on the rig's system clock, ns since the Unix epoch), `breaks` (continuity breaks of the capture so far)}; nil while the rig stamps no capture times or its stamp clock is not yet mapped onto system time) |
-| `session_gonio` | `gonio_x`, `gonio_y`: gonio_unit — every pair's 256 points in turn (n = 256 × pairs), `x = (r − l)/√2`, `y = (l + r)/√2` divided by the pair's auto gain (a mono signal is a vertical line, a left-only one leans left), one pair drawn from a random position in each of 256 bins of the frame's samples | `pairs` ([`GonioPairMeta`] {`left`, `right`, `gain_dbfs`: the auto gain, dBFS of the pair magnitude `√(l² + r²)`}) |
-| `preview_gonio` | as `session_gonio`, for the previewed device's declared pairs | as `session_gonio` |
+| `stream_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask, `ppm`: dbfs (the `ballistic`'s reading; the true peak where VU is chosen but not offered on the input, and under `momentary` / `short_term`), `true_peak`: dbtp, `max`: dbfs (highest `ppm` of the chosen ballistic since `levels.reset`), `overs`: count (since `levels.reset`) | `channels` (device input per column; length n), `ballistic` (`Ballistic`), `pair_levels` ([`PairLevels`] {`left`, `right`, `correlation`: f32 \| nil (−1 … 1 over the rig's window), `quiet`: `left` \| `right` \| nil (the side below the gate; then `correlation` is nil)}: every declared pair whose both inputs are captured), `loudness` ([`SourceLoudness`], below) |
+| `preview_levels` | as `stream_levels` | `backend`, `device`, `channels` (device input per column; length n), `inputs` ([PreviewInput] as `stream.preview` declared them), `pairs` ([Pair]), `ballistic`, `pair_levels` ([`PairLevels`], one per declared pair), `loudness` ([`SourceLoudness`]; a preview's sources never carry into the stream) |
+| `source_levels` | as `stream_levels`, over the rig's own captured inputs (no remote input) | `channels`, `ballistic`, `pair_levels`, `loudness` as `stream_levels`; `sample_rate_hz` (the stream's nominal rate); `mark` (`LevelsMark` \| nil {`sample` (stream sample index of the newest block's first frame), `system_ns` (its capture time on the rig's system clock, ns since the Unix epoch), `breaks` (continuity breaks of the capture so far)}; nil while the rig stamps no capture times or its stamp clock is not yet mapped onto system time) |
+| `stream_gonio` | `gonio_x`, `gonio_y`: gonio_unit — every pair's 256 points in turn (n = 256 × pairs), `x = (r − l)/√2`, `y = (l + r)/√2` divided by the pair's auto gain (a mono signal is a vertical line, a left-only one leans left), one pair drawn from a random position in each of 256 bins of the frame's samples | `pairs` ([`GonioPairMeta`] {`left`, `right`, `gain_dbfs`: the auto gain, dBFS of the pair magnitude `√(l² + r²)`}) |
+| `preview_gonio` | as `stream_gonio`, for the previewed device's declared pairs | as `stream_gonio` |
 | `timing` | none | `status` (TimingStatus), `window` {capture_start, offset, psr, loopback, stimulus} |
 | `ka` | none | `rev`, `daemon_wall_ns`, `timing` (TimingState), `generator` {owner, owner_local, armed, firing}, `health` (`DaemonHealth`, below) |
 
@@ -2630,11 +2630,11 @@ sources that changed; new ones start afresh. Nothing is persisted.
 `DaemonHealth`: `host` (the daemon's host name as a DNS label, so a client on another
 machine names where the figures come from), `cpu` (f64 \| nil: whole-host CPU use over about
 the last second, every process on every core, as a share of capacity, 1.0 = every core
-busy; nil until sampled twice), `audio` (`AudioHealth` \| nil: nil with no session open).
+busy; nil until sampled twice), `audio` (`AudioHealth` \| nil: nil with no stream open).
 `AudioHealth`: `load`, `peak` (f64 \| nil: the mean, and the largest single-callback, share
 of the block period the daemon's own audio callback took over about the last second;
-1.0 = the whole period), `session_load`, `session_peak` (the same since the session
-opened), `xruns` (u64: xruns the backend reported since the session opened). The load is
+1.0 = the whole period), `stream_load`, `stream_peak` (the same since the stream
+opened), `xruns` (u64: xruns the backend reported since the stream opened). The load is
 the daemon's callback only, not the whole audio graph (other JACK clients, the driver); a
 load is nil when no callback was timed over its span (a replay).
 
@@ -2860,7 +2860,7 @@ What a daemon reads of each artefact; any other version is refused:
 |---|---|
 | trace CSV (§7.1) | `v1` … `v6` |
 | session directory (§7.2) | manifest version 49 only |
-| raw capture sidecar (§7.5) | version 3 only; the protocol types it holds must still decode |
+| raw capture sidecar (§7.5) | version 4 only; the protocol types it holds must still decode |
 | SPL log (§7.4) | `v2` only |
 | band log | `v1` only |
 | `file.salvage` | `traces/*.csv` of a session only (each as a trace CSV above) |
@@ -2976,7 +2976,7 @@ daemon crash the last 30 s.
 
 At start the daemon loads `<dir>/session.json` (else `session.prev.json`, renaming a
 damaged `session.json` to `session.damaged.json`) exactly as `file.load` does — disarmed,
-no owner, a new session epoch, no audio I/O opened — logs what it restored, and carries
+no owner, a new stream epoch, no audio I/O opened — logs what it restored, and carries
 on appending to the restored logs' files after their last whole line. An autosave of
 another session format version is renamed to `<dir>.v<N>`, an unreadable one to
 `<dir>.damaged` (a name taken gets the time appended), with a warning; neither is deleted.
@@ -3044,33 +3044,33 @@ in the recording directory:
   `WAVE`, a 28-byte `JUNK` chunk, `fmt ` of 40 bytes, `fact`, `data`). Past 4 GiB the file
   becomes RF64 (EBU Tech 3306): `RIFF` → `RF64`, `JUNK` → `ds64` with the 64-bit sizes, the
   32-bit sizes 0xFFFFFFFF; the audio never moves.
-- `<name>.ac2rec.json`: the sidecar, JSON, `format: "ac2-raw-capture"`, `version: 3`
+- `<name>.ac2rec.json`: the sidecar, JSON, `format: "ac2-raw-capture"`, `version: 4`
   (another version is refused), `software` {`ac2`, `build`, `protocol`}, `audio`
-  {`file`, `sample_rate`, `channels`: [{`input` (session channel), `remote` (`RemoteInput`
+  {`file`, `sample_rate`, `channels`: [{`input` (stream channel), `remote` (`RemoteInput`
   \| nil: whose input a remote channel was), `name`, `mic`, `roles`: [{type: loopback
   \| reference \| measured \| analysed, `measurement`}]}]}, `device` {`backend`,
-  `input_device`, `output_device`, `buffer_frames`, `clock`, `session_epoch`, `loopback`},
-  `start` and `end.at` (`Mark` {`session_sample`, `wall_ns`, `utc`}), `end` {`at`,
+  `input_device`, `output_device`, `buffer_frames`, `clock`, `stream_epoch`, `loopback`},
+  `start` and `end.at` (`Mark` {`stream_sample`, `wall_ns`, `utc`}), `end` {`at`,
   `frames`, `reason`: RecordingEnd} \| nil while recording, `limits` {`max_duration`,
   `max_bytes`}, `started_by`, `initial` {`measurements`, `generator`, `inputs`,
   `calibrations` (of the recorded inputs on that device)}, `timeline` [{`at_sample`,
   `frame`, `wall_ns`, `change`: {type: measurement \| generator \| inputs \| calibration,
-  value}}], `discontinuities` [{`frame` (first file frame after it), `session_sample`,
+  value}}], `discontinuities` [{`frame` (first file frame after it), `stream_sample`,
   `lost_frames`, `estimated`, `causes`: [xrun \| gap \| overflow \| config_change \|
-  recorder_behind]}], `remote_gaps` [{`channel` (file channel), `frame`, `session_sample`,
+  recorder_behind]}], `remote_gaps` [{`channel` (file channel), `frame`, `stream_sample`,
   `frames`, `late`}] (samples another rig never delivered; zeros in the file),
-  `remote_slips` [{`channel`, `frame`, `session_sample`, `samples`}] (the remote channel's
+  `remote_slips` [{`channel`, `frame`, `stream_sample`, `samples`}] (the remote channel's
   map moved by `samples` from there on). Entity values are the protocol types of `software.protocol` in JSON.
 
-The sidecar is written when recording starts and replaced atomically when it ends. Session
-sample of file frame f: `start.session_sample + f + Σ lost_frames` of the discontinuities at
+The sidecar is written when recording starts and replaced atomically when it ends. Stream
+sample of file frame f: `start.stream_sample + f + Σ lost_frames` of the discontinuities at
 or before f.
 
 A WAV from elsewhere (16-, 24- or 32-bit integer PCM or 32-bit float, e.g. a recorder's)
 becomes a recording on the client: `ac2 rec import` (`ac2_traces::raw::import_wav`) writes
 its samples as above (integer full scale is ±1.0) with a sidecar of `device.backend`
 `replay`, `input_device` = `output_device` = `file:<file name>`, `clock` `unknown`,
-`buffer_frames` 0, `start` at the import's wall time and session sample 0, no timeline or
+`buffer_frames` 0, `start` at the import's wall time and stream sample 0, no timeline or
 discontinuities, and `end.reason` `stopped`. Calibrations of its replay are keyed by that
 device id, so `cal.spl` on a recorded calibrator tone calibrates it.
 

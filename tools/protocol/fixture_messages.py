@@ -544,7 +544,7 @@ def requests():
         req(0, "hello", {"client": "ac2-cli 0.0.0"}, mutation=False),
         req(
             2,
-            "session.open",
+            "stream.open",
             {
                 "config": {
                     "backend": "coreaudio",
@@ -625,7 +625,7 @@ def requests():
             "sweep.run",
             {"lease_token": TOKEN, "meas": 7, "name": "1083 sweep"},
         ),
-        req(39, "session.inputs", INPUTS),
+        req(39, "stream.inputs", INPUTS),
         req(
             40,
             "cal.delete",
@@ -633,7 +633,7 @@ def requests():
         ),
         req(
             41,
-            "session.preview",
+            "stream.preview",
             {
                 "backend": "jack",
                 "device": "jack",
@@ -642,10 +642,10 @@ def requests():
             },
             mutation=False,
         ),
-        req(42, "session.preview_stop", mutation=False),
+        req(42, "stream.preview_stop", mutation=False),
         req(
             43,
-            "session.detect_loopback",
+            "stream.detect_loopback",
             {
                 "lease_token": TOKEN,
                 "backend": "jack",
@@ -704,13 +704,13 @@ def requests():
         req(53, "rec.list", mutation=False),
         req(
             54,
-            "session.replay",
+            "stream.replay",
             {"recording": {"type": "name", "name": "soundcheck"}, "pace": "fast"},
         ),
         req(55, "gen.ceiling", {"ceiling": -40.0, "confirm_raise": True}),
         req(
             56,
-            "session.outputs",
+            "stream.outputs",
             {"outputs": [{"channel": 0, "label": "Main L"}, {"channel": 1, "label": None}]},
         ),
         req(57, "server.info", mutation=False),
@@ -767,7 +767,7 @@ def requests():
         ),
         req(
             76,
-            "session.control_panel",
+            "stream.control_panel",
             {"backend": "asio", "device": "Fireface USB"},
             mutation=False,
         ),
@@ -894,7 +894,7 @@ def data_requests():
         {"type": "window", "bytes": 65536},
         {"type": "subscribe", "sub": "d/"},
         {"type": "subscribe", "sub": "d/12/"},
-        {"type": "subscribe", "sub": "session/"},
+        {"type": "subscribe", "sub": "stream/"},
         {"type": "subscribe", "sub": "evt"},
         {"type": "unsubscribe", "sub": "d/3/tf"},
         {"type": "keyframe", "topic": "d/3/tf"},
@@ -1026,7 +1026,7 @@ def events():
                 "path": "/home/op/.local/share/ac2/recordings/soundcheck.wav",
                 "inputs": [0, 1],
                 "sample_rate_hz": 48000,
-                "session_epoch": 2,
+                "stream_epoch": 2,
                 "start_sample": 96000,
                 "started_at": 1789999100000000000,
                 "started_by": "alice",

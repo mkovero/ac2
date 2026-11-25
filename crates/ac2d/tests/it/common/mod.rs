@@ -11,7 +11,7 @@ use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_proto::flow::{DATA_WINDOW_DEFAULT, FLOW_TOPIC, frame_charge, outside_window};
 use ac2_proto::frame::{Frame, FrameData};
 use ac2_proto::model::{
-    DeviceSelector, LoopbackRoute, MeasConfig, MeasKind, Resolution, SessionConfig, SplConfig,
+    DeviceSelector, LoopbackRoute, MeasConfig, MeasKind, Resolution, SplConfig, StreamConfig,
     TfAveraging, TransferConfig,
 };
 use ac2_proto::units::{MeasId, RequestId, Rev};
@@ -191,8 +191,8 @@ pub fn local_tcp() -> Listen {
     }
 }
 
-pub fn session(loopback: bool) -> SessionConfig {
-    SessionConfig {
+pub fn stream(loopback: bool) -> StreamConfig {
+    StreamConfig {
         backend: None,
         input_device: DeviceSelector::Default,
         output_device: DeviceSelector::Default,
@@ -481,7 +481,7 @@ macro_rules! reply_kinds {
 
 reply_kinds! {
     welcome: ReplyBody::Welcome(v) => v, ac2_proto::Welcome;
-    session: ReplyBody::Session(v) => v, ac2_proto::model::Session;
+    stream: ReplyBody::Stream(v) => v, ac2_proto::model::Stream;
     lease: ReplyBody::Lease(v) => v, ac2_proto::model::Lease;
     generator: ReplyBody::Generator(v) => v, ac2_proto::model::Generator;
     measurement: ReplyBody::Measurement(v) => v, ac2_proto::model::Measurement;

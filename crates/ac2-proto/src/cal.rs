@@ -186,7 +186,7 @@ pub fn apply_pair_sides(inputs: &[InputSetup], pairs: &[Pair]) -> Vec<InputSetup
 /// the inputs by channel (1-based, as printed on the interface): both sides are of one kind
 /// (two mics, two line or two digital inputs), an input is in at most one pair, and a pair
 /// is two inputs.
-/// `captured` says whether the open session captures a channel (`None`: no open session, so
+/// `captured` says whether the open stream captures a channel (`None`: no open stream, so
 /// any channel may be declared).
 pub fn check_pairs(
     inputs: &[InputSetup],
@@ -206,7 +206,7 @@ pub fn check_pairs(
                 && !c(ch)
             {
                 return Err(format!(
-                    "input {} is not captured by the session, so it cannot be paired",
+                    "input {} is not captured by the stream, so it cannot be paired",
                     n(ch)
                 ));
             }
@@ -362,7 +362,7 @@ static DEFAULT_KIND: InputKind = InputKind::Mic {
     curve: CurveChoice::NotChosen,
 };
 
-/// What input `channel` of capture device `device` uses (`None`: no open session, so only
+/// What input `channel` of capture device `device` uses (`None`: no open stream, so only
 /// calibrations of the input's mic on any device can match).
 ///
 /// A mic's sensitivity, first match wins: the entry (device, input, mic) → verified; the
@@ -445,14 +445,14 @@ pub fn input_use<'a>(
     }
 }
 
-/// [`input_use`] on the open session's capture device.
+/// [`input_use`] on the open stream's capture device.
 pub fn state_input_use(s: &State, channel: u16) -> InputUse<'_> {
     input_use(
         &s.calibrations,
         &s.line_calibrations,
         &s.mics,
         &s.inputs,
-        s.session.open.as_ref().map(|o| &o.input_device),
+        s.stream.open.as_ref().map(|o| &o.input_device),
         channel,
     )
 }
@@ -611,7 +611,7 @@ mod tests {
             matches!(s(2, Some(&d)), Sensitivity::OtherMicOrInput(e) if e.key.device.0 == "hw:B")
         );
         assert_eq!(s(3, Some(&d)), Sensitivity::Uncalibrated);
-        // Without a session only the mic matches.
+        // Without a stream only the mic matches.
         assert!(matches!(s(0, None), Sensitivity::OtherMicOrInput(_)));
     }
 
@@ -816,7 +816,7 @@ mod tests {
         let captured = |ch: u16| ch < 3;
         assert_eq!(
             check_pairs(&inputs, &[pair(2, 3)], Some(&captured)).unwrap_err(),
-            "input 4 is not captured by the session, so it cannot be paired"
+            "input 4 is not captured by the stream, so it cannot be paired"
         );
         assert!(
             check(&[Pair {

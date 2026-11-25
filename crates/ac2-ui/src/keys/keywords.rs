@@ -157,7 +157,7 @@ impl CommandId {
             C::SessionSave | C::SessionSaveAs => &["project", "store"],
             C::SessionExport => &["project", "archive", "ac2session", "share"],
             C::Reconnect => &["daemon", "connection"],
-            C::OpenSession => &[
+            C::OpenStream => &[
                 "device",
                 "interface",
                 "soundcard",
@@ -165,7 +165,7 @@ impl CommandId {
                 "asio",
                 "start audio",
             ],
-            C::CloseSession => &["device", "interface", "stop audio"],
+            C::CloseStream => &["device", "interface", "stop audio"],
             C::Record => &["capture", "wav", "raw"],
             C::ReplayRecording => &["playback", "wav", "file"],
             C::NewMeasurement => &["add", "create"],

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{RemoteInput, ReplayInfo};
-use crate::units::{Db, Dbfs, Samples, Seconds, SessionEpoch, WallNs};
+use crate::units::{Db, Dbfs, Samples, Seconds, StreamEpoch, WallNs};
 
 /// Audio backend implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -17,8 +17,8 @@ pub enum BackendKind {
     CoreAudio,
     /// Simulated device.
     Fake,
-    /// A raw capture file played back (`session.replay`); never listed by
-    /// `session.devices`.
+    /// A raw capture file played back (`stream.replay`); never listed by
+    /// `stream.devices`.
     Replay,
     /// ASIO drivers (Windows, in builds with the `asio` feature).
     Asio,
@@ -79,14 +79,14 @@ pub struct DirectionInfo {
     /// The host's default device for this direction (where the system plays or records
     /// unless told otherwise).
     pub system_default: bool,
-    /// Spare inputs a session can open beyond `max_channels` (JACK): ports tied to no
+    /// Spare inputs a stream can open beyond `max_channels` (JACK): ports tied to no
     /// physical channel, which the operator routes into with the host's own tools. Spare `k`
     /// (zero-based) is device channel `max_channels + k`. Zero where the backend has none
     /// and for outputs.
     pub spare_channels: u16,
 }
 
-/// A device as listed by `session.devices`.
+/// A device as listed by `stream.devices`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeviceInfo {
@@ -108,7 +108,7 @@ pub struct DeviceInfo {
     pub index: IndexExactness,
     /// The clocks the device can run on, as its driver names them, the current one marked
     /// (ASIO); empty where the backend does not say. Read-only: the clock is set in the
-    /// driver's control panel (`session.control_panel`).
+    /// driver's control panel (`stream.control_panel`).
     pub clock_sources: Vec<ClockSource>,
     /// Non-fatal problems.
     pub notes: Vec<String>,
@@ -137,7 +137,7 @@ pub enum Availability {
     },
 }
 
-/// One backend the daemon offers, as listed by `session.devices`.
+/// One backend the daemon offers, as listed by `stream.devices`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackendInfo {
@@ -175,10 +175,10 @@ pub struct LoopbackRoute {
     pub input: u16,
 }
 
-/// Arguments of `session.open`.
+/// Arguments of `stream.open`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SessionConfig {
+pub struct StreamConfig {
     /// Backend the devices belong to; `None` = the daemon's default backend (the one it was
     /// started on).
     pub backend: Option<BackendKind>,
@@ -189,7 +189,7 @@ pub struct SessionConfig {
     /// Device input channels captured (zero-based). Spare inputs are listed here like any
     /// other, as the channels after the device's physical ones.
     pub input_channels: Vec<u16>,
-    /// Spare inputs the session opens ([`DirectionInfo::spare_channels`]): input channels
+    /// Spare inputs the stream opens ([`DirectionInfo::spare_channels`]): input channels
     /// from the device's physical count up to that count plus this one may be captured.
     /// Zero on every backend but JACK.
     pub spare_inputs: u16,
@@ -201,8 +201,8 @@ pub struct SessionConfig {
     pub buffer_frames: Option<u32>,
     /// Reference loopback; `None` = no internal reference (decision 3b).
     pub loopback: Option<LoopbackRoute>,
-    /// Inputs of other rigs captured into this session; each is listed in
-    /// `input_channels` as its session channel ([`RemoteInput::session_channel`]).
+    /// Inputs of other rigs captured into this stream; each is listed in
+    /// `input_channels` as its stream channel ([`RemoteInput::stream_channel`]).
     pub remote_inputs: Vec<RemoteInput>,
     /// How long audio that meets a remote input waits for it; `None` = the least that
     /// works (two of the source's periods, one of this rig's and 2 ms of network), and a
@@ -211,12 +211,12 @@ pub struct SessionConfig {
     pub link_offset: Option<Seconds>,
 }
 
-/// An open session.
+/// An open stream.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct OpenSession {
+pub struct OpenStream {
     /// Requested configuration.
-    pub config: SessionConfig,
+    pub config: StreamConfig,
     /// Backend actually used.
     pub backend: BackendKind,
     /// Device actually opened for capture.
@@ -231,17 +231,17 @@ pub struct OpenSession {
     pub clock: ClockRelation,
     /// When it opened.
     pub opened_at: WallNs,
-    /// The recording it plays, for a replay session (`backend` is then `replay`, the
+    /// The recording it plays, for a replay stream (`backend` is then `replay`, the
     /// devices are the ones that recorded it); `None` for a live device.
     pub replay: Option<ReplayInfo>,
     /// The clock source the device ran on when opened, as its driver names it (ASIO).
     pub clock_source: Option<String>,
-    /// The session reopened after its driver reset itself at another rate or buffer size
+    /// The stream reopened after its driver reset itself at another rate or buffer size
     /// (a change in the driver's control panel): what it ran at before. `None` otherwise.
     pub driver_change: Option<DriverChange>,
-    /// The session reopened after its driver reset or its clock changed: what the driver
+    /// The stream reopened after its driver reset or its clock changed: what the driver
     /// did, and whether that stopped the generator's output. Kept until a client opens a
-    /// session anew. `None` otherwise.
+    /// stream anew. `None` otherwise.
     pub driver_reset: Option<DriverReset>,
     /// The driver's own statement of its latency at the open buffer size (ASIO);
     /// `None` for a backend that states none in frames.
@@ -250,7 +250,7 @@ pub struct OpenSession {
     pub spare_ports: Vec<SparePort>,
 }
 
-/// A spare input of an open session.
+/// A spare input of an open stream.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SparePort {
@@ -260,7 +260,7 @@ pub struct SparePort {
     pub port: String,
 }
 
-/// A driver reset or clock change the session went through.
+/// A driver reset or clock change the stream went through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DriverReset {
@@ -271,7 +271,7 @@ pub struct DriverReset {
     pub output_stopped: bool,
 }
 
-/// What a driver did that reset the session's stream (ASIO). Each one may have moved the
+/// What a driver did that reset the stream (ASIO). Each one may have moved the
 /// sample clock under the stream (another rate, another source, a slip).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -313,7 +313,7 @@ pub struct DriverBuffering {
     pub output_frames: u32,
 }
 
-/// What a session ran at before its driver reset itself to other settings.
+/// What a stream ran at before its driver reset itself to other settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DriverChange {
@@ -323,21 +323,21 @@ pub struct DriverChange {
     pub from_buffer_frames: u32,
 }
 
-/// Session entity.
+/// Stream entity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Session {
+pub struct Stream {
     /// Current epoch.
-    pub epoch: SessionEpoch,
-    /// `None` while closed. Kept through an audio outage: the session stays open, with its
+    pub epoch: StreamEpoch,
+    /// `None` while closed. Kept through an audio outage: the stream stays open, with its
     /// configuration, until a client closes it.
-    pub open: Option<OpenSession>,
-    /// The open session's audio has stopped and the daemon is reopening it
-    /// (`docs/design/audio-recovery.md`); `None` while audio runs or no session is open.
+    pub open: Option<OpenStream>,
+    /// The open stream's audio has stopped and the daemon is reopening it
+    /// (`docs/design/audio-recovery.md`); `None` while audio runs or no stream is open.
     pub stopped: Option<AudioStopped>,
 }
 
-/// An open session whose audio stopped: since when, why, and how reopening it goes.
+/// An open stream whose audio stopped: since when, why, and how reopening it goes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AudioStopped {
@@ -349,7 +349,7 @@ pub struct AudioStopped {
     pub recovery: Recovery,
 }
 
-/// Why a session's audio stopped.
+/// Why a stream's audio stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StopCause {
@@ -372,7 +372,7 @@ pub enum StopCause {
     DeviceChanged,
 }
 
-/// Reopening a stopped session's configuration, attempt by attempt.
+/// Reopening a stopped stream's configuration, attempt by attempt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Recovery {
@@ -396,7 +396,7 @@ pub enum Recovery {
     },
 }
 
-/// Reply of `session.preview`: capture-only meters of a device before a session opens on it.
+/// Reply of `stream.preview`: capture-only meters of a device before a stream opens on it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preview {
@@ -408,7 +408,7 @@ pub struct Preview {
     pub channels: u16,
     /// Rate it runs at.
     pub sample_rate_hz: u32,
-    /// The preview closes unless `session.preview` names this device again within this.
+    /// The preview closes unless `stream.preview` names this device again within this.
     pub expires_in_ms: u32,
 }
 
@@ -429,7 +429,7 @@ pub struct LoopbackCandidate {
     pub gain: Option<Db>,
 }
 
-/// Reply of `session.detect_loopback`.
+/// Reply of `stream.detect_loopback`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LoopbackDetection {

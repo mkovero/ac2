@@ -400,7 +400,7 @@ fn the_dialog_refuses_a_frequency_the_generator_cannot_play() {
         ("0", "\"0\": frequency must be positive"),
         ("-40", "\"-40\": frequency must be positive"),
         ("1 v", "\"1 v\": unknown unit \"v\" (expected hz or khz)"),
-        // The test session runs at 48 kHz.
+        // The test stream runs at 48 kHz.
         ("24k", "a sine must be below 24000 Hz, half the sample rate"),
     ] {
         let mut r = ask_sine(&mut t, text);
@@ -415,7 +415,7 @@ fn the_dialog_refuses_a_frequency_the_generator_cannot_play() {
         assert_eq!(t.st.rig.stimulus.generator, None, "{text}");
     }
     // With no audio I/O open the rate is not known: the daemon judges it on arming.
-    t.remirror(|s| s.session.open = None);
+    t.remirror(|s| s.stream.open = None);
     ask_sine(&mut t, "30k");
     t.key("Enter");
     assert_eq!(t.st.generator_signal(), Some(sine(30_000.0)));
@@ -715,7 +715,7 @@ fn a_sine_goes_onto_a_bin_of_the_shortest_running_spectrum_fft() {
     assert_eq!(t.st.generator_signal(), Some(sine(1000.0)));
     let mut t = T::new();
     t.st.rig.stimulus.generator = Some(SignalKind::Sine);
-    t.remirror(|s| s.session.open = None);
+    t.remirror(|s| s.stream.open = None);
     assert_eq!(t.st.sine_bins(), None);
     assert_eq!(t.st.generator_signal(), Some(sine(1000.0)));
 }

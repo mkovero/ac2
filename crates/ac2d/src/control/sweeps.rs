@@ -7,8 +7,8 @@
 //! sweep can arrive. While the train plays the generator is `firing`; once the recording is
 //! in, the output is silenced and the generator disarmed — a sweep is one shot, and the
 //! operator arms again for the next — and the analysis runs on its own thread. Anything
-//! that stops the stimulus or the session — `gen.stop`, `gen.release`, a forced takeover,
-//! lease expiry, session close or reopen, `file.load` — aborts the run and discards its
+//! that stops the stimulus or the stream — `gen.stop`, `gen.release`, a forced takeover,
+//! lease expiry, stream close or reopen, `file.load` — aborts the run and discards its
 //! audio.
 
 use std::sync::Arc;
@@ -78,8 +78,8 @@ impl Control {
                 "arm the stimulus first (gen.set armed): a sweep fires like any stimulus",
             ));
         }
-        let Some(rt) = self.session.as_ref() else {
-            return Err(refused("no open session to play into"));
+        let Some(rt) = self.stream.as_ref() else {
+            return Err(refused("no open stream to play into"));
         };
         // A sweep walk's run records the mics standing at its step, each trace named for its
         // point and mic; another run each input, named for its input when there are several.
@@ -92,7 +92,7 @@ impl Control {
         let idx = |input: u16, what: &str| {
             block_index(&rt.input_map, input).ok_or_else(|| {
                 invalid(format!(
-                    "{what} input {} is not captured by the session",
+                    "{what} input {} is not captured by the stream",
                     input + 1
                 ))
             })
@@ -127,7 +127,7 @@ impl Control {
             }
             if *o >= rt.output_channels {
                 return Err(invalid(format!(
-                    "output {o} is not an output of the session"
+                    "output {o} is not an output of the stream"
                 )));
             }
         }
@@ -195,8 +195,8 @@ impl Control {
         if let Some(l) = &mut self.out.lease {
             l.deadline = deadline;
         }
-        let Some(rt) = self.session.as_mut() else {
-            return Err(refused("no open session to play into"));
+        let Some(rt) = self.stream.as_mut() else {
+            return Err(refused("no open stream to play into"));
         };
         let play = (|| {
             rt.set_routes(&req.outputs)?;
@@ -317,7 +317,7 @@ impl Control {
     /// Input `i` by name: its mic, else the device's channel name, else `Input N`.
     pub(super) fn input_name(&self, i: u16) -> String {
         let device = self
-            .session
+            .stream
             .as_ref()
             .map_or_else(Vec::new, |rt| self.input_channel_names(rt));
         let mic = ac2_proto::cal::input_setup(&self.store.state().inputs, i)
@@ -337,14 +337,14 @@ impl Control {
     pub(super) fn abort_runs(&mut self, reason: SweepFailure, msg: &str) {
         let dynamics = match reason {
             SweepFailure::LeaseExpired => DynamicsFailure::LeaseExpired,
-            SweepFailure::SessionClosed => DynamicsFailure::SessionClosed,
+            SweepFailure::StreamClosed => DynamicsFailure::StreamClosed,
             _ => DynamicsFailure::Stopped,
         };
         self.abort_dynamics(dynamics, msg);
         let Some(mut a) = self.sweep.take() else {
             return;
         };
-        if let (Some(job), Some(rt)) = (a.job.take(), &self.session) {
+        if let (Some(job), Some(rt)) = (a.job.take(), &self.stream) {
             rt.fanout.detach(job.fanout_id);
         }
         tracing::warn!("sweep {} aborted: {msg}", a.run.id.0);
@@ -378,7 +378,7 @@ impl Control {
         let job = a.job.take();
         let spec = a.spec;
         let repeats = a.run.repeats;
-        if let (Some(job), Some(rt)) = (job, &self.session) {
+        if let (Some(job), Some(rt)) = (job, &self.stream) {
             rt.fanout.detach(job.fanout_id);
         }
         // The train has played out: silence the source and disarm before the (longer)

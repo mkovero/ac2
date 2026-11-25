@@ -141,7 +141,7 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
         name: "tablet".into(),
     });
     assert_eq!(names(&s), vec!["laptop"]);
-    let e = t.call(Command::SessionStatus).unwrap_err();
+    let e = t.call(Command::StreamStatus).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
     assert!(!std::fs::read_to_string(&file).unwrap().contains("tablet"));
     // A restart reads the file as left.
@@ -177,12 +177,12 @@ fn a_revoked_connection_stays_refused_when_its_name_goes_to_a_new_key() {
         net_endpoints(&h).0.as_str(),
         Some(&curve(&old_tablet)),
     );
-    old.ok(Command::SessionStatus);
+    old.ok(Command::StreamStatus);
 
     c.ok(Command::ServerRevoke {
         name: "tablet".into(),
     });
-    let e = old.call(Command::SessionStatus).unwrap_err();
+    let e = old.call(Command::StreamStatus).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
 
     // The name goes to a different key while the old connection is still open: the new key
@@ -197,7 +197,7 @@ fn a_revoked_connection_stays_refused_when_its_name_goes_to_a_new_key() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
-    let e = old.call(Command::SessionStatus).unwrap_err();
+    let e = old.call(Command::StreamStatus).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
 
     // The new key's request ids start where the old key's did: it is answered on its own,

@@ -230,7 +230,7 @@ async fn the_universe_follows_the_cues_and_keeps_alive() {
     assert_eq!(f.ch(13), 40);
     assert_eq!(f.data.iter().filter(|v| **v > 0).count(), 2);
 
-    // A meter with no session cannot judge: its fault levels go out at once, replacing the
+    // A meter with no stream cannot judge: its fault levels go out at once, replacing the
     // test frame. A second meter's fault levels merge HTP.
     create(
         &c,
@@ -256,8 +256,8 @@ async fn the_universe_follows_the_cues_and_keeps_alive() {
     assert_eq!(f0.data, f1.data);
 
     // B runs without a limit: ok once its first second is judged, at once on the wire.
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();
@@ -379,7 +379,7 @@ async fn a_cue_change_fades_and_a_zero_fade_jumps() {
     node.until("the first frame", |_| true);
     target_until(&c, Some(target_on(&node))).await;
 
-    // A meter with no session goes to fault: channel 20 climbs through intermediate levels,
+    // A meter with no stream goes to fault: channel 20 climbs through intermediate levels,
     // never down, and stops at its level no sooner than the fade's length after the change.
     // How many steps arrive depends on how often a loaded runner wakes the control loop
     // (one every `FADE_STEP` when idle), so only a fade, not a step count, is asserted.

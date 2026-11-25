@@ -15,7 +15,7 @@ use ac2_proto::model::{
     CalStatus, FreqRange, LevelScale, MathConfig, MathDomain, MathExpr, MathOp, MathReference,
     PhaseBasis, SpecLevel, Weighting, Window,
 };
-use ac2_proto::units::{Hz, MeasId, Seconds, SessionEpoch};
+use ac2_proto::units::{Hz, MeasId, Seconds, StreamEpoch};
 use ac2_traces::columns::{Columns, wrap_deg};
 use ac2_traces::math::{self, Combine, Input};
 use ac2_traces::ops::capture_columns;
@@ -26,7 +26,7 @@ use super::{Answer, stages};
 pub(super) fn usable(
     a: &Answer,
     domain: MathDomain,
-    epoch: SessionEpoch,
+    epoch: StreamEpoch,
     grid_id: GridId,
 ) -> Result<&Frame, OperandStatus> {
     let f = match a {
@@ -44,9 +44,9 @@ pub(super) fn usable(
     if !kind_ok {
         return Err(OperandStatus::Mismatch);
     }
-    // Another epoch has another time base: a result of a session since closed cannot be
+    // Another epoch has another time base: a result of a stream since closed cannot be
     // combined with this one's.
-    if f.stamp.session_epoch != epoch {
+    if f.stamp.stream_epoch != epoch {
         return Err(OperandStatus::Settling);
     }
     // Another grid holds other columns (another FFT length or band layout restarted the
@@ -76,7 +76,7 @@ pub(super) fn usable(
 struct Value {
     columns: Columns,
     delay: f64,
-    time_base: Option<SessionEpoch>,
+    time_base: Option<StreamEpoch>,
     validity: Option<Vec<ValidityMask>>,
     scale: Option<LevelScale>,
     level: Option<SpecLevel>,
@@ -156,7 +156,7 @@ pub(super) fn coarsest_bins(each: &[&[BinRange]]) -> Vec<BinRange> {
     out
 }
 
-fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
+fn value(a: &Answer, f: Option<&Frame>, epoch: StreamEpoch) -> Option<Value> {
     if let Answer::Stored(h) = a {
         return Some(Value {
             columns: h.columns.clone(),
@@ -293,7 +293,7 @@ pub(crate) fn combine(
     cfg: &MathConfig,
     grid: &GridDef,
     freqs: &[f64],
-    epoch: SessionEpoch,
+    epoch: StreamEpoch,
     seen_delay: &[Option<f64>],
     answers: &[Answer],
 ) -> FrameData {

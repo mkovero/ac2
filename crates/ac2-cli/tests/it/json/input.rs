@@ -28,11 +28,11 @@ fn mic_curve_file(name: &str) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn input_setup_mic_curve_and_cal_flow() -> R {
     let f = looped()?;
-    // A session: a calibration of this device's input is verified, not just matched by mic.
+    // A stream: a calibration of this device's input is verified, not just matched by mic.
     ok_json(
         &f,
         &[
-            "session",
+            "stream",
             "open",
             "--backend",
             "fake",
@@ -63,7 +63,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     let i = ok_json(
         &f,
         &[
-            "session",
+            "stream",
             "inputs",
             "--mic",
             "2=MM1 34804",
@@ -86,7 +86,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     assert_ne!(r.code, 0);
     assert_eq!(r.json()?["error"]["code"], "invalid");
     // Only the named rows change; `IN=` clears a name.
-    let i = ok_json(&f, &["session", "inputs", "--mic", "3=", "--json"]).await?;
+    let i = ok_json(&f, &["stream", "inputs", "--mic", "3=", "--json"]).await?;
     assert_eq!(input_row(&i, 3)["mic"], Value::Null);
     assert_eq!(input_row(&i, 2)["mic"], "MM1 34804");
 
@@ -310,7 +310,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
         assert!(text.stdout.contains(want), "{want:?} in\n{}", text.stdout);
     }
 
-    // `cal rm`: the sensitivity calibration of the session's device, the input's mic by
+    // `cal rm`: the sensitivity calibration of the stream's device, the input's mic by
     // default.
     let d = ok_json(&f, &["cal", "rm", "--input", "2", "--json"]).await?;
     assert_eq!(
@@ -330,7 +330,7 @@ async fn cal_and_unreachable_daemon() -> R {
     ok_json(
         &f,
         &[
-            "session",
+            "stream",
             "open",
             "--backend",
             "fake",

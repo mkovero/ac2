@@ -1,4 +1,4 @@
-//! Reducer tests of the transfer pane's headroom advice: fed from the session's input
+//! Reducer tests of the transfer pane's headroom advice: fed from the stream's input
 //! meters, the transfer frame's coherence and the mirrored generator, shown as the pane's
 //! last banner, capped by the system max level, never changing a level, and switched off
 //! from the Display page.
@@ -7,10 +7,10 @@ use super::*;
 
 use ac2_client::{Latest, TopicFrame};
 use ac2_proto::FrameData;
-use ac2_proto::frame::{ClipFlags, SessionLevelsFrame, ValidityMask};
+use ac2_proto::frame::{ClipFlags, StreamLevelsFrame, ValidityMask};
 
 /// One snapshot at `now_s`: transfer measurement 1 with coherence `coh` everywhere, and
-/// the session meters of inputs 0 (reference, `ref_peak` dBFS) and 1 (measurement,
+/// the stream meters of inputs 0 (reference, `ref_peak` dBFS) and 1 (measurement,
 /// `meas_rms` dBFS RMS).
 fn feed(t: &mut T, now_s: f64, coh: f32, ref_peak: f32, meas_rms: f32) {
     t.st.apply(Msg::Tick { now_s, dt_s: 0.1 }, &t.keys);
@@ -25,8 +25,8 @@ fn feed(t: &mut T, now_s: f64, coh: f32, ref_peak: f32, meas_rms: f32) {
     f.stamp.protection = ac2_proto::frame::ProtectionFlags::NONE;
     let meters = ac2_proto::Frame {
         stamp: f.stamp,
-        data: FrameData::SessionLevels(SessionLevelsFrame {
-            meta: ac2_proto::frame::SessionLevelsMeta {
+        data: FrameData::StreamLevels(StreamLevelsFrame {
+            meta: ac2_proto::frame::StreamLevelsMeta {
                 channels: vec![0, 1],
                 ballistic: Default::default(),
                 pair_levels: vec![],

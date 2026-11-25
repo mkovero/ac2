@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::Change;
 use ac2_proto::model::{Clocks, DeviceClock, SampleClock, StampMap, SystemClock};
-use ac2_proto::units::SessionEpoch;
+use ac2_proto::units::StreamEpoch;
 
 use super::Control;
 
@@ -21,7 +21,7 @@ pub(super) struct ClockWatch {
     next_system: Instant,
     /// The newest reading of the capture clock and its stamp map, with the stream they are
     /// of.
-    sample: Option<(SessionEpoch, SampleClock, Option<StampMap>)>,
+    sample: Option<(StreamEpoch, SampleClock, Option<StampMap>)>,
 }
 
 impl ClockWatch {
@@ -40,7 +40,7 @@ impl Control {
     /// The fan-out of `epoch` measured the capture clock.
     pub(super) fn sample_clock(
         &mut self,
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         rate: SampleClock,
         map: Option<StampMap>,
     ) {
@@ -58,7 +58,7 @@ impl Control {
             self.clocks.system = self.s.system_clock.read();
             self.clocks.next_system = now + SYSTEM_EVERY;
         }
-        let capture = self.session.as_ref().map(|r| DeviceClock {
+        let capture = self.stream.as_ref().map(|r| DeviceClock {
             device: r.open.input_device.clone(),
             rate: if r.open.replay.is_some() {
                 SampleClock::Synthetic
@@ -72,7 +72,7 @@ impl Control {
         let c = Clocks {
             system: self.clocks.system,
             capture,
-            stamp_map: match (&self.session, self.clocks.sample) {
+            stamp_map: match (&self.stream, self.clocks.sample) {
                 (Some(r), Some((e, _, map))) if e == r.epoch && r.open.replay.is_none() => map,
                 _ => None,
             },

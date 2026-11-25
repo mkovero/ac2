@@ -1,6 +1,6 @@
-//! An open session whose audio stopped: the stopped stream is closed off this thread and
+//! An open stream whose audio stopped: the stopped stream is closed off this thread and
 //! the same configuration reopened, attempt after attempt, until it opens or a client
-//! closes the session (`docs/design/audio-recovery.md`).
+//! closes the stream (`docs/design/audio-recovery.md`).
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
@@ -8,13 +8,13 @@ use std::time::{Duration, Instant};
 use ac2_proto::ProtoError;
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    AudioStopped, BackendKind, DriverChange, DriverReset, DriverResetReason, GenAction,
-    OpenSession, Recovery as WireRecovery, Session, SessionConfig, StopCause,
+    AudioStopped, BackendKind, DriverChange, DriverReset, DriverResetReason, GenAction, OpenStream,
+    Recovery as WireRecovery, StopCause, Stream, StreamConfig,
 };
-use ac2_proto::units::{SessionEpoch, WallNs};
+use ac2_proto::units::{StreamEpoch, WallNs};
 
 use super::{Control, ControlMsg};
-use crate::session::Runtime;
+use crate::stream::Runtime;
 use crate::util::wall_ns;
 
 /// Waits between failed attempts: doubling from 1 s, so a device that comes straight back
@@ -91,9 +91,9 @@ enum Phase {
 
 /// The configuration being reopened and how it goes.
 pub(crate) struct Recovery {
-    /// The epoch the stopped session shows; a reopened stream gets the next.
-    epoch: SessionEpoch,
-    open: OpenSession,
+    /// The epoch the stopped stream shows; a reopened stream gets the next.
+    epoch: StreamEpoch,
+    open: OpenStream,
     routes: Vec<u16>,
     since: WallNs,
     cause: StopCause,
@@ -163,11 +163,11 @@ fn reset_text(r: DriverResetReason) -> &'static str {
     }
 }
 
-/// The reopened session `now` against the one that stopped, `was`: a configuration that
+/// The reopened stream `now` against the one that stopped, `was`: a configuration that
 /// named a rate or buffer size names the one the device now runs at (a driver reset may
 /// have changed it), and a change of either is stated in `driver_change` until a client
-/// opens a session anew.
-fn follow_driver(was: &OpenSession, now: &mut OpenSession) {
+/// opens a stream anew.
+fn follow_driver(was: &OpenStream, now: &mut OpenStream) {
     now.config.sample_rate_hz = was.config.sample_rate_hz.map(|_| now.sample_rate_hz);
     now.config.buffer_frames = was.config.buffer_frames.map(|_| now.buffer_frames);
     now.driver_change =
@@ -175,7 +175,7 @@ fn follow_driver(was: &OpenSession, now: &mut OpenSession) {
             was.driver_change
         } else {
             tracing::warn!(
-                "the session reopened at {} Hz / {} frames (was {} Hz / {} frames)",
+                "the stream reopened at {} Hz / {} frames (was {} Hz / {} frames)",
                 now.sample_rate_hz,
                 now.buffer_frames,
                 was.sample_rate_hz,
@@ -191,12 +191,12 @@ fn follow_driver(was: &OpenSession, now: &mut OpenSession) {
 impl Control {
     /// The stream of `epoch` stopped: closes it off this thread, pauses the measurements,
     /// disarms the generator and starts reopening the configuration.
-    pub(super) fn audio_stopped(&mut self, epoch: SessionEpoch, since: WallNs, cause: StopCause) {
+    pub(super) fn audio_stopped(&mut self, epoch: StreamEpoch, since: WallNs, cause: StopCause) {
         // Only the current stream's report counts; one from a stream already replaced is old.
-        if self.session.as_ref().is_none_or(|r| r.epoch != epoch) {
+        if self.stream.as_ref().is_none_or(|r| r.epoch != epoch) {
             return;
         }
-        let Some(rt) = self.session.take() else {
+        let Some(rt) = self.stream.take() else {
             return;
         };
         tracing::warn!(
@@ -231,9 +231,9 @@ impl Control {
     /// attempts carry on from there.
     pub(super) fn reopen_failed(
         &mut self,
-        open: OpenSession,
+        open: OpenStream,
         routes: Vec<u16>,
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         e: &ProtoError,
     ) {
         let output_stopped = self.disarm_for_outage();
@@ -275,7 +275,7 @@ impl Control {
         let Some(r) = self.audio_recovery.as_mut() else {
             return;
         };
-        let epoch = SessionEpoch(r.epoch.0 + 1);
+        let epoch = StreamEpoch(r.epoch.0 + 1);
         r.attempt += 1;
         r.phase = Phase::Opening { token };
         // A look still under way answers into the attempt; its answer is dropped.
@@ -327,7 +327,7 @@ impl Control {
             });
         if let Err(e) = spawned {
             self.attempt_failed(&crate::util::internal(format!(
-                "cannot start a thread to reopen the session: {e}"
+                "cannot start a thread to reopen the stream: {e}"
             )));
             return;
         }
@@ -344,7 +344,7 @@ impl Control {
             .as_ref()
             .is_some_and(|r| matches!(r.phase, Phase::Opening { token: t } if t == token));
         if !current {
-            // The session was closed or opened anew meanwhile.
+            // The stream was closed or opened anew meanwhile.
             if let Ok(rt) = result {
                 drop(close_off_thread(rt));
             }
@@ -367,18 +367,18 @@ impl Control {
                 };
                 let out_s = (wall_ns().saturating_sub(r.since.0)) as f64 / 1e9;
                 tracing::warn!(
-                    "audio back: the session reopened on attempt {} after {out_s:.1} s without \
+                    "audio back: the stream reopened on attempt {} after {out_s:.1} s without \
                      audio (epoch {}); measurements restart, the generator stays disarmed",
                     r.attempt,
                     rt.epoch.0
                 );
-                let s = Session {
+                let s = Stream {
                     epoch: rt.epoch,
                     open: Some(rt.open.clone()),
                     stopped: None,
                 };
-                self.session = Some(rt);
-                self.commit(Change::Session(s));
+                self.stream = Some(rt);
+                self.commit(Change::Stream(s));
                 self.after_open();
                 self.release_replay();
             }
@@ -418,7 +418,7 @@ impl Control {
         });
     }
 
-    /// Looks at the stopped session's device on a thread of its own (a hung host may not
+    /// Looks at the stopped stream's device on a thread of its own (a hung host may not
     /// answer a device list either).
     pub(super) fn start_probe(&mut self) {
         let token = self.ids.token();
@@ -478,15 +478,15 @@ impl Control {
         }
     }
 
-    /// The configuration a stopped session is being reopened with.
-    pub(super) fn recovery_config(&self) -> Option<&SessionConfig> {
+    /// The configuration a stopped stream is being reopened with.
+    pub(super) fn recovery_config(&self) -> Option<&StreamConfig> {
         self.audio_recovery.as_ref().map(|r| &r.open.config)
     }
 
-    /// A session file loaded while the audio is stopped: the stopped session shows the
+    /// A session file loaded while the audio is stopped: the stopped stream shows the
     /// load's `epoch`, comes back without generator routes like any loaded session, and on
     /// `config` when the load changed it (its remote inputs).
-    pub(super) fn rebase_recovery(&mut self, epoch: SessionEpoch, config: Option<SessionConfig>) {
+    pub(super) fn rebase_recovery(&mut self, epoch: StreamEpoch, config: Option<StreamConfig>) {
         let Some(r) = self.audio_recovery.as_mut() else {
             return;
         };
@@ -495,7 +495,7 @@ impl Control {
         if let Some(c) = config {
             r.open.config = c;
         }
-        if let Some(st) = self.store.state().session.stopped.clone() {
+        if let Some(st) = self.store.state().stream.stopped.clone() {
             self.commit_stopped(st.recovery);
         }
     }
@@ -504,7 +504,7 @@ impl Control {
         let Some(r) = self.audio_recovery.as_ref() else {
             return;
         };
-        let s = Session {
+        let s = Stream {
             epoch: r.epoch,
             open: Some(r.open.clone()),
             stopped: Some(AudioStopped {
@@ -513,7 +513,7 @@ impl Control {
                 recovery,
             }),
         };
-        self.commit(Change::Session(s));
+        self.commit(Change::Stream(s));
     }
 }
 

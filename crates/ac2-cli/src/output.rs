@@ -7,9 +7,9 @@ use ac2_proto::model::layout::{EntryRef, PaneContent, PaneEntry, RigRef};
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
     ClockRelation, DelayReference, DepthPolicy, InputKind, LfWindow, LineCalEntry, MeasKind,
-    Measurement, Mic, Pair, PeakMode, Polarity, RecordingEnd, RecordingFile, RecordingRun, Session,
-    SessionFile, SmoothingFraction, SmoothingMode, State, TimingState, TimingStatus, TraceData,
-    TraceMeta, TraceSource,
+    Measurement, Mic, Pair, PeakMode, Polarity, RecordingEnd, RecordingFile, RecordingRun,
+    SessionFile, SmoothingFraction, SmoothingMode, State, Stream, TimingState, TimingStatus,
+    TraceData, TraceMeta, TraceSource,
 };
 use ac2_proto::units::{MeasId, WallNs};
 use ac2_scene::format;
@@ -391,7 +391,7 @@ pub fn devices(backends: &[BackendInfo]) -> String {
     out
 }
 
-/// Session, as lines.
+/// Stream, as lines.
 /// The daemon's autosave as one line: `autosave     autosaved 5 min ago`, `saving…`,
 /// `failed: <reason>` (in full), `off`. The age assumes this machine's clock matches the
 /// daemon's.
@@ -433,7 +433,7 @@ pub fn log_failures(a: &Autosave, measurements: &[Measurement], now: WallNs) -> 
     .collect()
 }
 
-pub fn session(s: &Session) -> String {
+pub fn stream(s: &Stream) -> String {
     match &s.open {
         None => format!("audio I/O closed (epoch {})", s.epoch),
         Some(o) => match &o.replay {
@@ -469,9 +469,9 @@ pub fn session(s: &Session) -> String {
     }
 }
 
-/// A driver-reporting session's clock source and stated latency (ASIO, Core Audio), and a
+/// A driver-reporting stream's clock source and stated latency (ASIO, Core Audio), and a
 /// change or reset the driver made under it.
-fn driver_lines(o: &ac2_proto::model::OpenSession) -> String {
+fn driver_lines(o: &ac2_proto::model::OpenStream) -> String {
     let mut t = String::new();
     if let Some(c) = &o.clock_source {
         t.push_str(&format!("\n  clock  {c}"));
@@ -660,10 +660,10 @@ pub fn mics(m: &[Mic]) -> String {
 }
 
 /// The channels the input table lists: every input with a setup row, and every input the
-/// open session captures.
+/// open stream captures.
 fn input_channels(s: &State) -> Vec<u16> {
     let mut ch: Vec<u16> = s.inputs.iter().map(|i| i.channel).collect();
-    if let Some(o) = &s.session.open {
+    if let Some(o) = &s.stream.open {
         ch.extend(o.config.input_channels.iter().copied());
     }
     ch.sort_unstable();
@@ -833,11 +833,11 @@ pub fn timing_state(s: &TimingState, rate: Option<u32>) -> String {
     }
 }
 
-/// The session's clock domain, as one line: what the backend states about input and output
+/// The stream's clock domain, as one line: what the backend states about input and output
 /// clocks and, once the loopback monitor has measured it, their drift
-/// (`docs/design/multi-device.md`). `None` while no session is open.
-pub fn clock(session: &Session, t: &TimingStatus) -> Option<String> {
-    let open = session.open.as_ref()?;
+/// (`docs/design/multi-device.md`). `None` while no stream is open.
+pub fn clock(stream: &Stream, t: &TimingStatus) -> Option<String> {
+    let open = stream.open.as_ref()?;
     let relation = match open.clock {
         ClockRelation::SingleCallback => "one clock (one callback for input and output)",
         ClockRelation::Unknown => "input and output may be on different clocks",

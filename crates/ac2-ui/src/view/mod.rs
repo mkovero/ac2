@@ -15,9 +15,9 @@ mod recording;
 mod remote;
 mod rig;
 mod segment;
-mod session;
 mod sessions;
 mod settings;
+mod stream;
 mod top_bar;
 mod walk;
 

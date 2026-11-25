@@ -1,8 +1,8 @@
-//! A paired rig's heading from the clocks and session its levels show: two network-mode
-//! daemons paired both ways, both sessions open, no remote input anywhere; the app on one of
+//! A paired rig's heading from the clocks and stream its levels show: two network-mode
+//! daemons paired both ways, both streams open, no remote input anywhere; the app on one of
 //! them only.
 
-use crate::cross_rig::{config, device, net_endpoints, rig, session};
+use crate::cross_rig::{config, device, net_endpoints, rig, stream};
 use crate::harness::{Driver, R};
 use ac2_client::Client;
 use ac2_proto::model::RigPeer;
@@ -12,7 +12,7 @@ use ac2_ui::state::AppState;
 use ac2_zmq::KeyPair;
 use std::time::Duration;
 
-/// Pupu and kettu on one true clock, each pairing the other and admitting it, both sessions
+/// Pupu and kettu on one true clock, each pairing the other and admitting it, both streams
 /// open with no remote input; the app connected to pupu alone. The daemons live while the
 /// handles do.
 fn paired_both_ways(dir: &std::path::Path) -> R<(ac2d::Handle, ac2d::Handle, Driver)> {
@@ -38,8 +38,8 @@ fn paired_both_ways(dir: &std::path::Path) -> R<(ac2d::Handle, ac2d::Handle, Dri
     for (me, (id, name, _, keys)) in sides {
         call(
             me,
-            Command::SessionOpen {
-                config: session(vec![0, 1], Vec::new()),
+            Command::StreamOpen {
+                config: stream(vec![0, 1], Vec::new()),
             },
         )?;
         call(
@@ -81,7 +81,7 @@ fn kettu_heading(st: &AppState) -> Option<(String, String)> {
 fn heard_rate(st: &AppState) -> Option<String> {
     let s = st.daemon()?.remote.standing.first()?;
     Some(ac2_scene::audio::rate_text(
-        s.session.as_ref()?.sample_rate_hz,
+        s.stream.as_ref()?.sample_rate_hz,
     ))
 }
 

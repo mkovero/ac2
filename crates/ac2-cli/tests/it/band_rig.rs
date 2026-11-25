@@ -23,7 +23,7 @@ use ac2_proto::units::{DbSpl, Dbfs, Hz};
 use ac2_proto::{Command, ReplyBody};
 use serde_json::Value;
 
-use super::common::{client, document, fake_backend, rig_on, run_json as run, session};
+use super::common::{client, document, fake_backend, rig_on, run_json as run, stream};
 
 /// The newest `spl bands watch --json` line after `secs` of watching.
 async fn watch_last(ep: &Endpoints, secs: &str) -> Value {
@@ -67,8 +67,8 @@ async fn slow_bands_set_watch_and_transfer() {
     assert_eq!(code, 1, "{text}");
     assert!(text.contains("no SPL meter"), "{text}");
 
-    c.call(Command::SessionOpen {
-        config: session(vec![0, 1]),
+    c.call(Command::StreamOpen {
+        config: stream(vec![0, 1]),
     })
     .await
     .unwrap();

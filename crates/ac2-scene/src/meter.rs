@@ -1,4 +1,4 @@
-//! Input meters and channel labels of the session and measurement dialogs: how full a bar
+//! Input meters and channel labels of the stream and measurement dialogs: how full a bar
 //! is, what it reads and which state colours it, and what an input or output is called.
 //!
 //! Scale: −60 … 0 dBFS, linear in dB. Below −60 dBFS a bar is empty, but the readout keeps
@@ -181,7 +181,7 @@ impl InputUse {
     }
 }
 
-/// A session input's row in the always-on meters: its label, what the operation in focus
+/// A stream input's row in the always-on meters: its label, what the operation in focus
 /// uses it as, and its reading.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InputRow {
@@ -216,7 +216,7 @@ pub const PAIR_MARKS: (&str, &str) = ("L", "R");
 /// What a line or digital input reads without a line calibration.
 pub const DBFS: &str = "dBFS";
 
-/// A session input's label: its name ([`input_name`]), its role, and the one-based input
+/// A stream input's label: its name ([`input_name`]), its role, and the one-based input
 /// number when the name does not already say it, with the mic curve in use
 /// ([`crate::cal::curve_short`]) after a mic's name: `MM1 34804 · 90° · mic (in 1)`,
 /// `loopback · reference (in 2)`, `Input 3 · mic`, `capture_4 (in 4)`.

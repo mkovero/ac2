@@ -2,7 +2,7 @@
 //! stream of a transfer function, a default spectrum, an RTA and an SPL meter on the fake
 //! rig, and the daemon's CPU time over the run. The spectrum frame must stay display-sized:
 //! a 65 536-point FFT is 32 769 bins, far more than any screen has pixels; so must the IR
-//! frame. A realistic tuning session (three transfer functions and their average, three
+//! frame. A realistic tuning stream (three transfer functions and their average, three
 //! default spectra and a short one, an RTA, two SPL meters with band meters, the input
 //! meters), with and without a pane in its IR view, must fit a remote client's budget at
 //! 60 frames per second, and a credit-starved peer beside the counted one (a 64 kB window
@@ -24,7 +24,7 @@ use ac2_audio::fake::{FakeDrive, FakePath, Pace};
 use ac2_audio::{FakeBackend, FakeConfig};
 use ac2_proto::model::{
     BandFraction, BandLeqPreset, GeneratorDesired, GeneratorSettings, MathConfig, MathDomain,
-    MeasConfig, MeasKind, Operand, RtaConfig, SessionConfig, Signal, SpectrumConfig, TraceOwner,
+    MeasConfig, MeasKind, Operand, RtaConfig, Signal, SpectrumConfig, StreamConfig, TraceOwner,
 };
 use ac2_proto::units::{Dbfs, MeasId};
 use ac2_proto::{Command, ReplyBody, WireFrame, decode_wire};
@@ -198,7 +198,7 @@ fn starved_peer(
 /// What one run sets up and receives.
 struct Setup<'a> {
     meas: &'a [MeasConfig],
-    /// Session inputs.
+    /// Stream inputs.
     inputs: Vec<u16>,
     /// Pink noise out of output 0 (into every input on the fake rig).
     stimulus: bool,
@@ -234,10 +234,10 @@ fn run_with(setup: &Setup<'_>, seconds: f64) -> (Sizes, Option<Starved>) {
     let h = Daemon::start(config).unwrap();
     let prefixes: Vec<&[u8]> = setup.prefixes.iter().map(Vec::as_slice).collect();
     let (mut c, sub) = connect(&h, &prefixes);
-    c.ok(Command::SessionOpen {
-        config: SessionConfig {
+    c.ok(Command::StreamOpen {
+        config: StreamConfig {
             input_channels: setup.inputs.clone(),
-            ..session(false)
+            ..stream(false)
         },
     });
     for (i, m) in setup.meas.iter().enumerate() {
@@ -430,7 +430,7 @@ fn banded_spl(name: &str, input: u16) -> MeasConfig {
     m
 }
 
-/// The session a remote client follows while tuning: measurement ids in creation order.
+/// The stream a remote client follows while tuning: measurement ids in creation order.
 fn tuning_session() -> Vec<MeasConfig> {
     let tf = |name: &str, input: u16| {
         let mut m = transfer(name);
@@ -489,7 +489,7 @@ fn ui_topics(ir_view: bool) -> Vec<Vec<u8>> {
     for m in [10, 11] {
         t.extend(["spl", "leq", "band_leq"].map(|s| format!("d/{m}/{s}")));
     }
-    t.push("session/levels".into());
+    t.push("stream/levels".into());
     t.into_iter().map(String::into_bytes).collect()
 }
 
@@ -508,7 +508,7 @@ fn session_sizes(fps: u32, seconds: f64, ir_view: bool, starved: bool) -> (Sizes
     )
 }
 
-/// The tuning session at 60 frames per second stays far below what a Wi-Fi or VPN link
+/// The tuning stream at 60 frames per second stays far below what a Wi-Fi or VPN link
 /// carries, with each transfer function sent as a delta on the one before and a keyframe
 /// every half second (counting starts after the averages filled, past the first second).
 /// A credit-starved peer subscribes to the same topics: the counted peer's budgets hold
@@ -554,7 +554,7 @@ fn slow_tuning_session_fits_a_remote_link() {
             / seconds
             / 1e6
     };
-    // The session without the IR topic is what the app takes with no IR view: subscribing
+    // The stream without the IR topic is what the app takes with no IR view: subscribing
     // one more topic changes no other. Live views send a frame per hop of whole device
     // periods near one display frame (about 60 a second each), so the eye sees sound as it
     // happens: that, not the link, sets the rate (2.7 Mbit/s here on Linux, 2.9 on Windows).
@@ -598,7 +598,7 @@ fn slow_tuning_session_fits_a_remote_link() {
     }
 }
 
-/// Bytes a remote client receives in a tuning session at 30 and 60 frames per second,
+/// Bytes a remote client receives in a tuning stream at 30 and 60 frames per second,
 /// printed (`--ignored --nocapture`).
 #[test]
 #[ignore = "measurement, not a check"]

@@ -404,8 +404,8 @@ fn a_rigs_heading_says_the_relation_and_warns_in_words() {
     };
     assert_eq!(says(&r, &inputs), "unreachable");
     r.rigs[0].link = RemoteLink::Up;
-    r.inputs[0].audio = RemoteAudio::NoSession;
-    assert_eq!(says(&r, &inputs), "no audio from ketunkolo (no session)");
+    r.inputs[0].audio = RemoteAudio::NoStream;
+    assert_eq!(says(&r, &inputs), "no audio from ketunkolo (no stream)");
     // No audio because the rates differ: both rates.
     r.inputs[0].audio = RemoteAudio::RateMismatch {
         theirs: 48_000,

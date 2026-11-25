@@ -1,16 +1,16 @@
 //! The new-measurement dialogs: a few fields that build a `meas.create` (a sweep
 //! measurement's too: its settings, run later with `sweep.run`), and the dialogs that edit
 //! a math trace, a transfer or sweep measurement, a spectrum or an RTA. Inputs and outputs
-//! are picked by name from the session's channels (inputs with their meters in the view), never typed as numbers. Pure
+//! are picked by name from the stream's channels (inputs with their meters in the view), never typed as numbers. Pure
 //! data; the reducer routes keys here and the view draws them. Every default is the CLI's
 //! (`ac2 meas new`, `ac2 ir capture`), taken from the shared constructors in `ac2-proto`.
 //!
-//! The audio I/O dialog is [`crate::session_dialog`]; the rate and buffer parsers it
+//! The audio I/O dialog is [`crate::stream_dialog`]; the rate and buffer parsers it
 //! shares live here.
 
 use ac2_proto::model::{
     BandFraction, DepthPolicy, EssSpec, LfHarmonics, LfWindow, MeasConfig, MeasKind, Measurement,
-    OpenSession, Operand, Resolution, RtaConfig, Smoothing, SmoothingFraction, SpecAveraging,
+    OpenStream, Operand, Resolution, RtaConfig, Smoothing, SmoothingFraction, SpecAveraging,
     SpecLevel, SpecResolution, SpectrumConfig, SplConfig, SweepConfig, TimeWeighting,
     TransferConfig, TransferResolution, Weighting, Window,
 };
@@ -220,7 +220,7 @@ pub enum FieldId {
     /// A loudness shift's levels: judged at, played at.
     PhonFrom,
     PhonTo,
-    /// What a Programme pane meters: one of the session's pairs, or inputs.
+    /// What a Programme pane meters: one of the stream's pairs, or inputs.
     Metered,
     /// A Programme pane's input row `n` (zero-based) when it meters inputs.
     Bar(u8),
@@ -243,7 +243,7 @@ pub enum FieldId {
     OnBin,
 }
 
-/// A field's value: typed text, one of a few options (←/→ pick), or an input of the session
+/// A field's value: typed text, one of a few options (←/→ pick), or an input of the stream
 /// by name (←/→ pick; the view shows its meter). ←/→ step through the options in order and
 /// stop at the ends.
 #[derive(Clone, Debug, PartialEq)]
@@ -381,7 +381,7 @@ pub struct Form {
     pub headings: Vec<(FieldId, String)>,
     /// The averaging field's values, one per option.
     averaging: Vec<SpecAveraging>,
-    /// The open session's sample rate and device period: what the FFT size field's hint is
+    /// The open stream's sample rate and device period: what the FFT size field's hint is
     /// stated at.
     stream: Option<(u32, u32)>,
 }

@@ -31,8 +31,8 @@ pub struct IrMetricsArgs {
 /// `rec …`.
 #[derive(Debug, Subcommand)]
 pub enum RecCmd {
-    /// Start recording inputs of the open session (f32 WAV + JSON sidecar on the daemon
-    /// host); it runs until `rec stop`, its time or size limit, or the session closes.
+    /// Start recording inputs of the open stream (f32 WAV + JSON sidecar on the daemon
+    /// host); it runs until `rec stop`, its time or size limit, or the stream closes.
     Start(RecStartArgs),
     /// Stop the recording and finalise its file.
     Stop,
@@ -41,7 +41,7 @@ pub enum RecCmd {
     /// Recordings in the daemon's recording directory.
     List,
     /// Turn a WAV from elsewhere (a recorder's 16-, 24- or 32-bit PCM or float file) into a
-    /// recording `session replay` plays; written on this computer, no daemon needed.
+    /// recording `stream replay` plays; written on this computer, no daemon needed.
     Import(RecImportArgs),
 }
 
@@ -62,7 +62,7 @@ pub struct RecImportArgs {
 /// `rec start`.
 #[derive(Debug, Args)]
 pub struct RecStartArgs {
-    /// Inputs to record, e.g. `1,2` (default: every input of the session).
+    /// Inputs to record, e.g. `1,2` (default: every input of the stream).
     #[arg(long = "in", value_name = "CHANNELS")]
     pub inputs: Option<Channels>,
     /// File name (default `rec-<UTC date and time>`); an existing recording is never

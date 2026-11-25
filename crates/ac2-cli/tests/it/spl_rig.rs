@@ -17,7 +17,7 @@ use ac2_proto::{Command, ReplyBody};
 use clap::Parser;
 use serde_json::Value;
 
-use super::common::{ac2, client, rig, session};
+use super::common::{ac2, client, rig, stream};
 
 /// The `spl watch` JSON lines of one run.
 async fn watch(ep: &Endpoints, args: &[&str]) -> Vec<Value> {
@@ -42,8 +42,8 @@ fn num(v: &Value, k: &str) -> f64 {
 async fn slow_spl_watch_reads_its_input_on_a_fresh_meter() {
     let (h, ep) = rig();
     let c = client(&ep, "spl-rig-test").await;
-    c.call(Command::SessionOpen {
-        config: session(vec![0, 1]),
+    c.call(Command::StreamOpen {
+        config: stream(vec![0, 1]),
     })
     .await
     .unwrap();
@@ -147,8 +147,8 @@ async fn slow_spl_watch_reads_its_input_on_a_fresh_meter() {
 async fn spl_set_changes_the_weightings_in_place() {
     let (h, ep) = rig();
     let c = client(&ep, "spl-set-test").await;
-    c.call(Command::SessionOpen {
-        config: session(vec![0, 1]),
+    c.call(Command::StreamOpen {
+        config: stream(vec![0, 1]),
     })
     .await
     .unwrap();

@@ -1,11 +1,11 @@
 {
  "topic": "ka",
  "header": {
-  "v": 104,
+  "v": 105,
   "kind": "ka",
   "seq": 1234,
   "audio_sample": 172800000,
-  "session_epoch": 2,
+  "stream_epoch": 2,
   "daemon_incarnation": 6840227782638526189,
   "config_rev": 40,
   "config_applied_at": 168000000,
@@ -34,8 +34,8 @@
      "audio": {
       "load": 0.125,
       "peak": 0.5,
-      "session_load": null,
-      "session_peak": 0.75,
+      "stream_load": null,
+      "stream_peak": 0.75,
       "xruns": 3
      }
     }

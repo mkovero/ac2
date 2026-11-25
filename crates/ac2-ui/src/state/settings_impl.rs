@@ -10,10 +10,10 @@ use crate::cal_view::CalView;
 use crate::conn::Request;
 use crate::keys::{Chord, CommandId, Keymap, Scope};
 use crate::leq_dialog::{Focus, LeqDialog};
-use crate::session_dialog::{Edit, RoleKey, Row, SessionDialog};
 use crate::settings::{
     DisplayRow, Page, RecordingRow, RigPage, RigRow, SERVER_INFO_EVERY_S, Settings,
 };
+use crate::stream_dialog::{Edit, RoleKey, Row, StreamDialog};
 use ac2_scene::stimulus::{SignalKind, SignalRow};
 
 /// What the mouse does on the Settings view (the hosted pages keep their own messages).
@@ -56,7 +56,7 @@ impl AppState {
             self.settings_entered(out);
             return;
         }
-        let open = self.open_session().cloned();
+        let open = self.open_stream().cloned();
         let setup = self
             .daemon()
             .map(|s| ac2_proto::model::InputSetups {
@@ -65,10 +65,10 @@ impl AppState {
             })
             .unwrap_or_default();
         let labels = self.daemon().map(|s| s.outputs.clone()).unwrap_or_default();
-        let mut session = SessionDialog::new(open.as_ref(), &setup);
-        session.set_labels(&labels);
+        let mut stream = StreamDialog::new(open.as_ref(), &setup);
+        stream.set_labels(&labels);
         if let Some(d) = &self.rig.devices {
-            session.set_backends(d.clone(), self.prefs.of_rig(self.rig.id));
+            stream.set_backends(d.clone(), self.prefs.of_rig(self.rig.id));
         }
         // The calibrations start on the input the selected measurement listens on.
         let on = self
@@ -81,7 +81,7 @@ impl AppState {
             let calibrated = self.leq_calibrated(m.id);
             LeqDialog::new(&m, calibrated, self.leq_panes.cues_shown)
         });
-        let mut settings = Settings::new(page, session, cal, leq);
+        let mut settings = Settings::new(page, stream, cal, leq);
         settings.rig = RigPage::new(self.daemon().map(|s| &s.rig));
         self.overlay = Overlay::Settings(Box::new(settings));
         if self.connected() {
@@ -91,20 +91,20 @@ impl AppState {
     }
 
     /// Settings on the Audio I/O page focused on the input device: where a fresh start
-    /// on a daemon without an audio I/O, a new session and the open-session command
+    /// on a daemon without an audio I/O, a new session and the open-stream command
     /// land.
     pub fn open_audio_setup(&mut self, out: &mut Vec<Request>) {
         self.open_settings(Page::AudioIo, out);
         if let Overlay::Settings(s) = &mut self.overlay {
             s.focus_want = None;
-            s.focus_session_row(crate::session_dialog::Row::Device);
+            s.focus_stream_row(crate::stream_dialog::Row::Device);
         }
     }
 
     /// A page was shown: it asks for what it shows.
     fn settings_entered(&mut self, out: &mut Vec<Request>) {
         let remote = self
-            .open_session()
+            .open_stream()
             .is_some_and(|o| !o.config.remote_inputs.is_empty());
         let seen = self.daemon().map(|d| d.server.clone());
         let Overlay::Settings(s) = &mut self.overlay else {
@@ -153,12 +153,12 @@ impl AppState {
         let labels = self.daemon().map(|s| s.outputs.clone()).unwrap_or_default();
         let rig = self.daemon().map(|s| s.rig.clone());
         let remote = self
-            .open_session()
+            .open_stream()
             .map(|o| o.config.remote_inputs.clone())
             .unwrap_or_default();
         if let Overlay::Settings(s) = &mut self.overlay {
-            s.session.set_labels(&labels);
-            s.session.set_remote(&remote);
+            s.stream.set_labels(&labels);
+            s.stream.set_remote(&remote);
             s.connection.remote = !remote.is_empty();
             if let Some(r) = &rig {
                 s.rig.follow(r);
@@ -355,7 +355,7 @@ impl AppState {
             return;
         }
         match page {
-            Page::AudioIo => self.session_key(chord, swallow, out),
+            Page::AudioIo => self.stream_key(chord, swallow, out),
             Page::Calibration => self.cal_view_key(chord, swallow, out),
             Page::Leq => self.leq_key(chord, swallow, out),
             Page::Recording => self.recording_key(chord, swallow),
@@ -418,9 +418,9 @@ impl AppState {
         }
     }
 
-    /// Keys of the Audio I/O page (the session model and the max level row). Esc never gets
+    /// Keys of the Audio I/O page (the stream model and the max level row). Esc never gets
     /// here: it closes the topmost window.
-    pub(super) fn session_key(
+    pub(super) fn stream_key(
         &mut self,
         chord: Chord,
         swallow: Option<char>,
@@ -457,12 +457,12 @@ impl AppState {
             }
             return;
         }
-        let d = &mut s.session;
+        let d = &mut s.stream;
         let plain = !(chord.command || chord.alt);
         match chord.key {
             Key::Enter => {
                 if d.edit == Some(Edit::DetectLevel) {
-                    self.session_msg(super::SessionMsg::DetectConfirm, out);
+                    self.stream_msg(super::StreamMsg::DetectConfirm, out);
                 } else if matches!(d.edit, Some(Edit::OutputLabel(_))) {
                     match d.commit_label() {
                         Ok(Some(row)) => self.send_label(row, out),
@@ -472,7 +472,7 @@ impl AppState {
                 } else if matches!(d.edit, Some(Edit::Mic(_) | Edit::PairName(_))) {
                     d.finish_edit();
                 } else {
-                    self.submit_session(out);
+                    self.submit_stream(out);
                 }
             }
             Key::ArrowUp | Key::ArrowDown | Key::Tab => {
@@ -486,7 +486,7 @@ impl AppState {
                     let mics = st.as_ref().map(|s| s.mics.as_slice()).unwrap_or_default();
                     let live = st.as_ref().map(|s| s.inputs.as_slice()).unwrap_or_default();
                     if let Some(row) = d.step_curve(forward, mics, live) {
-                        // The session already captures this mic: the choice applies now.
+                        // The stream already captures this mic: the choice applies now.
                         let what = super::curve_what(&row);
                         out.push(Request::Call {
                             what,
@@ -522,12 +522,12 @@ impl AppState {
                     self.swallow_text = typed_char(&chord);
                 }
             }
-            Key::P if plain => self.session_msg(super::SessionMsg::Panel, out),
+            Key::P if plain => self.stream_msg(super::StreamMsg::Panel, out),
             Key::D if plain => {
-                self.session_msg(super::SessionMsg::Detect, out);
+                self.stream_msg(super::StreamMsg::Detect, out);
                 if self
                     .overlay
-                    .session()
+                    .stream()
                     .is_some_and(|d| d.edit == Some(Edit::DetectLevel))
                 {
                     self.swallow_text = typed_char(&chord);
@@ -537,7 +537,7 @@ impl AppState {
         }
     }
 
-    /// `session.outputs` with one label.
+    /// `stream.outputs` with one label.
     fn send_label(&mut self, row: OutputSetup, out: &mut Vec<Request>) {
         let what = match &row.label {
             Some(l) => format!("output {}: named {l} (every client)", row.channel + 1),
@@ -545,20 +545,20 @@ impl AppState {
         };
         out.push(Request::Call {
             what,
-            cmd: Command::SessionOutputs { outputs: vec![row] },
+            cmd: Command::StreamOutputs { outputs: vec![row] },
         });
     }
 
     /// S on an output: the stimulus plays on the ticked outputs from now on when the open
-    /// session already has them (no reopen: the stream carries every session output);
-    /// otherwise from the next session open (Enter).
+    /// stream already has them (no reopen: the stream carries every stream output);
+    /// otherwise from the next stream open (Enter).
     pub(super) fn stimulus_ticks_now(&mut self, out: &mut Vec<Request>) {
-        let open_outputs = self.open_session().map(|o| o.config.output_channels);
+        let open_outputs = self.open_stream().map(|o| o.config.output_channels);
         let labels = self.daemon().map(|s| s.outputs.clone()).unwrap_or_default();
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
-        let d = &mut s.session;
+        let d = &mut s.stream;
         let ticked: Vec<u16> = d
             .outputs
             .iter()
@@ -572,7 +572,7 @@ impl AppState {
         };
         if ticked.is_empty() || ticked.iter().any(|c| *c >= n) {
             d.notice = Some(
-                "the session opens again with these outputs on Enter (no output ticked, or one \
+                "the stream opens again with these outputs on Enter (no output ticked, or one \
                  it does not have yet)"
                     .into(),
             );
@@ -633,7 +633,7 @@ impl AppState {
                 s.signal.text.push_str(t);
             }
             Page::AudioIo if s.signal.focus.is_some() => {}
-            Page::AudioIo => s.session.type_text(t),
+            Page::AudioIo => s.stream.type_text(t),
             Page::Calibration => s.cal.type_text(t),
             Page::Leq => {
                 // The band transfer step takes keys, not text, but for the place's name.
@@ -667,7 +667,7 @@ impl AppState {
             Page::AudioIo if s.signal.focus.is_some() => {
                 s.signal.text.pop();
             }
-            Page::AudioIo => s.session.backspace(),
+            Page::AudioIo => s.stream.backspace(),
             Page::Calibration if s.cal.typing() => s.cal.backspace(),
             Page::Calibration => self.cal_view_key(Chord::key(Key::Delete), None, out),
             Page::Leq if s.leq.as_ref().is_some_and(|d| d.transfer.is_some()) => {

@@ -477,16 +477,16 @@ impl ProgrammePane {
     }
 }
 
-/// What a Programme pane says when inputs it names are not in the session (or no session
-/// is open): `input 3 not in this session`, `inputs 3+4 not in this session`.
+/// What a Programme pane says when inputs it names are not in the stream (or no stream
+/// is open): `input 3 not in this stream`, `inputs 3+4 not in this stream`.
 pub fn missing_text(inputs: &[u16]) -> String {
     let n: Vec<String> = inputs
         .iter()
         .map(|c| (u32::from(*c) + 1).to_string())
         .collect();
     match n.len() {
-        1 => format!("input {} not in this session", n[0]),
-        _ => format!("inputs {} not in this session", n.join("+")),
+        1 => format!("input {} not in this stream", n[0]),
+        _ => format!("inputs {} not in this stream", n.join("+")),
     }
 }
 

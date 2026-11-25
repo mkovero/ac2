@@ -1,7 +1,7 @@
 //! Data-socket topics and subscription prefixes.
 //!
-//! Topic strings: `d/<meas>/<stream>` (measurement streams), `session/levels` and
-//! `session/preview` (input meters of the session and of a device preview), `timing`,
+//! Topic strings: `d/<meas>/<stream>` (measurement streams), `stream/levels` and
+//! `stream/preview` (input meters of the stream and of a device preview), `timing`,
 //! `evt`, `ka`, `audio/<channel>` (raw capture, rig to rig) and `bins/<meas>/<stage>` (a
 //! transfer's bins of one analysis stage).
 //! `<meas>` is the decimal [`MeasId`] without sign or leading zeros, so every topic has
@@ -97,12 +97,12 @@ pub enum Topic {
         /// Stream.
         stream: Stream,
     },
-    /// `session/levels`: meters of every input of the open session.
-    SessionLevels,
-    /// `session/preview`: meters of every input of the previewed device.
+    /// `stream/levels`: meters of every input of the open stream.
+    StreamLevels,
+    /// `stream/preview`: meters of every input of the previewed device.
     PreviewLevels,
-    /// `session/gonio`: goniometer points of the open session's pairs.
-    SessionGonio,
+    /// `stream/gonio`: goniometer points of the open stream's pairs.
+    StreamGonio,
     /// `preview/gonio`: goniometer points of the previewed device's pairs.
     PreviewGonio,
     /// `timing`: loopback timing monitor.
@@ -149,10 +149,10 @@ impl Topic {
         let s = std::str::from_utf8(b).map_err(|_| err())?;
         match s {
             "timing" => return Ok(Self::Timing),
-            "session/levels" => return Ok(Self::SessionLevels),
+            "stream/levels" => return Ok(Self::StreamLevels),
             "source/levels" => return Ok(Self::SourceLevels),
-            "session/preview" => return Ok(Self::PreviewLevels),
-            "session/gonio" => return Ok(Self::SessionGonio),
+            "stream/preview" => return Ok(Self::PreviewLevels),
+            "stream/gonio" => return Ok(Self::StreamGonio),
             "preview/gonio" => return Ok(Self::PreviewGonio),
             "evt" => return Ok(Self::Evt),
             "ka" => return Ok(Self::Ka),
@@ -199,10 +199,10 @@ impl fmt::Display for Topic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Data { meas, stream } => write!(f, "d/{}/{}", meas.0, stream.as_str()),
-            Self::SessionLevels => f.write_str("session/levels"),
+            Self::StreamLevels => f.write_str("stream/levels"),
             Self::SourceLevels => f.write_str("source/levels"),
-            Self::PreviewLevels => f.write_str("session/preview"),
-            Self::SessionGonio => f.write_str("session/gonio"),
+            Self::PreviewLevels => f.write_str("stream/preview"),
+            Self::StreamGonio => f.write_str("stream/gonio"),
             Self::PreviewGonio => f.write_str("preview/gonio"),
             Self::Timing => f.write_str("timing"),
             Self::Evt => f.write_str("evt"),
@@ -253,8 +253,8 @@ pub enum Subscription {
     AllData,
     /// Every stream of one measurement (`d/<meas>/`).
     Meas(MeasId),
-    /// The session's and the preview's input meters and the session's goniometer
-    /// (`session/`).
+    /// The stream's and the preview's input meters and the stream's goniometer
+    /// (`stream/`).
     InputMeters,
     /// Exactly one topic.
     Topic(Topic),
@@ -266,7 +266,7 @@ impl Subscription {
         match self {
             Self::AllData => b"d/".to_vec(),
             Self::Meas(m) => format!("d/{}/", m.0).into_bytes(),
-            Self::InputMeters => b"session/".to_vec(),
+            Self::InputMeters => b"stream/".to_vec(),
             Self::Topic(t) => t.to_bytes(),
         }
     }
@@ -279,19 +279,19 @@ impl Subscription {
             (Self::Meas(m), Topic::Data { meas, .. }) => m == meas,
             (
                 Self::InputMeters,
-                Topic::SessionLevels | Topic::PreviewLevels | Topic::SessionGonio,
+                Topic::StreamLevels | Topic::PreviewLevels | Topic::StreamGonio,
             ) => true,
             (Self::Topic(t), other) => t == other,
             _ => false,
         }
     }
 
-    /// The subscription whose [`Subscription::prefix`] is `b`: `d/`, `session/`,
+    /// The subscription whose [`Subscription::prefix`] is `b`: `d/`, `stream/`,
     /// `d/<meas>/` (canonical, as a topic spells it) or a whole topic.
     pub fn parse_prefix(b: &[u8]) -> Result<Self, TopicError> {
         match b {
             b"d/" => return Ok(Self::AllData),
-            b"session/" => return Ok(Self::InputMeters),
+            b"stream/" => return Ok(Self::InputMeters),
             _ => {}
         }
         if let Some(id) = b.strip_prefix(b"d/").and_then(|r| r.strip_suffix(b"/"))
@@ -337,9 +337,9 @@ mod tests {
             Topic::Evt,
             Topic::Ka,
             Topic::Timing,
-            Topic::SessionLevels,
+            Topic::StreamLevels,
             Topic::PreviewLevels,
-            Topic::SessionGonio,
+            Topic::StreamGonio,
             Topic::PreviewGonio,
             Topic::SourceLevels,
             Topic::Audio { channel: 0 },
@@ -359,9 +359,9 @@ mod tests {
                 .starts_with(&Subscription::InputMeters.prefix())
         );
         for t in [
-            Topic::SessionLevels,
+            Topic::StreamLevels,
             Topic::PreviewLevels,
-            Topic::SessionGonio,
+            Topic::StreamGonio,
         ] {
             assert!(
                 t.to_bytes()
@@ -370,8 +370,8 @@ mod tests {
             assert!(Subscription::InputMeters.matches(&t));
             assert!(!Subscription::AllData.matches(&t));
         }
-        assert!(Topic::parse(b"session/").is_err());
-        assert!(Topic::parse(b"session/levelsx").is_err());
+        assert!(Topic::parse(b"stream/").is_err());
+        assert!(Topic::parse(b"stream/levelsx").is_err());
         for bad in [
             &b"d/01/tf"[..],
             b"d/+1/tf",
@@ -395,7 +395,7 @@ mod tests {
             Subscription::Meas(MeasId(0)),
             Subscription::Meas(MeasId(12)),
             Subscription::Topic(Topic::Ka),
-            Subscription::Topic(Topic::SessionGonio),
+            Subscription::Topic(Topic::StreamGonio),
             Subscription::Topic(Topic::Data {
                 meas: MeasId(4),
                 stream: Stream::BandLeq,
@@ -404,7 +404,7 @@ mod tests {
         for s in subs {
             assert_eq!(Subscription::parse_prefix(&s.prefix()), Ok(s));
         }
-        for bad in [&b"d/01/"[..], b"d//", b"d/1/x/", b"", b"session", b"d"] {
+        for bad in [&b"d/01/"[..], b"d//", b"d/1/x/", b"", b"stream", b"d"] {
             assert!(Subscription::parse_prefix(bad).is_err(), "{bad:?}");
         }
     }

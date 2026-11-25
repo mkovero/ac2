@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use ac2_e2e::{Setup, SimDaemon, sim_daemon_with};
 use ac2_proto::model::{
     BackendKind, DeviceSelector, LeqConfig, LoopbackRoute, MeasConfig, MeasKind, MeasScope,
-    PeakWeighting, SessionConfig, SpecAveraging, SpectrumConfig, SplConfig, TimeWeighting,
+    PeakWeighting, SpecAveraging, SpectrumConfig, SplConfig, StreamConfig, TimeWeighting,
     TransferConfig, Weighting, Window,
 };
 use ac2_proto::topic::{Stream, Topic};
@@ -59,7 +59,7 @@ pub fn have_gpu(test: &str) -> bool {
 /// How the app describes the rig's link in its top bar.
 pub const DESCRIBE: &str = "simulated rig";
 
-/// A simulated rig set up as an operator's: a session on in 1–4 and out 1–2 (out 1 loops
+/// A simulated rig set up as an operator's: a stream on in 1–4 and out 1–2 (out 1 loops
 /// back to in 1 and reaches the room mics on in 2 and in 3), transfer measurements `Main L`
 /// (in 1 → in 2) and `Delay tower` (in 1 → in 3), the spectrum `Mic 1 FFT` and the SPL meter
 /// `FOH SPL` on in 2, every one running; and a client of the test's own on it.
@@ -84,7 +84,7 @@ impl Rig {
     pub fn start_with(edit: impl FnOnce(&mut ac2d::DaemonConfig)) -> R<Self> {
         let daemon = sim_daemon_with(Setup::Empty, edit)?;
         let cli = Cli::connect(daemon.endpoints())?;
-        cli.call(Command::SessionOpen { config: session() })?;
+        cli.call(Command::StreamOpen { config: stream() })?;
         for (want, config) in [MAIN_L, DELAY_TOWER, MIC_FFT, FOH_SPL]
             .into_iter()
             .zip(measurements())
@@ -103,8 +103,8 @@ impl Rig {
     }
 }
 
-fn session() -> SessionConfig {
-    SessionConfig {
+fn stream() -> StreamConfig {
+    StreamConfig {
         backend: Some(BackendKind::Fake),
         input_device: DeviceSelector::Default,
         output_device: DeviceSelector::Default,
@@ -226,7 +226,7 @@ pub fn harness(opts: AppOptions) -> Harness<'static, App> {
 pub fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> bool) {
     let t0 = Instant::now();
     // The sidebar's input labels take the device's channel names once the list arrives.
-    let named = |a: &App| a.state.open_session().is_none() || a.state.rig.devices.is_some();
+    let named = |a: &App| a.state.open_stream().is_none() || a.state.rig.devices.is_some();
     while !(cond(h.state()) && named(h.state())) {
         if t0.elapsed() > WAIT {
             let a = h.state();

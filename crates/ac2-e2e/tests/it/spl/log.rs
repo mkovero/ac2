@@ -49,7 +49,7 @@ fn run_seconds(s: &AppState) -> Option<u64> {
     }
 }
 
-/// The run clock and a new log from an empty daemon, using the app: a session and an SPL
+/// The run clock and a new log from an empty daemon, using the app: a stream and an SPL
 /// meter from the app; the Leq view's caption counts the meter's log (`running 0:00:05
 /// since … · LAeq total …`); the palette's new log asks first, naming the run that ends; N
 /// keeps it, Enter starts a new log, and the clock starts again from zero.

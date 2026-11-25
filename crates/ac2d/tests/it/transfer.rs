@@ -89,8 +89,8 @@ fn depth_policy_is_validated_and_kept() {
         other => panic!("{other:?}"),
     };
     // The job starts with it.
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
     h.shutdown();
@@ -106,8 +106,8 @@ fn resolution_sets_the_grid_and_frames_say_what_is_unresolved() {
     cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let mut m = transfer("main");
     c.ok(Command::MeasCreate { config: m.clone() });
@@ -172,8 +172,8 @@ fn transfer_magnitude_delay_timing_and_ir() {
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
     let timing = Sub::connect(h.context(), h.data_endpoint(), &[b"timing"]);
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     c.ok(Command::MeasCreate {
         config: transfer("main"),
@@ -540,8 +540,8 @@ fn an_ambiguous_finding_awaits_a_pick() {
     cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     c.ok(Command::MeasCreate {
         config: transfer("main"),
@@ -683,8 +683,8 @@ fn tracking_applies_a_fractional_arrival() {
     cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     c.ok(Command::MeasCreate {
         config: transfer("main"),
@@ -786,9 +786,9 @@ fn tenth_millisecond_steps_at_96_khz_return_exactly() {
     .unwrap();
     let h = Daemon::start(config(backend, inproc("tf-96k"))).unwrap();
     let (mut c, _sub) = connect(&h, &[]);
-    let mut s = session(true);
+    let mut s = stream(true);
     s.sample_rate_hz = Some(fs);
-    c.ok(Command::SessionOpen { config: s });
+    c.ok(Command::StreamOpen { config: s });
     c.ok(Command::MeasCreate {
         config: transfer("main"),
     });
@@ -837,8 +837,8 @@ fn a_retried_delay_find_runs_once() {
     init_log();
     let h = Daemon::start(config(manual_rig(), inproc("tf-find-once"))).unwrap();
     let (mut c, _sub) = connect(&h, &[]);
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     c.ok(Command::MeasCreate {
         config: transfer("main"),
@@ -868,8 +868,8 @@ fn filled_rises_after_a_reset_and_a_delay_step_restarts_it() {
     let backend = manual_rig();
     let h = Daemon::start(steady_config(backend.clone(), inproc("tf-filled"))).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let mut m = transfer("main");
     if let MeasKind::Transfer { config } = &mut m.kind {
@@ -951,8 +951,8 @@ fn a_find_across_a_generator_stop_says_so() {
     cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     c.ok(Command::MeasCreate {
         config: transfer("main"),

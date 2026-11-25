@@ -1342,7 +1342,7 @@
     1
    ],
    "sample_rate_hz": 48000,
-   "session_epoch": 2,
+   "stream_epoch": 2,
    "start_sample": 96000,
    "started_at": 1789999100000000000,
    "started_by": "alice",

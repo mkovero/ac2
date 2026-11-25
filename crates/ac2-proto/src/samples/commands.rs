@@ -12,12 +12,12 @@ pub fn commands() -> Vec<Command> {
         Command::Hello {
             client: "ac2-cli 0.0.0".into(),
         },
-        Command::SessionDevices,
-        Command::SessionOpen {
-            config: super::builders::remote_session_config(),
+        Command::StreamDevices,
+        Command::StreamOpen {
+            config: super::builders::remote_stream_config(),
         },
-        Command::SessionClose,
-        Command::SessionStatus,
+        Command::StreamClose,
+        Command::StreamStatus,
         Command::GenAcquire { force: false },
         Command::GenSet {
             lease_token: token(),
@@ -167,14 +167,14 @@ pub fn commands() -> Vec<Command> {
             discard: true,
         },
         Command::FileList,
-        Command::SessionInputs {
+        Command::StreamInputs {
             inputs: inputs().inputs,
             pairs: inputs().pairs,
         },
         Command::CalDelete {
             key: CalRef::Line(line_cal_key()),
         },
-        Command::SessionPreview {
+        Command::StreamPreview {
             backend: BackendKind::Jack,
             device: DeviceId("jack".into()),
             inputs: vec![
@@ -193,8 +193,8 @@ pub fn commands() -> Vec<Command> {
                 name: None,
             }],
         },
-        Command::SessionPreviewStop,
-        Command::SessionDetectLoopback {
+        Command::StreamPreviewStop,
+        Command::StreamDetectLoopback {
             lease_token: token(),
             backend: BackendKind::Jack,
             input_device: DeviceId("jack".into()),
@@ -248,7 +248,7 @@ pub fn commands() -> Vec<Command> {
         },
         Command::RecStop,
         Command::RecList,
-        Command::SessionReplay {
+        Command::StreamReplay {
             recording: RecordingRef::Name {
                 name: "soundcheck".into(),
             },
@@ -258,7 +258,7 @@ pub fn commands() -> Vec<Command> {
             ceiling: Dbfs(-40.0),
             confirm_raise: true,
         },
-        Command::SessionOutputs {
+        Command::StreamOutputs {
             outputs: vec![
                 OutputSetup {
                     channel: 0,
@@ -347,7 +347,7 @@ pub fn commands() -> Vec<Command> {
             meas: MeasId(1),
             layout: Some(pane_layout()),
         },
-        Command::SessionControlPanel {
+        Command::StreamControlPanel {
             backend: BackendKind::Asio,
             device: DeviceId("Fireface USB".into()),
         },

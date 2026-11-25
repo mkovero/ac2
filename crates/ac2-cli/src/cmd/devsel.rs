@@ -1,4 +1,4 @@
-//! Picking a listed device for one direction, shared by `session open` (the daemon's
+//! Picking a listed device for one direction, shared by `stream open` (the daemon's
 //! listing) and `selftest duplex` (the backend's own).
 //!
 //! Some hosts list each direction as its own device (an input-only and an output-only

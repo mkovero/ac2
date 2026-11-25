@@ -19,14 +19,14 @@ pub fn status_lines(r: &RemoteState, now: WallNs) -> Vec<String> {
 fn line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
     let mut parts = vec![format!("from levels {}", s.name), evidence(r, s, Some(now))];
     if s.link == RemoteLink::Up {
-        parts.push(match &s.session {
+        parts.push(match &s.stream {
             Some(x) => format!(
                 "{}, {} input{}",
                 rate_text(x.sample_rate_hz),
                 x.channels.len(),
                 if x.channels.len() == 1 { "" } else { "s" }
             ),
-            None => "no session".into(),
+            None => "no stream".into(),
         });
     }
     // The relation already says the link is down; the link's own state says why.
@@ -47,7 +47,7 @@ fn line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
 /// What a standing relation rests on, where a reader could take it for the audio-fed one.
 pub const FROM_LEVELS: &str = "measured from the rigs' level frames, no audio streamed";
 
-/// What rig `s`'s levels say of the clocks, in `status_lines`' words without its session
+/// What rig `s`'s levels say of the clocks, in `status_lines`' words without its stream
 /// or its link, the figure naming whose clock runs against whose: *clocks agree · ketunkolo
 /// runs +0.12 ppm against this rig over 60 s · marks for 5 min 12 s*. `now`: the reporting
 /// daemon's wall time; `None` while it is not known, which leaves the marks' age out.
@@ -163,7 +163,7 @@ pub fn link_short(link: &RemoteLink) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ac2_proto::model::{MinuteCount, NotLockedReason, PeerClock, StandingSession};
+    use ac2_proto::model::{MinuteCount, NotLockedReason, PeerClock, StandingStream};
     use ac2_proto::units::{RigId, Seconds};
 
     fn rig(link: RemoteLink, relation: PeerRelation, ppm: Option<f64>) -> RemoteState {
@@ -172,7 +172,7 @@ mod tests {
                 rig: RigId(2),
                 name: "ketunkolo".into(),
                 link: link.clone(),
-                session: (link == RemoteLink::Up).then(|| StandingSession {
+                stream: (link == RemoteLink::Up).then(|| StandingStream {
                     sample_rate_hz: 96_000,
                     channels: vec![0, 1, 4],
                 }),
@@ -328,11 +328,11 @@ mod tests {
             one(&rig(
                 up,
                 PeerRelation::CantTell {
-                    reason: CantTellReason::NoSession { rig: RigId(1) }
+                    reason: CantTellReason::NoStream { rig: RigId(1) }
                 },
                 None
             )),
-            "from levels ketunkolo · CLOCKS: CAN'T TELL (this rig has no audio session) · \
+            "from levels ketunkolo · CLOCKS: CAN'T TELL (this rig has no audio stream) · \
              96 kHz, 3 inputs · link up"
         );
         assert_eq!(

@@ -2,7 +2,7 @@
 //! daemon on the fake rig in real time, the async client holding the lease. The loopback
 //! input (output 1 → input 1) is the output path; an SPL meter on it shows what leaves.
 //!
-//! Arming and re-routing never reopen the stream (the session epoch, the running meter and,
+//! Arming and re-routing never reopen the stream (the stream epoch, the running meter and,
 //! on JACK, every port connection stay); the output plays whenever the state says firing,
 //! and an expired lease is visible in the state before a fresh lease plays again.
 #![allow(clippy::unwrap_used)]
@@ -17,7 +17,7 @@ use ac2_proto::model::{
     GenAction, GeneratorDesired, GeneratorSettings, Signal, SplConfig, State, TimeWeighting,
     Weighting,
 };
-use ac2_proto::units::{Dbfs, Hz, MeasId, SessionEpoch};
+use ac2_proto::units::{Dbfs, Hz, MeasId, StreamEpoch};
 use ac2_proto::{Command, Stream, Topic};
 use ac2_zmq::{AuthorizedKeys, CurveClient, KeyPair};
 use ac2d::{Daemon, NetworkSecurity};
@@ -94,8 +94,8 @@ async fn slow_remote_client_fires_reroutes_and_recovers_from_expiry() {
     c.wait_synced(Duration::from_secs(5)).await.unwrap();
     assert_eq!(c.client_id().0, "laptop", "identity from CURVE");
 
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();
@@ -118,9 +118,9 @@ async fn slow_remote_client_fires_reroutes_and_recovers_from_expiry() {
         stream: Stream::Spl,
     }))
     .unwrap();
-    let epoch = state_until(&c, "session", |s| s.session.open.is_some())
+    let epoch = state_until(&c, "stream", |s| s.stream.open.is_some())
         .await
-        .session
+        .stream
         .epoch;
     let before = spl_until(&c, "a running meter", |m| m.duration.0 > 0.5).await;
     assert!(silent(&before), "nothing plays before firing: {before:?}");
@@ -136,7 +136,7 @@ async fn slow_remote_client_fires_reroutes_and_recovers_from_expiry() {
     })
     .await;
     assert!(silent(&armed), "arming does not emit: {armed:?}");
-    let same_epoch = |s: &State| s.session.epoch == epoch;
+    let same_epoch = |s: &State| s.stream.epoch == epoch;
     assert!(
         same_epoch(&c.view().state.clone().unwrap()),
         "arming never reopens"
@@ -201,8 +201,8 @@ async fn slow_remote_client_fires_reroutes_and_recovers_from_expiry() {
     lease.set(desired(vec![0], true, true)).await.unwrap();
     spl_until(&c, "the tone under a fresh lease", plays).await;
     assert_eq!(
-        c.view().state.clone().unwrap().session.epoch,
-        SessionEpoch(epoch.0),
+        c.view().state.clone().unwrap().stream.epoch,
+        StreamEpoch(epoch.0),
         "no reopen at any point"
     );
     lease.end().await.unwrap();

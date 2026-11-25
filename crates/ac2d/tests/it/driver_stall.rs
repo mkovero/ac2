@@ -83,8 +83,8 @@ fn start(name: &str) -> (ac2d::Handle, Client, Client, LeaseToken, Arc<Knobs>) {
     let h = Daemon::start(cfg).unwrap();
     let mut a = Client::connect(h.context(), h.ctrl_endpoint());
     let b = Client::connect(h.context(), h.ctrl_endpoint());
-    a.ok(Command::SessionOpen {
-        config: session(false),
+    a.ok(Command::StreamOpen {
+        config: stream(false),
     });
     let tok = a
         .ok(Command::GenAcquire { force: false })
@@ -98,7 +98,7 @@ fn start(name: &str) -> (ac2d::Handle, Client, Client, LeaseToken, Arc<Knobs>) {
 fn preview(c: &mut Client) -> Request {
     Request::new(
         c.next_id(),
-        Command::SessionPreview {
+        Command::StreamPreview {
             backend: BackendKind::Fake,
             device: fake_dev(),
             inputs: Vec::<PreviewInput>::new(),
@@ -149,7 +149,7 @@ fn hold(a: &mut Client, tok: LeaseToken, span: Duration) {
 fn listing_or_previewing_on_a_slow_driver_answers_lease_refreshes() {
     let (h, mut a, mut b, tok, _slow) = start("slow-driver-list");
 
-    let devices = Request::new(b.next_id(), Command::SessionDevices);
+    let devices = Request::new(b.next_id(), Command::StreamDevices);
     b.send(&devices);
     hold(&mut a, tok, SLOW + Duration::from_millis(300));
     let r = b.recv(Duration::from_secs(5)).expect("the devices reply");
@@ -166,13 +166,13 @@ fn listing_or_previewing_on_a_slow_driver_answers_lease_refreshes() {
 }
 
 #[test]
-fn a_slow_session_open_does_not_count_against_the_lease() {
+fn a_slow_stream_open_does_not_count_against_the_lease() {
     let (h, mut a, mut b, tok, _slow) = start("slow-driver-open");
     std::thread::sleep(Duration::from_millis(300));
     a.ok(Command::GenRefresh { lease_token: tok });
     // The loop is blocked opening the device for longer than the lease runs.
-    b.ok(Command::SessionOpen {
-        config: session(false),
+    b.ok(Command::StreamOpen {
+        config: stream(false),
     });
     a.ok(Command::GenRefresh { lease_token: tok });
     drop(h);
@@ -185,7 +185,7 @@ fn a_detection_while_a_preview_opens_is_refused_in_time_and_keeps_the_lease() {
     a.ok(Command::GenRefresh { lease_token: tok });
     let t = Instant::now();
     let e = a
-        .call(Command::SessionDetectLoopback {
+        .call(Command::StreamDetectLoopback {
             lease_token: tok,
             backend: BackendKind::Fake,
             input_device: fake_dev(),
@@ -214,8 +214,8 @@ fn an_open_while_a_preview_opens_is_refused_in_time_and_keeps_the_lease() {
     a.ok(Command::GenRefresh { lease_token: tok });
     let t = Instant::now();
     let e = a
-        .call(Command::SessionOpen {
-            config: session(false),
+        .call(Command::StreamOpen {
+            config: stream(false),
         })
         .unwrap_err();
     assert!(
@@ -228,8 +228,8 @@ fn an_open_while_a_preview_opens_is_refused_in_time_and_keeps_the_lease() {
     hold(&mut a, tok, 2 * SLOW);
     preview_refused(&b, &p);
     // Asked again once the preview has let the device go, the open goes through.
-    a.ok(Command::SessionOpen {
-        config: session(false),
+    a.ok(Command::StreamOpen {
+        config: stream(false),
     });
     a.ok(Command::GenRefresh { lease_token: tok });
     drop(h);
@@ -240,7 +240,7 @@ fn listings_asked_while_one_runs_wait_for_it() {
     let (h, _a, mut b, _tok, knobs) = start("slow-driver-lists");
     let before = knobs.lists.load(Ordering::SeqCst);
     let asks: Vec<Request> = (0..3)
-        .map(|_| Request::new(b.next_id(), Command::SessionDevices))
+        .map(|_| Request::new(b.next_id(), Command::StreamDevices))
         .collect();
     for r in &asks {
         b.send(r);

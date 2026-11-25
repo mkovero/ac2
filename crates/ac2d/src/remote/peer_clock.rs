@@ -43,7 +43,7 @@ pub(crate) struct Evidence<'a> {
     /// Why there is no feed when there is none: no audio for the joined feed; for the
     /// standing feed what stopped its marks.
     pub(crate) absent: CantTellReason,
-    /// The two sessions' nominal rates differ: (theirs, ours).
+    /// The two streams' nominal rates differ: (theirs, ours).
     pub(crate) other_rate: Option<(u32, u32)>,
 }
 
@@ -186,7 +186,7 @@ impl PeerClockWatch {
     /// time `wall`; whether the relation changed.
     pub(crate) fn update(&mut self, e: &Evidence<'_>, now: Duration, wall: WallNs) -> bool {
         let judged = judge(e);
-        // Another nominal rate is a fact of the two sessions, not of a wandering rate: it
+        // Another nominal rate is a fact of the two streams, not of a wandering rate: it
         // holds exactly as long as it is so.
         let held = matches!(
             self.clock.relation,

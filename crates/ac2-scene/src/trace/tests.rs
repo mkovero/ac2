@@ -47,7 +47,7 @@ fn mic_wording() {
     assert_eq!(curve_note(None, None), None);
 }
 
-const EPOCH: SessionEpoch = SessionEpoch(3);
+const EPOCH: StreamEpoch = StreamEpoch(3);
 
 fn log_freqs(n: usize) -> Vec<f64> {
     // 20 Hz … 20 kHz, 48 per octave-ish.
@@ -217,7 +217,7 @@ fn nudge_and_independent() {
     let to = b.trace(
         4,
         TimeBase::Shared {
-            epoch: SessionEpoch(9),
+            epoch: StreamEpoch(9),
             delay: Seconds(0.02),
         },
     );
@@ -428,7 +428,7 @@ fn stepped(wanted: Option<TraceKey>, step: f64) -> (Vec<DisplayTrace>, Vec<Displ
     let cap = Data::delay(300, tau, tau);
     let run = Data::delay(300, run_tau, run_tau);
     let mut stamp = ac2_proto::samples::stamp(None);
-    stamp.session_epoch = EPOCH;
+    stamp.stream_epoch = EPOCH;
     let draw = |frame: &TfFrame| {
         let live = TfTrace::live(
             frame,

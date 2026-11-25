@@ -13,7 +13,7 @@ use ac2_ui::keys::CommandId;
 use ac2_ui::state::{AppState, Msg, Overlay, Severity};
 use std::time::{Duration, Instant};
 
-/// Leq windows with limits from an empty daemon, using the app: the session from its dialog,
+/// Leq windows with limits from an empty daemon, using the app: the stream from its dialog,
 /// an SPL meter from the palette, its windows from the Leq dialog by keys (a 5 s and a 10 s
 /// window limited to 85 dB), the stimulus from the keys. Pink noise at −20 dBFS reads about
 /// 91 dB SPL (A) on the calibrated mic: both windows' columns (the default layout) and tiles turn

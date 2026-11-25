@@ -143,7 +143,7 @@ impl Drop for Rig {
     }
 }
 
-/// Steps the stream each session opens, a batch of blocks whenever the daemon has read the
+/// Steps the stream each stream opens, a batch of blocks whenever the daemon has read the
 /// last: a real device cannot outrun its reader, and an overflow would be audio lost that
 /// no test asked for.
 fn drive(backend: &FakeBackend, stop: &AtomicBool, frames: &AtomicU64) {

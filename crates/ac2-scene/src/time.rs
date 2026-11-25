@@ -65,7 +65,7 @@ pub enum Freshness {
     Stopped {
         age_s: f64,
     },
-    /// The session's audio stopped: no frame can come until the daemon reopens it. The
+    /// The stream's audio stopped: no frame can come until the daemon reopens it. The
     /// AUDIO STOPPED banner says why; a per-curve age would only repeat it less clearly.
     AudioStopped {
         age_s: f64,

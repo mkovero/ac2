@@ -64,7 +64,7 @@ struct Inner {
 }
 
 impl Rig {
-    /// The session open with Main L, Delay tower, Mic 1 FFT and FOH SPL running.
+    /// The stream open with Main L, Delay tower, Mic 1 FFT and FOH SPL running.
     pub fn start() -> Self {
         Self::scene("base")
     }
@@ -279,7 +279,7 @@ impl Inner {
             client_id: Some(ClientId("ac2-ui test".into())),
             phase: Phase::Live,
             incarnation: Some(INCARNATION),
-            session_epoch: Some(self.state.session.epoch),
+            stream_epoch: Some(self.state.stream.epoch),
             rev: REV,
             state: Some(Arc::clone(&self.state)),
             last_ka: Some(now),
@@ -307,7 +307,7 @@ impl Inner {
         FrameStamp {
             seq: self.seq,
             audio_sample: SampleIndex(self.seq * 4800),
-            session_epoch: self.state.session.epoch,
+            stream_epoch: self.state.stream.epoch,
             daemon_incarnation: INCARNATION,
             config_rev: REV,
             config_applied_at: SampleIndex(0),

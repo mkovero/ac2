@@ -71,8 +71,8 @@ def preflight(rig: dict, ac2: Ac2, rew: Rew | None, want: set[str], strict: bool
         rep["ok"].append(f"DUT binary {b}")
     st = ac2.status() or {}
     rep["ac2_build"] = st.get("build_id")
-    if not (st.get("session") or {}).get("open"):
-        rep["warn"].append("ac2: no session open (the run opens one with [ac2].session_open)")
+    if not (st.get("stream") or {}).get("open"):
+        rep["warn"].append("ac2: no stream open (the run opens one with [ac2].stream_open)")
     ceil = ac2.ceiling() or {}
     rep["ac2_ceiling"] = ceil
     bound = float(rig["rig"]["system_max_dbfs"])
@@ -198,7 +198,7 @@ def main(a) -> int:
     try:
         if stages.dropin_path(rig).exists():
             stages.remove_dropin(ctx)
-        stages.ensure_session(ctx)
+        stages.ensure_stream(ctx)
         if rew is not None:
             snap = rew.snapshot()
             (out / "cal").mkdir(exist_ok=True)
@@ -356,7 +356,7 @@ def unpatch_ac2(ctx: stages.Ctx, pname: str) -> int:
     if not errs:
         print(f"[{pname}] ac2's inputs restored: {rec['saved_inputs']}", flush=True)
         return 0
-    cmd = " ".join(["ac2", *map(str, ctx.rig["ac2"]["session_open"])])
+    cmd = " ".join(["ac2", *map(str, ctx.rig["ac2"]["stream_open"])])
     print(f"!!! ac2's inputs were NOT restored after the DUT patch: {'; '.join(errs)}.\n"
           f"!!! Its captures may still come from the DUT. Run `{cmd}` NOW to reconnect them.", flush=True)
     return 4

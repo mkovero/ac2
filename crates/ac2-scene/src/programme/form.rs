@@ -43,7 +43,7 @@ pub const FIRST_BAR_HINT: &str = "by name; mics show levels, no loudness";
 pub const MORE_BAR_HINT: &str = "← past the first input: none";
 
 /// Why the chooser's row or the dialog cannot meter.
-pub const NO_INPUTS: &str = "no inputs in the session to meter";
+pub const NO_INPUTS: &str = "no inputs in the stream to meter";
 pub const CHOOSE_FIRST: &str = "choose input 1";
 pub const BARS_DISTINCT: &str = "each row names another input, 8 at most";
 

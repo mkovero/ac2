@@ -4,7 +4,7 @@ use super::*;
 
 mod settings;
 
-/// The health meter after the session line: the daemon's host CPU, its callback load and
+/// The health meter after the stream line: the daemon's host CPU, its callback load and
 /// xruns, the data rate and the window's frame rate, from figures the test sets (the rig's
 /// keepalives and this window's own, fed at chosen instants).
 #[test]
@@ -26,8 +26,8 @@ fn top_bar_health_meter() {
         audio: Some(AudioHealth {
             load: Some(0.14),
             peak: Some(0.31),
-            session_load: Some(0.12),
-            session_peak: Some(0.48),
+            stream_load: Some(0.12),
+            stream_peak: Some(0.48),
             xruns: 0,
         }),
     });
@@ -99,8 +99,8 @@ fn top_bar_line_scrolls_when_narrow() {
         audio: Some(AudioHealth {
             load: Some(0.14),
             peak: Some(0.31),
-            session_load: Some(0.12),
-            session_peak: Some(0.48),
+            stream_load: Some(0.12),
+            stream_peak: Some(0.48),
             xruns: 0,
         }),
     });

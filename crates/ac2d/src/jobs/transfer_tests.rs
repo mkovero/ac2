@@ -85,7 +85,7 @@ fn stage_bins_take_the_mic_curve_off_per_bin() {
             meas: MeasId(1),
             cfg,
             config_rev: Rev(1),
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
         },
         FS,
         (0, 1),

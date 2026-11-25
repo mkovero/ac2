@@ -133,14 +133,14 @@ fn a_damaged_state_file_shows_a_banner() {
     );
 }
 
-/// A stopped session's audio reaches every pane's banners in place of STALE, and the top
-/// bar's texts; it clears when the daemon reopens the session.
+/// A stopped stream's audio reaches every pane's banners in place of STALE, and the top
+/// bar's texts; it clears when the daemon reopens the stream.
 #[test]
-fn stopped_audio_shows_a_banner_until_the_session_is_back() {
+fn stopped_audio_shows_a_banner_until_the_stream_is_back() {
     use ac2_proto::model::{AudioStopped, Recovery, StopCause};
     let mut t = T::new();
     let mut s = daemon_state();
-    s.session.stopped = Some(AudioStopped {
+    s.stream.stopped = Some(AudioStopped {
         since: WallNs(0),
         cause: StopCause::NotDelivering { after_ms: 1000 },
         recovery: Recovery::Waiting {
@@ -166,7 +166,7 @@ fn stopped_audio_shows_a_banner_until_the_session_is_back() {
         bar.as_deref(),
         Some("audio stopped · reopening (attempt 2, next in 5 s)")
     );
-    s.session.stopped = None;
+    s.stream.stopped = None;
     t.conn(mirror(s));
     let st = crate::scenes::status(&t.st, &[], None, now());
     assert!(ac2_scene::banner::banners(&st).is_empty());

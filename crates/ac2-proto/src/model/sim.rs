@@ -228,8 +228,8 @@ pub enum SimCancel {
     PlanChanged,
     /// Its walk was deleted.
     WalkDeleted,
-    /// The audio session closed.
-    SessionClosed,
+    /// The audio stream closed.
+    StreamClosed,
 }
 
 /// Where a simulation's absorption comes from.

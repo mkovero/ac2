@@ -1,5 +1,5 @@
 use super::*;
-use ac2_proto::units::{Hz, SessionEpoch};
+use ac2_proto::units::{Hz, StreamEpoch};
 
 fn freqs() -> Vec<f64> {
     (0..480)
@@ -33,7 +33,7 @@ fn delay_and_polarity_come_back_through_the_operands_own_delays() {
     // own arrival removed, so both columns read flat.
     let ca = columns(&f, |_| Complex64::new(1.0, 0.0));
     let cb = columns(&f, |_| Complex64::new(-1.0, 0.0));
-    let epoch = Some(SessionEpoch(3));
+    let epoch = Some(StreamEpoch(3));
     let a = Input {
         columns: &ca,
         delay: 0.0137,
@@ -74,7 +74,7 @@ fn an_alignment_needs_phase_and_one_time_base() {
         delay: 0.0,
         time_base: e,
     };
-    let e = Some(SessionEpoch(1));
+    let e = Some(StreamEpoch(1));
     assert_eq!(
         align(&inp(&ca, e), &inp(&no_phase, e), &f, band(), Seconds(0.05)).expect_err("refused"),
         MathError::NoPhase(1)
@@ -82,7 +82,7 @@ fn an_alignment_needs_phase_and_one_time_base() {
     assert_eq!(
         align(
             &inp(&ca, e),
-            &inp(&ca, Some(SessionEpoch(2))),
+            &inp(&ca, Some(StreamEpoch(2))),
             &f,
             band(),
             Seconds(0.05)
@@ -100,7 +100,7 @@ fn an_alignment_needs_phase_and_one_time_base() {
 fn a_band_off_the_grid_publishes_the_plain_sum() {
     let f = freqs();
     let ca = columns(&f, |_| Complex64::new(1.0, 0.0));
-    let e = Some(SessionEpoch(1));
+    let e = Some(StreamEpoch(1));
     let a = Input {
         columns: &ca,
         delay: 0.0,

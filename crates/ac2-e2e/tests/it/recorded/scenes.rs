@@ -6,8 +6,8 @@ use ac2_proto::model::{
     AlignBand, ArtnetTarget, Bandwidth, CurveChoice, DepthPolicy, EqBody, EqEdit, EqRealisation,
     EqSection, EqShape, InputKind, InputSetup, Marker, MarkerKind, MathConfig, MathDomain,
     MathExpr, MathOp, MeasConfig, MeasKind, MeasScope, Measurement, Operand, PeakQ, PlanSpec,
-    Resolution, SessionConfig, ShelfFreq, ShelfOrder, ShelfSlope, Smoothing, SmoothingFraction,
-    SmoothingMode, SpecResolution, SpectrumConfig, SplConfig, TfAveraging, TimeWeighting,
+    Resolution, ShelfFreq, ShelfOrder, ShelfSlope, Smoothing, SmoothingFraction, SmoothingMode,
+    SpecResolution, SpectrumConfig, SplConfig, StreamConfig, TfAveraging, TimeWeighting,
     TraceOwner, TransferConfig, WalkKind, WalkPointSpec, Weighting, ZoneSpec,
 };
 use ac2_proto::units::{Db, DbSpl, Hz, MeasId, Seconds};
@@ -15,15 +15,15 @@ use ac2_proto::{Command, ReplyBody};
 
 use crate::harness::{Cli, R};
 
-/// The session every rig opens: the simulated rig's four inputs and two outputs at 48 kHz,
+/// The stream every rig opens: the simulated rig's four inputs and two outputs at 48 kHz,
 /// out 1 looped back on in 1.
-pub fn session() -> SessionConfig {
-    SessionConfig {
+pub fn stream() -> StreamConfig {
+    StreamConfig {
         input_channels: vec![0, 1, 2, 3],
         output_channels: 2,
         sample_rate_hz: Some(48_000),
         buffer_frames: Some(256),
-        ..ac2_ui::sim::demo_session()
+        ..ac2_ui::sim::demo_stream()
     }
 }
 
@@ -89,10 +89,10 @@ fn id_of(cli: &Cli, name: &str) -> R<MeasId> {
         .ok_or_else(|| format!("no measurement {name}").into())
 }
 
-/// The session open with two transfer positions, a spectrum and an SPL meter, all running:
+/// The stream open with two transfer positions, a spectrum and an SPL meter, all running:
 /// Main L following its delay from 12.5 ms, Delay tower held at 677 samples.
 pub fn rig(cli: &Cli) -> R {
-    cli.call(Command::SessionOpen { config: session() })?;
+    cli.call(Command::StreamOpen { config: stream() })?;
     let main = start(cli, session_meas("Main L", transfer(1)))?;
     let tower = start(cli, session_meas("Delay tower", transfer(2)))?;
     start(cli, session_meas("Mic 1 FFT", spectrum(1)))?;
@@ -357,7 +357,7 @@ pub fn calibrations(cli: &Cli) -> R {
             input: None,
         })?;
     }
-    cli.call(Command::SessionInputs {
+    cli.call(Command::StreamInputs {
         inputs: vec![InputSetup {
             channel: 1,
             kind: InputKind::Mic {

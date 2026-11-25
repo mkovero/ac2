@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::frame::{DaemonHealth, GenSummary, KaMeta};
 use ac2_proto::model::{State, TimingState};
-use ac2_proto::units::{ClientId, DaemonIncarnation, Rev, SessionEpoch};
+use ac2_proto::units::{ClientId, DaemonIncarnation, Rev, StreamEpoch};
 use ac2_proto::{Change, Event, FrameStamp, Patch, StateSnapshot};
 
 /// No `ka` for this long: the daemon is not responding.
@@ -92,8 +92,8 @@ pub struct MirrorView {
     pub phase: Phase,
     /// Incarnation of the daemon the state belongs to.
     pub incarnation: Option<DaemonIncarnation>,
-    /// Newest session epoch seen (ka, snapshot or session event).
-    pub session_epoch: Option<SessionEpoch>,
+    /// Newest stream epoch seen (ka, snapshot or stream event).
+    pub stream_epoch: Option<StreamEpoch>,
     /// Last applied rev.
     pub rev: Rev,
     /// Mirrored state; `None` until the first snapshot (and after an incarnation change).
@@ -151,7 +151,7 @@ pub struct Mirror {
     enabled: bool,
     phase: Phase,
     incarnation: Option<DaemonIncarnation>,
-    epoch: Option<SessionEpoch>,
+    epoch: Option<StreamEpoch>,
     rev: Rev,
     state: Option<Arc<State>>,
     /// Events not yet applicable (before the snapshot, or after a gap), by rev.
@@ -196,7 +196,7 @@ impl Mirror {
         MirrorView {
             phase: self.phase,
             incarnation: self.incarnation,
-            session_epoch: self.epoch,
+            stream_epoch: self.epoch,
             rev: self.rev,
             state: self.state.clone(),
             last_ka: self.last_ka,
@@ -213,7 +213,7 @@ impl Mirror {
         }
     }
 
-    fn bump_epoch(&mut self, e: SessionEpoch) {
+    fn bump_epoch(&mut self, e: StreamEpoch) {
         if self.epoch.is_none_or(|cur| e > cur) {
             self.epoch = Some(e);
         }
@@ -242,7 +242,7 @@ impl Mirror {
         if self.incarnation != Some(stamp.daemon_incarnation) {
             let restarted = self.incarnation.is_some();
             self.incarnation = Some(stamp.daemon_incarnation);
-            self.epoch = Some(stamp.session_epoch);
+            self.epoch = Some(stamp.stream_epoch);
             self.state = None;
             self.rev = Rev(0);
             self.pending.clear();
@@ -261,7 +261,7 @@ impl Mirror {
             };
             return self.request(need, now);
         }
-        self.bump_epoch(stamp.session_epoch);
+        self.bump_epoch(stamp.stream_epoch);
         if !self.enabled {
             return None;
         }
@@ -317,8 +317,8 @@ impl Mirror {
             return None;
         }
         self.incarnation = Some(snap.daemon_incarnation);
-        self.bump_epoch(snap.session_epoch);
-        self.bump_epoch(snap.state.session.epoch);
+        self.bump_epoch(snap.stream_epoch);
+        self.bump_epoch(snap.state.stream.epoch);
         self.rev = snap.rev;
         self.state = Some(Arc::new(snap.state));
         self.phase = Phase::Live;
@@ -435,7 +435,7 @@ impl Mirror {
 
     fn apply(&mut self, ev: Event) {
         self.rev = ev.rev;
-        if let Change::Session(s) = &ev.change {
+        if let Change::Stream(s) = &ev.change {
             self.bump_epoch(s.epoch);
         }
         if let Some(state) = self.state.as_mut() {
@@ -460,7 +460,7 @@ fn upsert<T, K: PartialEq>(v: &mut Vec<T>, patch: Patch<T, K>, key: impl Fn(&T) 
 /// Applies one change to a state: assignment of the entity's full new value.
 pub fn apply_change(s: &mut State, c: Change) {
     match c {
-        Change::Session(x) => s.session = x,
+        Change::Stream(x) => s.stream = x,
         Change::Measurement(p) => upsert(&mut s.measurements, p, |m| m.id),
         Change::Trace(p) => upsert(&mut s.traces, p, |t| t.id),
         Change::Generator(g) => s.generator = g,
@@ -525,7 +525,7 @@ mod tests {
             state: samples::state(),
             rev: Rev(rev),
             daemon_incarnation: DaemonIncarnation(inc),
-            session_epoch: SessionEpoch(2),
+            stream_epoch: StreamEpoch(2),
         }
     }
 

@@ -100,7 +100,7 @@ fn the_simulated_rig_is_an_ac2d_the_app_starts() {
         let app = h.state();
         if !app.connect_open()
             && matches!(app.state.rig.conn, ConnState::Connected { .. })
-            && app.state.open_session().is_some()
+            && app.state.open_stream().is_some()
         {
             break;
         }

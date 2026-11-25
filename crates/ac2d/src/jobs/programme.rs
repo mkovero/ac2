@@ -1,7 +1,7 @@
 //! Programme meters of the inputs a stream captures: the ballistic readings of
 //! `rig.levels`, the true peak, the max holds and the over counts per input, and the
 //! correlation and goniometer points per declared pair. They run beside the peak/RMS
-//! meters, on the thread that already holds the blocks (the fan-out for a session, the
+//! meters, on the thread that already holds the blocks (the fan-out for a stream, the
 //! preview's own thread), so they cost no copy of the audio.
 //!
 //! Every ballistic runs all the time: a change of `rig.levels.ballistic` reads a settled
@@ -36,13 +36,13 @@ const RESET_LOG: usize = 64;
 const OVER_RELEASE_DB: f64 = 1.0;
 
 /// What the control thread tells the meters: the rig's settings, what decides whether an
-/// input may show a VU, the session's pairs, and the resets asked for.
+/// input may show a VU, the stream's pairs, and the resets asked for.
 #[derive(Debug, Default)]
 pub(crate) struct LevelsPolicy {
     pub(crate) settings: LevelsSettings,
     pub(crate) inputs: Vec<InputSetup>,
     pub(crate) line_calibrations: Vec<LineCalEntry>,
-    /// The session's declared pairs; the preview keeps its own declaration.
+    /// The stream's declared pairs; the preview keeps its own declaration.
     pub(crate) pairs: Vec<Pair>,
     /// `(seq, channels)` of each reset; empty `channels` = every input.
     resets: Vec<(u64, Vec<u16>)>,
@@ -62,7 +62,7 @@ impl LevelsPolicy {
         }
     }
 
-    /// Takes the session's declaration; unchanged rows leave the loudness sources alone.
+    /// Takes the stream's declaration; unchanged rows leave the loudness sources alone.
     pub(crate) fn declare(&mut self, inputs: &[InputSetup], pairs: &[Pair]) {
         if self.inputs != inputs {
             self.inputs = inputs.to_vec();
@@ -165,8 +165,8 @@ pub(crate) struct Captured {
 
 /// Whose declaration of kinds and pairs a [`Programme`] meters by.
 pub(crate) enum Declared {
-    /// The session's, followed through the policy.
-    Session,
+    /// The stream's, followed through the policy.
+    Stream,
     /// A preview's own, fixed for its life.
     Fixed {
         inputs: Vec<InputSetup>,
@@ -182,7 +182,7 @@ pub(crate) struct Programme {
     sample_rate: f64,
     inputs: Vec<Input>,
     pairs: Vec<PairState>,
-    /// The session's pairs follow the policy; a preview's are declared once.
+    /// The stream's pairs follow the policy; a preview's are declared once.
     follow_pairs: bool,
     policy: SharedPolicy,
     settings: LevelsSettings,
@@ -202,15 +202,15 @@ pub(crate) struct Programme {
 }
 
 impl Programme {
-    /// Meters of the inputs `c` captures, by `declared` kinds and pairs (the session's are
+    /// Meters of the inputs `c` captures, by `declared` kinds and pairs (the stream's are
     /// refreshed from the policy at every frame). `seed` decorrelates the goniometers'
     /// sampling positions. Every loudness source starts afresh.
     pub(crate) fn new(c: Captured, declared: Declared, policy: SharedPolicy, seed: u64) -> Self {
-        let follow_pairs = matches!(declared, Declared::Session);
+        let follow_pairs = matches!(declared, Declared::Stream);
         let (settings, resets_seen, declared_seen, (inputs, pairs)) = {
             let p = policy.lock().unwrap_or_else(|e| e.into_inner());
             let decl = match declared {
-                Declared::Session => (p.inputs.clone(), p.pairs.clone()),
+                Declared::Stream => (p.inputs.clone(), p.pairs.clone()),
                 Declared::Fixed { inputs, pairs } => (inputs, pairs),
             };
             (p.settings, p.reset_seq, p.declared, decl)
@@ -320,7 +320,7 @@ impl Programme {
         self.loudness.push(&self.chans, &self.block_tp);
     }
 
-    /// Reads the policy: settings, VU offers, the session's pairs and the resets since the
+    /// Reads the policy: settings, VU offers, the stream's pairs and the resets since the
     /// last frame.
     fn sync(&mut self) {
         let mut pairs_changed = false;
@@ -504,7 +504,7 @@ mod tests {
                 device: DeviceId("fake".into()),
                 sample_rate: 48_000,
             },
-            Declared::Session,
+            Declared::Stream,
             Arc::clone(&p),
             7,
         );
@@ -672,7 +672,7 @@ mod tests {
                 device: DeviceId("fake".into()),
                 sample_rate: 48_000,
             },
-            Declared::Session,
+            Declared::Stream,
             Arc::clone(&p),
             7,
         );

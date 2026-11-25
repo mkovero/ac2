@@ -16,7 +16,7 @@ use ac2_proto::frame::{
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{MathConfig, MathDomain, MathExpr};
 use ac2_proto::topic::Topic;
-use ac2_proto::units::{MeasId, SessionEpoch};
+use ac2_proto::units::{MeasId, StreamEpoch};
 use ac2_traces::columns::Columns;
 use ac2_traces::math::{self, Combine, Input};
 
@@ -66,7 +66,7 @@ pub(super) fn frames(
     answers: &[Answer],
     bins: &[Option<Vec<BinsFrame>>],
     seen_delay: &[Option<f64>],
-    epoch: SessionEpoch,
+    epoch: StreamEpoch,
     wanted: &[usize],
 ) -> Vec<BinsFrame> {
     let Some(l) = tf.meta.bins.as_deref() else {
@@ -121,7 +121,7 @@ fn stage_frame(
     ops: &[(f64, &BinsFrame)],
     tf: &TfFrame,
     reference: ac2_core::average::DelayReference,
-    epoch: SessionEpoch,
+    epoch: StreamEpoch,
 ) -> BinsFrame {
     let m0 = ops[0].1.meta.clone();
     let n = ops[0].1.mag.len();

@@ -38,8 +38,8 @@ pub use bins::{BinLayout, BinStage, BinsFrame, BinsMeta};
 pub use coded::CodedFrame;
 pub use data::{
     BandLeqFrame, DataMessage, Frame, FrameData, FrameStamp, GONIO_POINTS, GonioFrame, GonioPair,
-    IrFrame, LeqFrame, LevelsFrame, METER_FPS, PreviewLevelsFrame, RtaFrame, SessionLevelsFrame,
-    SourceLevelsFrame, SpecFrame, SplFrame, TfFrame,
+    IrFrame, LeqFrame, LevelsFrame, METER_FPS, PreviewLevelsFrame, RtaFrame, SourceLevelsFrame,
+    SpecFrame, SplFrame, StreamLevelsFrame, TfFrame,
 };
 pub use decode::decode_data_message;
 pub use encode::{encode_event_message, encode_frame};
@@ -49,8 +49,8 @@ pub use meta::{
     AudioHealth, BandLeqMeta, BandWindowState, DaemonHealth, FrameHeader, FrameMeta, GenSummary,
     GonioMeta, GonioPairMeta, HARMONIC_DB_MIN, HarmonicLevel, HarmonicReading, HarmonicUnreadable,
     IrMeta, KaMeta, LeqMeta, LeqPeak, LeqRun, LevelsMark, LevelsMeta, LoudnessSource, MathState,
-    OperandState, OperandStatus, PairLevels, PreviewLevelsMeta, RtaMeta, SessionLevelsMeta,
-    SourceLevelsMeta, SourceLoudness, SpecBand, SpecBands, SpecHarmonics, SpecMeta, SplMeta,
+    OperandState, OperandStatus, PairLevels, PreviewLevelsMeta, RtaMeta, SourceLevelsMeta,
+    SourceLoudness, SpecBand, SpecBands, SpecHarmonics, SpecMeta, SplMeta, StreamLevelsMeta,
     TfMeta, TimingMeta, TimingWindow,
 };
 pub use schema::{ArrayDesc, ArrayName, Elem, FrameKind, Unit};

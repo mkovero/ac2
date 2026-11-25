@@ -342,7 +342,7 @@ pub const CHANGED_ELSEWHERE_ENTER: &str =
 pub fn reply_warning(w: &Warning, names: &[String]) -> String {
     match w {
         Warning::RigMonitorBlind { .. } => format!(
-            "rig SPL meter(s) {} stop metering until a session opens again; their OSC cues \
+            "rig SPL meter(s) {} stop metering until a stream opens again; their OSC cues \
              report fault",
             names.join(", ")
         ),
@@ -520,7 +520,7 @@ mod tests {
         assert_eq!(warning_meas(&blind), &[MeasId(1), MeasId(2)]);
         assert_eq!(
             reply_warning(&blind, &names),
-            "rig SPL meter(s) Stage, FOH stop metering until a session opens again; their OSC \
+            "rig SPL meter(s) Stage, FOH stop metering until a stream opens again; their OSC \
              cues report fault"
         );
         let moved = Warning::RigMonitorMoved {

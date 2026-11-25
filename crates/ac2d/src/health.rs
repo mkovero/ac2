@@ -1,8 +1,8 @@
-//! The figures of the health meter keepalives carry: whole-host CPU use, the session's
+//! The figures of the health meter keepalives carry: whole-host CPU use, the stream's
 //! audio callback load and its xruns.
 //!
 //! Everything here runs on the control thread when a keepalive is due. The audio callback
-//! only adds to counters ([`ac2_audio::StreamHealth`]); the windows, the session totals and
+//! only adds to counters ([`ac2_audio::StreamHealth`]); the windows, the stream totals and
 //! the CPU samples are made here, about once a second.
 
 use std::time::{Duration, Instant};
@@ -38,20 +38,20 @@ impl HostCpu {
     }
 }
 
-/// The open session's audio across the streams it ran on: a recovery reopens the stream
-/// within the session, and the totals keep counting across it.
-struct SessionAudio {
+/// The open stream's audio across the device streams it ran on: a recovery opens a new
+/// device stream, and the totals keep counting across it.
+struct StreamAudio {
     stream: StreamHealth,
-    /// Totals of the session's earlier streams.
+    /// Totals of the stream's earlier device streams.
     carried: LoadTotals,
     carried_xruns: u64,
     /// The current stream's totals when the running window began.
     window_start: LoadTotals,
-    session_peak: Option<f64>,
+    stream_peak: Option<f64>,
     shown: AudioHealth,
 }
 
-impl SessionAudio {
+impl StreamAudio {
     /// Starts on a stream as it opened: what ran before the first look counts in the first
     /// window.
     fn new(stream: StreamHealth) -> Self {
@@ -61,36 +61,36 @@ impl SessionAudio {
             carried: LoadTotals::default(),
             carried_xruns: 0,
             window_start: LoadTotals::default(),
-            session_peak: None,
+            stream_peak: None,
             shown: AudioHealth {
                 load: None,
                 peak: None,
-                session_load: None,
-                session_peak: None,
+                stream_load: None,
+                stream_peak: None,
                 xruns,
             },
         }
     }
 
-    /// The session's audio moved to `stream`.
+    /// The stream's audio moved to device stream `stream`.
     fn switch_to(&mut self, stream: StreamHealth) {
         let old = self.stream.load_totals();
         self.carried.busy_ns += old.busy_ns;
         self.carried.period_ns += old.period_ns;
         self.carried_xruns += self.stream.xruns();
-        self.session_peak = max(self.session_peak, self.stream.take_peak());
+        self.stream_peak = max(self.stream_peak, self.stream.take_peak());
         self.window_start = LoadTotals::default();
         self.stream = stream;
         self.shown.xruns = self.carried_xruns + self.stream.xruns();
     }
 
-    /// Ends a window: the reading over it, and the session's totals.
+    /// Ends a window: the reading over it, and the stream's totals.
     fn read(&mut self) {
         let now = self.stream.load_totals();
         let load = now.since(&self.window_start);
         let peak = self.stream.take_peak();
         self.window_start = now;
-        self.session_peak = max(self.session_peak, peak);
+        self.stream_peak = max(self.stream_peak, peak);
         let total = LoadTotals {
             busy_ns: self.carried.busy_ns + now.busy_ns,
             period_ns: self.carried.period_ns + now.period_ns,
@@ -98,8 +98,8 @@ impl SessionAudio {
         self.shown = AudioHealth {
             load,
             peak,
-            session_load: total.since(&LoadTotals::default()),
-            session_peak: self.session_peak,
+            stream_load: total.since(&LoadTotals::default()),
+            stream_peak: self.stream_peak,
             xruns: self.carried_xruns + self.stream.xruns(),
         };
     }
@@ -112,13 +112,13 @@ fn max(a: Option<f64>, b: Option<f64>) -> Option<f64> {
     }
 }
 
-/// What the session's audio is, as the control thread knows it.
-pub(crate) enum SessionStream<'a> {
-    /// No session open.
+/// What the stream's audio is, as the control thread knows it.
+pub(crate) enum StreamState<'a> {
+    /// No stream open.
     Closed,
-    /// A session is open and runs on this stream.
+    /// A stream is open and runs on this device stream.
     Running(&'a StreamHealth),
-    /// A session is open but its stream stopped and is being reopened.
+    /// A stream is open but its device stream stopped and is being reopened.
     Recovering,
 }
 
@@ -127,7 +127,7 @@ pub(crate) struct Health {
     host: String,
     cpu: HostCpu,
     cpu_shown: Option<f64>,
-    audio: Option<SessionAudio>,
+    audio: Option<StreamAudio>,
     window_end: Option<Instant>,
 }
 
@@ -142,16 +142,16 @@ impl Health {
         }
     }
 
-    /// Brings the figures up to `now` for a session in state `session`: follows the stream
+    /// Brings the figures up to `now` for a stream in state `state`: follows the device stream
     /// at once, and ends a window when one is due.
-    pub(crate) fn tick(&mut self, now: Instant, session: SessionStream<'_>) {
-        match (session, &mut self.audio) {
-            (SessionStream::Closed, a) => *a = None,
-            (SessionStream::Running(s), Some(a)) if !a.stream.same_stream(s) => {
+    pub(crate) fn tick(&mut self, now: Instant, state: StreamState<'_>) {
+        match (state, &mut self.audio) {
+            (StreamState::Closed, a) => *a = None,
+            (StreamState::Running(s), Some(a)) if !a.stream.same_stream(s) => {
                 a.switch_to(s.clone());
             }
-            (SessionStream::Running(s), a @ None) => *a = Some(SessionAudio::new(s.clone())),
-            (SessionStream::Running(_) | SessionStream::Recovering, _) => {}
+            (StreamState::Running(s), a @ None) => *a = Some(StreamAudio::new(s.clone())),
+            (StreamState::Running(_) | StreamState::Recovering, _) => {}
         }
         if self.window_end.is_some_and(|t| now < t) {
             return;
@@ -163,8 +163,8 @@ impl Health {
         }
     }
 
-    /// A new session (a client opened one): nothing of an earlier one carries over.
-    pub(crate) fn session_closed(&mut self) {
+    /// A new stream (a client opened one): nothing of an earlier one carries over.
+    pub(crate) fn stream_closed(&mut self) {
         self.audio = None;
     }
 
@@ -191,38 +191,38 @@ mod tests {
     }
 
     #[test]
-    fn audio_figures_follow_the_session_and_carry_across_a_reopen() {
+    fn audio_figures_follow_the_stream_and_carry_across_a_reopen() {
         let mut h = Health::new();
         let t0 = Instant::now();
-        h.tick(t0, SessionStream::Closed);
-        assert_eq!(h.snapshot().audio, None, "no session, no audio figures");
+        h.tick(t0, StreamState::Closed);
+        assert_eq!(h.snapshot().audio, None, "no stream, no audio figures");
 
         let (a, mut drive_a) = fake_stream();
-        h.tick(t0, SessionStream::Running(&a.health()));
-        let first = h.snapshot().audio.expect("a session");
+        h.tick(t0, StreamState::Running(&a.health()));
+        let first = h.snapshot().audio.expect("a stream");
         assert_eq!(first.load, None, "no window ended yet: nothing, not zero");
 
         drive_a.run_blocks(20);
-        h.tick(t0 + WINDOW, SessionStream::Running(&a.health()));
-        let read = h.snapshot().audio.expect("a session");
+        h.tick(t0 + WINDOW, StreamState::Running(&a.health()));
+        let read = h.snapshot().audio.expect("a stream");
         let load = read.load.expect("the fake device's callback ran");
         assert!((0.0..1.0).contains(&load), "{load}");
-        assert!(read.session_load.is_some() && read.peak.is_some());
+        assert!(read.stream_load.is_some() && read.peak.is_some());
 
-        // A recovery reopens the stream: the session's totals keep counting.
-        h.tick(t0 + WINDOW, SessionStream::Recovering);
+        // A recovery reopens the stream: the stream's totals keep counting.
+        h.tick(t0 + WINDOW, StreamState::Recovering);
         let (b, _drive_b) = fake_stream();
-        h.tick(t0 + 2 * WINDOW, SessionStream::Running(&b.health()));
-        let after = h.snapshot().audio.expect("still the session");
+        h.tick(t0 + 2 * WINDOW, StreamState::Running(&b.health()));
+        let after = h.snapshot().audio.expect("still the stream");
         assert_eq!(after.load, None, "no block on the new stream yet");
         assert_eq!(
-            after.session_load, read.session_load,
+            after.stream_load, read.stream_load,
             "the first stream's blocks still count"
         );
-        assert!(after.session_peak >= read.session_peak);
+        assert!(after.stream_peak >= read.stream_peak);
 
-        h.session_closed();
-        h.tick(t0 + 3 * WINDOW, SessionStream::Closed);
+        h.stream_closed();
+        h.tick(t0 + 3 * WINDOW, StreamState::Closed);
         assert_eq!(h.snapshot().audio, None);
     }
 
@@ -230,12 +230,12 @@ mod tests {
     fn the_host_is_named_and_cpu_needs_two_samples() {
         let mut h = Health::new();
         let t0 = Instant::now();
-        h.tick(t0, SessionStream::Closed);
+        h.tick(t0, StreamState::Closed);
         let s = h.snapshot();
         assert!(!s.host.is_empty());
         assert_eq!(s.cpu, None, "one sample is a baseline, not a figure");
         std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
-        h.tick(t0 + WINDOW, SessionStream::Closed);
+        h.tick(t0 + WINDOW, StreamState::Closed);
         let cpu = h.snapshot().cpu.expect("two samples");
         assert!((0.0..=1.0).contains(&cpu), "{cpu}");
     }

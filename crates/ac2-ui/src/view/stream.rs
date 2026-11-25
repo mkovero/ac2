@@ -1,4 +1,4 @@
-//! The session dialog (backend, device, the channel grids with meters and roles, the
+//! The stream dialog (backend, device, the channel grids with meters and roles, the
 //! reference, rate and buffer) and the input meter shared with the measurement dialogs.
 
 use eframe::egui::{self, Color32, RichText};
@@ -8,10 +8,10 @@ use ac2_scene::meter::{MeterReading, MeterState};
 
 use super::CellCtx;
 use crate::app::App;
-use crate::session_dialog::{
-    DetectPhase, Edit, OutputDevice, RoleKey, Row, SessionDialog, backend_name, device_summary,
+use crate::state::StreamMsg;
+use crate::stream_dialog::{
+    DetectPhase, Edit, OutputDevice, RoleKey, Row, StreamDialog, backend_name, device_summary,
 };
-use crate::state::SessionMsg;
 use crate::theme::Chrome;
 
 const METER_W: f32 = 150.0;
@@ -143,7 +143,7 @@ type ChannelData = (
 );
 
 /// The input meters and each mic row's curve and calibration text, for the channel rows.
-fn channel_data(app: &App, d: &SessionDialog) -> ChannelData {
+fn channel_data(app: &App, d: &StreamDialog) -> ChannelData {
     let meters = app.state.input_meters();
     let now = super::now();
     let offset = ac2_scene::time::ClockOffset(
@@ -166,8 +166,8 @@ fn channel_data(app: &App, d: &SessionDialog) -> ChannelData {
     (meters, cal)
 }
 
-/// What the session model says: a notice, why meters are missing, why Enter was refused.
-pub(super) fn notices(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome) {
+/// What the stream model says: a notice, why meters are missing, why Enter was refused.
+pub(super) fn notices(ui: &mut egui::Ui, d: &StreamDialog, ch: &Chrome) {
     for (text, color) in [
         (d.notice.as_deref(), ch.armed),
         (d.preview_error.as_deref(), ch.dim),
@@ -183,15 +183,15 @@ pub(super) fn notices(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome) {
 /// The Audio I/O page below the device, in the order the operator decides: the inputs
 /// with meters, names and roles; the outputs with their labels and the stimulus; the
 /// reference (loopback) with its detection; rate and buffer; then the one button that opens
-/// the session. `focus`: the focused row, `None` while the max level row below has it.
+/// the stream. `focus`: the focused row, `None` while the max level row below has it.
 pub(super) fn channels_section(
     app: &App,
     ui: &mut egui::Ui,
-    d: &SessionDialog,
+    d: &StreamDialog,
     focus: Option<Row>,
     ch: &Chrome,
-    msg: &mut Option<SessionMsg>,
-    remote: &dyn Fn(&mut egui::Ui, &mut Option<SessionMsg>),
+    msg: &mut Option<StreamMsg>,
+    remote: &dyn Fn(&mut egui::Ui, &mut Option<StreamMsg>),
 ) {
     if d.backends.is_none() {
         // The device section says the listing is on its way.
@@ -210,13 +210,13 @@ pub(super) fn channels_section(
     super::settings::section(ui, "Reference (loopback)", "", ch);
     ui.label(RichText::new(d.reference_text()).color(ch.text));
     ui.label(
-        RichText::new(crate::session_dialog::REFERENCE_HELP)
+        RichText::new(crate::stream_dialog::REFERENCE_HELP)
             .small()
             .color(ch.dim),
     );
     ui.add_space(2.0);
     if ui.button("Detect loopback…  D").clicked() {
-        *msg = Some(SessionMsg::Detect);
+        *msg = Some(StreamMsg::Detect);
     }
     detect_panel(ui, d, ch, msg);
     super::settings::section(ui, "Sample rate and buffer", "", ch);
@@ -228,10 +228,10 @@ pub(super) fn channels_section(
 /// The page's last row: what Enter does here, set apart from the settings above it.
 pub(super) fn open_row(
     ui: &mut egui::Ui,
-    d: &SessionDialog,
+    d: &StreamDialog,
     new_session: bool,
     ch: &Chrome,
-    msg: &mut Option<SessionMsg>,
+    msg: &mut Option<StreamMsg>,
 ) {
     ui.add_space(6.0);
     ui.separator();
@@ -248,7 +248,7 @@ pub(super) fn open_row(
             .fill(ch.focus)
             .min_size(egui::vec2(0.0, 24.0));
         if ui.add(primary).clicked() {
-            *msg = Some(SessionMsg::Submit);
+            *msg = Some(StreamMsg::Submit);
         }
         ui.label(
             RichText::new("Esc closes without opening")
@@ -261,20 +261,20 @@ pub(super) fn open_row(
 /// The Audio I/O page's device: backend, input and output device.
 pub(super) fn device_section(
     ui: &mut egui::Ui,
-    d: &SessionDialog,
+    d: &StreamDialog,
     focus: Option<Row>,
     ch: &Chrome,
-    msg: &mut Option<SessionMsg>,
+    msg: &mut Option<StreamMsg>,
 ) {
     backend_rows(ui, d, focus, ch, msg);
 }
 
 fn backend_rows(
     ui: &mut egui::Ui,
-    d: &SessionDialog,
+    d: &StreamDialog,
     focus: Option<Row>,
     ch: &Chrome,
-    msg: &mut Option<SessionMsg>,
+    msg: &mut Option<StreamMsg>,
 ) {
     let Some(backends) = &d.backends else {
         ui.label(RichText::new("listing backends and devices…").color(ch.dim));
@@ -282,7 +282,7 @@ fn backend_rows(
     };
     ui.horizontal(|ui| {
         if label_col(ui, "Backend", focus == Some(Row::Backend), ch).clicked() {
-            *msg = Some(SessionMsg::Focus(Row::Backend));
+            *msg = Some(StreamMsg::Focus(Row::Backend));
         }
         for (i, b) in backends.iter().enumerate() {
             let available = b.availability == Availability::Available;
@@ -296,7 +296,7 @@ fn backend_rows(
                 .add(egui::Button::selectable(i == d.backend, t))
                 .clicked()
             {
-                *msg = Some(SessionMsg::Cycle(Row::Backend, i as i32 - d.backend as i32));
+                *msg = Some(StreamMsg::Cycle(Row::Backend, i as i32 - d.backend as i32));
             }
         }
     });
@@ -356,10 +356,10 @@ fn backend_rows(
         );
     }
     if let Some((kind, _)) = d.panel_target() {
-        let (button, hint) = crate::session_dialog::panel_label(kind);
+        let (button, hint) = crate::stream_dialog::panel_label(kind);
         ui.horizontal(|ui| {
             if ui.button(button).clicked() {
-                *msg = Some(SessionMsg::Panel);
+                *msg = Some(StreamMsg::Panel);
             }
             ui.label(RichText::new(hint).small().color(ch.dim));
         });
@@ -372,7 +372,7 @@ fn device_row(
     label: &str,
     shown: Option<(String, String)>,
     (place, n): (usize, usize),
-    cell: CellCtx<'_, Row, SessionMsg>,
+    cell: CellCtx<'_, Row, StreamMsg>,
 ) {
     let CellCtx {
         focused,
@@ -382,21 +382,21 @@ fn device_row(
     } = cell;
     ui.horizontal(|ui| {
         if label_col(ui, label, focused, ch).clicked() {
-            *msg = Some(SessionMsg::Focus(row));
+            *msg = Some(StreamMsg::Focus(row));
         }
         let Some((name, summary)) = shown else {
             ui.label(RichText::new("no device").color(ch.dim));
             return;
         };
         if n > 1 && ui.small_button("‹").clicked() {
-            *msg = Some(SessionMsg::Cycle(row, -1));
+            *msg = Some(StreamMsg::Cycle(row, -1));
         }
         let t = RichText::new(name).color(ch.text).strong();
         if ui.add(egui::Button::selectable(focused, t)).clicked() {
-            *msg = Some(SessionMsg::Cycle(row, 1));
+            *msg = Some(StreamMsg::Cycle(row, 1));
         }
         if n > 1 && ui.small_button("›").clicked() {
-            *msg = Some(SessionMsg::Cycle(row, 1));
+            *msg = Some(StreamMsg::Cycle(row, 1));
         }
         if !summary.is_empty() {
             ui.label(RichText::new(summary).color(ch.dim));
@@ -414,36 +414,36 @@ fn device_row(
 /// The count of spare inputs (JACK): ‹ › or ← → change it.
 fn spares_row(
     ui: &mut egui::Ui,
-    d: &SessionDialog,
+    d: &StreamDialog,
     focused: bool,
     ch: &Chrome,
-    msg: &mut Option<SessionMsg>,
+    msg: &mut Option<StreamMsg>,
 ) {
     ui.horizontal(|ui| {
         if label_col(ui, "Spare inputs", focused, ch).clicked() {
-            *msg = Some(SessionMsg::Focus(Row::Spares));
+            *msg = Some(StreamMsg::Focus(Row::Spares));
         }
         if ui.small_button("‹").clicked() {
-            *msg = Some(SessionMsg::Cycle(Row::Spares, -1));
+            *msg = Some(StreamMsg::Cycle(Row::Spares, -1));
         }
         let t = RichText::new(d.spares.to_string())
             .monospace()
             .color(ch.text);
         let resp = ui.add(egui::Button::selectable(focused, t));
         if resp.clicked() {
-            *msg = Some(SessionMsg::Focus(Row::Spares));
+            *msg = Some(StreamMsg::Focus(Row::Spares));
         }
         if focused {
             super::settings::reveal_focused(&resp);
         }
         if ui.small_button("›").clicked() {
-            *msg = Some(SessionMsg::Cycle(Row::Spares, 1));
+            *msg = Some(StreamMsg::Cycle(Row::Spares, 1));
         }
         ui.label(RichText::new(d.spares_text()).small().color(ch.dim));
     });
 }
 
-/// A channel row's head: the focus marker, the in-session tick and the channel number;
+/// A channel row's head: the focus marker, the in-stream tick and the channel number;
 /// whether the tick was clicked.
 fn row_head(ui: &mut egui::Ui, focused: bool, on: bool, channel: u16, ch: &Chrome) -> bool {
     ui.horizontal(|ui| {
@@ -462,14 +462,14 @@ fn row_head(ui: &mut egui::Ui, focused: bool, on: bool, channel: u16, ch: &Chrom
 
 fn input_grid(
     ui: &mut egui::Ui,
-    d: &SessionDialog,
+    d: &StreamDialog,
     focus: Option<Row>,
     meters: &std::collections::BTreeMap<u16, MeterReading>,
     cal: &[Option<(String, bool)>],
     ch: &Chrome,
-    msg: &mut Option<SessionMsg>,
+    msg: &mut Option<StreamMsg>,
 ) {
-    egui::Grid::new("ac2-session-inputs")
+    egui::Grid::new("ac2-stream-inputs")
         .num_columns(5)
         .spacing(egui::vec2(10.0, 4.0))
         .min_col_width(0.0)
@@ -487,8 +487,8 @@ fn input_grid(
             for (i, r) in d.inputs.iter().enumerate() {
                 let row = Row::Input(i);
                 let focused = focus == Some(row);
-                if row_head(ui, focused, r.in_session, r.channel, ch) {
-                    *msg = Some(SessionMsg::Toggle(row));
+                if row_head(ui, focused, r.in_stream, r.channel, ch) {
+                    *msg = Some(StreamMsg::Toggle(row));
                 }
                 let editing = d.edit == Some(Edit::Mic(i));
                 let naming_pair = d.edit == Some(Edit::PairName(i));
@@ -519,14 +519,14 @@ fn input_grid(
                                 (None, None) => dev,
                             }
                         };
-                        let color = if r.in_session { ch.text } else { ch.dim };
+                        let color = if r.in_stream { ch.text } else { ch.dim };
                         let t = RichText::new(name).color(color);
                         let resp = ui.add(egui::Button::selectable(focused, t));
                         if resp.clicked() {
-                            *msg = Some(SessionMsg::Focus(row));
+                            *msg = Some(StreamMsg::Focus(row));
                         }
                         if resp.double_clicked() {
-                            *msg = Some(SessionMsg::EditMic(row));
+                            *msg = Some(StreamMsg::EditMic(row));
                         }
                         resp
                     })
@@ -546,7 +546,7 @@ fn input_grid(
                         .on_hover_text("R: the loopback return of the stimulus")
                         .clicked()
                     {
-                        *msg = Some(SessionMsg::Role(row, RoleKey::Reference));
+                        *msg = Some(StreamMsg::Role(row, RoleKey::Reference));
                     }
                     // The kind: one word, the same as the Inputs list says it.
                     let k = r.kind_pref();
@@ -574,7 +574,7 @@ fn input_grid(
                         ),
                     ] {
                         if chip(ui, on, text, color, ch).on_hover_text(tip).clicked() {
-                            *msg = Some(SessionMsg::Role(row, key));
+                            *msg = Some(StreamMsg::Role(row, key));
                         }
                     }
                     let picked = d.pair_pick == Some(r.channel);
@@ -593,7 +593,7 @@ fn input_grid(
                          (two inputs of one kind)"
                     };
                     if resp.on_hover_text(tip).clicked() {
-                        *msg = Some(SessionMsg::Role(row, RoleKey::Pair));
+                        *msg = Some(StreamMsg::Role(row, RoleKey::Pair));
                     }
                 });
                 // A named mic says which curve and calibration it uses; an unnamed one, how
@@ -631,12 +631,12 @@ fn input_grid(
 
 fn output_grid(
     ui: &mut egui::Ui,
-    d: &SessionDialog,
+    d: &StreamDialog,
     focus: Option<Row>,
     ch: &Chrome,
-    msg: &mut Option<SessionMsg>,
+    msg: &mut Option<StreamMsg>,
 ) {
-    egui::Grid::new("ac2-session-outputs")
+    egui::Grid::new("ac2-stream-outputs")
         .num_columns(3)
         .spacing(egui::vec2(10.0, 4.0))
         .min_col_width(0.0)
@@ -644,9 +644,9 @@ fn output_grid(
             for (o, r) in d.outputs.iter().enumerate() {
                 let row = Row::Output(o);
                 let focused = focus == Some(row);
-                let in_session = r.channel < d.out_count;
-                if row_head(ui, focused, in_session, r.channel, ch) {
-                    *msg = Some(SessionMsg::Toggle(row));
+                let in_stream = r.channel < d.out_count;
+                if row_head(ui, focused, in_stream, r.channel, ch) {
+                    *msg = Some(StreamMsg::Toggle(row));
                 }
                 let name = if d.edit == Some(Edit::OutputLabel(o)) {
                     format!("{}▏", d.edit_text)
@@ -659,16 +659,15 @@ fn output_grid(
                 let resp = ui
                     .horizontal(|ui| {
                         ui.set_min_width(NAME_W);
-                        let t =
-                            RichText::new(name).color(if in_session { ch.text } else { ch.dim });
+                        let t = RichText::new(name).color(if in_stream { ch.text } else { ch.dim });
                         ui.add(egui::Button::selectable(focused, t))
                     })
                     .inner;
                 if resp.clicked() {
-                    *msg = Some(SessionMsg::Focus(row));
+                    *msg = Some(StreamMsg::Focus(row));
                 }
                 if resp.double_clicked() {
-                    *msg = Some(SessionMsg::EditMic(row));
+                    *msg = Some(StreamMsg::EditMic(row));
                 }
                 if focused {
                     super::settings::reveal_focused(&resp);
@@ -677,7 +676,7 @@ fn output_grid(
                     .on_hover_text("S: plays the stimulus, to the speakers and the loopback")
                     .clicked()
                 {
-                    *msg = Some(SessionMsg::Role(row, RoleKey::Stimulus));
+                    *msg = Some(StreamMsg::Role(row, RoleKey::Stimulus));
                 }
                 ui.end_row();
             }
@@ -686,10 +685,10 @@ fn output_grid(
 
 fn rate_rows(
     ui: &mut egui::Ui,
-    d: &SessionDialog,
+    d: &StreamDialog,
     focus: Option<Row>,
     ch: &Chrome,
-    msg: &mut Option<SessionMsg>,
+    msg: &mut Option<StreamMsg>,
 ) {
     let dir = d
         .device_info()
@@ -709,7 +708,7 @@ fn rate_rows(
         ui.horizontal(|ui| {
             let focused = focus == Some(row);
             if label_col(ui, label, focused, ch).clicked() {
-                *msg = Some(SessionMsg::Focus(row));
+                *msg = Some(StreamMsg::Focus(row));
             }
             let shown = if focused {
                 format!("{text}▏ {unit}")
@@ -721,7 +720,7 @@ fn rate_rows(
             let t = RichText::new(shown).monospace().color(ch.text);
             let resp = ui.add(egui::Button::selectable(focused, t));
             if resp.clicked() {
-                *msg = Some(SessionMsg::Focus(row));
+                *msg = Some(StreamMsg::Focus(row));
             }
             if focused {
                 super::settings::reveal_focused(&resp);
@@ -735,7 +734,7 @@ fn rate_rows(
     }
 }
 
-fn detect_panel(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Option<SessionMsg>) {
+fn detect_panel(ui: &mut egui::Ui, d: &StreamDialog, ch: &Chrome, msg: &mut Option<StreamMsg>) {
     let Some(p) = &d.detect else {
         return;
     };
@@ -762,14 +761,14 @@ fn detect_panel(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Opt
                         .on_hover_text(super::keys_cue(&[egui::Key::Enter]))
                         .clicked()
                     {
-                        *msg = Some(SessionMsg::DetectConfirm);
+                        *msg = Some(StreamMsg::DetectConfirm);
                     }
                     if ui
                         .button("Cancel")
                         .on_hover_text(super::keys_cue(&[egui::Key::ArrowUp]))
                         .clicked()
                     {
-                        *msg = Some(SessionMsg::DetectCancel);
+                        *msg = Some(StreamMsg::DetectCancel);
                     }
                 });
                 ui.label(

@@ -232,7 +232,7 @@ fn step_ms(seconds: f64) -> String {
 /// One step of a measurement's delay, in the unit its key steps by.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DelayStep {
-    /// Whole or fractional samples of the session rate (Ctrl / Alt).
+    /// Whole or fractional samples of the stream rate (Ctrl / Alt).
     Samples(f64),
     /// Seconds (the plain keys' 0.1 ms).
     Seconds(f64),

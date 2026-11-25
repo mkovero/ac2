@@ -10,20 +10,20 @@ fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
     let mut t = T::disconnected();
     t.st.rig.due.open_session_when_empty = true;
     connected_to(&mut t, "local daemon");
-    let r = t.conn(mirror(no_session_state()));
+    let r = t.conn(mirror(no_stream_state()));
     assert!(r.iter().any(|x| matches!(x, Request::SessionList)), "{r:?}");
     assert!(t.st.sessions_dialog().is_some(), "{:?}", t.st.overlay);
     t.key("Escape");
     assert_eq!(t.st.overlay, Overlay::None);
     // Only once: the operator closed it.
-    t.conn(mirror(no_session_state()));
+    t.conn(mirror(no_stream_state()));
     assert_eq!(t.st.overlay, Overlay::None);
     let hint =
         t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys)
             .expect("hint");
     assert_eq!(hint.text, "No session open — Alt+S, then New session");
 
-    // A daemon that already has a session: no dialog; its input meters and the channel
+    // A daemon that already has a stream: no dialog; its input meters and the channel
     // names for them.
     let mut t = T::disconnected();
     t.st.rig.due.open_session_when_empty = true;
@@ -46,7 +46,7 @@ fn a_kept_session_without_audio_opens_no_sessions_dialog() {
     t.st.rig.due.open_session_when_empty = true;
     connected_to(&mut t, "local daemon");
     let mut kept = daemon_state();
-    kept.session.open = None;
+    kept.stream.open = None;
     t.conn(mirror(kept));
     assert_eq!(t.st.overlay, Overlay::None);
     assert!(!t.st.rig.due.open_session_when_empty);
@@ -133,11 +133,11 @@ fn endpoint_backends() -> Vec<BackendInfo> {
 
 /// An input device without outputs plays on the system's default output; ←/→ on the
 /// Output row choose another output device, whose rows the Audio I/O page shows;
-/// the session opens with both devices, the loopback detection plays on the output device,
+/// the stream opens with both devices, the loopback detection plays on the output device,
 /// and the choice is remembered for the input device.
 #[test]
 fn an_input_only_device_plays_on_another_output_device() {
-    use crate::session_dialog::OutputDevice;
+    use crate::stream_dialog::OutputDevice;
     let mut t = T::new();
     let r = open_dialog(&mut t, endpoint_backends());
     let d = dialog(&t);
@@ -198,7 +198,7 @@ fn an_input_only_device_plays_on_another_output_device() {
     assert!(dialog(&t).inputs[0].reference);
 
     let r = t.key("Enter");
-    let (config, _) = opened(&r).expect("session.open");
+    let (config, _) = opened(&r).expect("stream.open");
     assert_eq!(
         config.input_device,
         DeviceSelector::Id {
@@ -233,10 +233,10 @@ fn an_input_only_device_plays_on_another_output_device() {
 }
 
 /// A device with both directions (JACK, the simulated rig) plays on itself: the Output row
-/// offers only that, and the session names the one device both ways.
+/// offers only that, and the stream names the one device both ways.
 #[test]
 fn a_duplex_device_plays_on_itself() {
-    use crate::session_dialog::OutputDevice;
+    use crate::stream_dialog::OutputDevice;
     let mut t = T::new();
     open_dialog(&mut t, backends(true));
     assert_eq!(dialog(&t).out_device, OutputDevice::SameAsInput);
@@ -246,7 +246,7 @@ fn a_duplex_device_plays_on_itself() {
     t.key("Right");
     assert_eq!(dialog(&t).out_device, OutputDevice::SameAsInput);
     let r = t.key("Enter");
-    let (config, _) = opened(&r).expect("session.open");
+    let (config, _) = opened(&r).expect("stream.open");
     assert_eq!(config.input_device, config.output_device);
 }
 
@@ -293,7 +293,7 @@ fn an_asio_device_lists_its_clocks_and_p_opens_its_driver_panel() {
     assert!(
         matches!(
             calls.as_slice(),
-            [(what, Command::SessionControlPanel { backend: BackendKind::Asio, device })]
+            [(what, Command::StreamControlPanel { backend: BackendKind::Asio, device })]
                 if device.0 == "Fireface USB" && *what == "driver control panel of Fireface USB"
         ),
         "{r:?}"
@@ -326,14 +326,14 @@ fn p_on_a_core_audio_device_opens_audio_midi_setup() {
     let mut t = T::new();
     open_dialog(&mut t, vec![ca]);
     assert_eq!(
-        crate::session_dialog::panel_label(BackendKind::CoreAudio).0,
+        crate::stream_dialog::panel_label(BackendKind::CoreAudio).0,
         "Audio MIDI Setup… (P)"
     );
     focus(&mut t, Row::Device);
     let r = t.type_key("P", "p");
     assert!(
         r.iter().any(|r| matches!(r,
-            Request::Call { what, cmd: Command::SessionControlPanel { backend: BackendKind::CoreAudio, device } }
+            Request::Call { what, cmd: Command::StreamControlPanel { backend: BackendKind::CoreAudio, device } }
                 if device.0 == "coreaudio:BlackHole2ch_UID"
                     && what == "Audio MIDI Setup for coreaudio:BlackHole2ch_UID")),
         "{r:?}"
@@ -341,7 +341,7 @@ fn p_on_a_core_audio_device_opens_audio_midi_setup() {
 }
 
 /// One USB mic and nothing else: no outputs, no reference. It opens capture-only, the mic
-/// in the session, no loopback and no output channels.
+/// in the stream, no loopback and no output channels.
 #[test]
 fn a_lone_usb_mic_opens_without_reference_or_outputs() {
     let mut t = T::new();
@@ -360,7 +360,7 @@ fn a_lone_usb_mic_opens_without_reference_or_outputs() {
     t.key("M");
     let d = dialog(&t);
     assert!(!d.inputs[0].reference);
-    assert!(d.inputs[0].in_session);
+    assert!(d.inputs[0].in_stream);
     assert_eq!(d.inputs[0].kind_pref(), KindPref::Mic);
     let r = t.key("Enter");
     let (config, inputs) = opened(&r).unwrap_or_else(|| panic!("{:?}", dialog(&t).error));
@@ -389,7 +389,7 @@ fn a_device_list_answer_after_an_edit_keeps_the_edit() {
     t.key("M");
     let ticked = |t: &T| {
         let r = &dialog(t).inputs[2];
-        r.in_session && r.is_mic()
+        r.in_stream && r.is_mic()
     };
     assert!(ticked(&t), "{:?}", dialog(&t).inputs[2]);
 

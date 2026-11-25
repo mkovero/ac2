@@ -1,8 +1,8 @@
-//! The health meter after the session line: CPU use, the audio callback's load, xruns, the
+//! The health meter after the stream line: CPU use, the audio callback's load, xruns, the
 //! link's data rate and the UI's frame rate (`CPU 23 % · app CPU 41 % · DSP 14 % ·
 //! 0 xruns · 14 Mbit/s · 60 fps`).
 //!
-//! Every figure that is missing (an older daemon, no session, the first second) is left
+//! Every figure that is missing (an older daemon, no stream, the first second) is left
 //! out rather than shown as zero: a zero reads as a measurement.
 
 use ac2_proto::frame::DaemonHealth;
@@ -231,7 +231,7 @@ pub fn health_line(i: &HealthInputs) -> Option<HealthLine> {
             }
             let warn = i.since_xrun_s.is_some_and(|s| s < XRUN_WARN_S);
             // Four digits of room; a count past that widens its slot once, and the count
-            // only grows until the next session.
+            // only grows until the next stream.
             let digits = a.xruns.to_string().len().max(4);
             parts.push(HealthPart {
                 label: String::new(),
@@ -250,7 +250,7 @@ pub fn health_line(i: &HealthInputs) -> Option<HealthLine> {
             if let Some(s) = span(a.load, a.peak) {
                 lines.push(format!("DSP {s} over the last second"));
             }
-            if let Some(s) = span(a.session_load, a.session_peak) {
+            if let Some(s) = span(a.stream_load, a.stream_peak) {
                 lines.push(format!("DSP {s} since the audio I/O opened"));
             }
             lines.push(format!(
@@ -346,8 +346,8 @@ mod tests {
         AudioHealth {
             load,
             peak: load.map(|l| l * 2.0),
-            session_load: Some(0.12),
-            session_peak: Some(0.48),
+            stream_load: Some(0.12),
+            stream_peak: Some(0.48),
             xruns,
         }
     }

@@ -526,7 +526,7 @@ impl AppState {
                     }
                 };
                 out.push(Request::Call {
-                    cmd: Command::SessionReplay {
+                    cmd: Command::StreamReplay {
                         recording,
                         pace: ac2_proto::model::ReplayPace::Realtime,
                     },

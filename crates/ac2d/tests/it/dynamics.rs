@@ -152,8 +152,8 @@ fn slow_dynamics_run_stores_one_trace_that_exports_and_imports() {
     c.ok(Command::Hello {
         client: "dynamics test".into(),
     });
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let mut d = driver(&backend);
     let token = c.acquire();
@@ -352,10 +352,10 @@ fn slow_an_ended_run_leaves_its_measurement_free() {
     c.ok(Command::Hello {
         client: "dynamics test".into(),
     });
-    c.ok(Command::SessionOpen {
-        config: ac2_proto::model::SessionConfig {
+    c.ok(Command::StreamOpen {
+        config: ac2_proto::model::StreamConfig {
             input_channels: vec![0, 1, 2],
-            ..session(true)
+            ..stream(true)
         },
     });
     let mut d = driver(&backend);
@@ -435,8 +435,8 @@ fn a_programme_above_the_global_maximum_is_kept_and_refused_when_run() {
     c.ok(Command::Hello {
         client: "dynamics test".into(),
     });
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let token = c.acquire();
     let run = |c: &mut Client, meas| {
@@ -557,7 +557,7 @@ fn big_dynamics_csv() -> Vec<u8> {
     use ac2_proto::model::{
         CalState, DynamicsData, DynamicsInfo, DynamicsPoint, DynamicsStep, TraceMeta,
     };
-    use ac2_proto::units::{DynamicsId, SessionEpoch, WallNs};
+    use ac2_proto::units::{DynamicsId, StreamEpoch, WallNs};
     use ac2_traces::StoredTrace;
 
     const POINTS: usize = 1500;
@@ -629,7 +629,7 @@ fn big_dynamics_csv() -> Vec<u8> {
                 meas_name: "Studer dyn 8k".into(),
                 run: DynamicsId(1),
                 number: 1,
-                epoch: SessionEpoch(3),
+                epoch: StreamEpoch(3),
             },
             grid_id: grid.id(),
             delay: Seconds(0.0),

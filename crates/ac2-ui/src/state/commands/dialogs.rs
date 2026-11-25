@@ -1,4 +1,4 @@
-//! Dialog submissions: forms, the calibration view, the session dialog, the new-log and measurement offers, averaging and math operands.
+//! Dialog submissions: forms, the calibration view, the stream dialog, the new-log and measurement offers, averaging and math operands.
 
 use crate::state::*;
 
@@ -29,7 +29,7 @@ impl AppState {
     /// Enter on a dialog: the command goes out and the dialog closes, or the dialog says
     /// what is wrong and stays.
     pub(in crate::state) fn submit_form(&mut self, out: &mut Vec<Request>) {
-        let open = self.open_session().cloned();
+        let open = self.open_stream().cloned();
         let ceiling = self.ceiling();
         if let Overlay::Form(f) = &mut self.overlay
             && matches!(f.kind, FormKind::Sweep | FormKind::SweepEdit)
@@ -331,11 +331,11 @@ impl AppState {
         }
     }
 
-    pub(in crate::state) fn session_msg(&mut self, m: SessionMsg, out: &mut Vec<Request>) {
+    pub(in crate::state) fn stream_msg(&mut self, m: StreamMsg, out: &mut Vec<Request>) {
         match m {
-            SessionMsg::AddRemote => return self.open_remote_pick(out),
-            SessionMsg::PickRemote(rig, ch) => return self.pick_remote(rig, ch, out),
-            SessionMsg::RemoveRemote(slot) => return self.remove_remote(slot, out),
+            StreamMsg::AddRemote => return self.open_remote_pick(out),
+            StreamMsg::PickRemote(rig, ch) => return self.pick_remote(rig, ch, out),
+            StreamMsg::RemoveRemote(slot) => return self.remove_remote(slot, out),
             _ => {}
         }
         let level = self.rig.stimulus.level;
@@ -346,41 +346,41 @@ impl AppState {
         // A row the mouse acts on takes the focus off the max level row.
         if matches!(
             m,
-            SessionMsg::Focus(_)
-                | SessionMsg::Cycle(..)
-                | SessionMsg::Toggle(_)
-                | SessionMsg::Role(..)
-                | SessionMsg::EditMic(_)
+            StreamMsg::Focus(_)
+                | StreamMsg::Cycle(..)
+                | StreamMsg::Toggle(_)
+                | StreamMsg::Role(..)
+                | StreamMsg::EditMic(_)
         ) {
             s.on_ceiling = false;
             s.signal = Default::default();
         }
-        let d = &mut s.session;
+        let d = &mut s.stream;
         match m {
-            SessionMsg::Focus(r) => {
+            StreamMsg::Focus(r) => {
                 s.on_ceiling = false;
                 d.detect_cancel();
                 d.focus_row(r);
             }
-            SessionMsg::Cycle(r, step) => {
+            StreamMsg::Cycle(r, step) => {
                 d.detect_cancel();
                 d.focus_row(r);
                 d.cycle(step, self.prefs.of_rig(self.rig.id));
             }
-            SessionMsg::Toggle(r) => {
+            StreamMsg::Toggle(r) => {
                 s.on_ceiling = false;
                 d.focus_row(r);
                 d.toggle();
             }
-            SessionMsg::Role(r, k) => {
+            StreamMsg::Role(r, k) => {
                 s.on_ceiling = false;
                 d.focus_row(r);
                 d.assign(k);
-                if k == crate::session_dialog::RoleKey::Stimulus {
+                if k == crate::stream_dialog::RoleKey::Stimulus {
                     self.stimulus_ticks_now(out);
                 }
             }
-            SessionMsg::EditMic(r) => {
+            StreamMsg::EditMic(r) => {
                 s.on_ceiling = false;
                 d.focus_row(r);
                 if matches!(r, Row::Output(_)) {
@@ -389,12 +389,12 @@ impl AppState {
                     d.start_mic_edit();
                 }
             }
-            SessionMsg::Detect => {
+            StreamMsg::Detect => {
                 if let Err(e) = d.detect_start(level) {
                     d.error = Some(e);
                 }
             }
-            SessionMsg::Panel => {
+            StreamMsg::Panel => {
                 if let Some((backend, device)) = d.panel_target() {
                     let what = match backend {
                         ac2_proto::model::BackendKind::CoreAudio => {
@@ -404,29 +404,29 @@ impl AppState {
                     };
                     out.push(Request::Call {
                         what,
-                        cmd: Command::SessionControlPanel { backend, device },
+                        cmd: Command::StreamControlPanel { backend, device },
                     });
                 }
             }
-            SessionMsg::DetectConfirm => {
+            StreamMsg::DetectConfirm => {
                 if let Some(req) = d.detect_confirm(ceiling) {
                     out.push(Request::DetectLoopback(req));
                 }
             }
-            SessionMsg::DetectCancel => d.detect_cancel(),
-            SessionMsg::Submit => self.submit_session(out),
-            SessionMsg::Cancel => self.overlay = Overlay::None,
-            SessionMsg::AddRemote | SessionMsg::PickRemote(..) | SessionMsg::RemoveRemote(_) => {}
+            StreamMsg::DetectCancel => d.detect_cancel(),
+            StreamMsg::Submit => self.submit_stream(out),
+            StreamMsg::Cancel => self.overlay = Overlay::None,
+            StreamMsg::AddRemote | StreamMsg::PickRemote(..) | StreamMsg::RemoveRemote(_) => {}
         }
     }
 
-    /// Enter on the session dialog: opens the session its roles describe, remembers them
+    /// Enter on the stream dialog: opens the stream its roles describe, remembers them
     /// for the device, and points the stimulus at the chosen outputs (K4).
-    pub(in crate::state) fn submit_session(&mut self, out: &mut Vec<Request>) {
+    pub(in crate::state) fn submit_stream(&mut self, out: &mut Vec<Request>) {
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
-        let d = &mut s.session;
+        let d = &mut s.stream;
         d.finish_edit();
         let plan = match d.plan() {
             Ok(p) => p,
@@ -457,7 +457,7 @@ impl AppState {
             }
         }
         self.prefs_dirty = true;
-        out.push(Request::OpenSession {
+        out.push(Request::OpenStream {
             config: plan.config,
             inputs: plan.inputs.inputs,
             pairs: plan.inputs.pairs,

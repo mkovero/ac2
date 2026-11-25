@@ -14,7 +14,7 @@ use ac2_proto::model::{
     LocalServer, NetBind, NetChoice, NetSaved, NetSetting, NetSettingKind, NetSettingView,
     NetStatus, NetStatusKind, NetStatusView, NetToggle, NetUnavailable, NotSavedReason,
     PeerNetStatus, REMOTE_BASE, RemoteAudio, RemoteInput, RemoteLink, RigPeer, ServerInfo,
-    SessionConfig, StateFile, SystemClock,
+    StateFile, StreamConfig, SystemClock,
 };
 use ac2_proto::{Command, ErrorCode};
 use ac2_zmq::{AuthorizedKeys, Context, CurveClient, KeyPair};
@@ -590,11 +590,11 @@ fn a_damaged_or_other_version_setting_is_set_aside_and_means_off() {
     }
 }
 
-/// A rig whose network is turned on while its session runs serves a paired rig its input
-/// at once: the session needs no reopening for the new pair. Turned off, the paired rig
+/// A rig whose network is turned on while its stream runs serves a paired rig its input
+/// at once: the stream needs no reopening for the new pair. Turned off, the paired rig
 /// reads why rather than a lost link, and is back up once it is on again.
 #[test]
-fn slow_turned_on_mid_session_a_paired_rig_gets_its_audio() {
+fn slow_turned_on_mid_stream_a_paired_rig_gets_its_audio() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let app = KeyPair::generate().unwrap();
@@ -619,10 +619,10 @@ fn slow_turned_on_mid_session_a_paired_rig_gets_its_audio() {
             client: "test".into(),
         })
         .rig_id;
-    cb.ok(Command::SessionOpen {
-        config: session(false),
+    cb.ok(Command::StreamOpen {
+        config: stream(false),
     });
-    let epoch = cb.state().session.epoch;
+    let epoch = cb.state().stream.epoch;
     let port = turn_on(&mut cb, &b);
     let a_key = a.server_public_key().unwrap();
     let mut ca = Client::connect(&ctx, a.ctrl_endpoint());
@@ -645,8 +645,8 @@ fn slow_turned_on_mid_session_a_paired_rig_gets_its_audio() {
             key: b.server_public_key().unwrap().to_z85(),
         },
     });
-    ca.ok(Command::SessionOpen {
-        config: SessionConfig {
+    ca.ok(Command::StreamOpen {
+        config: StreamConfig {
             input_channels: vec![0, REMOTE_BASE],
             sample_rate_hz: Some(FS),
             remote_inputs: vec![RemoteInput {
@@ -655,7 +655,7 @@ fn slow_turned_on_mid_session_a_paired_rig_gets_its_audio() {
                 rig_name: "rig-b".into(),
                 channel: 1,
             }],
-            ..session(false)
+            ..stream(false)
         },
     });
     let t0 = Instant::now();
@@ -668,9 +668,9 @@ fn slow_turned_on_mid_session_a_paired_rig_gets_its_audio() {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert_eq!(
-        cb.state().session.epoch,
+        cb.state().stream.epoch,
         epoch,
-        "the session was not reopened"
+        "the stream was not reopened"
     );
 
     let link = |ca: &mut Client| ca.state().remote.rigs.first().map(|r| r.link.clone());

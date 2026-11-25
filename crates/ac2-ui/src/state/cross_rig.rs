@@ -117,21 +117,21 @@ impl AppState {
         }
     }
 
-    /// What rig `r`'s audio session runs at, for its heading: the rate, else what the top
+    /// What rig `r`'s audio stream runs at, for its heading: the rate, else what the top
     /// bar says of a rig without one.
     fn rig_audio(r: &RigState) -> RigAudio {
         match r.daemon() {
-            Some(s) => match &s.session.open {
+            Some(s) => match &s.stream.open {
                 Some(o) => RigAudio::Rate(o.sample_rate_hz),
-                None if s.measurements.is_empty() => RigAudio::NoSession,
+                None if s.measurements.is_empty() => RigAudio::NoStream,
                 None => RigAudio::NoAudio,
             },
-            None => RigAudio::NoSession,
+            None => RigAudio::NoStream,
         }
     }
 
     /// The rig shown's daemon's standing relation with paired rig `id`: the clocks and the
-    /// session it hears in that rig's levels. None while the app is not connected to the
+    /// stream it hears in that rig's levels. None while the app is not connected to the
     /// rig shown: its mirror then holds what was, not what is.
     fn standing_with(shown: &RigState, id: RigId) -> Option<&StandingRig> {
         if !matches!(shown.conn, ConnState::Connected { .. }) {
@@ -153,19 +153,19 @@ impl AppState {
         ))
     }
 
-    /// A paired rig's session as its levels have it, for a rig this app does not read; `None`
+    /// A paired rig's stream as its levels have it, for a rig this app does not read; `None`
     /// while the link between the daemons is down, when nothing is heard of it.
     fn heard_audio(s: &StandingRig) -> Option<RigAudio> {
         (s.link == RemoteLink::Up).then(|| {
-            s.session
+            s.stream
                 .as_ref()
-                .map_or(RigAudio::NoSession, |x| RigAudio::Rate(x.sample_rate_hz))
+                .map_or(RigAudio::NoStream, |x| RigAudio::Rate(x.sample_rate_hz))
         })
     }
 
     /// The clock domain of each rig listed, the rig shown first and then `paired` in order,
     /// judged together: a tag says which of the others a rig agrees with. A rig this app
-    /// does not read (not held, or its link down) has the session the rig shown's daemon
+    /// does not read (not held, or its link down) has the stream the rig shown's daemon
     /// hears in its levels, else none: the app then knows neither its rate nor its clocks,
     /// so it gets no tag and no other rig is compared with it.
     fn clock_tags(&self, shown: &RigState, paired: &[(RigId, String)]) -> Vec<DomainTag> {
@@ -188,7 +188,7 @@ impl AppState {
                 Some((s, now)) => RigClockFacts {
                     id: Some(id),
                     name,
-                    rate_hz: s.session.open.as_ref().map(|o| o.sample_rate_hz),
+                    rate_hz: s.stream.open.as_ref().map(|o| o.sample_rate_hz),
                     clocks: &s.clocks,
                     between: &s.remote.rigs,
                     levels: Some(Levels {
@@ -203,7 +203,7 @@ impl AppState {
                         .and_then(Self::heard_audio)
                         .and_then(|a| match a {
                             RigAudio::Rate(hz) => Some(hz),
-                            RigAudio::NoSession | RigAudio::NoAudio => None,
+                            RigAudio::NoStream | RigAudio::NoAudio => None,
                         }),
                     clocks: &unread,
                     between: &[],
@@ -267,7 +267,7 @@ impl AppState {
         let remote = shown.daemon().map(|s| &s.remote);
         let inputs = shown
             .daemon()
-            .and_then(|s| s.session.open.as_ref())
+            .and_then(|s| s.stream.open.as_ref())
             .map_or(&[][..], |o| &o.config.remote_inputs[..]);
         for ((id, name), clock) in paired.into_iter().zip(&clocks[1..]) {
             // One verdict on a heading: a rig with a clock tag says the clocks there.

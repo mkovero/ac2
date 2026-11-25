@@ -51,8 +51,8 @@ fn bursty_delivery_is_named_once_per_minute() {
     let fake = manual_rig();
     let h = Daemon::start(config(fake.clone(), inproc("bursts"))).unwrap();
     let (mut c, _s) = connect(&h, &[]);
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let mut d = driver(&fake);
 

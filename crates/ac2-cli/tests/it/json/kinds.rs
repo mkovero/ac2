@@ -1,5 +1,5 @@
 //! Input kinds, stereo pairs and line calibration (`programme-meter.md` §1–2): what
-//! `session inputs --kind / --pair`, `cal line`, `cal list` and `cal rm --line` send, print
+//! `stream inputs --kind / --pair`, `cal line`, `cal list` and `cal rm --line` send, print
 //! and refuse, in the app's words.
 
 use ac2_proto::model::Signal;
@@ -26,7 +26,7 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     ok_json(
         &f,
         &[
-            "session",
+            "stream",
             "open",
             "--backend",
             "fake",
@@ -41,7 +41,7 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     let i = ok_json(
         &f,
         &[
-            "session",
+            "stream",
             "inputs",
             "--kind",
             "3=line",
@@ -64,7 +64,7 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     assert_eq!(input_row(&i, 3)["pair"], "left");
     assert_eq!(input_row(&i, 4)["pair"], "right");
     // The text: one line per input, the pair on one line, the app's words.
-    let t = ac2(&f, &["session", "inputs"]).await?.stdout;
+    let t = ac2(&f, &["stream", "inputs"]).await?.stdout;
     has(&t, "in 1 · mic MM1 · ");
     has(&t, "in 2 · digital · dBFS");
     has(&t, "in 3+4 · line · pair Main · dBFS");
@@ -72,8 +72,8 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
 
     // A mic name or curve on a line or digital input is refused here, naming the way.
     for args in [
-        ["session", "inputs", "--mic", "3=M30", "--json"],
-        ["session", "inputs", "--curve", "2=off", "--json"],
+        ["stream", "inputs", "--mic", "3=M30", "--json"],
+        ["stream", "inputs", "--curve", "2=off", "--json"],
     ] {
         let r = ac2(&f, &args).await?;
         assert_ne!(r.code, 0, "{args:?}");
@@ -81,21 +81,21 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
         has(&r.stdout, "--kind");
     }
     // Pair refusals come from the daemon, as it states them.
-    let r = ac2(&f, &["session", "inputs", "--pair", "1,2", "--json"]).await?;
+    let r = ac2(&f, &["stream", "inputs", "--pair", "1,2", "--json"]).await?;
     assert_ne!(r.code, 0);
     assert_eq!(r.json()?["error"]["code"], "invalid");
     has(&r.stdout, "inputs 1 and 2 are of different kinds");
     let r = ac2(
         &f,
         &[
-            "session", "inputs", "--kind", "5=line", "--kind", "6=line", "--pair", "5,6", "--json",
+            "stream", "inputs", "--kind", "5=line", "--kind", "6=line", "--pair", "5,6", "--json",
         ],
     )
     .await?;
     assert_ne!(r.code, 0);
-    has(&r.stdout, "input 5 is not captured by the session");
+    has(&r.stdout, "input 5 is not captured by the stream");
     // A refused command changes nothing: the pair stands.
-    let i = ok_json(&f, &["session", "inputs", "--json"]).await?;
+    let i = ok_json(&f, &["stream", "inputs", "--json"]).await?;
     assert_eq!(input_row(&i, 3)["pair"], "left");
 
     // Line calibration: +4 dBu (1.228 V) with a tone reading −20 dBFS puts full scale at
@@ -163,7 +163,7 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     assert_eq!(l["line_calibrations"].as_array().map(Vec::len), Some(0));
     let t = ac2(&f, &["cal", "list"]).await?.stdout;
     has(&t, "line calibrations\nnone");
-    // A second removal: the device is the session's, so the daemon says what is not there.
+    // A second removal: the device is the stream's, so the daemon says what is not there.
     let r = ac2(&f, &["cal", "rm", "--input", "3", "--line", "--json"]).await?;
     assert_ne!(r.code, 0);
     assert_eq!(r.json()?["error"]["code"], "not_found");
@@ -172,19 +172,19 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     has(&r.stdout, "input 3 is a line input");
 
     // `--no-pairs` clears; a kind change back to mic drops the line input's pair side too.
-    let i = ok_json(&f, &["session", "inputs", "--no-pairs", "--json"]).await?;
+    let i = ok_json(&f, &["stream", "inputs", "--no-pairs", "--json"]).await?;
     assert_eq!(input_row(&i, 3)["pair"], Value::Null);
     assert_eq!(input_row(&i, 4)["pair"], Value::Null);
     let i = ok_json(
         &f,
         &[
-            "session", "inputs", "--kind", "3=mic", "--mic", "3=M30", "--json",
+            "stream", "inputs", "--kind", "3=mic", "--mic", "3=M30", "--json",
         ],
     )
     .await?;
     assert_eq!(input_row(&i, 3)["kind"]["kind"], "mic");
     assert_eq!(input_row(&i, 3)["mic"], "M30");
-    let t = ac2(&f, &["session", "inputs"]).await?.stdout;
+    let t = ac2(&f, &["stream", "inputs"]).await?.stdout;
     has(&t, "in 3 · mic M30 · ");
     has(&t, "in 4 · line · dBFS");
     Ok(())

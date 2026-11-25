@@ -9,7 +9,7 @@ use super::{
 };
 use crate::grid::GridId;
 use crate::units::{
-    Db, Dbfs, DynamicsId, Hz, MeasId, SampleIndex, Seconds, SessionEpoch, SweepId, TraceId,
+    Db, Dbfs, DynamicsId, Hz, MeasId, SampleIndex, Seconds, StreamEpoch, SweepId, TraceId,
     TransferId, WallNs,
 };
 
@@ -183,7 +183,7 @@ pub enum TraceSource {
         /// Its name at capture.
         meas_name: String,
         /// Epoch it was captured in (shared time reference within it).
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         /// Capture sample index.
         at_sample: SampleIndex,
     },
@@ -205,7 +205,7 @@ pub enum TraceSource {
         /// Its name at capture.
         meas_name: String,
         /// Epoch it was captured in.
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         /// Capture sample index.
         at_sample: SampleIndex,
         /// The expression.
@@ -252,7 +252,7 @@ pub enum TraceSource {
         /// runs stored when it ran.
         number: u32,
         /// Epoch (shared time reference within it, like a capture).
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         /// Sweep played.
         sweep: EssSpec,
         /// Level played.
@@ -279,16 +279,16 @@ pub enum TraceSource {
         /// runs stored when it ran.
         number: u32,
         /// Epoch it ran in.
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
     },
 }
 
 impl TraceSource {
-    /// The session epoch whose time base the trace's phase is in: captures (live or sweep)
+    /// The stream epoch whose time base the trace's phase is in: captures (live or sweep)
     /// share their epoch's, and so does a math capture whose phase is a sum, difference or
     /// average of operands in that time base (a ratio or a cascade is relative, in no time
     /// base); every other source is independent (decision 8a).
-    pub fn shared_epoch(&self) -> Option<SessionEpoch> {
+    pub fn shared_epoch(&self) -> Option<StreamEpoch> {
         match self {
             TraceSource::Captured { epoch, .. } | TraceSource::Sweep { epoch, .. } => Some(*epoch),
             TraceSource::Math {

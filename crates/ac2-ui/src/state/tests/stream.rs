@@ -1,7 +1,7 @@
 //! Reducer tests of the audio I/O and measurement dialogs, the meters and recording.
 
 use super::*;
-use crate::session_dialog::Edit;
+use crate::stream_dialog::Edit;
 
 fn real_backends() -> Vec<BackendInfo> {
     let mut b = backends(false);
@@ -61,7 +61,7 @@ fn empty_hint_yields_to_stored_traces() {
     connected_to(&mut t, "local daemon");
     let meta = captured(10, Some(1), 2);
     // Main L, kept from an earlier session: the pane draws its capture.
-    let mut s = no_session_state();
+    let mut s = no_stream_state();
     s.measurements = vec![meas(1, "Main L", transfer())];
     s.traces = vec![meta.clone()];
     t.conn(mirror(s));
@@ -97,7 +97,7 @@ fn empty_hint_yields_to_stored_traces() {
     // Hidden: the plot is empty again and the hint goes back to its centre.
     let mut hidden = meta.clone();
     hidden.edit.visible = false;
-    let mut s = no_session_state();
+    let mut s = no_stream_state();
     s.measurements = vec![meas(1, "Main L", transfer())];
     s.traces = vec![hidden.clone()];
     t.conn(mirror(s));
@@ -112,7 +112,7 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
     connected_to(&mut t, "local daemon");
     // Connected but not synced: nothing to say yet.
     assert_eq!(t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys), None);
-    t.conn(mirror(no_session_state()));
+    t.conn(mirror(no_stream_state()));
     assert_eq!(
         t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys)
             .map(|h| h.text)
@@ -121,10 +121,10 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
     );
     assert_eq!(
         t.st.no_audio_line(&t.keys),
-        "no session · Alt+S, then New session"
+        "no stream · Alt+S, then New session"
     );
     // Measurements kept without audio: the audio is what is missing.
-    let mut s = no_session_state();
+    let mut s = no_stream_state();
     s.measurements = vec![meas(1, "Main L", transfer())];
     t.conn(mirror(s));
     assert_eq!(
@@ -157,7 +157,7 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
     assert_eq!(t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys), None);
     // The hint follows the keymap: the palette entry when Alt+S is unbound.
     let keys = Keymap::from_toml("[global]\nsessions = []").expect("keys");
-    t.conn(mirror(no_session_state()));
+    t.conn(mirror(no_stream_state()));
     assert_eq!(
         t.st.empty_hint(t.pane(PaneKind::Transfer), &keys)
             .map(|h| h.text)
@@ -212,7 +212,7 @@ fn hints_name_the_keys_the_keymap_binds() {
 #[test]
 fn arming_without_a_session_names_the_key() {
     let mut t = T::new();
-    t.conn(mirror(no_session_state()));
+    t.conn(mirror(no_stream_state()));
     t.pink_at(-20.0);
     let r = t.key("Space");
     assert!(r.is_empty(), "{r:?}");
@@ -228,12 +228,12 @@ fn arming_without_a_session_names_the_key() {
     );
 }
 
-/// Shift+O, the simulated rig's own wiring as roles, Enter: the session, its mic names and
+/// Shift+O, the simulated rig's own wiring as roles, Enter: the stream, its mic names and
 /// one transfer per mic, without a channel number typed.
 #[test]
-fn session_dialog_opens_a_session_from_roles() {
+fn stream_dialog_opens_a_stream_from_roles() {
     let mut t = T::new();
-    t.conn(mirror(no_session_state()));
+    t.conn(mirror(no_stream_state()));
     // Shift+O opens the dialog, asks for the devices and subscribes to the meters; the O it
     // types is swallowed.
     let r = t.type_key("Shift+O", "O");
@@ -254,7 +254,7 @@ fn session_dialog_opens_a_session_from_roles() {
     assert_eq!(d.inputs[0].kind_pref(), KindPref::Line);
     assert_eq!(d.inputs[1].kind_pref(), KindPref::Mic);
     assert_eq!(d.inputs[1].label(), "Room mic");
-    assert!(!d.inputs[2].in_session);
+    assert!(!d.inputs[2].in_stream);
     assert!(d.outputs[0].stimulus);
     // Name the mic: N on its row, type, Enter ends the edit (it does not open).
     focus(&mut t, Row::Input(1));
@@ -265,7 +265,7 @@ fn session_dialog_opens_a_session_from_roles() {
     assert_eq!(dialog(&t).inputs[1].mic(), Some("M30 FOH"));
     assert_eq!(dialog(&t).edit, None);
     let r = t.key("Enter");
-    let (config, inputs) = opened(&r).expect("session.open");
+    let (config, inputs) = opened(&r).expect("stream.open");
     assert_eq!(config.backend, Some(BackendKind::Fake));
     assert_eq!(config.input_channels, vec![0, 1]);
     assert_eq!(config.output_channels, 2);
@@ -321,21 +321,21 @@ fn session_dialog_opens_a_session_from_roles() {
 fn roles_move_toggle_and_explain_themselves() {
     let mut t = T::new();
     open_dialog(&mut t, backends(true));
-    // R moves the reference; the old row keeps its place in the session.
+    // R moves the reference; the old row keeps its place in the stream.
     focus(&mut t, Row::Input(2));
     t.key("R");
     let d = dialog(&t);
     assert!(d.inputs[2].reference);
-    assert!(d.inputs[2].in_session);
+    assert!(d.inputs[2].in_stream);
     assert!(!d.inputs[0].reference);
-    assert!(d.inputs[0].in_session);
-    // M marks several mics; Space takes a row out of the session, its kind kept.
+    assert!(d.inputs[0].in_stream);
+    // M marks several mics; Space takes a row out of the stream, its kind kept.
     focus(&mut t, Row::Input(3));
     t.key("M");
     assert_eq!(dialog(&t).inputs[3].kind_pref(), KindPref::Mic);
     assert_eq!(dialog(&t).inputs[1].kind_pref(), KindPref::Mic);
     t.type_key("Space", " ");
-    assert!(!dialog(&t).inputs[3].in_session);
+    assert!(!dialog(&t).inputs[3].in_stream);
     assert_eq!(dialog(&t).inputs[3].kind_pref(), KindPref::Mic);
     // S belongs on an output: on an input it says so and changes nothing.
     t.key("S");
@@ -354,15 +354,15 @@ fn roles_move_toggle_and_explain_themselves() {
     let e = dialog(&t).error.clone().unwrap_or_default();
     assert!(e.starts_with("Pick the stimulus output"), "{e}");
     t.key("S");
-    // Space on output 2 shrinks the session to output 1, and back.
+    // Space on output 2 shrinks the stream to output 1, and back.
     focus(&mut t, Row::Output(1));
     t.type_key("Space", " ");
     assert_eq!(dialog(&t).out_count, 1);
     t.type_key("Space", " ");
     assert_eq!(dialog(&t).out_count, 2);
-    // Every input out of the session: refused in plain words.
+    // Every input out of the stream: refused in plain words.
     for i in 0..4 {
-        if dialog(&t).inputs[i].in_session {
+        if dialog(&t).inputs[i].in_stream {
             focus(&mut t, Row::Input(i));
             t.type_key("Space", " ");
         }
@@ -379,7 +379,7 @@ fn mic_names_must_differ_and_the_mouse_assigns_roles() {
     // Unnamed channels read Input N.
     assert_eq!(dialog(&t).inputs[2].label(), "Input 3");
     for i in [1, 2] {
-        t.st.apply(Msg::Session(SessionMsg::EditMic(Row::Input(i))), &t.keys);
+        t.st.apply(Msg::Stream(StreamMsg::EditMic(Row::Input(i))), &t.keys);
         t.text("ECM");
         t.key("Enter");
     }
@@ -388,22 +388,22 @@ fn mic_names_must_differ_and_the_mouse_assigns_roles() {
     assert!(e.contains("Two mics are named \"ECM\""), "{e}");
     // The R chip of input 3 by mouse; N on the reference refuses a mic name.
     t.st.apply(
-        Msg::Session(SessionMsg::Role(Row::Input(2), RoleKey::Reference)),
+        Msg::Stream(StreamMsg::Role(Row::Input(2), RoleKey::Reference)),
         &t.keys,
     );
     assert!(dialog(&t).inputs[2].reference);
     t.key("N");
     assert_eq!(dialog(&t).edit, None);
-    let r = t.st.apply(Msg::Session(SessionMsg::Submit), &t.keys);
+    let r = t.st.apply(Msg::Stream(StreamMsg::Submit), &t.keys);
     let (config, inputs) = opened(&r).expect("open");
     assert_eq!(config.loopback.map(|l| l.input), Some(2));
     assert_eq!(config.input_channels, vec![0, 1, 2]);
     assert_eq!(inputs[1].mic(), Some("ECM"));
     assert_eq!(inputs[2].mic(), None);
     // Cancel closes without touching the stimulus (Esc would stop it).
-    t.st.apply(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.st.apply(Msg::Command(CommandId::OpenStream), &t.keys);
     t.st.rig.stimulus.phase = StimPhase::Armed;
-    let r = t.st.apply(Msg::Session(SessionMsg::Cancel), &t.keys);
+    let r = t.st.apply(Msg::Stream(StreamMsg::Cancel), &t.keys);
     assert!(!r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
@@ -434,7 +434,7 @@ fn roles_are_remembered_per_device() {
     assert_eq!(d.inputs[0].kind_pref(), KindPref::Mic);
     assert_eq!(d.inputs[0].mic(), Some("M30"));
     assert_eq!(d.inputs[0].label(), "M30");
-    assert!(!d.inputs[1].in_session);
+    assert!(!d.inputs[1].in_stream);
     assert!(d.outputs[1].stimulus && !d.outputs[0].stimulus);
     let r = t.key("Enter");
     let (config, _) = opened(&r).expect("open");
@@ -507,7 +507,7 @@ fn jack_alone_and_unavailable_says_what_to_do() {
 }
 
 #[test]
-fn preview_renews_and_the_open_device_uses_the_session_meters() {
+fn preview_renews_and_the_open_device_uses_the_stream_meters() {
     let mut t = T::new();
     open_dialog(&mut t, backends(true));
     let tick = |t: &mut T, s: f64| {
@@ -540,18 +540,18 @@ fn preview_renews_and_the_open_device_uses_the_session_meters() {
         Some("meters unavailable: device busy")
     );
     t.key("Escape");
-    // The open session's own device: its session meters, no preview.
+    // The open stream's own device: its stream meters, no preview.
     let mut s = daemon_state();
-    if let Some(o) = &mut s.session.open {
+    if let Some(o) = &mut s.stream.open {
         o.backend = BackendKind::Fake;
     }
     t.conn(mirror(s));
-    t.st.apply(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.st.apply(Msg::Command(CommandId::OpenStream), &t.keys);
     let r = t.conn(ConnEvent::Devices(Ok(backends(true))));
     assert!(dialog(&t).is_open_device());
     assert!(previewed(&r).is_none(), "{r:?}");
-    // Prefilled from the session: inputs 1–2, no loopback.
-    assert!(dialog(&t).inputs[0].in_session && dialog(&t).inputs[1].in_session);
+    // Prefilled from the stream: inputs 1–2, no loopback.
+    assert!(dialog(&t).inputs[0].in_stream && dialog(&t).inputs[1].in_stream);
     assert!(dialog(&t).inputs.iter().all(|i| !i.reference));
 }
 
@@ -615,7 +615,7 @@ fn detect_loopback_needs_a_stimulus_output_and_a_typed_level() {
     assert_eq!(req.level, Dbfs(-30.0));
     assert_eq!(req.output, 0);
     assert_eq!(req.device, DeviceId("fake:loop".into()));
-    // While the burst plays, Enter does not open a session on the same device.
+    // While the burst plays, Enter does not open a stream on the same device.
     assert!(opened(&t.key("Enter")).is_none());
     assert!(
         dialog(&t)
@@ -660,9 +660,9 @@ fn opening_on_an_empty_daemon_asks_what_to_measure() {
     open_dialog(&mut t, backends(true));
     let r = t.key("Enter");
     assert!(opened(&r).is_some(), "{r:?}");
-    // The reply can come before the state shows the session: the chooser waits for it, as
+    // The reply can come before the state shows the stream: the chooser waits for it, as
     // which kinds can be made is read from that state.
-    t.conn(ConnEvent::SessionOpened);
+    t.conn(ConnEvent::StreamOpened);
     assert_eq!(t.st.overlay, Overlay::None);
     let mut s = daemon_state();
     s.measurements.clear();
@@ -681,14 +681,14 @@ fn opening_on_an_empty_daemon_asks_what_to_measure() {
     assert_eq!(t.st.overlay, Overlay::None);
     // A daemon that has measurements by then asks nothing.
     t.conn(mirror(daemon_state()));
-    t.conn(ConnEvent::SessionOpened);
+    t.conn(ConnEvent::StreamOpened);
     assert_eq!(t.st.overlay, Overlay::None);
 }
 
 #[test]
-fn session_dialog_errors() {
+fn stream_dialog_errors() {
     let mut t = T::new();
-    t.st.apply(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.st.apply(Msg::Command(CommandId::OpenStream), &t.keys);
     t.conn(ConnEvent::Devices(Err("not connected".into())));
     assert!(
         dialog(&t)
@@ -700,7 +700,7 @@ fn session_dialog_errors() {
     // Not connected: no dialog.
     let mut t = T::disconnected();
     assert!(
-        t.st.apply(Msg::Command(CommandId::OpenSession), &t.keys)
+        t.st.apply(Msg::Command(CommandId::OpenStream), &t.keys)
             .is_empty()
     );
     assert_eq!(t.st.overlay, Overlay::None);

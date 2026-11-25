@@ -138,7 +138,7 @@ pub enum MeasEqCmd {
         /// Name.
         #[arg(long)]
         name: Option<String>,
-        /// Digital at this rate (default: the session's, 48 kHz without one).
+        /// Digital at this rate (default: the stream's, 48 kHz without one).
         #[arg(long, conflicts_with = "analog")]
         rate: Option<Freq>,
         /// Analog (the s-domain prototype, no frequency warping).

@@ -121,8 +121,8 @@ fn rig(name: &str) -> Rig {
     cfg.session_dir = dir.path().join("sessions");
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     c.ok(Command::MeasCreate {
         config: transfer("main"),

@@ -4,7 +4,7 @@
 //!
 //! The history is display state kept by the UI between frames, like [`PeakHold`]: the
 //! frames' columns resampled once, when they arrive, onto an even log-frequency grid of
-//! [`ROWS_PER_OCTAVE`], and placed by the audio time they end at (the session's sample
+//! [`ROWS_PER_OCTAVE`], and placed by the audio time they end at (the stream's sample
 //! clock, `audio_sample ÷ rate`) on a time grid of
 //! [`SLOTS_PER_S`] slots a second over the history length ([`slots`]): the slot is as
 //! long at every length, so a spectrum that updates about 30 times a second keeps a row
@@ -163,7 +163,7 @@ impl RowMap {
 #[derive(Clone, Copy, Debug)]
 pub struct SpectrographFrame<'a> {
     pub seq: u64,
-    /// The audio time the frame ends at, ns on the session's sample clock
+    /// The audio time the frame ends at, ns on the stream's sample clock
     /// (`audio_sample ÷ rate`): frames are placed by when they were measured, not by when
     /// the link delivered them.
     pub at_ns: u64,

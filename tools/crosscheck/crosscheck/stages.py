@@ -178,20 +178,20 @@ def verify_bound(ctx: Ctx, want: float) -> dict:
     return c
 
 
-def _session_fits(st: dict, session_open: list) -> bool:
-    """True when the open session has the outputs and loopback `session_open` asks for. A
+def _stream_fits(st: dict, stream_open: list) -> bool:
+    """True when the open stream has the outputs and loopback `stream_open` asks for. A
     restarted ac2d with a rig monitor reopens capture-only (no outputs, no loopback): open,
     but it cannot play a sweep."""
-    cfg = ((st.get("session") or {}).get("open") or {}).get("config")
+    cfg = ((st.get("stream") or {}).get("open") or {}).get("config")
     if not cfg:
         return False
-    args = list(map(str, session_open))
+    args = list(map(str, stream_open))
     if "--outputs" in args and cfg.get("output_channels", 0) < int(args[args.index("--outputs") + 1]):
         return False
     return not ("--loopback-out" in args and not cfg.get("loopback"))
 
 
-def ensure_session(ctx: Ctx, deadline: float = 30.0):
+def ensure_stream(ctx: Ctx, deadline: float = 30.0):
     t0 = time.monotonic()
     while True:
         try:
@@ -201,8 +201,8 @@ def ensure_session(ctx: Ctx, deadline: float = 30.0):
             if time.monotonic() - t0 > deadline:
                 raise
             time.sleep(1.0)
-    if not _session_fits(st, ctx.rig["ac2"]["session_open"]):
-        ctx.ac2.run(*ctx.rig["ac2"]["session_open"], json_out=False)
+    if not _stream_fits(st, ctx.rig["ac2"]["stream_open"]):
+        ctx.ac2.run(*ctx.rig["ac2"]["stream_open"], json_out=False)
         st = ctx.ac2.status() or {}
     return st
 
@@ -220,14 +220,14 @@ def install_dropin(ctx: Ctx, level: float):
     p = dropin_path(ctx.rig)
     have = ctx.manifest.get("dropin") or {}
     if p.exists() and have.get("installed") == str(p) and have.get("level") == level and "removed" not in have:
-        # an earlier electrical path installed it: no second restart (which reopens the session)
+        # an earlier electrical path installed it: no second restart (which reopens the stream)
         if abs(float(ceiling(ctx).get("bound", 0)) - level) <= 1e-6:
             return
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("[Service]\nExecStart=\nExecStart=" + ctx.rig["ac2"]["exec_start"].format(level=f"{level:g}") + "\n")
     _systemctl("daemon-reload")
     _systemctl("restart", ctx.rig["ac2"]["systemd_unit"])
-    ensure_session(ctx)
+    ensure_stream(ctx)
     c = ceiling(ctx)
     if abs(float(c.get("bound", 0)) - level) > 1e-6:
         raise RuntimeError(f"after the drop-in ac2d's bound reads {c.get('bound')}, not {level:g}")
@@ -245,7 +245,7 @@ def remove_dropin(ctx: Ctx) -> dict:
         p.unlink()
         _systemctl("daemon-reload")
         _systemctl("restart", ctx.rig["ac2"]["systemd_unit"])
-    ensure_session(ctx)
+    ensure_stream(ctx)
     c = verify_bound(ctx, float(ctx.rig["rig"]["system_max_dbfs"]))
     r = {"removed": existed, "ceiling_after": c}
     rec = ctx.manifest.setdefault("dropin", {})

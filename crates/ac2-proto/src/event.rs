@@ -10,10 +10,10 @@ use thiserror::Error;
 use crate::model::{
     Autosave, CalEntry, CalKey, Clocks, DynamicsRun, Generator, InputSetups, LineCalEntry,
     LineCalKey, Measurement, Mic, OutputSetup, PlanSpec, RecordingRun, RemoteState, Rig,
-    ServerSummary, Session, SimFitKept, SimState, SplLog, State, SweepRun, TimingStatus, TraceMeta,
+    ServerSummary, SimFitKept, SimState, SplLog, State, Stream, SweepRun, TimingStatus, TraceMeta,
     WalkState, WorkingSession,
 };
-use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId, WalkId};
+use crate::units::{DaemonIncarnation, MeasId, Rev, StreamEpoch, TraceId, WalkId};
 
 /// Largest event message accepted, bytes.
 pub const MAX_EVENT_BYTES: usize = 1 << 20;
@@ -36,8 +36,8 @@ pub enum Patch<T, K> {
 /// What changed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Change {
-    /// Session (never deleted; closed is a value).
-    Session(Session),
+    /// Stream (never deleted; closed is a value).
+    Stream(Stream),
     /// A measurement.
     Measurement(Patch<Measurement, MeasId>),
     /// A trace.
@@ -61,7 +61,7 @@ pub enum Change {
     Timing(TimingStatus),
     /// The host's clocks (never deleted).
     Clocks(Clocks),
-    /// Remote inputs: the paired rigs, the session's remote rigs and inputs (never deleted).
+    /// Remote inputs: the paired rigs, the stream's remote rigs and inputs (never deleted).
     Remote(RemoteState),
     /// The latest sweep run (never deleted; a new run replaces it).
     Sweep(SweepRun),
@@ -104,12 +104,12 @@ pub struct Event {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WireEvent {
-    /// [`Change::Session`].
-    Session {
+    /// [`Change::Stream`].
+    Stream {
         /// Rev.
         rev: Rev,
         /// Payload.
-        payload: Session,
+        payload: Stream,
     },
     /// [`Change::Measurement`].
     Measurement {
@@ -285,7 +285,7 @@ impl From<Event> for WireEvent {
     fn from(e: Event) -> Self {
         let rev = e.rev;
         match e.change {
-            Change::Session(payload) => Self::Session { rev, payload },
+            Change::Stream(payload) => Self::Stream { rev, payload },
             Change::Measurement(payload) => Self::Measurement { rev, payload },
             Change::Trace(payload) => Self::Trace { rev, payload },
             Change::Generator(payload) => Self::Generator { rev, payload },
@@ -317,7 +317,7 @@ impl From<Event> for WireEvent {
 impl From<WireEvent> for Event {
     fn from(w: WireEvent) -> Self {
         let (rev, change) = match w {
-            WireEvent::Session { rev, payload } => (rev, Change::Session(payload)),
+            WireEvent::Stream { rev, payload } => (rev, Change::Stream(payload)),
             WireEvent::Measurement { rev, payload } => (rev, Change::Measurement(payload)),
             WireEvent::Trace { rev, payload } => (rev, Change::Trace(payload)),
             WireEvent::Generator { rev, payload } => (rev, Change::Generator(payload)),
@@ -351,7 +351,7 @@ impl Change {
     /// Wire `kind`.
     pub fn kind(&self) -> &'static str {
         match self {
-            Self::Session(_) => "session",
+            Self::Stream(_) => "stream",
             Self::Measurement(_) => "measurement",
             Self::Trace(_) => "trace",
             Self::Generator(_) => "generator",
@@ -391,7 +391,7 @@ pub struct StateSnapshot {
     /// Incarnation.
     pub daemon_incarnation: DaemonIncarnation,
     /// Epoch.
-    pub session_epoch: SessionEpoch,
+    pub stream_epoch: StreamEpoch,
 }
 
 /// Event decode failures.

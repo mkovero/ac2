@@ -141,7 +141,7 @@ fn meter_frames_are_checked_against_topic_and_channels() {
         .filter(|f| {
             matches!(
                 f.data,
-                FrameData::SessionLevels(_) | FrameData::PreviewLevels(_)
+                FrameData::StreamLevels(_) | FrameData::PreviewLevels(_)
             )
         })
         .collect();
@@ -155,13 +155,13 @@ fn meter_frames_are_checked_against_topic_and_channels() {
         );
         // Swapping the two meter topics is a kind mismatch.
         parts[0] = match f.topic() {
-            Topic::SessionLevels => Topic::PreviewLevels.to_bytes(),
-            _ => Topic::SessionLevels.to_bytes(),
+            Topic::StreamLevels => Topic::PreviewLevels.to_bytes(),
+            _ => Topic::StreamLevels.to_bytes(),
         };
         assert_eq!(decode_parts(&parts), Err(DecodeError::KindMismatch));
     }
     let mut bad = meters[0].clone();
-    if let FrameData::SessionLevels(s) = &mut bad.data {
+    if let FrameData::StreamLevels(s) = &mut bad.data {
         s.meta.channels.pop();
     }
     assert!(matches!(

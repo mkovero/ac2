@@ -1,4 +1,4 @@
-//! Device listing, session input meters, the capture-only preview and loopback detection,
+//! Device listing, stream input meters, the capture-only preview and loopback detection,
 //! against the fake rig.
 #![allow(clippy::unwrap_used)]
 
@@ -96,7 +96,7 @@ fn fake_dev() -> DeviceId {
 fn devices_list_backends_with_channel_names() {
     let h = start(Arc::new(named_rig(FakeDrive::Manual, 0.0)));
     let (mut c, _s) = connect(&h, &[]);
-    let b = c.backends(Command::SessionDevices);
+    let b = c.backends(Command::StreamDevices);
     assert_eq!(b.len(), 1);
     assert_eq!(b[0].kind, BackendKind::Fake);
     assert_eq!(b[0].availability, Availability::Available);
@@ -118,39 +118,39 @@ fn devices_list_backends_with_channel_names() {
         d.output.as_ref().unwrap().channel_names.as_deref(),
         Some(&["Main".to_owned(), "Aux".to_owned()][..])
     );
-    // A session on a backend the daemon does not offer is refused, never redirected.
-    let mut cfg = session(true);
+    // A stream on a backend the daemon does not offer is refused, never redirected.
+    let mut cfg = stream(true);
     cfg.backend = Some(BackendKind::Jack);
-    let e = c.call(Command::SessionOpen { config: cfg }).unwrap_err();
+    let e = c.call(Command::StreamOpen { config: cfg }).unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound);
-    // The default backend is the one the daemon names in the open session.
-    let s = c.session(Command::SessionOpen {
-        config: session(true),
+    // The default backend is the one the daemon names in the open stream.
+    let s = c.stream(Command::StreamOpen {
+        config: stream(true),
     });
     assert_eq!(s.open.unwrap().backend, BackendKind::Fake);
 }
 
-/// `session/levels` meters every session input with no measurement running, at most
+/// `stream/levels` meters every stream input with no measurement running, at most
 /// ~30 frames per second, only while subscribed.
 #[test]
-fn session_levels_meter_every_input_without_measurements() {
+fn stream_levels_meter_every_input_without_measurements() {
     let rig = named_rig(FakeDrive::Manual, 0.01);
     let fake = rig.clone();
     let h = start(Arc::new(rig));
     let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
-    let mut cfg = session(true);
+    let mut cfg = stream(true);
     cfg.input_channels = vec![0, 1, 3];
-    c.ok(Command::SessionOpen { config: cfg });
+    c.ok(Command::StreamOpen { config: cfg });
     let mut d = driver(&fake);
     run(&mut d, 1.5);
     let mut frames = Vec::new();
     while let Some(f) = s.frame(Duration::from_millis(300), |f| {
-        matches!(f.data, FrameData::SessionLevels(_))
+        matches!(f.data, FrameData::StreamLevels(_))
     }) {
         frames.push(f);
     }
-    assert!(!frames.is_empty(), "no session/levels frames");
-    let FrameData::SessionLevels(last) = &frames.last().unwrap().data else {
+    assert!(!frames.is_empty(), "no stream/levels frames");
+    let FrameData::StreamLevels(last) = &frames.last().unwrap().data else {
         unreachable!()
     };
     assert_eq!(last.meta.channels, vec![0, 1, 3]);
@@ -160,7 +160,7 @@ fn session_levels_meter_every_input_without_measurements() {
         assert!((f64::from(*r) - want).abs() < 0.5, "input {i}: {r} dBFS");
     }
     assert!(last.clip.iter().all(|c| *c == ClipFlags::NONE));
-    assert_eq!(frames[0].topic(), Topic::SessionLevels);
+    assert_eq!(frames[0].topic(), Topic::StreamLevels);
     // 1.5 s of audio stepped in ~30 chunks: the rate limit keeps the count near 30/s of
     // wall time, never one frame per block (280 blocks).
     assert!(frames.len() < 120, "{} frames", frames.len());
@@ -177,7 +177,7 @@ fn preview_is_capture_only_and_silent() {
     };
     let h = start(Arc::new(rec));
     let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
-    let p = c.preview(Command::SessionPreview {
+    let p = c.preview(Command::StreamPreview {
         backend: BackendKind::Fake,
         device: fake_dev(),
         inputs: Vec::new(),
@@ -207,17 +207,17 @@ fn preview_is_capture_only_and_silent() {
         assert!(l.peak[1] < -80.0, "{:?}", l.peak);
     }
     // Renewing keeps the one stream; stopping closes it.
-    c.ok(Command::SessionPreview {
+    c.ok(Command::StreamPreview {
         backend: BackendKind::Fake,
         device: fake_dev(),
         inputs: Vec::new(),
         pairs: Vec::new(),
     });
-    c.ok(Command::SessionPreviewStop);
+    c.ok(Command::StreamPreviewStop);
     assert_eq!(*opened.lock().unwrap(), vec![(0, false)]);
     // A device the backend does not list is refused.
     let e = c
-        .call(Command::SessionPreview {
+        .call(Command::StreamPreview {
             backend: BackendKind::Fake,
             device: DeviceId("nope".into()),
             inputs: Vec::new(),
@@ -228,7 +228,7 @@ fn preview_is_capture_only_and_silent() {
 }
 
 #[test]
-fn slow_preview_expires_and_closes_when_a_session_opens() {
+fn slow_preview_expires_and_closes_when_a_stream_opens() {
     let opened: Opened = Arc::default();
     let rec = Recording {
         inner: named_rig(FakeDrive::Thread(Pace::Realtime), 0.0),
@@ -236,7 +236,7 @@ fn slow_preview_expires_and_closes_when_a_session_opens() {
     };
     let h = start(Arc::new(rec));
     let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
-    c.ok(Command::SessionPreview {
+    c.ok(Command::StreamPreview {
         backend: BackendKind::Fake,
         device: fake_dev(),
         inputs: Vec::new(),
@@ -244,30 +244,30 @@ fn slow_preview_expires_and_closes_when_a_session_opens() {
     });
     s.frame(T, |f| matches!(f.data, FrameData::PreviewLevels(_)))
         .expect("preview frame");
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
-    // No preview frame arrives once the session has replaced it.
+    // No preview frame arrives once the stream has replaced it.
     let quiet_from = Instant::now() + Duration::from_millis(200);
     let end = quiet_from + Duration::from_millis(600);
-    let (mut late, mut session) = (0, 0);
+    let (mut late, mut stream) = (0, 0);
     while Instant::now() < end {
         match s
             .frame(Duration::from_millis(100), |_| true)
             .map(|f| f.data)
         {
             Some(FrameData::PreviewLevels(_)) if Instant::now() > quiet_from => late += 1,
-            Some(FrameData::SessionLevels(_)) => session += 1,
+            Some(FrameData::StreamLevels(_)) => stream += 1,
             _ => {}
         }
     }
     assert_eq!(late, 0);
-    assert!(session > 0, "the session meters took over");
+    assert!(stream > 0, "the stream meters took over");
     assert_eq!(opened.lock().unwrap().len(), 2);
 
     // A preview nobody renews closes by itself.
-    c.ok(Command::SessionClose);
-    c.ok(Command::SessionPreview {
+    c.ok(Command::StreamClose);
+    c.ok(Command::StreamPreview {
         backend: BackendKind::Fake,
         device: fake_dev(),
         inputs: Vec::new(),
@@ -296,7 +296,7 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
     };
     let h = start(Arc::new(rec));
     let (mut c, _s) = connect(&h, &[]);
-    let detect = |token, level| Command::SessionDetectLoopback {
+    let detect = |token, level| Command::StreamDetectLoopback {
         lease_token: token,
         backend: BackendKind::Fake,
         input_device: fake_dev(),
@@ -315,7 +315,7 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
     let e = c.call(detect(token, Some(Dbfs(-3.0)))).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "above the −10 dBFS ceiling");
     let e = c
-        .call(Command::SessionDetectLoopback {
+        .call(Command::StreamDetectLoopback {
             lease_token: token,
             backend: BackendKind::Fake,
             input_device: fake_dev(),
@@ -348,8 +348,8 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
     assert_eq!(*opened.lock().unwrap(), vec![(1, true)]);
     // Refused while the stimulus is armed (the burst outlasted the lease's refresh period:
     // take it again).
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let token = c.acquire();
     c.ok(Command::GenSet {
@@ -370,10 +370,10 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
 }
 
 /// Input and output listed as two devices (a built-in mic and speakers): each says which direction it
-/// has, the loopback is found across them, and a session opens with the output on the other
+/// has, the loopback is found across them, and a stream opens with the output on the other
 /// device, reported as of unknown clock relation.
 #[test]
-fn a_session_plays_on_another_device_than_it_captures_from() {
+fn a_stream_plays_on_another_device_than_it_captures_from() {
     use ac2_audio::FakeEndpoints;
     use ac2_audio::fake::{FAKE_INPUT_ID, FAKE_OUTPUT_ID};
     use ac2_proto::model::{ClockRelation, DeviceSelector};
@@ -383,7 +383,7 @@ fn a_session_plays_on_another_device_than_it_captures_from() {
     cfg.endpoints = FakeEndpoints::Split;
     let h = start(Arc::new(FakeBackend::new(cfg).unwrap()));
     let (mut c, _s) = connect(&h, &[]);
-    let b = c.backends(Command::SessionDevices);
+    let b = c.backends(Command::StreamDevices);
     let devs = &b[0].devices;
     assert_eq!(devs.len(), 2, "{devs:?}");
     let (input, output) = (&devs[0], &devs[1]);
@@ -399,7 +399,7 @@ fn a_session_plays_on_another_device_than_it_captures_from() {
     let token = c.acquire();
     // The input endpoint has no output to play the burst on.
     let e = c
-        .call(Command::SessionDetectLoopback {
+        .call(Command::StreamDetectLoopback {
             lease_token: token,
             backend: BackendKind::Fake,
             input_device: in_id.clone(),
@@ -409,7 +409,7 @@ fn a_session_plays_on_another_device_than_it_captures_from() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
-    let d = c.loopback_detection(Command::SessionDetectLoopback {
+    let d = c.loopback_detection(Command::StreamDetectLoopback {
         lease_token: token,
         backend: BackendKind::Fake,
         input_device: in_id.clone(),
@@ -420,11 +420,11 @@ fn a_session_plays_on_another_device_than_it_captures_from() {
     assert_eq!(d.loopback, Some(0), "{d:?}");
     assert_eq!((&d.input_device, &d.output_device), (&in_id, &out_id));
 
-    let mut config = session(true);
+    let mut config = stream(true);
     config.input_device = DeviceSelector::Id { id: in_id.clone() };
     config.output_device = DeviceSelector::Id { id: in_id.clone() };
     let e = c
-        .call(Command::SessionOpen {
+        .call(Command::StreamOpen {
             config: config.clone(),
         })
         .unwrap_err();
@@ -434,14 +434,14 @@ fn a_session_plays_on_another_device_than_it_captures_from() {
         "no outputs on the input endpoint: {e:?}"
     );
     config.output_device = DeviceSelector::Id { id: out_id.clone() };
-    let s = c.session(Command::SessionOpen { config });
+    let s = c.stream(Command::StreamOpen { config });
     let o = s.open.unwrap();
     assert_eq!((&o.input_device, &o.output_device), (&in_id, &out_id));
     assert_eq!(o.clock, ClockRelation::Unknown);
 }
 
 /// The fake rig presented as a second backend (JACK), so a test can move the preview
-/// between backends the way the session dialog's ←/→ does, without a JACK server.
+/// between backends the way the stream dialog's ←/→ does, without a JACK server.
 #[derive(Debug)]
 struct AsJack(FakeBackend);
 
@@ -493,7 +493,7 @@ fn slow_preview_follows_the_device_through_every_round() {
     let h = Daemon::start(cfg).unwrap();
     let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
     let preview = |c: &mut Client, kind| {
-        c.ok(Command::SessionPreview {
+        c.ok(Command::StreamPreview {
             backend: kind,
             device: fake_dev(),
             inputs: Vec::new(),
@@ -518,7 +518,7 @@ fn slow_preview_follows_the_device_through_every_round() {
             preview_of(&s, BackendKind::Fake).expect("renewed preview");
         }
         // The dialog closes: the device is released and nothing more arrives.
-        c.ok(Command::SessionPreviewStop);
+        c.ok(Command::StreamPreviewStop);
         while s.frame(Duration::from_millis(100), |_| true).is_some() {}
         assert!(
             s.frame(Duration::from_millis(300), |f| matches!(
@@ -548,7 +548,7 @@ fn a_renewal_reopens_a_preview_that_stopped_delivering() {
     let h = start(Arc::new(rec));
     let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
     let preview = |c: &mut Client| {
-        c.ok(Command::SessionPreview {
+        c.ok(Command::StreamPreview {
             backend: BackendKind::Fake,
             device: fake_dev(),
             inputs: Vec::new(),
@@ -584,7 +584,7 @@ fn a_retried_detection_runs_once() {
     let token = c.acquire();
     let req = ac2_proto::Request::new(
         c.next_id(),
-        Command::SessionDetectLoopback {
+        Command::StreamDetectLoopback {
             lease_token: token,
             backend: BackendKind::Fake,
             input_device: fake_dev(),
@@ -621,27 +621,27 @@ fn spare_inputs_open_after_the_physical_ones_and_are_metered() {
     let fake = rig.clone();
     let h = start(Arc::new(rig));
     let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
-    let b = c.backends(Command::SessionDevices);
+    let b = c.backends(Command::StreamDevices);
     let input = b[0].devices[0].input.as_ref().unwrap();
     assert_eq!(
         (input.max_channels, input.spare_channels),
         (4, FAKE_SPARE_INPUTS)
     );
 
-    let mut cfg = session(true);
+    let mut cfg = stream(true);
     cfg.spare_inputs = FAKE_SPARE_INPUTS + 1;
-    let e = c.call(Command::SessionOpen { config: cfg }).unwrap_err();
+    let e = c.call(Command::StreamOpen { config: cfg }).unwrap_err();
     assert_eq!(e.code, ErrorCode::Unsupported, "{}", e.msg);
-    let mut cfg = session(true);
+    let mut cfg = stream(true);
     cfg.spare_inputs = 1;
     cfg.input_channels = vec![0, 1, 5];
-    let e = c.call(Command::SessionOpen { config: cfg }).unwrap_err();
+    let e = c.call(Command::StreamOpen { config: cfg }).unwrap_err();
     assert_eq!(e.code, ErrorCode::Unsupported, "{}", e.msg);
 
-    let mut cfg = session(true);
+    let mut cfg = stream(true);
     cfg.spare_inputs = 2;
     cfg.input_channels = vec![0, 1, 4, 5];
-    let opened = c.session(Command::SessionOpen { config: cfg });
+    let opened = c.stream(Command::StreamOpen { config: cfg });
     let spare = |input: u16| SparePort {
         input,
         port: format!("fake:in_{}", input + 1),
@@ -651,11 +651,11 @@ fn spare_inputs_open_after_the_physical_ones_and_are_metered() {
     run(&mut d, 1.0);
     let mut last = None;
     while let Some(f) = s.frame(Duration::from_millis(300), |f| {
-        matches!(f.data, FrameData::SessionLevels(_))
+        matches!(f.data, FrameData::StreamLevels(_))
     }) {
         last = Some(f);
     }
-    let FrameData::SessionLevels(l) = &last.expect("session/levels").data else {
+    let FrameData::StreamLevels(l) = &last.expect("stream/levels").data else {
         unreachable!()
     };
     assert_eq!(l.meta.channels, vec![0, 1, 4, 5]);
