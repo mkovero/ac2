@@ -93,7 +93,10 @@ impl Spool {
     /// Whether the bytes at `offset` are `data`: a chunk sent again after its reply was
     /// lost.
     pub(crate) fn holds(&mut self, offset: u64, data: &[u8]) -> io::Result<bool> {
-        if offset + data.len() as u64 > self.len {
+        if offset
+            .checked_add(data.len() as u64)
+            .is_none_or(|end| end > self.len)
+        {
             return Ok(false);
         }
         Ok(self.read_at(offset, data.len())? == data)

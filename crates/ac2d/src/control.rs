@@ -585,6 +585,7 @@ impl Control {
             }
             self.check_lease(now);
             self.check_muted();
+            self.transfers.tick(now);
             self.check_dynamics_deadline(now);
             if now >= self.ka.due {
                 self.send_ka();

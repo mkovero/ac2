@@ -145,6 +145,48 @@ fn an_upload_is_spooled_aborted_and_retried_chunk_by_chunk() {
     h.shutdown();
 }
 
+/// A chunk whose offset and length overflow is refused like any out-of-order chunk; the
+/// upload goes on.
+#[test]
+fn a_chunk_offset_that_overflows_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("spool-overflow", dir.path(), &plenty(), |_| {});
+    let (mut c, _sub) = connect(&h, &[]);
+    let data = b"some bytes of an upload".to_vec();
+    let t = begin(&mut c, &data).unwrap();
+    chunk(&mut c, t, 0, &data[..10]).unwrap();
+    for offset in [u64::MAX, u64::MAX - 5, u64::MAX - 12] {
+        let r = c.call(Command::FileUploadChunk {
+            transfer: t,
+            offset,
+            data: Blob(data[10..].to_vec()),
+        });
+        code(r, ErrorCode::Invalid);
+    }
+    chunk(&mut c, t, 10, &data[10..]).unwrap();
+    h.shutdown();
+}
+
+/// An empty upload is complete at once: its sum is checked as it begins.
+#[test]
+fn an_empty_upload_with_a_wrong_sum_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("spool-empty", dir.path(), &plenty(), |_| {});
+    let (mut c, _sub) = connect(&h, &[]);
+    let e = code(
+        c.call(Command::FileUploadBegin {
+            file: "empty".into(),
+            bytes: 0,
+            sha256: "0".repeat(64),
+        }),
+        ErrorCode::Invalid,
+    );
+    assert!(e.msg.contains("checksum"), "{e:?}");
+    assert_eq!(spooled(dir.path()), Vec::<String>::new());
+    begin(&mut c, &[]).unwrap();
+    h.shutdown();
+}
+
 #[test]
 fn a_client_holds_two_transfers_and_the_daemon_eight() {
     let dir = tempfile::tempdir().unwrap();
@@ -241,6 +283,25 @@ fn an_upload_ends_at_its_lifetime_with_its_file() {
     h.shutdown();
 }
 
+/// An upload nobody touches again goes at its lifetime with its spool file, though no
+/// client sends another transfer command.
+#[test]
+fn an_untouched_upload_goes_at_its_lifetime_without_another_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("spool-untouched", dir.path(), &plenty(), |c| {
+        c.transfers.lifetime = Duration::from_millis(300);
+    });
+    let (mut c, _sub) = connect(&h, &[]);
+    let t = begin(&mut c, b"abc").unwrap();
+    assert_eq!(spooled(dir.path()), [format!("up-{t}.part")]);
+    let began = Instant::now();
+    while !spooled(dir.path()).is_empty() {
+        assert!(began.elapsed() < Duration::from_secs(10), "still spooled");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    h.shutdown();
+}
+
 #[test]
 fn a_restart_leaves_nothing_in_the_staging_directory() {
     let dir = tempfile::tempdir().unwrap();
@@ -260,6 +321,46 @@ fn a_restart_leaves_nothing_in_the_staging_directory() {
     let h = start("spool-restart-2", dir.path(), &plenty(), |_| {});
     let (mut c, _sub) = connect(&h, &[]);
     c.ok(Command::ServerInfo);
+    assert_eq!(spooled(dir.path()), Vec::<String>::new());
+    h.shutdown();
+}
+
+/// A power cut while `file.import` replaced a session, between parking the old one and
+/// renaming the new one in: at the next start the old one is put back. One parked whose
+/// name was taken again (the new one landed) goes with the staging.
+#[test]
+fn a_session_half_replaced_by_an_import_is_put_back_at_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("spool-replaced", dir.path(), &plenty(), |_| {});
+    let (mut c, sub) = connect(&h, &[]);
+    for name in ["show", "kept", "older"] {
+        c.ok(Command::FileSave {
+            session: SessionRef::Name { name: name.into() },
+            overwrite: false,
+        });
+    }
+    drop((c, sub));
+    h.shutdown();
+    let sessions = dir.path().join("sessions");
+    let s = staging(dir.path());
+    std::fs::create_dir_all(s.join("replaced-1-3")).unwrap();
+    std::fs::rename(sessions.join("show"), s.join("replaced-1-3/show")).unwrap();
+    std::fs::create_dir_all(s.join("replaced-1-4")).unwrap();
+    std::fs::rename(sessions.join("older"), s.join("replaced-1-4/kept")).unwrap();
+    let kept = std::fs::read(sessions.join("kept/session.json")).unwrap();
+
+    let h = start("spool-replaced-2", dir.path(), &plenty(), |_| {});
+    let (mut c, _sub) = connect(&h, &[]);
+    let ReplyBody::Sessions(l) = c.ok(Command::FileList) else {
+        panic!("a session list")
+    };
+    let mut names: Vec<_> = l.into_iter().map(|s| s.name).collect();
+    names.sort();
+    assert_eq!(names, ["kept", "show"]);
+    assert_eq!(
+        std::fs::read(sessions.join("kept/session.json")).unwrap(),
+        kept
+    );
     assert_eq!(spooled(dir.path()), Vec::<String>::new());
     h.shutdown();
 }

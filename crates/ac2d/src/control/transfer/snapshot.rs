@@ -62,6 +62,11 @@ pub(crate) struct Snapshots {
 }
 
 impl Snapshots {
+    /// Drops what no client fetched for [`HOLD`].
+    pub(crate) fn tick(&mut self, now: Instant) {
+        self.prune(now);
+    }
+
     fn prune(&mut self, now: Instant) {
         self.map
             .retain(|_, h| now.saturating_duration_since(h.last) < HOLD);

@@ -169,6 +169,13 @@ impl Transfers {
         TransferId(self.next)
     }
 
+    /// The daemon's periodic tick: transfers idle or past their lifetime go with their
+    /// spool files and held snapshots, whether or not any client sends a transfer command.
+    pub(crate) fn tick(&mut self, now: Instant) {
+        self.prune(now);
+        self.snapshots.tick(now);
+    }
+
     fn prune(&mut self, now: Instant) {
         let lifetime = self.limits.lifetime;
         self.map.retain(|id, x| {
@@ -347,8 +354,10 @@ impl Control {
     }
 
     /// Removes what an earlier run left in the staging directory: spool files, unpacked
-    /// uploads, sessions half deleted.
+    /// uploads, sessions half deleted; a session half replaced by an import is put back
+    /// first.
     pub(super) fn clear_staging(&self) {
+        unpack::restore_replaced(&self.staging(), &self.s.session_dir);
         remove_dir(&self.staging());
     }
 
@@ -394,6 +403,12 @@ impl Control {
         if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(invalid("sha256 must be 64 hex digits"));
         }
+        let sha256 = sha256.to_ascii_lowercase();
+        // An empty upload is complete at once and no chunk ever reaches the check: its sum
+        // is checked here.
+        if bytes == 0 && sha256 != Hasher::default().hex() {
+            return Err(invalid(ArchiveError::Checksum.to_string()));
+        }
         let file_name = client_file(&file);
         let transfer = self.transfers.admit(client)?;
         let dir = self.made_staging()?;
@@ -414,7 +429,6 @@ impl Control {
         }
         let spool = Spool::create(dir.join(format!("up-{transfer}.part")))
             .map_err(|e| disk_err("upload", &e))?;
-        let sha256 = sha256.to_ascii_lowercase();
         self.transfers.insert(
             transfer,
             client,
@@ -502,7 +516,7 @@ impl Control {
             stage: self.stage_path("upload"),
             disk: self.unpack_disk(),
         };
-        let aside = self.stage_path("replaced");
+        let aside = self.stage_path(unpack::REPLACED).join(&name);
         let root = self.s.session_dir.clone();
         let (n, t) = (name.clone(), target.clone());
         let work: Work = Box::new(move |cancel: &Cancel| {
@@ -756,9 +770,15 @@ fn append_chunk(
         ))));
     };
     let len = data.len() as u64;
+    // The offset is the client's: no sum with it may wrap.
+    let Some(end) = offset.checked_add(len) else {
+        return Err(Chunk::Refused(invalid(format!(
+            "upload {id}: a chunk at {offset} ends past any file"
+        ))));
+    };
     // A chunk sent again after its reply was lost, past the dedup window: the bytes are
     // there already.
-    if len > 0 && offset + len == spool.len() {
+    if len > 0 && end == spool.len() {
         return match spool.holds(offset, data) {
             Ok(true) => Ok(()),
             Ok(false) => Err(Chunk::Refused(invalid(format!(
@@ -773,7 +793,7 @@ fn append_chunk(
             spool.len()
         ))));
     }
-    if data.len() > CHUNK_BYTES as usize || offset + len > *bytes {
+    if data.len() > CHUNK_BYTES as usize || end > *bytes {
         return Err(Chunk::Refused(invalid(format!(
             "upload {id}: the chunk goes past the size announced ({bytes} bytes)"
         ))));
