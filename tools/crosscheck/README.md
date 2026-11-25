@@ -26,7 +26,7 @@ The **rig** (pupu) runs `run` and `preflight`. It needs only numpy and JACK-Clie
 `~/ac2-test/venv-meas/bin/python` has both. scipy and matplotlib are not needed there.
 
 - jackd at 96 kHz with the FF400. ac2d runs as the systemd user unit `ac2d.service` with
-  `--max-level -50`, and its session is open or can be opened.
+  `--max-level -50`, and its stream is open or can be opened.
 - REW 5.40 on Xvfb with its API on `localhost:4735` (`docs/rigs/pupu.md`). The REW stages
   import recordings, so no Pro licence is needed. Without REW they are skipped.
 - PipeWire with the `pw_rew` tunnel, for the ambient stage only. If PipeWire is not running,
@@ -119,7 +119,7 @@ reach of Ctrl-C.
 - **Above the rig's −50 needs `--allow-electrical-level`**, capped by the config
   (`electrical_max_dbfs`, −10 on pupu) and at −6 in code (`levels.ELECTRICAL_HARD_MAX_DBFS`).
   That flag installs a runtime systemd drop-in, restarts ac2d with `--max-level <level>` and
-  reopens the session. This happens only **after** the speaker stage.
+  reopens the stream. This happens only **after** the speaker stage.
   In a `finally` (also on Ctrl-C, SIGTERM or SIGHUP) the drop-in is removed, ac2d restarts,
   and `gen ceiling` must read a bound of −50 again. If it does not, the run says so loudly
   and exits 3. A drop-in left over from a crash is removed before anything else runs.
@@ -223,7 +223,7 @@ then SIGTERM, then kill), keeping its `xruns <n>` line.
   `ac2:out_5 → ac2-dut:dut_in`, `ac2:out_2 → ac2-dut:ref_in`, and checks before every sweep that
   each patched input has the DUT as its only source. Afterwards (in a finally) it removes
   exactly those links and restores the recorded ones. If that fails it prints `!!!` lines
-  naming `ac2 session open …` (the rig's `[ac2].session_open`) and the run exits 4.
+  naming `ac2 stream open …` (the rig's `[ac2].stream_open`) and the run exits 4.
 - **Hardware outputs still play.** ac2d connects its outputs to `system:playback_N` itself,
   so during the ac2 stages outs 5 and 2 also carry ac2's stimulus at `--emit`. Both are
   approved electrical/loopback outputs, and the level policy checks them as on the Xone path
@@ -541,7 +541,7 @@ Each case is a meas/ref WAV pair (96 kHz f32; channel 0 meas, channel 1 ref). It
 - **OSM**: the external `osm-harness` (OSM v1.5.2's `Measurement` class, ticked
   deterministically every round(0.08·fs) samples). Its JSON is OSM's `requestData` shape.
 - **ac2**: a private `ac2d` (fake backend, its own HOME and runtime dir, no autosave). The pair
-  is imported (`ac2 rec import`) and replayed `--fast` (`ac2 session replay`): the replay
+  is imported (`ac2 rec import`) and replayed `--fast` (`ac2 stream replay`): the replay
   backend is capture-only, so nothing can play. A transfer measurement (ref = in 2, meas = in 1)
   and a spectrum on in 1 run on it. After the last sample, the stage captures and exports both
   and runs `ac2 delay find`.

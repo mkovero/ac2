@@ -6,7 +6,7 @@ ac2 ships three programs:
 |---|---|
 | `ac2-ui` | the desktop app (shown as **ac2** in menus). It starts the `ac2d` beside it when none is running. |
 | `ac2d` | the daemon: owns the audio interface, runs the measurements. |
-| `ac2` | the command-line client: set up sessions and measurements, script everything. |
+| `ac2` | the command-line client: open streams, set up measurements, script everything. |
 
 There is no published GitHub release yet. The installers come from the
 [Release workflow](https://github.com/mkovero/ac2/actions/workflows/release.yml): open its
@@ -58,11 +58,11 @@ them. JACK gives every port one clock, exact sample indices and the server's sho
 - **JACK2**: start the server on your interface before the daemon, e.g.
   `jackd -d alsa -d hw:UMC1820 -r 48000 -p 256` (or with QjackCtl).
 
-The daemon connects JACK ports itself. The session's inputs come from the capture ports of
+The daemon connects JACK ports itself. The stream's inputs come from the capture ports of
 the same number (input 1 = the first capture port in the device list). Outputs are
 connected only when you choose them for the stimulus: arming the generator on `--out 1,2`
 connects `ac2:out_1` and `ac2:out_2` to the first and second playback ports, and the
-session's loopback output is connected when the session opens. Other outputs are never
+stream's loopback output is connected when the stream opens. Other outputs are never
 connected, connections the daemon did not make (a recorder, a patch to another program)
 are left alone, and changing the generator's outputs never reopens the stream, so they
 stay.
@@ -152,7 +152,7 @@ There are three ways; pick one.
   installed beside it (the per-user daemon below, so the command-line client reaches it too)
   and stops it when it quits. To try ac2 without hardware, `ac2-ui --connect` opens the
   connect dialog: choose *Simulated rig (no audio)* (it starts with its
-  session open and a transfer measurement "demo" running). That daemon is a separate
+  stream open and a transfer measurement "demo" running). That daemon is a separate
   `ac2d --ephemeral` that stops with the app. The command-line client cannot reach it;
   everything it would do is in the app.
 - **A per-user daemon** that the app and the CLI share: `systemctl --user enable --now ac2d`
@@ -197,18 +197,18 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
      is what calibrations are kept under;
    - **S** on the output that feeds the system and the loopback: the **Stimulus**.
 
-   **Space** adds or removes a row from the session. Not sure which input the loopback
+   **Space** adds or removes a row from the stream. Not sure which input the loopback
    is on? **D** (*Detect loopback…*) plays a 0.5 s noise burst on the stimulus output at a
    level you type (there is no default level; **Enter** plays) and marks the input it
    comes back on as the Reference. Settings says in words what is missing (*Pick a
    reference input: the loopback from your stimulus output*); rate and buffer stay at the
    device's defaults unless you type them. The roles and names are remembered per device.
-3. **Enter** (on either page) opens the session. With a reference and at least one mic, and
+3. **Enter** (on either page) opens the stream. With a reference and at least one mic, and
    no measurements yet, the app offers *Reference → M30 FOH* — one transfer measurement per
    mic; **Enter** creates and starts them. Later, **Ctrl+K** → *New transfer…*
    (or *New spectrum…*, *New RTA…*, *New SPL meter…*) picks inputs by name with their meters
    (**←/→**); *Delete selected…* and *Close audio I/O* are in the
-   palette too. While the session is open, the **Inputs** list on the left keeps a named
+   palette too. While the stream is open, the **Inputs** list on the left keeps a named
    meter per input with its role (*reference*, *mic*), so levels stay in sight while you
    measure.
 
@@ -216,9 +216,9 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
 
 ```sh
 ac2 devices                                       # find your interface
-ac2 session open --backend jack --in 1-2                    # Linux
-ac2 session open --backend coreaudio --device "<name>" --in 1-2  # macOS
-ac2 session open --backend asio --device "<driver>" --in 1-2  # Windows
+ac2 stream open --backend jack --in 1-2                    # Linux
+ac2 stream open --backend coreaudio --device "<name>" --in 1-2  # macOS
+ac2 stream open --backend asio --device "<driver>" --in 1-2  # Windows
 ac2 meas new tf --ref 1 --meas 2 --name main
 ac2 meas start main
 ac2-ui                                            # or start ac2 from the menu
@@ -243,13 +243,13 @@ calibrate the mic for dB SPL and set up Leq windows ([user guide](user-guide.md#
 
 No hardware at hand? Use the built-in simulated rig (output 1 → input 1 loopback, output 1
 → input 2 through a speaker-and-room model; it never touches real audio). In the app, choose
-*Simulated rig (no audio)* in the connect dialog (`ac2-ui --connect`): its session is already open (inputs 1–2, output 1,
+*Simulated rig (no audio)* in the connect dialog (`ac2-ui --connect`): its stream is already open (inputs 1–2, output 1,
 loopback 1 → 1) and the transfer measurement "demo" (reference 1, measurement 2) is running,
 so steps 1–4 above work at once. From a terminal:
 
 ```sh
 ac2d --backend fake &
-ac2 session open --backend fake --in 1-2
+ac2 stream open --backend fake --in 1-2
 ac2 meas new tf --ref 1 --meas 2 --name demo && ac2 meas start demo
 ac2-ui
 ```
@@ -258,14 +258,14 @@ ac2-ui
 
 `tools/release/first-measurement.sh <tarball>` replays the Linux path in a throw-away home
 directory against the simulated rig and prints a timestamp per step. On the release
-tarball: unpacked and installed after 0.3 s, daemon up after 0.3 s, session and running
+tarball: unpacked and installed after 0.3 s, daemon up after 0.3 s, stream and running
 transfer measurement after 0.4 s, delay found and inserted and a first trace captured after
 6.4 s (4 s of that is the noise averaging before the finder runs). The rest of the
 two-minute budget is the person: downloading, typing five commands (or, in the app, **L**, a
 level, **Space**, **Enter**, **X**) and wiring the loopback cable. On macOS and Windows the
 installer replaces `install.sh`; the Release workflow installs each OS's artifact (the MSI
 on Windows, the zip on macOS) and runs a shorter version there: daemon on the simulated rig,
-session, transfer measurement.
+stream, transfer measurement.
 
 ## Remote use (FOH ↔ stage)
 
