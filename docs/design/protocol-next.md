@@ -939,7 +939,9 @@ or it boots without its meter and refuses every network client.
    released, expired or taken over, the global maximum lowered, a session loaded), and a
    burst whose requester no longer holds the lease never shows as firing.
 6. **A session half replaced by `file.import`** (a stop between parking the old one and
-   renaming the new one in) is put back at the next start when its name is still free.
+   renaming the new one in) is put back at the next start when its name is still free,
+   whatever it holds. `file.import` replaces only a folder with a session manifest; a
+   folder without one is refused with `conflict` even with `overwrite`.
 7. **A delay set to the value it holds** moves neither its `rev` nor drops a stopped
    transfer's kept result.
 8. **File names inside a session archive** follow the rule session names follow: no Windows

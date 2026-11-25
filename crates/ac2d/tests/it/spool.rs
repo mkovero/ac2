@@ -347,6 +347,9 @@ fn a_session_half_replaced_by_an_import_is_put_back_at_start() {
     std::fs::rename(sessions.join("show"), s.join("replaced-1-3/show")).unwrap();
     std::fs::create_dir_all(s.join("replaced-1-4")).unwrap();
     std::fs::rename(sessions.join("older"), s.join("replaced-1-4/kept")).unwrap();
+    // Parked by a build that replaced any folder: no manifest, still the only copy.
+    std::fs::create_dir_all(s.join("replaced-1-5/notes")).unwrap();
+    std::fs::write(s.join("replaced-1-5/notes/todo.txt"), b"tune the fills").unwrap();
     let kept = std::fs::read(sessions.join("kept/session.json")).unwrap();
 
     let h = start("spool-replaced-2", dir.path(), &plenty(), |_| {});
@@ -361,7 +364,51 @@ fn a_session_half_replaced_by_an_import_is_put_back_at_start() {
         std::fs::read(sessions.join("kept/session.json")).unwrap(),
         kept
     );
+    assert_eq!(
+        std::fs::read(sessions.join("notes/todo.txt")).unwrap(),
+        b"tune the fills"
+    );
     assert_eq!(spooled(dir.path()), Vec::<String>::new());
+    h.shutdown();
+}
+
+/// `file.import` with `overwrite` replaces a session, never a folder that is not one.
+#[test]
+fn an_import_never_replaces_a_folder_that_is_not_a_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("spool-not-a-session", dir.path(), &plenty(), |_| {});
+    let (mut c, _sub) = connect(&h, &[]);
+    c.ok(Command::FileSave {
+        session: SessionRef::Name {
+            name: "show".into(),
+        },
+        overwrite: false,
+    });
+    let sessions = dir.path().join("sessions");
+    let bytes = ac2_archive::pack_dir(&sessions.join("show")).unwrap();
+    std::fs::create_dir_all(sessions.join("notes")).unwrap();
+    std::fs::write(sessions.join("notes/todo.txt"), b"tune the fills").unwrap();
+    let t = upload(&mut c, &bytes);
+    let e = code(
+        c.call(Command::FileImport {
+            transfer: t,
+            name: "notes".into(),
+            overwrite: true,
+        }),
+        ErrorCode::Conflict,
+    );
+    assert!(e.msg.contains("not a session"), "{}", e.msg);
+    assert_eq!(
+        std::fs::read(sessions.join("notes/todo.txt")).unwrap(),
+        b"tune the fills"
+    );
+    // A session of that name is replaced as asked.
+    let t = upload(&mut c, &bytes);
+    c.ok(Command::FileImport {
+        transfer: t,
+        name: "show".into(),
+        overwrite: true,
+    });
     h.shutdown();
 }
 

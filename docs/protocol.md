@@ -1982,7 +1982,8 @@ with the autosave (§7.3).
   A chunk the disk cannot take with 64 MiB left is `refused` and drops the upload.
   `file.upload_abort` ends an upload (`invalid` for a download, `refused` while a file
   operation reads it). Then `file.load` / `file.salvage` with `{type: upload}` or
-  `file.import` (stores it as a named session; `session_exists` unless `overwrite`), or
+  `file.import` (stores it as a named session; `session_exists` unless `overwrite`;
+  `conflict` when the name holds a folder that is not a session, `overwrite` or not), or
   `trace.import` (reads it as a trace file, named after the last component of the upload's
   `file` when the file names no trace; the upload is used up whether the import succeeds or
   not, except a refusal with `import` problem `pick_channel` or `bad_options`: the client

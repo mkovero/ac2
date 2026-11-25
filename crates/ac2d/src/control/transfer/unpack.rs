@@ -150,6 +150,14 @@ pub(crate) fn import_upload(
             ),
         ));
     }
+    // A folder without a session manifest is someone's own: an import replaces sessions
+    // only, never what it cannot tell is one.
+    if fs::symlink_metadata(target).is_ok() && !ac2_archive::is_session_dir(target) {
+        return Err(perr(
+            ErrorCode::Conflict,
+            format!("{name:?} exists in the session directory and is not a session: not replaced"),
+        ));
+    }
     src.unpack()?;
     // Only a session this build reads is stored by name: one of another version would
     // not list. Its traces can be salvaged instead.
@@ -193,10 +201,10 @@ pub(crate) fn import_upload(
     Ok(m)
 }
 
-/// Before the staging directory `staging` is cleared at start: a session `file.import` had
+/// Before the staging directory `staging` is cleared at start: what `file.import` had
 /// parked to replace it, and whose name in `root` is still free (the stop came before the
-/// new one was renamed in), goes back. One whose name was taken was replaced and goes with
-/// the staging.
+/// new one was renamed in), goes back, session or not, since clearing the staging would
+/// delete its only copy. One whose name was taken was replaced and goes with the staging.
 pub(crate) fn restore_replaced(staging: &Path, root: &Path) {
     let Ok(rd) = fs::read_dir(staging) else {
         return;
@@ -209,9 +217,7 @@ pub(crate) fn restore_replaced(staging: &Path, root: &Path) {
         for s in fs::read_dir(parked.path()).into_iter().flatten().flatten() {
             let name = s.file_name().to_string_lossy().into_owned();
             let to = root.join(&name);
-            if session::validate_name(&name).is_err()
-                || !ac2_archive::is_session_dir(&s.path())
-                || fs::symlink_metadata(&to).is_ok()
+            if session::validate_name(&name).is_err() || fs::symlink_metadata(&to).is_ok()
             {
                 continue;
             }
@@ -221,8 +227,8 @@ pub(crate) fn restore_replaced(staging: &Path, root: &Path) {
                         tracing::warn!("{}: not synced: {e}", root.display());
                     }
                     tracing::warn!(
-                        "session {name:?} was being replaced by an import when the daemon \
-                         stopped: put back"
+                        "{name:?} was being replaced by an import when the daemon stopped: \
+                         put back"
                     );
                 }
                 Err(e) => tracing::warn!("session {name:?}: not put back: {e}"),
