@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""One-shot converter of a host's stored files to the PROTO 105 shapes.
+"""One-shot converter of a host's stored files to the PROTO 106 shapes.
 
-Run once per host with the old daemon stopped, before the first start of a 105 daemon:
+Run once per host with the old daemon stopped, before the first start of a 106 daemon:
 
     python3 tools/proto-next/convert.py --rig ~/.config/ac2/rig.json \
         --cal ~/.config/ac2/calibrations.json --plans ~/.local/share/ac2/plans \
         --auth ~/.config/ac2/authorized_clients
 
-A 105 daemon started before that sets an old authorized-clients file aside as
+A 106 daemon started before that sets an old authorized-clients file aside as
 `authorized_clients.damaged-<time>`: convert that file and put it back as
 `authorized_clients`, the daemon stopped.
 
-Each file is rewritten atomically; the original is kept beside it as `<name>.pre105`.
+Each file is rewritten atomically; the original is kept beside it as `<name>.pre106`.
 A file already in the new shape is left alone. Covers, per file:
 
 - rig.json (rig settings) 11 -> 12: `monitor_session` -> `monitor_stream`; a band
@@ -237,8 +237,8 @@ def convert_auth(text):
 
 def write_beside(path, text, mode=None):
     """Writes `text` over `path` atomically, with `mode` (default: its own); the original
-    kept as `.pre105`, with the same mode."""
-    keep = path + ".pre105"
+    kept as `.pre106`, with the same mode."""
+    keep = path + ".pre106"
     shutil.copy2(path, keep)
     if mode is not None:
         os.chmod(keep, mode)
@@ -250,7 +250,7 @@ def write_beside(path, text, mode=None):
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
-    print(f"{path}: converted (original kept as {path}.pre105)")
+    print(f"{path}: converted (original kept as {path}.pre106)")
 
 
 def rewrite(path, convert):

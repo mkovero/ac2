@@ -63,7 +63,7 @@ not the socket, keeps a second daemon of the user's out.
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 105`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 106`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 

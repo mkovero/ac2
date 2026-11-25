@@ -1,8 +1,8 @@
 # Protocol next: edit tokens, roles, big state, frame meta, log keys
 
 Status: decided, not built. Everything here lands under one protocol version
-(`PROTO_VERSION` 104 → 105) and one bump of each file format it touches; there is no reader
-for the shapes it replaces. File version numbers below are counted from `main` at 5c95a4a3;
+(`PROTO_VERSION` 105 → 106) and one bump of each file format it touches; there is no reader
+for the shapes it replaces. File version numbers below are counted from `main` at 4fb6493c;
 a branch that bumps one of them first moves these up by one.
 
 ## Problem
@@ -210,7 +210,7 @@ rig's) is not read line by line: the daemon sets it aside whole (`.damaged-<time
 damaged file), starts with no client authorized and reports a damaged file whose reason
 names `tools/proto-next/convert.py --auth <the set-aside file>`; there is no version marker,
 the role field is the marker. The one-shot deploy converter (`--auth`) adds `operator` to
-the two-field lines, keeps `rig=` lines, writes the file and the `.pre105` original it keeps
+the two-field lines, keeps `rig=` lines, writes the file and the `.pre106` original it keeps
 with mode 600, and prints no key.
 
 `auth.authorize` (today `server.authorize`) takes `role: ClientRole`, typed and required;
@@ -812,7 +812,7 @@ These change nothing on the wire or in a stored format and land on their own bra
 
 One integration branch, `proto-next`, takes each feature branch in turn; each is built and
 tested alone (quick tier) before the next starts. The first branch bumps `PROTO_VERSION` to
-105; later branches refresh `fixtures/protocol/WIRE_LOCK` under 105. Each stored format is
+106; later branches refresh `fixtures/protocol/WIRE_LOCK` under 106. Each stored format is
 bumped once (table below), by the first branch that changes its shape; a later branch that
 changes it again does so under the same number and extends the converter. Nothing deploys
 until the last has landed.
@@ -862,8 +862,8 @@ Every serde writer of the workspace was walked; stored formats that change shape
 
 | format | from → to | why | deploy action |
 |---|---|---|---|
-| `PROTO_VERSION` | 104 → 105 | everything above | daemon, CLI, apps together |
-| session format (`ac2-traces::session::VERSION`) | 49 → 50 | stream names, tag keys, `lo_hz` / `hi_hz`, `sample_rate_hz`, `next_run`, string integers, log versions and marks | autosave of 49 set aside at start (its logs stay plain CSV); save or export first; old saved sessions reach 105 by `file.salvage` |
+| `PROTO_VERSION` | 105 → 106 | everything above | daemon, CLI, apps together |
+| session format (`ac2-traces::session::VERSION`) | 49 → 50 | stream names, tag keys, `lo_hz` / `hi_hz`, `sample_rate_hz`, `next_run`, string integers, log versions and marks | autosave of 49 set aside at start (its logs stay plain CSV); save or export first; old saved sessions reach 106 by `file.salvage` |
 | `working.json` (autosave folder) | unversioned | `saved_at`, `replaced_at` as strings | set aside with its autosave |
 | rig meter logs (`rig_logs`) | session format 49 → 50 | as the session | not read back; the meters start new logs, old CSV stays on disk |
 | raw capture sidecar | 3 → 4 | stream names, `sample_rate_hz`, string integers, measurement without `delay`, initial `delays`, `TimelineChange::Delay` (§1) | old captures not replayed; keep the WAV |
@@ -884,7 +884,7 @@ keep; runs `tools/proto-next/convert.py` once, which rewrites `rig.json`, the ca
 store, the authorized-clients file and the plan files into their new shapes and is deleted
 after the deploy (no reader of old shapes enters the daemon); checks the runtime directory's
 unit setting; installs daemon, CLI and apps together, since no client speaks an older PROTO
-and 105 both. A standalone meter's files must be converted before its first start under 105,
+and 106 both. A standalone meter's files must be converted before its first start under 106,
 or it boots without its meter and refuses every network client.
 
 ## Open questions
