@@ -2,8 +2,8 @@
 //! link's data rate and the UI's frame rate (`CPU 23 % · app CPU 41 % · DSP 14 % ·
 //! 0 xruns · 14 Mbit/s · 60 fps`).
 //!
-//! Every figure that is missing (an older daemon, no stream, the first second) is left
-//! out rather than shown as zero: a zero reads as a measurement.
+//! Every figure that is missing (one the daemon's system states none of, no stream, the
+//! first second) is left out rather than shown as zero: a zero reads as a measurement.
 
 use ac2_proto::frame::DaemonHealth;
 

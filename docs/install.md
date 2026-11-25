@@ -350,7 +350,7 @@ rig paired with either is paired for both.
 
 `authorized_clients` has a line per key: `<name> <Z85 key> <role>`, the role `operator`,
 `viewer` or `rig=<rig id>` (a rig admitted to take this rig's inputs). Edit it with `ac2 auth`
-rather than by hand. A file from before roles (lines of a name and a key only) is set aside
+rather than by hand. A file without roles (lines of a name and a key only) is set aside
 whole (`authorized_clients.damaged-<time>`) and the daemon starts with none authorized, saying so in its
 log and in `server info`'s damage: convert the set-aside file with `tools/proto-next/convert.py
 --auth <file>` (every key becomes an operator) and put it back with the daemon stopped.

@@ -231,7 +231,7 @@ pub(crate) fn load_or_create_authorized(
     match fs::read(path) {
         Ok(bytes) => {
             let text = String::from_utf8_lossy(&bytes);
-            if ac2_zmq::is_before_roles(&text) {
+            if ac2_zmq::is_roleless(&text) {
                 let to = ac2_paths::set_aside_damaged(path).map_err(io_err(path))?;
                 let keys = AuthorizedKeys::new();
                 ac2_paths::write_private_atomic(path, keys.to_text().as_bytes())

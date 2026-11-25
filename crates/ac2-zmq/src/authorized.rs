@@ -21,8 +21,8 @@
 //!   generator) or `rig=<16 hex digits>` (another rig's daemon, by its rig id, admitted to take
 //!   audio rather than to control: `pupu <key> rig=00000000706f7075`). A line without one is
 //!   malformed, so a lost or torn field locks that client out rather than granting it
-//!   control. A file whose key lines all lack it is the shape before roles
-//!   ([`is_before_roles`]).
+//!   control. A file whose key lines all lack it is a roleless list ([`is_roleless`]),
+//!   which needs a role chosen for each key.
 //! - Names and keys are unique. Any malformed line rejects the whole file (with its line
 //!   number): a half-read list must never silently drop a key or authorize a wrong one.
 //!
@@ -147,10 +147,10 @@ pub enum Admission {
     Listed(Role),
 }
 
-/// Whether `text` is an authorized-clients file in the shape before roles: it lists keys and
+/// Whether `text` is a roleless authorized-clients file: it lists keys and
 /// no key line names a role. Such a file is converted, never read: every line of it would
 /// be malformed, and reading it line by line would drop every client.
-pub fn is_before_roles(text: &str) -> bool {
+pub fn is_roleless(text: &str) -> bool {
     let mut keys = 0usize;
     for line in text.lines() {
         let line = line.trim();
@@ -414,7 +414,7 @@ mod tests {
         assert!(text.contains(" rig=00000000706f7075\n"), "{text}");
         assert!(text.contains(" operator\n"), "{text}");
         assert!(text.contains(" viewer\n"), "{text}");
-        assert!(!is_before_roles(&text));
+        assert!(!is_roleless(&text));
         let mut back = AuthorizedKeys::parse(&text)?;
         assert_eq!(back, keys);
         assert_eq!(back.rig_of("pupu"), Some(0x706f_7075));
@@ -433,21 +433,19 @@ mod tests {
     }
 
     #[test]
-    fn a_line_without_a_role_is_malformed_and_a_file_of_them_is_the_old_shape() {
+    fn a_line_without_a_role_is_malformed_and_a_file_of_them_is_roleless() {
         let (a, r) = (key(), key());
         let old = format!("# list\nlaptop {a}\npupu {r} rig=00000000706f7075\n");
-        assert!(is_before_roles(&old));
+        assert!(is_roleless(&old));
         assert!(matches!(
             AuthorizedKeys::parse(&old),
             Err(KeyStoreError::Parse { line: 2, .. })
         ));
-        // One line with a role makes it the new shape with one torn line, not the old one.
+        // One line with a role makes it a list with roles and one torn line, not a roleless one.
         let torn = format!("laptop {a} operator\nphone {r}\n");
-        assert!(!is_before_roles(&torn));
-        assert!(!is_before_roles("# only comments\n"));
-        assert!(!is_before_roles(&format!(
-            "pupu {r} rig=00000000706f7075\n"
-        )));
+        assert!(!is_roleless(&torn));
+        assert!(!is_roleless("# only comments\n"));
+        assert!(!is_roleless(&format!("pupu {r} rig=00000000706f7075\n")));
     }
 
     #[test]

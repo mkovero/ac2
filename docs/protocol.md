@@ -2357,7 +2357,7 @@ Every connection has a role, fixed when it connects and carried in `welcome`: a 
 client (the local pair: the OS user is the boundary) is an `operator`; a network client has
 the role its key is listed with in the authorized-clients file (one line per key: `<name>
 <Z85 key> <operator | viewer | rig=<rig id, 16 hex digits>>`; a file whose key lines have
-no role, the shape before roles, is set aside whole and the daemon starts with no client
+no role is set aside whole and the daemon starts with no client
 authorized, a `damaged_files` entry naming the converter). The daemon reads the role from
 the list at every request, so a change takes effect on the next one; a change also drops
 the key's data connections (§5.8 `rejoin`), so the client says `hello` again and learns it.
@@ -3034,10 +3034,10 @@ than most real curves); bytes include topic, header and payload, not the transpo
 | `source_levels`, as above, with its `mark` | 871 B | ≈ 706 B | ≈ 166 B |
 | `stream_gonio`, 3 pairs | 1 565 B | ≈ 1 573 B | ≈ 1 468 B |
 
-The "as f32 arrays" column of the meter rows is what each frame cost when every one went as
-a keyframe with its readings in the metadata. With the 500 ms keyframe interval (§5.2)
-`stream_levels` of 8 inputs is ≈ 185 B per frame on average (≈ 5.6 kB/s at 30 frames/s,
-was 25.6 kB/s), `source_levels` ≈ 234 B (≈ 3.5 kB/s at its 15 frames/s, was 13.1 kB/s);
+The "as f32 arrays" column of the meter rows is what each frame would cost as a keyframe
+with its readings in the metadata. With the 500 ms keyframe interval (§5.2)
+`stream_levels` of 8 inputs is ≈ 185 B per frame on average (≈ 5.6 kB/s at 30 frames/s),
+`source_levels` ≈ 234 B (≈ 3.5 kB/s at its 15 frames/s);
 `stream_gonio` (noise: points barely repeat) ≈ 44 kB/s. A rig link carrying another rig's
 `source_levels` thus needs ≈ 28 kbit/s per rig.
 
