@@ -214,6 +214,25 @@ fn each_measurement_has_its_own_slots() {
     r.h.shutdown();
 }
 
+/// A delay set to the value it holds moves nothing: its rev stays and a stopped transfer
+/// keeps its result.
+#[test]
+fn a_delay_set_to_its_own_value_keeps_the_result() {
+    let mut r = rig("stopped-same-delay");
+    r.c.ok(Command::MeasStop { meas: MeasId(1) });
+    let d = r.c.delay_now(MeasId(1));
+    let ac2_proto::ReplyBody::Delay(after) = r.c.ok(Command::DelaySet {
+        meas: MeasId(1),
+        delay: d.applied,
+    }) else {
+        panic!("delay.set answers with the delay")
+    };
+    assert_eq!((after.rev, after.applied), (d.rev, d.applied));
+    capture(&mut r.c, "same delay").unwrap();
+    assert!(!meas_frames(&r, MeasId(1)).is_empty());
+    r.h.shutdown();
+}
+
 /// A second stop keeps the result; a new delay, a configuration that restarts the averages
 /// and the session closing each drop it with its frames; a delete drops the frames.
 #[test]

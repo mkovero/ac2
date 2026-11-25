@@ -522,8 +522,14 @@ impl Control {
                 "the delay may be nudged by at most ±{MAX_DELAY_S} s from the arrival"
             )));
         }
-        // The value the delay takes moves its rev: this commit's.
-        let rev = Rev(self.store.rev().0 + 1);
+        // Only a value that moves moves the rev, to this commit's (the reply's, the first
+        // commit below): frames computed under the same value still describe it.
+        let moved = samples != d.applied_samples || nudged != d.nudged_samples;
+        let rev = if moved {
+            Rev(self.store.rev().0 + 1)
+        } else {
+            d.rev
+        };
         let operator = source != DelaySource::Tracking;
         d.rev = rev;
         d.applied = Seconds(samples / fs);
@@ -538,7 +544,9 @@ impl Control {
         }
         // A running transfer's averages start over at a new delay: a stopped one's kept
         // result no longer describes it.
-        self.drop_kept(meas);
+        if moved {
+            self.drop_kept(meas);
+        }
         if let Some(j) = self.jobs.get(&meas) {
             j.send(JobCmd::SetDelay {
                 samples,
@@ -549,6 +557,10 @@ impl Control {
             });
         }
         let reply = self.reply_delay(d);
+        debug_assert!(
+            !moved || self.store.rev() == rev,
+            "the delay's rev is its commit's"
+        );
         // A typed value is no finding's arrival: the finding no longer describes the delay.
         if source == DelaySource::Typed {
             self.drop_finding(meas);
