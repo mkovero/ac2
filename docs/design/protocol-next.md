@@ -321,32 +321,45 @@ demoted or revoked, on the network. Settled:
 
 ### 4. Oversize snapshots and events
 
-**Snapshot.** `state.snapshot` encodes its `StateSnapshot`; at or under `MAX_CTRL_BYTES` it
-replies `snapshot` as today. Over it, the encoded bytes are held as a download and the reply
-is `snapshot_transfer {rev: Rev, transfer: Transfer}`, where `transfer.file_name` is
-`state-<rev>.msgpack` and the bytes are the msgpack `StateSnapshot` the inline reply would
-have carried. The client fetches with `file.download_chunk`, checks `sha256`, ends with
-`file.download_end` (nil `saved_as`) and hands the decoded snapshot to the mirror, which
+**Snapshot.** `state.snapshot` encodes its `StateSnapshot` (redacted first for a network
+client, §3's host-path rule, since no reply redaction reaches a transfer's bytes); while the
+bytes leave room for the reply envelope (`MAX_CTRL_BYTES` less 4 KiB, `INLINE_BYTES` in
+`control/transfer/snapshot.rs`) it replies `snapshot` as before. Over it, the encoded bytes
+are held as a download and the reply is `snapshot_transfer {rev: Rev, transfer: Transfer}`
+(`ac2_proto::SnapshotTransfer`), where `transfer.file_name` is `state-<rev>.msgpack` and the
+bytes are the msgpack `StateSnapshot` the inline reply would have carried
+(`encode_snapshot` / `decode_snapshot`). The client (`ac2-client` `snapshot.rs`, behind both
+`Client::snapshot` and the mirror's resync) fetches with `file.download_chunk`, ends with
+`file.download_end` (nil `saved_as`; a snapshot transfer ended with one is `invalid`), checks
+`sha256` and that the decoded snapshot's rev is the reply's, and hands it to the mirror, which
 already buffers events newer than the snapshot it awaits. The fetch runs inside `run_sync`;
-it publishes the connection's liveness after every chunk, so a slow link's fetch is not read
-as daemon silence.
+after every reply of it the mirror takes the answer as liveness (`Mirror::on_answer`) and
+the view is published, so a slow link's fetch is not read as daemon silence. Small and big
+differ only at that size switch: the same `file.download_chunk` / `file.download_end`, the
+same transfer ids (one id space), one client function.
 
-A snapshot transfer stays in memory, outside every transfer quota (§5, and today's
-`MAX_TRANSFERS`). Its bytes are shared by every client that asked at the same rev; a client
-holds at most two, a third `state.snapshot` replaces the older, and each is dropped 30 s after
-its last chunk (or its reply, if never fetched). `state.snapshot` is a pure read and a retry
-runs it again; holding two keeps the first reply's transfer valid when a retry ran it twice
-across a rev change. Memory is the distinct revs asked for in 30 s times the state's size, in
-practice one.
+A snapshot transfer stays in memory, outside every transfer quota (§5, `MAX_TRANSFERS`, a
+viewer's one transfer and the viewers' share): resyncing is what every client must be able
+to do, and a viewer resyncing takes no slot an operator could want. Its bytes are shared by
+every client that asked at the same rev and redaction (a network client's bytes differ from
+the local pair's); a client (a connection) holds at most two, a third `state.snapshot`
+replaces the older, and each is dropped 30 s after its last chunk (or its reply, if never
+fetched). `state.snapshot` is a pure read and a retry runs it again; holding two keeps the
+first reply's transfer valid when a retry ran it twice across a rev change. Memory is the
+distinct revs asked for in 30 s times the state's size, in practice one. A key whose role is
+taken down loses its snapshot transfers with its other transfers.
 
-`state.since` whose reply would exceed `MAX_CTRL_BYTES` answers `resync_required`; the client
-takes a snapshot, which goes the transfer path if it must. No entity is capped.
+`state.since` whose events would exceed one reply (their encoded sizes against the same
+`INLINE_BYTES`) answers `resync_required` (detail `oldest`: the first event it would have
+sent); the client takes a snapshot, which goes the transfer path if it must. No entity is
+capped and no event list is cut short.
 
 **Events.** An event over `MAX_EVENT_BYTES` is committed (state moved, rev taken) and every
 connection taking events is sent `resync_required` with its next message; the snapshot that follows
-holds the value, as today. The event is no longer pushed to the store's replay queue: the
-store records its rev as not replayable, so a `state.since` spanning it answers
-`resync_required` rather than holding an event no client can take. A maximal finished
+holds the value, as today. The event is taken out of the store's replay queue as soon as its
+encoding is found over the bound (`Store::not_replayable`): the store records its rev as not
+replayable, so a `state.since` from before it answers `resync_required` (detail `oldest`: the
+rev after it) rather than holding an event no client can take. A maximal finished
 `sim.run` is the known case; it is rare and the cost is one snapshot per client.
 
 ### 5. Uploads spooled to disk
@@ -550,7 +563,7 @@ on the index (`second / step_s`), not on Unix time. `SplHistory` gains `second: 
 beside `at`, and `log_start` / `log_until` become `first_second` / `last_second:
 Option<u64>` with the wall annotations beside them. `spl.history_get` has one cap,
 `SplHistory::MAX_POINTS = 14 400`, for `Newest.seconds` and for a range's bucket count, and
-refuses (`invalid`) above it; `MAX_SECONDS` goes.
+refuses (`invalid`) above it; `MAX_SECONDS` goes (built in `pn-big`).
 
 **Salvage.** `file.salvage` also reads `spl/*.csv` and `*.bands.csv` of the current log
 versions in a session of another format version. Each recovered log becomes a stopped SPL
@@ -706,7 +719,11 @@ until the last has landed.
    remove / list` (no `ac2 server authorize` kept), and the `ac2 cal` flags whose wire field
    is `channel` are `--channel` (no `--input` kept).
 7. `pn-ipc`: §8 (done); then an all-OS CI run (`-f all_os=true`) and the Wine AF_UNIX proof.
-8. `pn-big`: §4 and the one history cap; snapshot transfers exempt from `MAX_TRANSFERS`.
+8. `pn-big`: §4 and the one history cap; snapshot transfers exempt from `MAX_TRANSFERS`
+   (done). The history cap of §7 (`SplHistory::MAX_POINTS = 14 400` for both spans,
+   `newest` above it `invalid`, `MAX_SECONDS` gone) is built here, ahead of the rest of §7:
+   `newest {seconds}` returned `seconds + 1` points (both ends of the span kept), so it
+   returns exactly `seconds` now and 14 400 fits the cap.
 9. `pn-spool`: §5; then an all-OS CI run for the free-space query per OS.
 10. `pn-frames`: §6 with the `dbtp` tagging and the delta header,
     `crates/ac2d/tests/wire_size.rs` rerun. `PerFrame` (`frame/wire.rs`) already carries

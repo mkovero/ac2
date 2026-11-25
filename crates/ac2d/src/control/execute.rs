@@ -8,14 +8,11 @@ use ac2_proto::model::{
     ClientRole, ColourFamily, GenAction, MeasConfig, MeasKind, Measurement, SweepFailure,
 };
 use ac2_proto::units::{Db, MeasId, Rev, Seconds};
-use ac2_proto::{
-    CalSplElectricalArgs, Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, TraceImportArgs,
-    Welcome,
-};
+use ac2_proto::{CalSplElectricalArgs, Command, ProtoError, ReplyBody, TraceImportArgs, Welcome};
 
 use crate::jobs::JobCmd;
 use crate::route::Peer;
-use crate::util::{internal, invalid, missing, perr_detail, refused};
+use crate::util::{internal, invalid, missing, refused};
 
 use super::validate::{
     check_meas_name, display_only, not_a_sweep, smoothing_only, spl_in_place, stale_meas,
@@ -379,20 +376,8 @@ impl Control {
                 rests_from,
             }) => self.dynamics_run(peer, lease_token, meas, name, rests_from),
 
-            Command::StateSnapshot => Ok(ReplyBody::Snapshot(Box::new(
-                self.store.snapshot(self.s.incarnation),
-            ))),
-            Command::StateSince { rev } => match self.store.since(rev, Instant::now()) {
-                Ok(evs) => Ok(ReplyBody::Events(evs)),
-                Err(oldest) => Err(perr_detail(
-                    ErrorCode::ResyncRequired,
-                    format!(
-                        "events after rev {} are no longer replayable; take a snapshot",
-                        rev.0
-                    ),
-                    ErrorDetail::Resync { oldest },
-                )),
-            },
+            Command::StateSnapshot => self.state_snapshot(peer),
+            Command::StateSince { rev } => self.state_since(rev),
             Command::GridGet { grid_id } => self
                 .grids
                 .get(&grid_id)

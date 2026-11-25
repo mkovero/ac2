@@ -56,6 +56,12 @@ fn state(st: &mut State) {
     rig(&mut st.rig);
 }
 
+/// A snapshot as a network client is sent it: inline in a reply, or as the bytes of a
+/// snapshot transfer, which no reply redaction reaches.
+pub(super) fn snapshot(s: &mut ac2_proto::StateSnapshot) {
+    state(&mut s.state);
+}
+
 /// `c` as a network client is sent it, when that differs from what the local pair is sent.
 pub(crate) fn change(c: &Change) -> Option<Change> {
     let mut c = match c {

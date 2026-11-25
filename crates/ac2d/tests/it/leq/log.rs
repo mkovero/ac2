@@ -244,18 +244,31 @@ async fn a_long_log_in_pages_and_its_history() {
     assert_eq!(starts(&got), starts(&rows));
     assert_eq!(got[17].laeq, rows[17].laeq);
 
+    // More than a reply's points is refused, not cut short.
+    let e = c
+        .call(Command::SplHistoryGet {
+            meas: M,
+            span: HistorySpan::Newest {
+                seconds: SplHistory::MAX_POINTS + 1,
+            },
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(e.code(), Some(ErrorCode::Invalid), "{e}");
     // The history of its last 4 h, one point a second, replayed from the rows before too.
     let r = c
         .call(Command::SplHistoryGet {
             meas: M,
-            span: HistorySpan::Newest { seconds: 100_000 },
+            span: HistorySpan::Newest {
+                seconds: SplHistory::MAX_POINTS,
+            },
         })
         .await
         .unwrap();
     let hist = r.spl_history();
     assert_eq!(hist.scale, LevelScale::DbSpl);
     assert_eq!(hist.windows, vec![window(60.0, Some(95.0))]);
-    assert_eq!(hist.at.len(), SplHistory::MAX_SECONDS as usize + 1);
+    assert_eq!(hist.at.len(), SplHistory::MAX_POINTS as usize);
     assert_eq!(
         hist.at.last().unwrap().0,
         rows[rows.len() - 1].start.0 + 1_000_000_000
@@ -317,7 +330,7 @@ async fn a_long_log_in_pages_and_its_history() {
     }
     // More points than a reply carries: refused, naming the limit.
     let e = range(first, until, 1).await.unwrap_err();
-    assert!(e.to_string().contains("at most 4000"), "{e}");
+    assert!(e.to_string().contains("at most 14400"), "{e}");
     tokio::task::spawn_blocking(move || h.shutdown())
         .await
         .unwrap();

@@ -61,7 +61,7 @@ fn a_full_spl_history_fits_a_ctrl_message() {
         ReplyBody::SplHistory(h) => Some(h),
         _ => None,
     });
-    let points = SplHistory::MAX_SECONDS.max(SplHistory::MAX_POINTS) as usize;
+    let points = SplHistory::MAX_POINTS as usize;
     let window = h
         .windows
         .iter()

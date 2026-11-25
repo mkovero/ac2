@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ErrorCode, ProtoError, Warning};
 use crate::PROTO_VERSION;
-use crate::event::{Event, StateSnapshot};
+use crate::event::{Event, SnapshotTransfer, StateSnapshot};
 use crate::grid::GridDef;
 use crate::model::{
     BackendInfo, CalEntry, ClientRole, Delay, DelayFinding, DynamicsRun, Generator, InputSetups,
@@ -114,8 +114,10 @@ pub enum ReplyBody {
     SplHistory(Box<SplHistory>),
     /// `spl.band_log_get`.
     SplBandLog(Box<crate::model::SplBandLog>),
-    /// `state.snapshot`.
+    /// `state.snapshot`, when it fits a ctrl message.
     Snapshot(Box<StateSnapshot>),
+    /// `state.snapshot`, when it does not: the snapshot's bytes as a download.
+    SnapshotTransfer(SnapshotTransfer),
     /// `state.since`.
     Events(Vec<Event>),
     /// `grid.get`.

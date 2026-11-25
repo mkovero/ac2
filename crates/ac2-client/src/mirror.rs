@@ -230,6 +230,12 @@ impl Mirror {
         Some(need)
     }
 
+    /// The daemon answered a request: as alive as a keepalive says. A snapshot fetched as a
+    /// transfer holds the sync task from its keepalives for as long as the link takes.
+    pub fn on_answer(&mut self, now: Instant) {
+        self.last_ka = Some(now);
+    }
+
     /// A keepalive arrived.
     pub fn on_ka(
         &mut self,
@@ -692,6 +698,10 @@ mod tests {
         let t1 = t0 + 2 * KA_TIMEOUT;
         assert_eq!(m.on_ka(&s, k, t1, 0), None);
         assert!(m.view().responding(t1));
+        // A reply during a long snapshot fetch, with no keepalive taken meanwhile.
+        let t2 = t1 + 2 * KA_TIMEOUT;
+        m.on_answer(t2);
+        assert!(m.view().responding(t2));
     }
 
     #[test]

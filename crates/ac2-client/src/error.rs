@@ -79,6 +79,9 @@ pub enum ClientError {
     /// A session archive could not be packed, checked or read.
     #[error("{0}")]
     Archive(ac2_archive::ArchiveError),
+    /// A state snapshot sent as a transfer did not arrive whole or did not decode.
+    #[error("state snapshot transfer: {0}")]
+    Snapshot(String),
     /// A local file could not be read or written.
     #[error("{path}: {source}")]
     Io {

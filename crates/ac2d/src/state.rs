@@ -23,6 +23,9 @@ pub(crate) struct Store {
     state: State,
     rev: Rev,
     replay: VecDeque<(Instant, Event)>,
+    /// The newest rev whose event no client can take (over the event bound): a
+    /// `state.since` from before it must take a snapshot, which holds its value.
+    unreplayable: Rev,
     limits: ReplayLimits,
 }
 
@@ -102,6 +105,7 @@ impl Store {
             },
             rev: Rev(0),
             replay: VecDeque::new(),
+            unreplayable: Rev(0),
             limits,
         }
     }
@@ -187,6 +191,14 @@ impl Store {
         ev
     }
 
+    /// The event of the newest commit, `rev`, is over the event bound: no client can take it,
+    /// so it is not replayed either, and a `state.since` spanning it answers
+    /// `resync_required`.
+    pub(crate) fn not_replayable(&mut self, rev: Rev) {
+        self.replay.retain(|(_, e)| e.rev != rev);
+        self.unreplayable = self.unreplayable.max(rev);
+    }
+
     fn evict(&mut self, now: Instant) {
         while self.replay.len() > self.limits.events {
             self.replay.pop_front();
@@ -207,7 +219,8 @@ impl Store {
         let oldest = self
             .replay
             .front()
-            .map_or(Rev(self.rev.0 + 1), |(_, e)| e.rev);
+            .map_or(Rev(self.rev.0 + 1), |(_, e)| e.rev)
+            .max(Rev(self.unreplayable.0 + 1));
         if rev > self.rev || rev.0 + 1 < oldest.0 {
             return Err(oldest);
         }
@@ -335,6 +348,29 @@ mod tests {
         let later = t0 + Duration::from_secs(61);
         assert_eq!(s.since(Rev(5), later), Err(Rev(7)));
         assert_eq!(s.since(Rev(6), later).expect("current").len(), 0);
+    }
+
+    /// An event over the bound is not replayed: a `state.since` from before it takes a
+    /// snapshot, one from it on replays what came after.
+    #[test]
+    fn an_unreplayable_rev_bars_a_since_across_it() {
+        let t0 = Instant::now();
+        let mut s = store(16);
+        for _ in 0..3 {
+            bump(&mut s, t0);
+        }
+        let big = bump(&mut s, t0);
+        s.not_replayable(big.rev);
+        bump(&mut s, t0);
+        assert_eq!(s.since(Rev(2), t0), Err(Rev(5)));
+        assert_eq!(s.since(Rev(3), t0), Err(Rev(5)));
+        let after: Vec<_> = s
+            .since(Rev(4), t0)
+            .expect("replayable")
+            .iter()
+            .map(|e| e.rev)
+            .collect();
+        assert_eq!(after, vec![Rev(5)]);
     }
 
     #[test]

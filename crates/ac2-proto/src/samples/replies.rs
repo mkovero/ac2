@@ -8,7 +8,7 @@ use crate::ctrl::{
     ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason, ProtoError, Reply, ReplyBody,
     Warning, Welcome,
 };
-use crate::event::StateSnapshot;
+use crate::event::{SnapshotTransfer, StateSnapshot};
 use crate::model::*;
 use crate::units::*;
 
@@ -259,6 +259,16 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             daemon_incarnation: DaemonIncarnation(0x5eed_5eed_5eed_5eed),
             stream_epoch: StreamEpoch(2),
         }))),
+        Ok(ReplyBody::SnapshotTransfer(SnapshotTransfer {
+            rev: Rev(42),
+            transfer: Transfer {
+                transfer: TransferId(9),
+                file_name: SnapshotTransfer::file_name(Rev(42)),
+                bytes: 5_242_880,
+                sha256: "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae".into(),
+                chunk_bytes: 1 << 20,
+            },
+        })),
         Ok(ReplyBody::Events(events())),
         Ok(ReplyBody::Grid(grids().remove(1))),
         Ok(ReplyBody::SessionFile(session_file())),

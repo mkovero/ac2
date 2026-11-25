@@ -857,6 +857,8 @@ impl Control {
                     // A client drops it unread; the I/O thread owes every connection that
                     // takes events `resync_required` instead, sent ahead of its next event,
                     // credit or keepalive, and the snapshot that brings holds the value.
+                    // Nor can a `state.since` carry it.
+                    self.store.not_replayable(ev.rev);
                     tracing::warn!(
                         "event rev {} ({}) is {} bytes, over the {}-byte event limit: not \
                          sent; event connections are sent resync_required with their next \

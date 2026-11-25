@@ -209,7 +209,8 @@ impl SplLogPage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HistorySpan {
-    /// The newest `seconds` (at most [`SplHistory::MAX_SECONDS`]), a point a second.
+    /// The newest `seconds` (at most [`SplHistory::MAX_POINTS`], else refused), a point a
+    /// second.
     Newest {
         /// Seconds wanted.
         seconds: u32,
@@ -261,8 +262,7 @@ pub struct SplHistory {
 }
 
 impl SplHistory {
-    /// Longest history a [`HistorySpan::Newest`] covers: 4 h.
-    pub const MAX_SECONDS: u32 = 4 * 3600;
-    /// Most points a [`HistorySpan::Range`] reply carries: a few screen widths.
-    pub const MAX_POINTS: u32 = 4000;
+    /// Most points a reply carries, either span: 4 h a second at a time, which with every
+    /// window a meter may have still fits one ctrl message.
+    pub const MAX_POINTS: u32 = 4 * 3600;
 }

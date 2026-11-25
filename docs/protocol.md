@@ -141,7 +141,8 @@ Warning { type: "<name>", … }
   only time out); a larger request is answered `too_large` to its `id` (read from its
   envelope alone), and a client refuses to send one. What can be that large goes another
   way: `trace.export` as a download, `trace.import` from an upload, `dynamics.table` for a
-  dynamics trace's step table.
+  dynamics trace's step table, a large state as a snapshot transfer (§4.2), and
+  `state.since` asks for a snapshot rather than send more than one reply holds.
 - Every receiving socket bounds a message part before buffering it (`ZMQ_MAXMSGSIZE`): the
   largest legal part plus 64 KiB of slack (CURVE's framing; a request a little over 4 MiB is
   still read and answered `too_large`). A part past that closes the connection that carried
@@ -241,8 +242,8 @@ from the store.
 | `dynamics.run` | `lease_token`, `meas` (a dynamics measurement), `name: string \| nil`, `rests_from: TraceId \| nil` | `dynamics` (the run as started) | L (held for the run), armed |
 | `dynamics.table` | `trace` (a dynamics trace, else `invalid`) | `dynamics_table` (`DynamicsTable`: `info`, `inputs`, as in `DynamicsData` without `envelopes`) | read |
 | `dynamics.envelope` | `trace` (a dynamics trace), `input: u16` (a measured input, zero-based), `step: u32` (zero-based); else `invalid` | `dynamics_envelope` (`DynamicsEnvelope`: `input`, `step`, `start`, `end`, each edge a `DynamicsEdgeCurve` of parallel f32 arrays {`t`, `gr_db`, `h_db`: four arrays, H2…H5, NaN where blind}) | read |
-| `state.snapshot` | — | `snapshot` | read |
-| `state.since` | `rev` | `events` or `resync_required` | read |
+| `state.snapshot` | — | `snapshot`, or `snapshot_transfer` when it would not fit one reply (§4.2) | read |
+| `state.since` | `rev` | `events`, or `resync_required` when an event after `rev` is no longer replayable or the events would not fit one reply | read |
 | `grid.get` | `grid_id` | `grid` | read |
 | `file.save` | `session: SessionRef`, `overwrite: bool` | `session_file`; the working state belongs to it, clean | |
 | `file.load` | `session: SessionRef`, `discard: bool` | `session_file`; loads disarmed, no owner, new epoch | |
@@ -254,8 +255,8 @@ from the store.
 | `file.upload_chunk` | `transfer`, `offset: u64`, `data: bin` | `ack` | acts |
 | `file.import` | `transfer`, `name`, `overwrite: bool` | `session_file` | acts (writes a file, commits no state) |
 | `file.download_begin` | `session: SessionRef \| nil` (nil: the working state) | `transfer` | acts |
-| `file.download_chunk` | `transfer`, `offset: u64` | `chunk` (bin) | read |
-| `file.download_end` | `transfer`, `saved_as: string \| nil` | `ack` | |
+| `file.download_chunk` | `transfer` (a download or a snapshot transfer), `offset: u64` | `chunk` (bin) | read |
+| `file.download_end` | `transfer`, `saved_as: string \| nil` (nil for a snapshot transfer, else `invalid`) | `ack` | |
 | `rec.start` | `request: RecordRequest` | `recording` (the run as started) | |
 | `rec.stop` | — | `recording` (the run, finished) | |
 | `rec.list` | — | `recordings` | read |
@@ -1000,14 +1001,14 @@ measured), `judgement`: `LeqJudgement`}.
 configuration order), `scale`: `LevelScale`, `step_s`: u32, `log_start`, `log_until`: WallNs
 \| nil, `at`: [WallNs], `leq`: [[f32]], `over`: [[bool]]}: each window over a span of the
 meter's current log, as its `leq` frames carried them. `span` (`HistorySpan`, tagged by
-`type`) is `newest` {`seconds`: u32}, the newest `seconds` (at most 14400, 4 h; more is
-clamped) a point a second, or `range` {`from`, `to`: WallNs, `step_s`: u32}, the seconds
+`type`) is `newest` {`seconds`: u32}, the newest `seconds` (at most
+`SplHistory::MAX_POINTS`, 14 400, 4 h; more is `invalid`) a point a second, or `range` {`from`, `to`: WallNs, `step_s`: u32}, the seconds
 ending after `from` and at or before `to`, anywhere in the log. With `step_s` 1 each second
 is a point; with more, each point is a bucket of `step_s` whole seconds of Unix time (a
 second belongs to the bucket its end falls in; `at` is the bucket's end, a multiple of
 `step_s` s), `leq[w][k]` window `w`'s **highest** Leq in the bucket and `over[w][k]` true
 when it was over in any second of it — a limit is about the worst moment. A range of more
-than 4000 points (`SplHistory::MAX_POINTS`: `(to − from) / step_s`, rounded up), `step_s`
+than 14 400 points (the same cap: `(to − from) / step_s`, rounded up), `step_s`
 0 or `to` ≤ `from` is `invalid`. `step_s` in the reply is 1 for `newest`. `at` is the end of
 each second (bucket), oldest first; a second without a row has no entry, as no frame was
 sent for it, and a bucket without any second neither. `leq[w][k]` is in `scale` (NaN when
@@ -1047,7 +1048,7 @@ reads it with three non-mutating commands, none of which disturbs the meter:
    time.
 3. **The windows as the meter judged them:** `spl.history_get` with `range` over
    [`log_start`, `log_until`] (from any first reply) at a `step_s` that keeps it within
-   4000 points, or in slices at `step_s` 1, gives each window's Leq and over-limit state
+   14 400 points, or in slices at `step_s` 1, gives each window's Leq and over-limit state
    without replaying the log client-side.
 
 The meter's `spl_log` entity (§4.1) changes when a window's judgement changes (each window's
@@ -1905,7 +1906,7 @@ with the autosave (§7.3).
   download (no `saved_as`).
   Unpacking accepts regular files at `session.json`,
   `session.prev.json`, `traces/<file>`, `spl/<file>` only, at most 512 MiB and 20 000
-  entries. At most 4 transfers per daemon; one idle for 2 min, or 15 min after it began
+  entries. At most 4 transfers per daemon (snapshot transfers, §4.2, apart); one idle for 2 min, or 15 min after it began
   however busy (64 MiB fits at about 600 kbit/s), is dropped (`not_found` after). A
   transfer belongs to the client that began it.
 - To a network client every host path in a reply or event is its last component: a
@@ -2226,7 +2227,7 @@ other kinds).
 `lease`, `generator`, `measurement`, `delay`, `delay_finding`, `trace`, `traces`, `trace_data`,
 `dynamics_table`, `dynamics_envelope`, `calibration`, `line_calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`, `source_state`,
 `spl_log_page`, `spl_history`, `spl_band_log`,
-`snapshot`, `events`,
+`snapshot`, `snapshot_transfer`, `events`,
 `grid`, `session_file`, `sessions`, `transfer`, `chunk`, `salvage`, `sweep`, `dynamics`, `recording`,
 `recordings`, `plan`, `plans`, `walk`, `sim`.
 
@@ -2267,7 +2268,8 @@ the key's data connections (§5.8 `rejoin`), so the client says `hello` again an
   `dynamics.envelope`, `cal.list`, `spl.log_get`, `spl.history_get`, `spl.band_log_get`,
   `file.list`, `rec.list`, `plan.list`, `server.info`, `gen.stop`,
   `file.download_chunk`, `file.download_begin` with a nil `session` (the working state),
-  `file.download_end` with a nil `saved_as`. A viewer holds one transfer at a time, a
+  `file.download_end` with a nil `saved_as`. Snapshot transfers (§4.2) count against none of
+  the transfer limits below. A viewer holds one transfer at a time, a
   download still being packed counted (`refused` for a second `trace.export` or
   `file.download_begin` while one is open), viewers together at most 2 of the 4, and a
   viewer key begins a `file.download_begin` at most once per 5 s (`refused`, with the
@@ -2473,7 +2475,19 @@ samples). Every later recovery reopens the configuration as it then stands.
 
 ### 4.2 Snapshot and events
 
-`state.snapshot` → `{state, rev, daemon_incarnation, stream_epoch}`.
+`state.snapshot` → `snapshot` `{state, rev, daemon_incarnation, stream_epoch}` while that
+fits one ctrl reply (4 MiB less 4 KiB for the envelope). A larger one is held as a download
+and the reply is `snapshot_transfer` {`rev`, `transfer`: `Transfer`}: `transfer.file_name`
+is `state-<rev>.msgpack` and its bytes are the msgpack `StateSnapshot` the inline reply
+would have carried (to a network client with its host paths cut, as in a reply). The client
+fetches it with `file.download_chunk`, checks `sha256`, ends it with `file.download_end`
+(nil `saved_as`) and takes the decoded snapshot as it would an inline one; the events it
+buffered meanwhile apply after it as usual. A snapshot transfer is outside every transfer
+limit (the 4 transfers of §3.2, a viewer's one and the viewers' share of §3.5): it is what
+every client, a viewer too, must be able to take. The bytes of one rev are shared by the clients that asked at it; a client
+holds at most two (a third `state.snapshot` replaces its older one, so a retry run across a
+rev change leaves the first reply's transfer valid), and each is dropped 30 s after its last
+chunk, or after its reply if never fetched (`not_found` after).
 
 An event is `{rev, kind, payload}`. `kind` is one of `stream`, `measurement`, `delay`,
 `delay_finding`, `trace`,
@@ -2486,7 +2500,9 @@ Applying an event is assignment. Events travel on the data socket as
 `[b"evt"][msgpack event]` and in `state.since` replies. Largest event: 1 MiB; one that
 would be larger is not sent on the data socket, and every connection taking events is sent
 `resync_required` ahead of its next event, credit answer or keepalive, within about a
-second (the snapshot holds the value). On the data
+second (the snapshot holds the value); it is not replayed either, so a `state.since` from
+before it answers `resync_required`. A `state.since` whose events would not fit one reply
+answers `resync_required` too: no event list is cut short. On the data
 socket they go outside the byte window, within a bound of their own (§5.8): past it a
 connection's events are dropped and it is sent `resync_required`.
 
@@ -2508,7 +2524,8 @@ and tells the operator.
 2. Wait for the first `ka`. It is only a hint that the subscription is live: a `ka` also
    goes to a connection not subscribed to it. Steps 4 and 6 repair an event missed before
    the subscription took effect.
-3. `state.snapshot` → rev R. Apply buffered events with rev > R in order, then live ones.
+3. `state.snapshot` (inline, or fetched from its `snapshot_transfer`) → rev R. Apply
+   buffered events with rev > R in order, then live ones.
 4. Event with rev > last + 1 → `state.since(last)`; the `resync_required` notice → back
    to 3.
 5. `ka` with another `daemon_incarnation` → drop all state, back to 1.

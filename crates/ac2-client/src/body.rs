@@ -37,6 +37,7 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::SplHistory(_) => "spl_history",
         ReplyBody::SplBandLog(_) => "spl_band_log",
         ReplyBody::Snapshot(_) => "snapshot",
+        ReplyBody::SnapshotTransfer(_) => "snapshot_transfer",
         ReplyBody::Events(_) => "events",
         ReplyBody::Grid(_) => "grid",
         ReplyBody::SessionFile(_) => "session_file",

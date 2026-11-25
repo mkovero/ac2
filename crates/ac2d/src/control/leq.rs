@@ -276,7 +276,13 @@ impl Control {
         let extent = log.and_then(|l| leq_log::lock(l).extent());
         let mut h = match span {
             HistorySpan::Newest { seconds } => {
-                let seconds = seconds.min(SplHistory::MAX_SECONDS);
+                if seconds > SplHistory::MAX_POINTS {
+                    return Err(invalid(format!(
+                        "spl.history_get newest: {seconds} s, at most {}: take a range with \
+                         a larger step_s",
+                        SplHistory::MAX_POINTS
+                    )));
+                }
                 let (rows, from_log_start) = match log {
                     Some(l) => {
                         leq_log::lock(l).tail(leq_history::rows_needed(&config.leq, seconds))
