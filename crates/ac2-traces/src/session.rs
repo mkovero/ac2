@@ -470,8 +470,11 @@ fn save_into(dir: &Path, s: &Session, mode: &Mode<'_>) -> Result<Manifest, Sessi
     for (sub, d) in [(TRACE_DIR, &traces_dir), (SPL_DIR, &spl_dir)] {
         if let Ok(rd) = fs::read_dir(d) {
             for e in rd.flatten() {
-                let rel = format!("{sub}/{}", e.file_name().to_string_lossy());
-                if !keep.contains(&rel) {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let rel = format!("{sub}/{name}");
+                // A file set aside in place (one that could not be moved out) is the
+                // operator's, as everything set aside is.
+                if !keep.contains(&rel) && !ac2_paths::is_set_aside(&name) {
                     let _ = fs::remove_file(e.path());
                 }
             }

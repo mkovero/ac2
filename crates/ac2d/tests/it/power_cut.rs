@@ -220,6 +220,57 @@ fn a_log_without_its_header_costs_only_itself() {
     }
 }
 
+/// A log set aside is never deleted and never replaces one set aside before: one that
+/// cannot be moved out of the autosave (its side folder blocked by a file) is set aside
+/// where it lies and outlives the next write, and a file of the side folder of the name it
+/// moves under is left as it was.
+#[test]
+fn a_log_set_aside_is_never_lost() {
+    let root = tempfile::tempdir().unwrap();
+    let seeded = root.path().join("seed");
+    seed(&seeded);
+    let bad = b"\xff\xfe not this file at all \x01".to_vec();
+    for blocked in [true, false] {
+        let dir = root.path().join(format!("run-{blocked}"));
+        copy_tree(&seeded, &dir);
+        let (log, _) = log_files(&dir);
+        std::fs::write(&log, &bad).unwrap();
+        let side = dir.join("autosave.damaged-files");
+        let flat = side.join(format!(
+            "spl_{}",
+            log.file_name().unwrap().to_string_lossy()
+        ));
+        if blocked {
+            std::fs::write(&side, b"not a folder").unwrap();
+        } else {
+            std::fs::create_dir(&side).unwrap();
+            std::fs::write(&flat, b"set aside before").unwrap();
+        }
+        let (h, backend) = start("power-cut-aside", &dir);
+        let (mut c, _sub) = connect(&h, &[b"evt"]);
+        let d = damaged(&mut c);
+        assert_eq!(kinds(&d), [StateFile::SplLog], "{d:?}");
+        let aside = PathBuf::from(d[0].set_aside_as.clone().expect("set aside"));
+        assert_eq!(
+            aside.starts_with(dir.join("autosave/spl")),
+            blocked,
+            "{aside:?}"
+        );
+        meter_on(&mut c, &backend);
+        // A change, so that shutdown writes the autosave and sweeps its folders.
+        c.ok(Command::MeasCreate {
+            config: spl("another", 2),
+        });
+        drop(c);
+        h.shutdown();
+        assert!(dir.join("autosave/session.json").is_file());
+        assert_eq!(std::fs::read(&aside).unwrap(), bad, "{aside:?}");
+        if !blocked {
+            assert_eq!(std::fs::read(&flat).unwrap(), b"set aside before");
+        }
+    }
+}
+
 /// The rows of a session meter's SPL log and band log on disk, and the files' bytes.
 fn read_logs(dir: &Path) -> (usize, usize, Vec<u8>, Vec<u8>) {
     let (spl, bands) = log_files(dir);

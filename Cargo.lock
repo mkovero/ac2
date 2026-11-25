@@ -214,6 +214,7 @@ version = "0.1.0"
 dependencies = [
  "ac2-archive",
  "ac2-core",
+ "ac2-paths",
  "ac2-proto",
  "num-complex",
  "serde",

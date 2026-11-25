@@ -261,27 +261,59 @@ pub fn set_aside_damaged(path: &Path) -> io::Result<PathBuf> {
 /// Moves a file out of the way, keeping it, as [`set_aside_damaged`] but to
 /// `<name>.<tag>-<unix seconds>`: `tag` says why (`v2` for a file of format version 2).
 pub fn set_aside_as(path: &Path, tag: &str) -> io::Result<PathBuf> {
-    let name = path
-        .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?
-        .to_string_lossy()
-        .into_owned();
+    let name = file_name(path)?;
+    let dir = path.parent().unwrap_or(Path::new(""));
+    set_aside_into(path, dir, &name, tag)
+}
+
+/// Moves `path` into directory `into` as `<name>.<tag>-<unix seconds>` (`-2`, `-3`… when
+/// taken: an earlier file set aside is never replaced), both directories synced. Returns
+/// where it went.
+pub fn set_aside_into(path: &Path, into: &Path, name: &str, tag: &str) -> io::Result<PathBuf> {
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    let mut to = path.with_file_name(format!("{name}.{tag}-{t}"));
+    let mut to = into.join(format!("{name}.{tag}-{t}"));
     let mut n = 2;
     while to.exists() {
-        to = path.with_file_name(format!("{name}.{tag}-{t}-{n}"));
+        to = into.join(format!("{name}.{tag}-{t}-{n}"));
         n += 1;
     }
     fs::rename(path, &to)?;
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        // The file is moved either way; a failed sync only risks the rename being undone by
-        // another power cut, which the next start sets aside again.
-        let _ = sync_dir(dir);
+    // The file is moved either way; a failed sync only risks the rename being undone by
+    // another power cut, which the next start sets aside again.
+    for d in [Some(into), path.parent()].into_iter().flatten() {
+        if !d.as_os_str().is_empty() {
+            let _ = sync_dir(d);
+        }
     }
     Ok(to)
+}
+
+/// Whether file name `name` is one [`set_aside_as`] gives (`damaged` or `v<version>`):
+/// a directory swept of files it no longer names keeps these, kept for the operator.
+pub fn is_set_aside(name: &str) -> bool {
+    let Some((_, tail)) = name.rsplit_once('.') else {
+        return false;
+    };
+    let Some((tag, stamp)) = tail.split_once('-') else {
+        return false;
+    };
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let tag_ok = tag == "damaged" || tag.strip_prefix('v').is_some_and(digits);
+    let stamp_ok = match stamp.split_once('-') {
+        Some((t, n)) => digits(t) && digits(n),
+        None => digits(stamp),
+    };
+    tag_ok && stamp_ok
+}
+
+fn file_name(path: &Path) -> io::Result<String> {
+    Ok(path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?
+        .to_string_lossy()
+        .into_owned())
 }
 
 #[cfg(test)]
@@ -302,6 +334,28 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(fs::read(&a).expect("first"), b"{");
         assert_eq!(fs::read(&b).expect("second"), b"[");
+    }
+
+    #[test]
+    fn set_aside_names_are_told_apart() {
+        for n in [
+            "4-5.csv.damaged-1795646484",
+            "4-5.csv.damaged-1795646484-2",
+            "spl_4-5.csv.v2-1795646484",
+        ] {
+            assert!(is_set_aside(n), "{n}");
+        }
+        for n in [
+            "4-5.csv",
+            "4-5.bands.csv",
+            "4-5.csv.mark",
+            ".convert-abc",
+            "x.vx-1",
+            "x.damaged-",
+            "x.damaged-1-",
+        ] {
+            assert!(!is_set_aside(n), "{n}");
+        }
     }
 
     #[test]

@@ -178,7 +178,8 @@ fn whole(e: &SessionError, path: &Path, to: Option<PathBuf>, what: &str) -> Dama
 /// autosave, where the next write would delete them as unnamed: into `<dir>.damaged-files/`,
 /// each named `<file>.damaged-<time>`; a log of another format version, which is not
 /// damaged, into `<dir>.old-version-files/` as `<file>.v<version>-<time>`, plain CSV of
-/// its own version.
+/// its own version. None replaces a file set aside before. One that cannot be moved there
+/// is set aside under that name where it lies, which the write's sweep leaves alone.
 pub(crate) fn set_dropped_aside(dir: &Path, dropped: Vec<Dropped>) -> Vec<Damage> {
     let damaged = sibling(dir, "", ".damaged-files");
     let old = sibling(dir, "", ".old-version-files");
@@ -190,17 +191,21 @@ pub(crate) fn set_dropped_aside(dir: &Path, dropped: Vec<Dropped>) -> Vec<Damage
             } else {
                 &damaged
             };
+            let tag = d
+                .old_version
+                .map_or_else(|| "damaged".into(), |v| format!("v{v}"));
             let from = dir.join(&d.file);
+            let flat = d.file.replace(['/', '\\'], "_");
             let moved = fs::create_dir_all(into)
-                .and_then(|()| {
-                    let flat = into.join(d.file.replace(['/', '\\'], "_"));
-                    fs::rename(&from, &flat)?;
-                    match d.old_version {
-                        Some(v) => ac2_paths::set_aside_as(&flat, &format!("v{v}")),
-                        None => ac2_paths::set_aside_damaged(&flat),
-                    }
-                })
-                .and_then(|to| ac2_paths::sync_dir(dir).map(|()| to));
+                .and_then(|()| ac2_paths::set_aside_into(&from, into, &flat, &tag))
+                .or_else(|e| {
+                    tracing::warn!(
+                        "autosave: cannot move {} to {}: {e}; set aside where it is",
+                        from.display(),
+                        into.display()
+                    );
+                    ac2_paths::set_aside_as(&from, &tag)
+                });
             let (set_aside_as, what) = match moved {
                 Ok(to) => (Some(to), "left out"),
                 Err(_) if !from.exists() => (None, "left out"),
