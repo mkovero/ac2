@@ -605,17 +605,17 @@ impl AppState {
                 let t = self.nav.target.pan(d);
                 self.nav.set_target(t);
             }
-            C::ResetView => self.nav.set_target(FreqRange::default()),
+            C::ResetView => self.nav.set_target(self.freq_home()),
             C::LevelZoomIn
             | C::LevelZoomOut
             | C::LevelPanUp
             | C::LevelPanDown
             | C::LevelFit
             | C::LevelReset => {
-                // Fit and reset frame the whole picture: frequency back to 20 Hz – 20 kHz
+                // Fit and reset frame the whole picture: frequency back to its home range
                 // too, as Home alone does.
                 if matches!(c, C::LevelFit | C::LevelReset) {
-                    self.nav.set_target(FreqRange::default());
+                    self.nav.set_target(self.freq_home());
                 }
                 self.level_key(c)
             }

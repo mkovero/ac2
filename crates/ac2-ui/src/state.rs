@@ -200,6 +200,9 @@ pub struct AppState {
     /// What the scene builders get; `view.freq` follows `nav`.
     pub view: ViewState,
     pub nav: FreqNav,
+    /// The frequency range Home went to when the app last looked ([`AppState::freq_home`]):
+    /// a view still on it moves with it when the session's rate changes.
+    pub(crate) freq_home: FreqRange,
     /// The 3D spectrograph's tier on this machine's GPU (Settings › 3D quality may override
     /// it); set by the app from the adapter. `None`: the GPU has no 3D view.
     pub auto_tier: Option<ac2_scene::primitives::SkylineTier>,
@@ -327,6 +330,7 @@ impl AppState {
             theme,
             view: ViewState::default(),
             nav: FreqNav::new(FreqRange::default()),
+            freq_home: FreqRange::default(),
             auto_tier: Some(ac2_scene::primitives::SkylineTier::Full),
             layout: Layout::default(),
             level_axes: Default::default(),
@@ -430,6 +434,7 @@ impl AppState {
         if pairing_input {
             self.refresh_pairing();
         }
+        self.follow_freq_home();
         self.frame_new_pictures();
         self.want_dynamics_envelopes(&mut out);
         if let Some(p) = worked_on {

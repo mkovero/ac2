@@ -253,3 +253,17 @@ fn level_ticks_are_readable_at_any_span() {
     let l = labels(Range::new(LEVEL_LIMIT_LO, LEVEL_LIMIT_HI));
     assert!(l.contains(&"0".to_owned()) && l.len() <= 8, "{l:?}");
 }
+
+/// Home is the audio band up to 48 kHz sessions, and runs to Nyquist above.
+#[test]
+fn home_range_by_rate() {
+    let hi = |r| FreqRange::home(r).hi;
+    assert_eq!(hi(None), 20_000.0);
+    assert_eq!(hi(Some(44_100)), 20_000.0);
+    assert_eq!(hi(Some(48_000)), 20_000.0);
+    assert_eq!(hi(Some(88_200)), 44_100.0);
+    assert_eq!(hi(Some(96_000)), 48_000.0);
+    assert_eq!(hi(Some(192_000)), 96_000.0);
+    assert_eq!(hi(Some(768_000)), FREQ_LIMIT_HI);
+    assert_eq!(FreqRange::home(Some(96_000)).lo, 20.0);
+}

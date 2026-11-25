@@ -31,6 +31,23 @@ impl Default for FreqRange {
 }
 
 impl FreqRange {
+    /// The range a view starts on and Home goes back to, for a session at `sample_rate_hz`:
+    /// 20 Hz – 20 kHz, and up to half the rate when the session samples above 48 kHz. A
+    /// 44.1 or 48 kHz converter's band ends in its anti-alias filter just above 20 kHz, so
+    /// the audio band is the whole picture; a 96 or 192 kHz one carries signal up to its
+    /// Nyquist frequency, and an axis ending at 20 kHz would hide what it was set up to
+    /// measure.
+    pub fn home(sample_rate_hz: Option<u32>) -> Self {
+        let d = Self::default();
+        match sample_rate_hz {
+            Some(r) if r > 48_000 => Self {
+                hi: (f64::from(r) / 2.0).min(FREQ_LIMIT_HI),
+                ..d
+            },
+            _ => d,
+        }
+    }
+
     pub fn range(&self) -> Range {
         Range::new(self.lo, self.hi)
     }

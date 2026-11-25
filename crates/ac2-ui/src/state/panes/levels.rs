@@ -762,3 +762,25 @@ impl AppState {
         v
     }
 }
+
+impl AppState {
+    /// The frequency range Home goes to: the audio band, up to the Nyquist frequency of the
+    /// shown rig's session when it samples above 48 kHz ([`FreqRange::home`]).
+    pub(in crate::state) fn freq_home(&self) -> ac2_scene::view::FreqRange {
+        ac2_scene::view::FreqRange::home(self.open_session().map(|o| o.sample_rate_hz))
+    }
+
+    /// After each message: a session opened at another rate has another home range, and a
+    /// view still on the old one goes to the new. A range the operator zoomed or panned to
+    /// stays.
+    pub(in crate::state) fn follow_freq_home(&mut self) {
+        let home = self.freq_home();
+        if home == self.freq_home {
+            return;
+        }
+        if self.nav.target == self.freq_home {
+            self.nav.set_target(home);
+        }
+        self.freq_home = home;
+    }
+}

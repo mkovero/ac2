@@ -1432,9 +1432,13 @@ whose measurement has since been deleted comes back empty, of its kind.
 ### Zoom, pan and the level axis
 
 The frequency axis is shared by the panes: **I** / **O** zoom, **←** / **→** pan, **Home**
-resets to 20 Hz – 20 kHz; the wheel zooms about the pointer, a drag pans. The axis zooms
-out to 1 Hz – 256 kHz: what a measurement has below 20 Hz or above 20 kHz (a sub's bottom
-octave, a 96 or 192 kHz session's top) is there once you zoom out or pan to it.
+resets to its **home range**; the wheel zooms about the pointer, a drag pans. The home
+range is 20 Hz – 20 kHz, and with a session above 48 kHz it runs up to half the sample
+rate: 48 kHz at 96 kHz, 96 kHz at 192 kHz (a 44.1 or 48 kHz session ends in its converter's
+filter just above 20 kHz). A view still on the home range moves to the new one when a
+session opens at another rate; a range you zoomed or panned to stays. The axis zooms
+out to 1 Hz – 256 kHz: what a measurement has below 20 Hz (a sub's bottom octave) is there
+once you zoom out or pan to it.
 
 Each pane's **level axis** (transfer magnitude, spectrum / RTA level, sweep distortion) is
 its own: two transfer panes side by side zoom and pan apart, and the keys and the wheel move
@@ -1463,9 +1467,9 @@ for the sweep panes'; they are framed on every entry under **G**.
 - A view that draws no level axis (the transfer pane's phase, coherence and alignment
   views) takes none of these: its pane's range stays as it was.
 - **Shift+Home** fits it to what the pane shows (offsets included; a few empty bins far
-  below do not stretch it) and resets frequency to 20 Hz – 20 kHz — the way to look at very
+  below do not stretch it) and resets frequency to its home range — the way to look at very
   low signals. **Ctrl+Home** restores the defaults (transfer ±30 dB, spectrum 0 … −100 dBFS
-  or 20 … 120 dB SPL, 20 Hz – 20 kHz).
+  or 20 … 120 dB SPL, the frequency home range).
 - The spectrum pane keeps one range per scale (**dBFS** uncalibrated, **dB SPL**
   calibrated), so a calibration never leaves the curves off a dBFS-sized axis.
 
