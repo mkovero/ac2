@@ -18,6 +18,7 @@ mod osc_rig;
 mod out_device_rig;
 mod pairing;
 mod parse;
+mod process;
 mod rec_rig;
 mod recovery_rig;
 mod salvage_rig;
