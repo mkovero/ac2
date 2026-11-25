@@ -5,9 +5,11 @@
 //! send order over the one connection, each a keyframe or a delta on the frame before it.
 //! A delta applies only on the exact frame it names as its base and only if the result
 //! matches its CRC; otherwise it is refused, the last applied frame is kept, and a keyframe
-//! is asked for at most once per [`KEYFRAME_ASK_GAP`]. A refused frame never counts as new,
-//! so the kept frame turns STALE (and is drawn dimmed) if no keyframe comes: never a curve
-//! built on the wrong base, and an old one reads as old. A delta with no frame held yet
+//! is asked for at most once per [`KEYFRAME_ASK_GAP`]. From the refusal until a keyframe
+//! applies the topic is [`TopicFrame::broken`] and STALE (drawn dimmed): the kept frame is
+//! the one before the loss, so it is never shown as live, and never a curve built on the
+//! wrong base. The daemon sends a keyframe at least every 500 ms per subscriber regardless,
+//! so a lost request costs at most that. A delta with no frame held yet
 //! waits for the keyframe its subscription brings without asking. Values are built only
 //! for the newest frame per topic of a drain. Malformed frames are counted, frames of older
 //! stream epochs or another daemon incarnation discarded.
@@ -82,6 +84,8 @@ struct Kept {
     received: Instant,
     /// When a keyframe was last asked for.
     asked_at: Option<Instant>,
+    /// A delta was refused since the frame applied last: the chain waits for a keyframe.
+    broken: bool,
 }
 
 /// Owner of the data DEALER, the subscriptions and the decoded frames.
@@ -151,8 +155,11 @@ pub struct TopicFrame {
     /// gave a clock offset.
     pub age: Option<f64>,
     /// STALE (Q2): no new frame for 1 s, age above 1 s (3 s for the once-a-second `leq` and
-    /// `band_leq`, [`stale_after`]), or the daemon not responding.
+    /// `band_leq`, [`stale_after`]), the daemon not responding, or [`Self::broken`].
     pub stale: bool,
+    /// A delta after `frame` was lost or refused and no keyframe has applied since: `frame`
+    /// is the last one received whole, not the newest the daemon sent.
+    pub broken: bool,
 }
 
 /// Result of one drain.
@@ -334,6 +341,7 @@ impl DataState {
                         if bump || k.stamp.seq == kp.coded.stamp.seq {
                             kp.coded = k;
                             kp.fresh |= bump;
+                            kp.broken = false;
                             if bump {
                                 kp.received = now;
                             }
@@ -351,6 +359,7 @@ impl DataState {
                                 fresh: true,
                                 received: now,
                                 asked_at: None,
+                                broken: false,
                             },
                         );
                         Some(stamp)
@@ -369,6 +378,7 @@ impl DataState {
                     }
                     Err(_) => {
                         self.refused += 1;
+                        kp.broken = true;
                         if kp
                             .asked_at
                             .is_none_or(|t| now.saturating_duration_since(t) >= KEYFRAME_ASK_GAP)
@@ -527,7 +537,7 @@ impl DataState {
             let Some(frame) = &k.frame else { continue };
             let since_new = now.saturating_duration_since(k.received);
             let age = frame_age(frame, now_wall_ns, view.clock_offset_ns);
-            let stale = is_stale(topic, responding, since_new, age);
+            let stale = k.broken || is_stale(topic, responding, since_new, age);
             let tf = TopicFrame {
                 topic: *topic,
                 frame: frame.clone(),
@@ -535,6 +545,7 @@ impl DataState {
                 since_new,
                 age,
                 stale,
+                broken: k.broken,
             };
             match out.frames.get_mut(&*k.name) {
                 Some(slot) => *slot = tf,
@@ -731,12 +742,15 @@ mod chain_tests {
         same_values(&l, &TF1, &tf[1]);
 
         // `tf[2]` is lost: the delta on it is refused, the frame before stays, one keyframe
-        // is asked for.
+        // is asked for. The kept frame is the one before the loss: broken and STALE at once,
+        // never shown as live while the frames it misses go by.
+        assert!(!l.get(&TF1).unwrap().broken);
         assert!(d.apply(delta(&tf[3], &tf[2]), &v, t0).is_none());
         assert_eq!(d.asks, [TF1]);
         let l = drain(&mut d, t0, &tf[1], 0);
         assert_eq!(l.refused_total, 1);
-        assert_eq!(shown(&l, &TF1), Some((tf[1].stamp.seq, false)));
+        assert_eq!(shown(&l, &TF1), Some((tf[1].stamp.seq, true)));
+        assert!(l.get(&TF1).unwrap().broken);
         same_values(&l, &TF1, &tf[1]);
 
         // Refused again within the gap: no second request; after it, one more.
@@ -759,6 +773,7 @@ mod chain_tests {
         assert!(d.apply(delta(&tf[3], &tf[2]), &v3, t3).is_some());
         let l = drain(&mut d, t3, &tf[3], 0);
         assert_eq!(shown(&l, &TF1), Some((tf[3].stamp.seq, false)));
+        assert!(!l.get(&TF1).unwrap().broken);
         same_values(&l, &TF1, &tf[3]);
         assert_eq!(l.malformed_total, 0);
     }

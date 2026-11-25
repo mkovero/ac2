@@ -308,6 +308,7 @@ fn spec_frame_captured(
         since_new: std::time::Duration::ZERO,
         age: Some(0.0),
         stale: false,
+        broken: false,
     };
     let mut latest = Latest::default();
     latest.frames.insert(f.topic.to_string().into(), f);

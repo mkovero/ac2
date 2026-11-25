@@ -344,7 +344,8 @@ impl AppState {
                 rate_hz: o.sample_rate_hz,
                 pairs: &pairs,
                 captured,
-                sources: frame.map_or(&[], |f| f.meta.loudness.as_slice()),
+                sources: frame.map_or(&[], |f| f.meta.sources.as_slice()),
+                loudness: frame.map_or(&[], |f| f.loudness.as_slice()),
                 is_mic: &|c| {
                     matches!(
                         ac2_proto::cal::input_kind(&s.inputs, c),
@@ -371,10 +372,12 @@ impl AppState {
         let pair = metered.pair().map(|(l, r)| ProgrammePair {
             name: pair_title(l, r),
             correlation: correlation(frame.and_then(|f| {
-                f.meta
-                    .pair_levels
+                let i = f
+                    .meta
+                    .pairs
                     .iter()
-                    .find(|p| p.left == l && p.right == r)
+                    .position(|p| p.left == l && p.right == r)?;
+                f.pair_levels.get(i)
             })),
             window_s: rig.map_or(1.0, |r| r.correlation_window.seconds()),
         });

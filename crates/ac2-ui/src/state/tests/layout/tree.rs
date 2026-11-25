@@ -83,6 +83,7 @@ fn tree_dots_have_the_colours_of_their_curves() {
             since_new: std::time::Duration::ZERO,
             age: Some(0.0),
             stale: false,
+            broken: false,
         };
         latest.frames.insert(f.topic.to_string().into(), f);
     }

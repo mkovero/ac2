@@ -72,6 +72,7 @@ fn spectra_of(t: &mut T, frames: &[(u32, Vec<f32>)], seq: u64, incarnation: Daem
             since_new: std::time::Duration::ZERO,
             age: Some(0.0),
             stale: false,
+            broken: false,
         };
         latest.frames.insert(f.topic.to_string().into(), f);
     }
@@ -438,6 +439,7 @@ pub(super) fn transfer_frame(t: &mut T, seq: u64, mag: f32, coh: f32) {
         since_new: std::time::Duration::ZERO,
         age: Some(0.0),
         stale: false,
+        broken: false,
     };
     let mut latest = Latest::default();
     latest.frames.insert(f.topic.to_string().into(), f);

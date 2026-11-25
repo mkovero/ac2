@@ -94,6 +94,7 @@ pub(super) fn tf_frames(t: &mut T, ids: &[u32]) {
             since_new: std::time::Duration::ZERO,
             age: Some(0.0),
             stale: false,
+            broken: false,
         };
         latest.frames.insert(f.topic.to_string().into(), f);
     }

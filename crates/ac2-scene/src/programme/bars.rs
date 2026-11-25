@@ -209,7 +209,7 @@ pub fn bars_of(
 
 fn source_bar(source: LoudnessSource, ballistic: Ballistic, f: &LoudnessFacts<'_>) -> SourceBar {
     let finite = |v: f64| Some(v).filter(|v| v.is_finite());
-    let (reading, max) = match f.sources.iter().find(|l| l.source == source) {
+    let (reading, max) = match f.reading(source).map(|(l, _)| l) {
         Some(l) if ballistic == Ballistic::Momentary => {
             (finite(l.momentary.0), finite(l.max_momentary.0))
         }

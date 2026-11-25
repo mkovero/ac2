@@ -32,8 +32,8 @@ fn frame(topic: Topic, seq: u64) -> TopicFrame {
                 meta: ac2_proto::frame::StreamLevelsMeta {
                     channels: vec![0],
                     ballistic: Default::default(),
-                    pair_levels: vec![],
-                    loudness: vec![],
+                    pairs: vec![],
+                    sources: vec![],
                 },
                 peak: vec![-20.0],
                 rms: vec![-30.0],
@@ -42,12 +42,15 @@ fn frame(topic: Topic, seq: u64) -> TopicFrame {
                 true_peak: vec![f32::NEG_INFINITY; 1],
                 max: vec![f32::NEG_INFINITY; 1],
                 overs: vec![0; 1],
+                pair_levels: vec![],
+                loudness: vec![],
             }),
         }),
         received: Instant::now(),
         since_new: Duration::ZERO,
         age: Some(0.5),
         stale: false,
+        broken: false,
     }
 }
 

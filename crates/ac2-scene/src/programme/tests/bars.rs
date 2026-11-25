@@ -1,7 +1,7 @@
 //! Bars per source under a loudness ballistic, the fallback rows, the LUFS scale, zones,
 //! target and max ticks (docs/design/programme-meter.md §6.2).
 
-use ac2_proto::frame::{LoudnessSource, SourceLoudness};
+use ac2_proto::frame::{LoudnessSource, LoudnessSourceMeta, SourceLoudness};
 use ac2_proto::units::{Db, Dbtp, Lufs, Seconds, WallNs};
 
 use super::super::loudness::{LoudnessFacts, NamedPair, plate_readout};
@@ -12,9 +12,15 @@ use crate::primitives::{FillRect, Scene, Viewport};
 use crate::theme::Theme;
 use crate::view::{PlotChrome, Style};
 
-pub(super) fn source(source: LoudnessSource) -> SourceLoudness {
-    SourceLoudness {
+pub(super) fn source(source: LoudnessSource) -> LoudnessSourceMeta {
+    LoudnessSourceMeta {
         source,
+        since: WallNs(1),
+    }
+}
+
+pub(super) fn reading() -> SourceLoudness {
+    SourceLoudness {
         momentary: Lufs(-23.06),
         short_term: Lufs(-22.84),
         integrated: Some(Lufs(-23.0)),
@@ -23,7 +29,6 @@ pub(super) fn source(source: LoudnessSource) -> SourceLoudness {
         max_short_term: Lufs(-21.0),
         max_true_peak: Dbtp(-1.2),
         duration: Seconds(75.0),
-        since: WallNs(1),
     }
 }
 
@@ -36,7 +41,9 @@ pub(super) struct Rig {
     pub rate_hz: u32,
     pub pairs: Vec<NamedPair>,
     pub captured: Vec<u16>,
-    pub sources: Vec<SourceLoudness>,
+    pub sources: Vec<LoudnessSourceMeta>,
+    /// One per source.
+    pub loudness: Vec<SourceLoudness>,
     pub overs: [u32; 8],
     pub clipped: [bool; 8],
 }
@@ -53,6 +60,7 @@ impl Rig {
             pairs: vec![pair(2, 3, "Main"), pair(4, 5, "Spare"), pair(6, 7, "Talk")],
             captured: vec![0, 1, 2, 3, 4, 6, 7],
             sources: vec![source(MAIN), source(LoudnessSource::Input { channel: 0 })],
+            loudness: vec![reading(), reading()],
             overs: [0; 8],
             clipped: [false; 8],
         }
@@ -85,6 +93,7 @@ impl Rig {
             pairs: &self.pairs,
             captured: &self.captured,
             sources: &self.sources,
+            loudness: &self.loudness,
             is_mic: &is_mic,
             label: &label,
             input: &input,
@@ -222,6 +231,7 @@ fn a_bar_per_source() {
     // A source the frame does not carry yet: an empty bar with — readings.
     let mut fresh = Rig::new();
     fresh.sources.clear();
+    fresh.loudness.clear();
     let b = fresh.bars(&[2, 3], Ballistic::ShortTerm);
     let s = source_bar(&b[2]);
     assert_eq!((s.reading, s.max), (None, None));
@@ -290,6 +300,7 @@ fn one_source_one_plate() {
     // Before the frame carries the source: there, every field −∞ / none, a blank foot.
     let mut fresh = Rig::new();
     fresh.sources.clear();
+    fresh.loudness.clear();
     let r = fresh.pane(&[2, 3], Ballistic::ShortTerm).loudness;
     assert_eq!(
         r,
@@ -418,8 +429,8 @@ fn fills(s: &Scene, bar: crate::primitives::Rect) -> Vec<FillRect> {
 fn zones_split_at_the_target_and_ticks_mark_the_max() {
     let theme = Theme::dark();
     let mut rig = Rig::new();
-    rig.sources[1].short_term = Lufs(-17.0);
-    rig.sources[1].max_short_term = Lufs(-15.5);
+    rig.loudness[1].short_term = Lufs(-17.0);
+    rig.loudness[1].max_short_term = Lufs(-15.5);
     let p = rig.pane(&[0], Ballistic::ShortTerm);
     let s = scene(&p, PlotChrome::Full, 600.0, 400.0);
     let bar = bar_rects(&s)[1];
@@ -479,7 +490,7 @@ fn zones_split_at_the_target_and_ticks_mark_the_max() {
     // A max outside the span, or none, draws no tick.
     for m in [-60.0, 3.0, f64::NEG_INFINITY] {
         let mut r = Rig::new();
-        r.sources[1].max_short_term = Lufs(m);
+        r.loudness[1].max_short_term = Lufs(m);
         let s = scene(
             &r.pane(&[0], Ballistic::ShortTerm),
             PlotChrome::Full,

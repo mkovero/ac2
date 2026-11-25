@@ -93,10 +93,14 @@ fn same_data(a: &ac2_proto::FrameData, b: &ac2_proto::FrameData) -> bool {
                 true_peak,
                 max,
                 overs,
+                pair_levels,
+                loudness,
             } = x;
             *meta == y.meta
                 && *clip == y.clip
                 && *overs == y.overs
+                && *pair_levels == y.pair_levels
+                && *loudness == y.loudness
                 && bits(peak, &y.peak)
                 && bits(rms, &y.rms)
                 && bits(ppm, &y.ppm)

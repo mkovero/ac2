@@ -92,7 +92,7 @@ pub async fn bands(
                 m.config.name,
                 t.bands,
                 t.unit,
-                age_text(tf.age, tf.stale)
+                age_text(tf)
             ));
             lines.push(t.headline.clone());
             let info: Vec<String> = t.limits_from.iter().chain(&t.correction).cloned().collect();
@@ -201,6 +201,7 @@ pub async fn bands(
                     "seq": tf.frame.stamp.seq,
                     "age_s": tf.age,
                     "stale": tf.stale,
+                    "broken": tf.broken,
                     "responding": latest.responding,
                     "scale": meta.scale,
                     "cal": meta.cal,
