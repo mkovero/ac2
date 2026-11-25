@@ -748,6 +748,34 @@ TCP endpoints is no daemon to the app. There is no second local transport and no
 The envelope discriminators stay: `op` / `args` on a command, `kind` on an event and a frame.
 They name the message, not a variant of a data type.
 
+Decided in `pn-misc`:
+- **Two level types.** `DmxSet {channel, value, snap}` is a cue state's level only (stored in
+  `rig.json` and sessions with the cues). A level with nothing to say about fading is
+  `DmxLevel {channel, value}`: `rig.dmx` (what the cues make) and `artnet.test.channels` (a
+  test frame always jumps). Text: `12=255!` is a snap; a `!` in a test frame is refused.
+- **Snap under HTP.** A channel jumps when a set at its winning level snaps; at a tie, one
+  snapping set is enough. A cue change whose changed channels all snap is one frame, no
+  fade; otherwise the snapping channels go out at once and the rest fade.
+- **Test merge.** The test frame is the cue frame (the fade's goal, not the step on the
+  wire) with each listed channel raised to its test level.
+- **Line range.** Refused outside −40 … +50 dBu (`LINE_DBU_FS_ACCEPTED`), warned outside
+  +4 … +30 (`LINE_DBU_FS_USUAL`). A millivolt slip from a mid-range interface (+22 dBu →
+  −38) now lands in the warning, not the refusal; volts are still bounded 1 mV … 100 V.
+- **Burst as generator state.** The burst's event sets `settings` to the burst (pink, its
+  level, 100 Hz – 10 kHz fourth order, `outputs: [output]`, the low-pass as at 48 kHz),
+  as a sweep shows its sweep; the operator's earlier generator settings are not kept.
+  `firing` goes false once every burst sample has been rendered (the listening tail after
+  it is not sound), with `last_action` left at `loopback_burst`; no `stop` audit. `gen.stop`
+  counts a detection as something to stop and cuts it (the reply is `refused`, the cut
+  message naming `gen.stop`).
+- **Which replies warn `recording_ended`.** Any synchronous command but `rec.stop` that ends
+  the recording, and a file job's reply (`file.load`, `file.new`, `file.recover`) — so
+  `stream.replay` and `file.recover` too. The warning rides a refusal as well (a
+  `stream.open` that closed the old stream, then failed), so `Reply.warnings` is no longer
+  "on success only". `RecordingRef` is `name` (the stem). A reopen the daemon makes on its
+  own (device change, recovery) answers no request and warns nobody; the recording's
+  `RecordingEnd` says it.
+
 ## Outside this bump
 
 These change nothing on the wire or in a stored format and land on their own branches:
