@@ -53,9 +53,18 @@ async fn slow_status_shows_the_clock_domain_and_the_drift() {
         before.contains("\n  clock   one clock · drift not measured yet (needs a stimulus)\n"),
         "{before}"
     );
-    // A session just opened has no minute of stamps: no figure for its clock yet.
-    assert!(before.contains(" sample clock measuring…\n"), "{before}");
-    assert!(before.contains(" system clock "), "{before}");
+    // A session just opened has no minute of stamps: no figure for its sample clock yet, and
+    // the system clock is named on the clock row's continuation.
+    let clocks = before
+        .lines()
+        .skip_while(|l| !l.starts_with("  clock "))
+        .nth(1)
+        .unwrap_or_else(|| panic!("no line after the clock row in\n{before}"));
+    assert!(
+        clocks.trim_start().starts_with("sample clock measuring…"),
+        "{before}"
+    );
+    assert!(clocks.contains("system clock "), "{before}");
 
     let lease = c
         .acquire_lease(false, OnDrop::StopAndRelease)
