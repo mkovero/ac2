@@ -4129,7 +4129,8 @@ wall time as the clock read it with what that clock rested on (`synced`, `unsync
 `derived`: corrected once the clock synchronised, `not_stated`), and on a run's first row
 whether the time since the run before is `known` or `unknown`. The levels are measured
 seconds: a wall clock stepped back or a power cut changes the times beside them, never their
-order. The header names the zone the meter's host was in. No Leq window reaches back across
+order. The header names the zone the meter's host was in; a host that gives its zone only
+as a rule (a POSIX `TZ` value) is named by the offset in force when the log started. No Leq window reaches back across
 an `unknown`: after it the windows start over, and they stay so through later restarts.
 Should the disk stop answering, the log holds the last 10 minutes of rows until the meter
 can mark them on disk; older ones are dropped and the log shows a gap there.

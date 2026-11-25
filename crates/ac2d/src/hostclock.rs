@@ -102,14 +102,46 @@ pub(crate) fn rtc() -> bool {
     true
 }
 
-/// Whether a `TZ` value names an IANA zone (`Europe/Helsinki`, `UTC`) rather than a POSIX
-/// rule (`EET-2EEST,M3.5.0/3,M10.5.0/4`), which carries offsets as digits.
+/// Whether a `TZ` value names an IANA zone (`Europe/Helsinki`, `UTC`, `EST5EDT`) rather than
+/// a POSIX rule (`EET-2EEST,M3.5.0/3,M10.5.0/4`, `EST5`), in the zone database's directories.
 fn iana_name(tz: &str) -> Option<&str> {
+    iana_name_in(tz, &zoneinfo_dirs())
+}
+
+/// Where the C library looks a `TZ` name up: `TZDIR`, else the usual places.
+fn zoneinfo_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = std::env::var_os("TZDIR")
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    dirs.extend(
+        [
+            "/usr/share/zoneinfo",
+            "/var/db/timezone/zoneinfo",
+            "/usr/lib/zoneinfo",
+        ]
+        .map(std::path::PathBuf::from),
+    );
+    dirs
+}
+
+/// [`iana_name`] against the zone files in `dirs`. A rule and a zone name can be spelled
+/// alike (`EST5EDT` is both), and the C library takes a value as a zone when a zone file of
+/// that name exists, so a value with digits names a zone only when one does; one without
+/// digits cannot be a rule, which needs an offset.
+fn iana_name_in<'a>(tz: &'a str, dirs: &[std::path::PathBuf]) -> Option<&'a str> {
     let n = tz.strip_prefix(':').unwrap_or(tz);
-    if n.is_empty() || n.starts_with(['/', '<']) {
+    let shaped = !n.is_empty()
+        && !n.starts_with('/')
+        && n.split('/').all(|p| !p.is_empty() && p != "." && p != "..")
+        && n.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '+' | '-'));
+    if !shaped {
         return None;
     }
-    (n.starts_with("Etc/") || !n.contains(|c: char| c.is_ascii_digit() || c == ',')).then_some(n)
+    let zone =
+        !n.contains(|c: char| c.is_ascii_digit()) || dirs.iter().any(|d| d.join(n).is_file());
+    zone.then_some(n)
 }
 
 /// The host's zone now under `local`: the IANA name when the host has one (`TZ` when it
@@ -207,9 +239,28 @@ mod tests {
             Some("America/Port-au-Prince")
         );
         assert_eq!(iana_name("UTC"), Some("UTC"));
-        assert_eq!(iana_name("Etc/GMT+2"), Some("Etc/GMT+2"));
         assert_eq!(iana_name("EET-2EEST,M3.5.0/3,M10.5.0/4"), None);
         assert_eq!(iana_name("/usr/share/zoneinfo/UTC"), None);
+        assert_eq!(iana_name("<+0330>-3:30"), None);
+    }
+
+    /// A name with digits is a zone when the database has a file of that name, as the C
+    /// library reads it; the same spelling without one is a rule.
+    #[test]
+    fn a_zone_name_with_digits_is_found_in_the_database() {
+        let db = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        std::fs::create_dir(db.path().join("Etc")).unwrap_or_else(|e| panic!("{e}"));
+        for z in ["EST5EDT", "Etc/GMT+5", "Etc/GMT-14"] {
+            std::fs::write(db.path().join(z), b"TZif").unwrap_or_else(|e| panic!("{e}"));
+        }
+        let dirs = [db.path().to_path_buf()];
+        for z in ["EST5EDT", "Etc/GMT+5", "Etc/GMT-14", "Europe/Helsinki"] {
+            assert_eq!(iana_name_in(z, &dirs), Some(z));
+        }
+        assert_eq!(iana_name_in(":EST5EDT", &dirs), Some("EST5EDT"));
+        assert_eq!(iana_name_in("EST5", &dirs), None);
+        assert_eq!(iana_name_in("CST6CDT", &dirs), None);
+        assert_eq!(iana_name_in("../EST5EDT", &dirs), None);
     }
 
     #[test]

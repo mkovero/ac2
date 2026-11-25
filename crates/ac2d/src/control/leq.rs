@@ -387,6 +387,16 @@ impl Control {
         v
     }
 
+    /// The zone a log's header names: the zone's name when the host gives one, which reads
+    /// every row's offset right across a change of daylight saving time; else the offset in
+    /// force when the log started, the only one that stays true for the log.
+    fn log_zone(&self, zone: &ac2_proto::model::TimeZone, started: WallNs) -> String {
+        match &zone.name {
+            Some(n) => n.clone(),
+            None => ac2_proto::model::offset_label(self.s.local_clock.offset_s(started.0)),
+        }
+    }
+
     /// Each SPL meter's log with what its file header names, by measurement.
     fn spl_log_infos(
         &self,
@@ -405,14 +415,15 @@ impl Control {
                     .iter()
                     .find(|i| i.channel == config.input)
                     .and_then(|i| i.kind.mic().map(str::to_owned));
+                let started = leq_log::lock(log).started();
                 Some((
                     SplLogInfo {
                         meas: *id,
                         name,
                         input: config.input,
                         mic,
-                        zone: st.rig.zone.label(),
-                        started: leq_log::lock(log).started(),
+                        zone: self.log_zone(&st.rig.zone, started),
+                        started,
                     },
                     log,
                 ))

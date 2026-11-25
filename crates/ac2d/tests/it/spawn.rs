@@ -535,3 +535,82 @@ fn slow_a_kill_around_the_autosave_write_leaves_a_loadable_autosave() {
         );
     }
 }
+
+/// Under a zone the host names only by a rule, an SPL log's header gives the offset in
+/// force when the log started, not the one when it was written: a log started in summer
+/// and saved in winter says summer's.
+#[test]
+fn a_logs_zone_offset_is_the_one_at_its_start() {
+    use ac2_proto::model::SessionRef;
+    let home = Home::new();
+    let mut p = home.ac2d_with_stores();
+    p.args(home.pair("zone"))
+        .env("TZ", "EET-2EEST,M3.5.0/3,M10.5.0/4");
+    let (_d, ctrl, _) = Daemon::spawn_printing(p);
+    let ctx = Context::new().unwrap();
+    let mut c = Client::connect(&ctx, &ctrl);
+    c.ok(Command::StreamOpen {
+        config: common::stream(false),
+    });
+    for input in [0, 1] {
+        c.ok(Command::MeasCreate {
+            config: common::spl(&format!("in {input}"), input),
+        });
+    }
+    let ids: Vec<_> = c.state().measurements.iter().map(|m| m.id).collect();
+    for meas in &ids {
+        c.ok(Command::MeasStart { meas: *meas });
+    }
+    std::thread::sleep(Duration::from_millis(2500));
+    let path = |d: &Path| SessionRef::Path {
+        path: d.to_string_lossy().into_owned(),
+    };
+    let first = home.path("first");
+    c.ok(Command::FileSave {
+        session: path(&first),
+        overwrite: false,
+    });
+    let logs = |d: &Path| -> Vec<PathBuf> {
+        let mut v: Vec<PathBuf> = std::fs::read_dir(d.join("spl"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.to_string_lossy().ends_with(".csv"))
+            .filter(|p| !p.to_string_lossy().ends_with(".bands.csv"))
+            .collect();
+        v.sort();
+        v
+    };
+    let started = ["2026-01-15T12:00:00.000Z", "2026-07-15T12:00:00.000Z"];
+    let files = logs(&first);
+    assert_eq!(files.len(), 2, "{files:?}");
+    for (f, at) in files.iter().zip(started) {
+        let text = read(f);
+        let line = text.lines().find(|l| l.starts_with("# started: ")).unwrap();
+        std::fs::write(f, text.replace(line, &format!("# started: {at}"))).unwrap();
+    }
+    c.ok(Command::FileLoad {
+        session: path(&first),
+        discard: true,
+    });
+    let second = home.path("second");
+    c.ok(Command::FileSave {
+        session: path(&second),
+        overwrite: false,
+    });
+    let zones: Vec<String> = logs(&second)
+        .iter()
+        .map(|f| {
+            let text = read(f);
+            let at = text.lines().find(|l| l.starts_with("# started: ")).unwrap();
+            let zone = text.lines().find(|l| l.starts_with("# zone: ")).unwrap();
+            format!("{at} {zone}")
+        })
+        .collect();
+    assert_eq!(
+        zones,
+        [
+            "# started: 2026-01-15T12:00:00.000Z # zone: +02:00",
+            "# started: 2026-07-15T12:00:00.000Z # zone: +03:00"
+        ]
+    );
+}

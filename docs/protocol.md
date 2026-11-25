@@ -3337,7 +3337,9 @@ the entry goes. An entry also goes with its meter. Each change is an `autosave` 
 
 What sessions store and `ac2 spl leq export` writes: the first line is exactly
 `# ac2 spl log v3`, then `# key: value` lines (`meas`, `name`, `input` (1-based), `mic`
-(only with one), `zone` (the rig's zone as the log was written: IANA name, else `±hh:mm`),
+(only with one), `zone` (the rig's zone: its IANA name when the host gives one, else the
+offset `±hh:mm` in force when the log started; a name is also read from `TZ` when the zone
+database has a file of that name, as `EST5EDT`),
 `started` (the log's `started_at`, ISO 8601 UTC)), then the header
 `second,run,start_utc,start_ns,clock,gap,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,lcpeak_1s,lafmax_1s,sensitivity_db,position_db,position_peak_db`
 and one row per logged second: the index and run (§3.2 *SPL log*), ISO 8601 UTC time of the
