@@ -91,6 +91,9 @@ pub struct RigState {
     /// Selecting a measurement clears it, so whichever of the two was selected last is what
     /// the keys act on ([`AppState::keys_on_trace`]).
     pub selected_trace: Option<TraceId>,
+    /// The slots (bit N for slot N) a Ctrl+N capture is in flight for: a second press waits
+    /// for the first's answer, so the two never strip each other's new traces of the slot.
+    pub(crate) capturing: u16,
     /// The measurement whose live-curve row was picked (Tab, its legend row or its list
     /// row) rather than its header. The live curve is what the measurement's keys act on
     /// either way; this only says which of the two rows is the selection, so Tab steps
@@ -206,6 +209,7 @@ impl RigState {
             traces: BTreeMap::new(),
             selected: None,
             selected_trace: None,
+            capturing: 0,
             selected_live: None,
             hidden_meas: BTreeSet::new(),
             collapsed: BTreeSet::new(),
@@ -255,7 +259,49 @@ impl RigState {
         self.fold_advice(&d, fold);
         self.fold_programme(&d, fold);
         self.data = Some(d);
+        self.drop_outdated_frames();
         forgot
+    }
+
+    /// Drops the frames of each stopped measurement whose newest result is of an older
+    /// configuration than the measurement's own (it was reset, given a new delay or new
+    /// settings while stopped): the daemon no longer keeps that result, a capture refuses
+    /// it, so the views show the measurement as stopped with nothing measured.
+    pub(super) fn drop_outdated_frames(&mut self) {
+        let Some(state) = self.mirror.as_ref().and_then(|m| m.state.as_deref()) else {
+            return;
+        };
+        let Some(d) = &self.data else {
+            return;
+        };
+        let meas_of = |t: &Topic| match t {
+            Topic::Data { meas, .. } | Topic::Bins { meas, .. } => Some(*meas),
+            _ => None,
+        };
+        let outdated: Vec<MeasId> = state
+            .measurements
+            .iter()
+            .filter(|m| !m.running)
+            .filter(|m| {
+                let newest = d
+                    .latest
+                    .frames
+                    .values()
+                    .filter(|f| matches!(f.topic, Topic::Data { meas, .. } if meas == m.id))
+                    .map(|f| f.frame.stamp.config_rev)
+                    .max();
+                newest.is_some_and(|r| r < m.config_rev)
+            })
+            .map(|m| m.id)
+            .collect();
+        if outdated.is_empty() {
+            return;
+        }
+        let mut nd = (**d).clone();
+        nd.latest
+            .frames
+            .retain(|_, f| !meas_of(&f.topic).is_some_and(|m| outdated.contains(&m)));
+        self.data = Some(Arc::new(nd));
     }
 
     /// The mirrored daemon state.

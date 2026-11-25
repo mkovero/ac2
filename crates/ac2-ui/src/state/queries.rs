@@ -502,7 +502,9 @@ impl AppState {
             .collect()
     }
 
-    /// The trace in each slot 1…9 (index 0 = slot 1).
+    /// A trace in each slot 1…9 (index 0 = slot 1), of any source curve: the last in the
+    /// daemon's list when several curves' captures hold the same number. For tests of a rig
+    /// with one capture per slot; the keys act on [`Self::stored_traces`] by source.
     pub fn slots(&self) -> [Option<&TraceMeta>; 9] {
         let mut out = [None; 9];
         for t in self

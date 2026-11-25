@@ -86,15 +86,6 @@ pub struct CaptureItem {
     pub replace: Option<TraceId>,
 }
 
-/// Why a capture stored nothing.
-#[derive(Clone, Debug, PartialEq)]
-pub enum CaptureRefusal {
-    /// The daemon refused it as invalid: the measurement has no result to store.
-    NoResult,
-    /// Anything else, in its words.
-    Failed(String),
-}
-
 /// What the link reports.
 #[derive(Clone, Debug)]
 pub enum ConnEvent {
@@ -144,7 +135,7 @@ pub enum ConnEvent {
     /// measurement name and the trace stored or why none was.
     Captured {
         slot: u8,
-        results: Vec<(String, Result<Box<TraceMeta>, CaptureRefusal>)>,
+        results: Vec<(String, Result<Box<TraceMeta>, String>)>,
     },
     Stimulus(StimEvent),
     /// `session.devices` answered (or could not be asked).

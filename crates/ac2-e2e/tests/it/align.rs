@@ -51,7 +51,10 @@ fn alignment_from_an_empty_daemon() -> R {
         .collect();
     assert!(rows[0].1.ends_with("(live)"), "{rows:?}");
     assert!(rows[1].1.starts_with("↔  aligned"), "{rows:?}");
-    assert!(rows[2].1.ends_with("(stored, S1)"), "{rows:?}");
+    assert!(
+        rows[2].1.ends_with(" S1)") && rows[2].1.contains("(stored, "),
+        "{rows:?}"
+    );
     assert!(!f.text(FieldId::AlignFrom).is_empty(), "{rows:?}");
     assert!(!f.text(FieldId::AlignTo).is_empty(), "{rows:?}");
     assert!(f.text(FieldId::Name).contains(" ↔ "), "{rows:?}");

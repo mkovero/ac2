@@ -123,13 +123,17 @@ fn eq_editor_from_an_empty_daemon() -> R {
         meas(s, m.id).map_or(0, |x| ac2_ui::eq_editor::curves(x, &s.trace_list()).len())
     };
     d.until("both captures", |s| curves(s) == 3)?;
-    let plain = format!("{} S1", m.config.name);
-    let capture =
-        d.st.trace_list()
-            .iter()
-            .find(|t| t.edit.name == plain)
-            .map(|t| (t.id, t.edit.name.clone()))
-            .ok_or("capture")?;
+    // Slot 1 of the measurement's own curve: the prediction's capture holds its own slot 1.
+    let capture = d
+        .st
+        .trace_list()
+        .iter()
+        .find(|t| {
+            t.edit.slot == Some(1) && t.slot_holder() == ac2_proto::model::SlotHolder::Curve(m.id)
+        })
+        .map(|t| (t.id, t.edit.name.clone()))
+        .ok_or("capture")?;
+    assert_eq!(capture.1, format!("{} S1", m.config.name));
     let meas_now = meas(&d.st, m.id).ok_or("the measurement")?.clone();
     let row = ac2_ui::eq_editor::curves(&meas_now, &d.st.trace_list())
         .iter()

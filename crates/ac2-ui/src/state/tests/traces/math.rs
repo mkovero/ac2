@@ -15,9 +15,13 @@ fn captures(r: &[Request]) -> Vec<(MeasId, u8, Option<TraceId>, String)> {
         .collect()
 }
 
+/// A capture of measurement `meas` in `slot`, filed under it.
 fn owned_by(id: u32, slot: u8, meas: u32) -> TraceMeta {
     let mut t = stored(id, Some(slot), 2);
     t.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(meas) };
+    if let TraceSource::Captured { meas: m, .. } = &mut t.source {
+        *m = MeasId(meas);
+    }
     t
 }
 
@@ -26,17 +30,40 @@ fn slots_capture_and_replace() {
     let mut t = T::new();
     let r = t.key("Ctrl+3");
     assert_eq!(captures(&r), [(MeasId(1), 3, None, "Main L S3".to_owned())]);
-    // Slots are per measurement: measurement 1's trace in slot 3 is what Ctrl+3 replaces,
-    // another owner's is not.
+    t.conn(ConnEvent::Captured {
+        slot: 3,
+        results: vec![("Main L".into(), Ok(Box::new(owned_by(10, 3, 1))))],
+    });
+    // Slots are per source curve: measurement 1's capture in slot 3 is what Ctrl+3
+    // replaces, another measurement's is not.
     t.conn(with_traces(vec![owned_by(8, 3, 2), owned_by(9, 3, 1)]));
     let r = t.key("Ctrl+3");
     assert_eq!(captures(&r)[0].2, Some(TraceId(9)));
+    t.conn(ConnEvent::Captured {
+        slot: 3,
+        results: vec![("Main L".into(), Ok(Box::new(owned_by(10, 3, 1))))],
+    });
+    // A capture of measurement 1 filed under measurement 2 (a math trace's group, a
+    // moved trace) still holds measurement 1's slot.
+    let mut moved = owned_by(9, 3, 1);
+    moved.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(2) };
+    t.conn(with_traces(vec![moved]));
+    let r = t.key("Ctrl+3");
+    assert_eq!(captures(&r)[0].2, Some(TraceId(9)));
+    t.conn(ConnEvent::Captured {
+        slot: 3,
+        results: vec![("Main L".into(), Ok(Box::new(owned_by(10, 3, 1))))],
+    });
     // A locked trace is not deleted; it only gives up the slot.
     let mut locked = owned_by(9, 3, 1);
     locked.edit.locked = true;
     t.conn(with_traces(vec![locked]));
     let r = t.key("Ctrl+3");
     assert_eq!(captures(&r)[0].2, None);
+    t.conn(ConnEvent::Captured {
+        slot: 3,
+        results: vec![("Main L".into(), Ok(Box::new(owned_by(10, 3, 1))))],
+    });
     // A capture stores what the focused pane shows: the spectrum selected in the list is
     // not on the transfer pane, whose own measurement is captured.
     t.st.rig.selected = Some(MeasId(2));
@@ -45,6 +72,10 @@ fn slots_capture_and_replace() {
         captures(&r).iter().map(|c| c.0).collect::<Vec<_>>(),
         [MeasId(1)]
     );
+    t.conn(ConnEvent::Captured {
+        slot: 1,
+        results: vec![("Main L".into(), Ok(Box::new(owned_by(11, 1, 1))))],
+    });
     // The spectrum pane captures the spectrum, whatever the list has selected.
     t.key("Alt+2");
     t.st.rig.selected = Some(MeasId(1));
@@ -53,6 +84,10 @@ fn slots_capture_and_replace() {
         captures(&r).iter().map(|c| c.0).collect::<Vec<_>>(),
         [MeasId(2)]
     );
+    t.conn(ConnEvent::Captured {
+        slot: 1,
+        results: vec![("Mic FFT".into(), Ok(Box::new(owned_by(12, 1, 2))))],
+    });
     // A pane with no curve to store says so.
     t.key("Alt+4");
     assert!(t.key("Ctrl+1").is_empty());
@@ -64,10 +99,12 @@ fn slots_capture_and_replace() {
 }
 
 /// Ctrl+N stores every live curve the focused pane draws, running or stopped, each into its
-/// own slot N; a hidden one is not drawn, so not stored. One toast names the result.
+/// own slot N; a hidden one is not drawn, so not stored. The old capture of a curve goes
+/// only once its new one is stored (`conn::request::capture`), so a refused one leaves the
+/// slot as it was. One toast names the result, a refusal in the daemon's words; pressed
+/// again before the answer, the key only says it is still capturing.
 #[test]
 fn ctrl_digit_captures_every_live_curve_of_the_pane() {
-    use crate::conn::CaptureRefusal;
     let mut s = daemon_state();
     let mut stopped = meas(5, "TF 2", transfer());
     stopped.running = false;
@@ -92,23 +129,36 @@ fn ctrl_digit_captures_every_live_curve_of_the_pane() {
             (MeasId(5), 1, Some(TraceId(9)), "TF 2 S1".to_owned()),
         ]
     );
+    assert!(t.key("Ctrl+1").is_empty());
+    assert_eq!(t.last_toast(), "slot 1: still capturing");
     t.conn(ConnEvent::Captured {
         slot: 1,
         results: vec![
             ("Main L".into(), Ok(Box::new(owned_by(20, 1, 1)))),
-            ("TF 2".into(), Err(CaptureRefusal::NoResult)),
+            (
+                "TF 2".into(),
+                Err(
+                    "TF 2: no result to capture (it has not measured with its current \
+                     settings)"
+                        .into(),
+                ),
+            ),
         ],
     });
     assert_eq!(
         t.last_toast(),
-        "slot 1: Main L captured · TF 2: no result yet"
+        "slot 1: Main L captured · TF 2: no result to capture (it has not measured with its \
+         current settings)"
     );
+    // Answered: the key captures again, and TF 2's capture still in slot 1 is the one the
+    // next capture of TF 2 replaces.
+    assert_eq!(captures(&t.key("Ctrl+1"))[1].2, Some(TraceId(9)));
 }
 
 #[test]
 fn digits_show_and_hide_slots_alt_digits_focus_panes() {
     let mut t = T::new();
-    t.conn(with_traces(vec![stored(9, Some(3), 2)]));
+    t.conn(with_traces(vec![owned_by(9, 3, 1)]));
     let r = t.key("3");
     let [
         Request::Call {

@@ -117,10 +117,9 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                 for i in items {
                     let r = match capture(&c, i.meas, slot, i.name, i.replace).await {
                         Ok(t) => Ok(Box::new(t)),
-                        Err(e) if e.code() == Some(ac2_proto::ErrorCode::Invalid) => {
-                            Err(super::CaptureRefusal::NoResult)
-                        }
-                        Err(e) => Err(super::CaptureRefusal::Failed(e.to_string())),
+                        // The daemon's refusal names the measurement and why, in its words.
+                        Err(ClientError::Daemon(e)) => Err(e.msg),
+                        Err(e) => Err(e.to_string()),
                     };
                     results.push((i.label, r));
                 }
@@ -522,10 +521,6 @@ pub(super) async fn capture(
     name: String,
     replace: Option<TraceId>,
 ) -> Result<TraceMeta, ClientError> {
-    if let Some(old) = replace {
-        // The slot's previous trace may already be gone; the capture still proceeds.
-        let _ = c.call(Command::TraceDelete { trace: old }).await;
-    }
     let r = c
         .call(Command::TraceCapture {
             meas,
@@ -533,7 +528,13 @@ pub(super) async fn capture(
             slot: Some(slot),
         })
         .await?;
-    expect_body!("trace.capture", r, ReplyBody::Trace(t) => t)
+    let t = expect_body!("trace.capture", r, ReplyBody::Trace(t) => t)?;
+    // Only once the new trace is stored: a refused capture keeps the slot's old one. The
+    // old trace may already be gone; the capture stands either way.
+    if let Some(old) = replace {
+        let _ = c.call(Command::TraceDelete { trace: old }).await;
+    }
+    Ok(t)
 }
 
 /// Runs `steps` in order; the first failure ends the job.

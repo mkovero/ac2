@@ -290,14 +290,17 @@ fn the_pane_points_at_imported_traces() {
     );
     assert_eq!(hint.place, HintPlace::Title);
     assert_eq!(legend(&t), ["Main L"]);
-    // Showing it with its slot key says why it does not appear.
+    // Its slot key is the pane's: none of the pane's traces is in slot 2.
     let mut hidden = owned(12, TraceOwner::Imported);
     hidden.edit.visible = false;
     hidden.edit.slot = Some(2);
     let mut s = daemon_state();
     s.traces = vec![hidden];
     t.conn(mirror(s));
-    let r = t.key("2");
+    assert!(t.key("2").is_empty());
+    assert_eq!(t.last_toast(), "slot 2: nothing of this pane");
+    // Shown from the tree, it says why it does not appear.
+    let r = t.st.apply(Msg::ToggleShown(TraceId(12)), &t.keys);
     assert!(
         matches!(
             r.as_slice(),

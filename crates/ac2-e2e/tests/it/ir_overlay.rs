@@ -66,3 +66,54 @@ fn a_stopped_transfer_captured_draws_beside_its_live_ir() -> R {
     );
     Ok(())
 }
+
+/// Reset while stopped, a transfer's kept result goes: its curve goes from the views, which
+/// say it is stopped as with nothing measured, and Ctrl+1 is refused in the daemon's words
+/// while slot 1's earlier capture stays.
+#[test]
+fn a_stopped_transfer_reset_has_nothing_to_capture_and_keeps_its_slot() -> R {
+    let rig = Rig::start()?;
+    let _noise = crate::harness::noise(&rig.cli)?;
+    let mut d = crate::harness::on_rig(&rig)?;
+    d.until("Main L's IR", |s| s.ir_frame_of(IrPane::Live).is_some())?;
+    d.key("Alt+3");
+    d.key("S");
+    d.until("Main L stopped", |s| {
+        s.meas(MAIN_L).is_some_and(|m| !m.running)
+    })?;
+    d.key("Ctrl+1");
+    let first = |s: &AppState| {
+        s.rig
+            .traces
+            .values()
+            .find(|(t, _)| t.meta.edit.slot == Some(1) && t.meta.edit.name == "Main L S1")
+            .map(|(t, _)| t.meta.id)
+    };
+    d.until("the capture in slot 1", |s| first(s).is_some())?;
+    let kept = first(&d.st).ok_or("the capture")?;
+
+    rig.cli
+        .call(ac2_proto::Command::MeasReset { meas: MAIN_L })?;
+    d.until("Main L's IR gone", |s| {
+        s.ir_frame_of(IrPane::Live).is_none()
+    })?;
+    d.key("1");
+    d.until("the capture hidden", |s| {
+        s.rig
+            .traces
+            .get(&kept)
+            .is_some_and(|(t, _)| !t.meta.edit.visible)
+    })?;
+    let s = scene(&d.st, &d.keys);
+    assert_eq!(s.note.as_deref(), Some("Main L stopped — S starts it"));
+
+    d.key("Ctrl+1");
+    let refused = "slot 1: nothing captured · Main L: no result to capture (it has not \
+                   measured with its current settings)";
+    d.until("the refusal", |s| {
+        s.toasts.list.iter().any(|t| t.text == refused)
+    })?;
+    d.pump();
+    assert_eq!(first(&d.st), Some(kept), "slot 1's capture stays");
+    Ok(())
+}

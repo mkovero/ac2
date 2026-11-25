@@ -94,6 +94,12 @@ impl Candidate {
                         Some(m) => format!("{} (EQ set of {})", t.edit.name, m.config.name),
                         None => format!("{} (EQ set)", t.edit.name),
                     },
+                    // Every source curve has its own slot N: the label says whose.
+                    (
+                        TraceSource::Captured { meas_name, .. }
+                        | TraceSource::Math { meas_name, .. },
+                        Some(s),
+                    ) => format!("{} (stored, {meas_name} S{s})", t.edit.name),
                     (_, Some(s)) => format!("{} (stored, S{s})", t.edit.name),
                     (_, None) => format!("{} (stored)", t.edit.name),
                 },

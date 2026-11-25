@@ -1,19 +1,18 @@
 //! What a capture into a slot says: one line for every measurement the focused pane drew,
 //! those stored first, then each that had nothing to store and why.
 
-/// How one measurement's capture ended.
+/// How one curve's capture ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome<'a> {
     /// Stored as a trace in the slot.
     Captured,
-    /// The measurement has no result to store (not measured since its start or change).
-    NoResult,
-    /// Refused for another reason, in the daemon's words.
-    Failed(&'a str),
+    /// Not stored, in the daemon's words (`TF 3: no result to capture yet`) or the link's.
+    NotStored(&'a str),
 }
 
-/// The toast of a capture into slot `slot` of the measurements named in `results`, in the
-/// pane's order: `slot 1: TF 1, TF 2 captured · TF 3: no result yet`.
+/// The toast of a capture into slot `slot` of the curves named in `results`, in the pane's
+/// order: `slot 1: TF 1, TF 2 captured · TF 3: no result to capture yet`. A reason that
+/// already starts with the curve's name is not named twice.
 pub fn slot_toast(slot: u8, results: &[(&str, Outcome<'_>)]) -> String {
     let done: Vec<&str> = results
         .iter()
@@ -26,13 +25,26 @@ pub fn slot_toast(slot: u8, results: &[(&str, Outcome<'_>)]) -> String {
         format!("slot {slot}: {} captured", done.join(", "))
     };
     for (name, o) in results {
-        match o {
-            Outcome::Captured => {}
-            Outcome::NoResult => s.push_str(&format!(" · {name}: no result yet")),
-            Outcome::Failed(e) => s.push_str(&format!(" · {name}: {e}")),
+        if let Outcome::NotStored(why) = o {
+            let why = why
+                .strip_prefix(*name)
+                .and_then(|r| r.strip_prefix(": "))
+                .unwrap_or(why);
+            s.push_str(&format!(" · {name}: {why}"));
         }
     }
     s
+}
+
+/// A capture key pressed again before the daemon answered the slot's previous capture.
+pub fn still_capturing(slot: u8) -> String {
+    format!("slot {slot}: still capturing")
+}
+
+/// A show/hide-slot key on a pane none of whose curves has a trace in the slot, while
+/// other panes' do: those are left as they are.
+pub fn nothing_of_pane(slot: u8) -> String {
+    format!("slot {slot}: nothing of this pane")
 }
 
 /// A capture key on a pane that draws no live curve to store; `to_it` says how to put a
@@ -63,18 +75,37 @@ mod tests {
         assert_eq!(
             slot_toast(
                 1,
-                &[("TF 1", Captured), ("TF 2", Captured), ("TF 3", NoResult)]
+                &[
+                    ("TF 1", Captured),
+                    ("TF 2", Captured),
+                    ("TF 3", NotStored("TF 3: no result to capture yet"))
+                ]
             ),
-            "slot 1: TF 1, TF 2 captured · TF 3: no result yet"
+            "slot 1: TF 1, TF 2 captured · TF 3: no result to capture yet"
         );
         assert_eq!(
             slot_toast(4, &[("Main", Captured)]),
             "slot 4: Main captured"
         );
         assert_eq!(
-            slot_toast(2, &[("TF 1", NoResult), ("Sub", Failed("not connected"))]),
-            "slot 2: nothing captured · TF 1: no result yet · Sub: not connected"
+            slot_toast(
+                2,
+                &[
+                    (
+                        "TF 1",
+                        NotStored(
+                            "TF 1: no result to capture (it has not measured with its \
+                             current settings)"
+                        )
+                    ),
+                    ("Sub", NotStored("client is closed"))
+                ]
+            ),
+            "slot 2: nothing captured · TF 1: no result to capture (it has not measured \
+             with its current settings) · Sub: client is closed"
         );
+        assert_eq!(still_capturing(3), "slot 3: still capturing");
+        assert_eq!(nothing_of_pane(5), "slot 5: nothing of this pane");
     }
 
     #[test]
