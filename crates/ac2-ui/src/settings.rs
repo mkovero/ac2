@@ -17,7 +17,7 @@
 //! lines and texts come from the mirrored state on every call, and the reducer turns the
 //! actions into requests.
 
-use ac2_proto::model::{Generator, ServerInfo};
+use ac2_proto::model::{Generator, Recordings, ServerInfo};
 use ac2_proto::units::Dbfs;
 use ac2_scene::rig::{RAISE_WHILE_LIVE, RAISE_WORD};
 use ac2_scene::stimulus::SignalRow;
@@ -339,9 +339,10 @@ impl RecordingPage {
 pub fn recording_rows(limit_min: u32, server: Option<&ServerInfo>) -> Vec<(RecordingRow, String)> {
     let folder = match server {
         None => "asking the daemon…".to_owned(),
-        Some(s) => match &s.recording_dir {
-            Some(d) => format!("{d} (ac2d --recordings)"),
-            None => "this daemon does not record".to_owned(),
+        Some(s) => match &s.recordings {
+            Recordings::Dir { dir } => format!("{dir} (ac2d --recordings)"),
+            Recordings::Kept => "on the rig's host".to_owned(),
+            Recordings::Off => "this daemon does not record".to_owned(),
         },
     };
     vec![

@@ -7,7 +7,7 @@ use ac2_client::{Client, expect_body};
 use ac2_proto::model::{
     LocalServer, NetBind, NetChoice, NetReason, NetReasonKind, NetSaved, NetSetting,
     NetSettingKind, NetSettingView, NetStatus, NetStatusView, NetToggle, NetUnavailable,
-    NotSavedReason, PeerNetStatus, ServerInfo,
+    NotSavedReason, PeerNetStatus, Recordings, ServerInfo,
 };
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
@@ -221,8 +221,10 @@ fn info_text(info: &ServerInfo) -> String {
         None => String::new(),
     };
     s.push_str(&network_text(info));
-    if let Some(d) = &info.recording_dir {
-        s.push_str(&format!("recordings   {d}\n"));
+    match &info.recordings {
+        Recordings::Off => {}
+        Recordings::Dir { dir } => s.push_str(&format!("recordings   {dir}\n")),
+        Recordings::Kept => s.push_str("recordings   on the rig's host\n"),
     }
     s.push_str(&super::clients::list_text(info));
     if !info.interfaces.is_empty() {

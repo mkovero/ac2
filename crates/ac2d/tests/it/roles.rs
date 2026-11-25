@@ -175,28 +175,45 @@ fn a_viewer_sends_every_command_and_only_its_set_runs() {
     let clients = |c: &mut Client| c.server(Command::ServerInfo).network.authorized;
     let authorized = clients(&mut op);
     let mut ran = Vec::new();
-    for cmd in ac2_proto::samples::commands() {
+    // The two downloads a viewer may send in one shape only: the working state (not a named
+    // session from the host), and an end that names no file on the host.
+    let both_shapes = [
+        Command::FileDownloadBegin {
+            session: Some(ac2_proto::model::SessionRef::Name {
+                name: "friday".into(),
+            }),
+        },
+        Command::FileDownloadEnd {
+            transfer: ac2_proto::units::TransferId(4),
+            saved_as: None,
+        },
+    ];
+    for cmd in ac2_proto::samples::commands()
+        .into_iter()
+        .chain(both_shapes)
+    {
         let name = cmd.name();
         let allowed = cmd.allowed(&ClientRole::Viewer);
+        let shape = format!("{cmd:?}");
         let before = op.state_rev();
         match phone.call(cmd) {
             Err(e) if is_view_only(&e) => {
-                assert!(!allowed, "{name} is a viewer's, yet refused: {e:?}");
-                assert_eq!(
-                    op.state_rev(),
-                    before,
-                    "{name} refused, yet it changed the state"
-                );
+                assert!(!allowed, "{shape} is a viewer's, yet refused: {e:?}");
             }
             // Anything else is the command's own answer: it went past the role gate.
             _ => {
-                assert!(allowed, "{name} is not a viewer's, yet it was not refused");
+                assert!(allowed, "{shape} is not a viewer's, yet it was not refused");
                 ran.push(name);
             }
         }
+        // Neither a refused command nor a read a viewer may send changes the rig.
+        assert_eq!(op.state_rev(), before, "{shape} changed the state");
     }
     assert!(
-        ran.contains(&"state.snapshot") && ran.contains(&"gen.stop"),
+        ran.contains(&"state.snapshot")
+            && ran.contains(&"gen.stop")
+            && ran.contains(&"file.download_begin")
+            && ran.contains(&"file.download_end"),
         "{ran:?}"
     );
     assert_eq!(clients(&mut op), authorized);

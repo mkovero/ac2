@@ -42,6 +42,9 @@ pub struct DaemonConfig {
     pub rig_logs: Option<PathBuf>,
     /// Stimulus lease expiry after the last refresh (Q6: 1.5 s).
     pub lease_expiry: Duration,
+    /// Longest a session transfer lives however often it is touched
+    /// ([`crate::TRANSFER_LIFETIME`]).
+    pub transfer_lifetime: Duration,
     /// State-event replay buffer.
     pub replay: ReplayLimits,
     /// Per-client request-id dedup window.
@@ -190,6 +193,7 @@ impl fmt::Debug for DaemonConfig {
             .field("rig_settings", &self.rig_settings)
             .field("rig_logs", &self.rig_logs)
             .field("lease_expiry", &self.lease_expiry)
+            .field("transfer_lifetime", &self.transfer_lifetime)
             .field("replay", &self.replay)
             .field("dedup", &self.dedup)
             .field("publish_fps", &self.publish_fps)
@@ -228,6 +232,7 @@ impl DaemonConfig {
             rig_settings: None,
             rig_logs: None,
             lease_expiry: Duration::from_millis(1500),
+            transfer_lifetime: crate::TRANSFER_LIFETIME,
             replay: ReplayLimits::default(),
             dedup: DedupLimits::default(),
             publish_fps: Self::PUBLISH_FPS,

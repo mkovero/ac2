@@ -88,7 +88,9 @@ pub fn server_info() -> ServerInfo {
             },
         ],
         toggle: NetToggle::Allowed,
-        recording_dir: Some("/home/fohtech/.local/share/ac2/recordings".into()),
+        recordings: Recordings::Dir {
+            dir: "/home/fohtech/.local/share/ac2/recordings".into(),
+        },
     }
 }
 
@@ -126,7 +128,7 @@ pub fn server_info_off() -> ServerInfo {
         },
         interfaces: Vec::new(),
         toggle: NetToggle::Allowed,
-        recording_dir: None,
+        recordings: Recordings::Off,
     }
 }
 
@@ -154,7 +156,7 @@ pub fn server_info_fixed() -> ServerInfo {
         toggle: NetToggle::Unavailable {
             reason: NetUnavailable::NotLocal,
         },
-        recording_dir: None,
+        recordings: Recordings::Kept,
     }
 }
 

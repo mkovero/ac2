@@ -22,9 +22,23 @@ pub struct ServerInfo {
     /// The host's interfaces the network can bind (loopback left out), read at each
     /// `server.info`; empty to a network client.
     pub interfaces: Vec<NetInterface>,
-    /// Where raw capture files are recorded on the daemon host; `None`: this daemon does
-    /// not record.
-    pub recording_dir: Option<String>,
+    /// Whether, and where on the daemon host, raw capture files are recorded.
+    pub recordings: Recordings,
+}
+
+/// Whether the daemon records raw capture files (`rec.start`), and where.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Recordings {
+    /// This daemon does not record.
+    Off,
+    /// It records into this directory on the daemon host.
+    Dir {
+        /// The directory.
+        dir: String,
+    },
+    /// It records on the daemon host; where is not told to a viewer.
+    Kept,
 }
 
 /// Whether `server.network` from the asking client may switch the network: the same answer

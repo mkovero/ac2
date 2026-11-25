@@ -514,7 +514,7 @@ impl Control {
         self.rig.meas.stream = stream;
         let rev = self.commit_rig(|r| r.monitor_at_start = on);
         tracing::info!(
-            target: "ac2d::audit",
+            target: crate::AUDIT_TARGET,
             "monitor at start {}",
             if on { "on" } else { "off" }
         );
@@ -616,7 +616,7 @@ impl Control {
                     .as_ref()
                     .map_or_else(String::new, |o| format!("{:?}", o.input_device));
                 tracing::info!(
-                    target: "ac2d::audit",
+                    target: crate::AUDIT_TARGET,
                     "monitor at start: audio opened capture-only on {dev} (no outputs, the \
                      generator disarmed); {} rig SPL meter(s) metering",
                     self.rig.meas.saved.len()

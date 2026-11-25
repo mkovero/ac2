@@ -142,6 +142,12 @@ impl Control {
             ),
             Command::LevelsReset { channels } => self.levels_reset(channels),
             Command::GenStop => {
+                // Anyone may stop the output; a stop of nothing changes nothing, so a client
+                // repeating it can neither flood every client with events nor write over
+                // who last acted on the generator.
+                if !self.generator_active() {
+                    return ack(self.store.rev());
+                }
                 self.abort_runs(SweepFailure::Stopped, "the stimulus was stopped");
                 self.stop_output();
                 let mut g = self.store.state().generator.clone();

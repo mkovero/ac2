@@ -67,6 +67,7 @@ mod osc;
 mod owners;
 mod recording;
 mod recovery;
+mod redact;
 mod remote;
 mod request;
 pub(crate) mod rig;
@@ -89,6 +90,7 @@ mod working;
 pub(crate) use artnet::check_addr as check_artnet_addr;
 pub(crate) use osc::{Judged, has_cue};
 pub(crate) use remote::check_peers;
+pub use transfer::DEFAULT_LIFETIME as TRANSFER_LIFETIME;
 pub(crate) use validate::validate_meas;
 use validate::{
     MAX_CAL_UNSETTLED_DB, MAX_DELAY_S, check_delay, check_find, delay_samples, gen_err,
@@ -272,6 +274,7 @@ pub(crate) struct Setup {
     /// How the daemon serves clients (`server.*`).
     pub(crate) server: rig::Server,
     pub(crate) lease_expiry: Duration,
+    pub(crate) transfer_lifetime: Duration,
     pub(crate) keepalive: Duration,
     pub(crate) replay: ReplayLimits,
     pub(crate) dedup: DedupLimits,
@@ -318,6 +321,13 @@ struct PendingReply {
     id: RequestId,
 }
 
+/// A loopback detection running on its own thread; answered when the result arrives.
+struct PendingDetect {
+    token: u64,
+    reply: PendingReply,
+    cut: crate::detect::Cut,
+}
+
 /// A `delay.find` running on a job thread; answered when the result arrives.
 struct PendingFind {
     route: Route,
@@ -329,8 +339,8 @@ struct PendingFind {
 /// The replies held until a worker thread reports back, by the token its work was given.
 #[derive(Default)]
 struct Pending {
-    /// The loopback detection running, by token.
-    detecting: Option<(u64, PendingReply)>,
+    /// The loopback detection running.
+    detecting: Option<PendingDetect>,
     /// Driver control panel calls under way, by token.
     panels: HashMap<u64, PendingReply>,
     /// The `delay.find` runs under way, by token.
@@ -687,7 +697,9 @@ impl Control {
                     if let Some((_, waiters)) = self.pending.devices.take_if(|(t, _)| *t == token) {
                         let now = Instant::now();
                         for p in waiters {
-                            let r = Ok(ReplyBody::Backends(backends.clone()));
+                            let r = self
+                                .still_operator(&p.client, "stream.devices")
+                                .map(|()| ReplyBody::Backends(backends.clone()));
                             self.answer(&p.route, &p.client, p.id, r, now);
                         }
                     }
@@ -695,20 +707,22 @@ impl Control {
                 Ok(ControlMsg::PreviewOpened { token }) => self.preview_opened(token),
                 Ok(ControlMsg::PanelShown { token, result }) => {
                     if let Some(p) = self.pending.panels.remove(&token) {
-                        let r = result.map(|()| ReplyBody::Ack {
-                            rev: self.store.rev(),
-                        });
+                        let r = self
+                            .still_operator(&p.client, "stream.control_panel")
+                            .and(result)
+                            .map(|()| ReplyBody::Ack {
+                                rev: self.store.rev(),
+                            });
                         self.answer(&p.route, &p.client, p.id, r, Instant::now());
                     }
                 }
                 Ok(ControlMsg::LoopbackDetected { token, result }) => {
-                    if let Some((t, p)) = self.pending.detecting.take() {
-                        if t == token {
-                            let r = (*result).map(ReplyBody::LoopbackDetection);
-                            self.answer(&p.route, &p.client, p.id, r, Instant::now());
-                        } else {
-                            self.pending.detecting = Some((t, p));
-                        }
+                    if let Some(d) = self.pending.detecting.take_if(|d| d.token == token) {
+                        let p = d.reply;
+                        let r = self
+                            .still_operator(&p.client, "stream.detect_loopback")
+                            .and_then(|()| (*result).map(ReplyBody::LoopbackDetection));
+                        self.answer(&p.route, &p.client, p.id, r, Instant::now());
                     }
                 }
                 Ok(ControlMsg::DelayTracked {
@@ -853,7 +867,15 @@ impl Control {
                         ac2_proto::event::MAX_EVENT_BYTES
                     );
                 }
-                self.s.outbox.event(&b);
+                // The network pair is sent its own copy where the change names host paths.
+                let net = redact::change(&ev.change).and_then(|change| {
+                    let mut n = ev.clone();
+                    n.change = change;
+                    ac2_proto::encode_event(&n)
+                        .inspect_err(|e| tracing::error!("event not encodable: {e}"))
+                        .ok()
+                });
+                self.s.outbox.event(&b, net.as_deref());
             }
             Err(e) => tracing::error!("event not encodable: {e}"),
         }

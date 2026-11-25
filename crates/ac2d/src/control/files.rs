@@ -21,7 +21,7 @@ use ac2_traces::session::{
     self, Manifest, SavedDelay, SavedMeasurement, Session as SessionData, SessionError,
 };
 
-use super::file_jobs::{FileDone, Pending, ReplaceFrom, ReplaceRead, Work};
+use super::file_jobs::{Cancel, FileDone, Pending, ReplaceFrom, ReplaceRead, Work};
 use super::load_check::check_session;
 use super::{Control, delay_samples};
 use crate::route::Peer;
@@ -169,11 +169,12 @@ impl Control {
         let data = self.session_data(true)?;
         let hash = self.content_hash();
         let (n, d) = (name.clone(), dir.clone());
-        let work: Work = Box::new(move || {
+        let work: Work = Box::new(move |cancel: &Cancel| {
             FileDone::Save((|| {
                 if ask && let Some(p) = session::peek(&d) {
                     return Err(super::transfer::exists(&n, p.saved_at.unwrap_or_default()));
                 }
+                cancel.check()?;
                 session::save(&d, &data).map_err(session_err)
             })())
         });
@@ -206,7 +207,7 @@ impl Control {
     pub(super) fn begin_list(&self) -> (Pending, Work) {
         let dir = self.s.session_dir.clone();
         let work: Work =
-            Box::new(move || {
+            Box::new(move |_: &Cancel| {
                 FileDone::List(session::list(&dir).map_err(session_err).map(|l| {
                     ReplyBody::Sessions(l.iter().map(|(n, p, m)| info(n, p, m)).collect())
                 }))
@@ -267,7 +268,7 @@ impl Control {
         src: Source,
     ) -> Result<(Pending, Work), ProtoError> {
         let kept = self.kept()?;
-        let work: Work = Box::new(move || {
+        let work: Work = Box::new(move |_: &Cancel| {
             let read = src.read();
             // A session that cannot replace the working state must not take the recovery
             // copy's place.
@@ -382,7 +383,7 @@ impl Control {
             }
             _ => (None, Source::Dir(self.session_path(client, r)?.1)),
         };
-        let work: Work = Box::new(move || FileDone::Salvage(src.read_traces()));
+        let work: Work = Box::new(move |_: &Cancel| FileDone::Salvage(src.read_traces()));
         Ok((Pending::Salvage { transfer }, work))
     }
 

@@ -494,7 +494,7 @@ impl Control {
         (input_device, output_device): (ac2_proto::model::DeviceId, ac2_proto::model::DeviceId),
         output: u16,
         level: Dbfs,
-    ) -> Result<u64, ProtoError> {
+    ) -> Result<(u64, crate::detect::Cut), ProtoError> {
         self.check_lease(Instant::now());
         self.lease_check(client, token)?;
         if !level.0.is_finite() {
@@ -522,7 +522,9 @@ impl Control {
         self.excuse_blocked(blocked);
         closed?;
         let token = self.ids.token();
+        let cut = crate::detect::Cut::default();
         let req = crate::detect::DetectRequest {
+            cut: cut.clone(),
             backend,
             kind,
             input_device,
@@ -533,7 +535,7 @@ impl Control {
             max_level: self.s.max_level,
         };
         tracing::info!(
-            target: "ac2d::audit",
+            target: crate::AUDIT_TARGET,
             "loopback detection on output {} by {}",
             output + 1,
             client.id().0
@@ -549,7 +551,7 @@ impl Control {
                 });
             })
             .map_err(|e| internal(format!("cannot start detection: {e}")))?;
-        Ok(token)
+        Ok((token, cut))
     }
 
     /// Opens `device`'s driver control panel on a thread of its own, and answers once the

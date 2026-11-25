@@ -52,7 +52,7 @@ pub(super) fn firing_sine(g: &Generator) -> Option<f64> {
 impl Control {
     pub(super) fn audit(&self, g: &mut Generator, action: GenAction, client: Option<&Peer>) {
         tracing::info!(
-            target: "ac2d::audit",
+            target: crate::AUDIT_TARGET,
             "generator {action:?} by {}",
             client.map_or_else(|| "daemon".to_owned(), describe)
         );
@@ -80,6 +80,20 @@ impl Control {
     }
 
     /// Fades the output out (the gate makes the source fade on its own as well).
+    /// Whether `gen.stop` has anything to stop: the generator armed or firing, a sweep or
+    /// dynamics run under way, or the output still sounding.
+    pub(super) fn generator_active(&self) -> bool {
+        let g = &self.store.state().generator;
+        g.armed
+            || g.firing
+            || self.sweep.is_some()
+            || self.dynamics.is_some()
+            || self
+                .stream
+                .as_ref()
+                .is_some_and(|rt| rt.gen_handle.state() != OutputState::Silent)
+    }
+
     pub(super) fn stop_output(&mut self) {
         self.out.gate.close();
         let sounding = self

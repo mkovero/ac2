@@ -9,6 +9,7 @@ use crate::route::Peer;
 use crate::util::{perr_detail, refused};
 
 use super::Control;
+use super::transfer::MAX_VIEWER_TRANSFERS;
 
 /// The refusal of a command a viewer may not send.
 pub(super) fn view_only(op: &str) -> ProtoError {
@@ -31,12 +32,27 @@ impl Control {
 
     /// Refuses `cmd` from `peer` unless its role may send it. Checked before dedup
     /// admission and before anything runs, so a refused request stores and changes nothing.
-    pub(super) fn role_gate(&self, peer: &Peer, cmd: &Command) -> Result<ClientRole, ProtoError> {
+    pub(super) fn role_gate(
+        &mut self,
+        peer: &Peer,
+        cmd: &Command,
+    ) -> Result<ClientRole, ProtoError> {
         let Some(role) = self.peer_role(peer) else {
             let name = peer.curve().map_or("", |(n, _)| n);
             // The handshake check refuses it from now on; a connection already up must
-            // not keep acting on the rig until it drops.
-            tracing::warn!(target: "ac2d::auth", "request from revoked client {name:?} refused");
+            // not keep acting on the rig until it drops. Said once per key: the connection
+            // may keep sending.
+            if self
+                .refusals
+                .first(peer.curve().map(|(_, k)| *k), "revoked")
+            {
+                tracing::warn!(
+                    target: "ac2d::auth",
+                    "request from revoked client {name:?} refused (repeats at debug)"
+                );
+            } else {
+                tracing::debug!(target: "ac2d::auth", "request from revoked client {name:?}");
+            }
             return Err(refused(format!(
                 "the key of client {name:?} was revoked on this rig"
             )));
@@ -61,8 +77,10 @@ impl Control {
         })
     }
 
-    /// A viewer holds one transfer at a time: transfers are held in memory and capped for
-    /// the whole daemon, and a viewer must not be able to crowd an operator's out.
+    /// A viewer key holds one transfer at a time, its download still being packed
+    /// included, and viewers together hold at most [`MAX_VIEWER_TRANSFERS`]: transfers are
+    /// held in memory and capped for the whole daemon, and viewers must not be able to
+    /// crowd an operator's out.
     pub(super) fn viewer_transfer_gate(
         &mut self,
         peer: &Peer,
@@ -73,10 +91,25 @@ impl Control {
             cmd,
             Command::TraceExport { .. } | Command::FileDownloadBegin { .. }
         );
-        if role == ClientRole::Viewer && opens && self.transfers.held_by(peer) > 0 {
+        let Some((_, key)) = peer.curve() else {
+            return Ok(());
+        };
+        if role != ClientRole::Viewer || !opens {
+            return Ok(());
+        }
+        let own =
+            self.transfers.held_by_viewers(Some(key)) + self.file_jobs.viewer_downloads(Some(key));
+        if own > 0 {
             return Err(refused(
                 "a viewer holds one transfer at a time: finish or abandon the one under way",
             ));
+        }
+        let all = self.transfers.held_by_viewers(None) + self.file_jobs.viewer_downloads(None);
+        if all >= MAX_VIEWER_TRANSFERS {
+            return Err(refused(format!(
+                "viewers hold {all} transfers, all they may hold together; try again when \
+                 one is done"
+            )));
         }
         Ok(())
     }
@@ -90,5 +123,37 @@ impl Control {
         self.dedup.forget_name(name);
         self.drop_lease_of_key(key);
         self.transfers.forget_key(key);
+        // What it began as an operator and is still running commits nothing and hands
+        // nothing out: file jobs stop before they change or pack a session (and are
+        // refused when they report), a loopback burst is cut with its fade.
+        self.file_jobs.cancel_key(key);
+        self.cut_detect_of_key(name, key);
+    }
+
+    /// `Ok` while `client` is still an operator: an operator's command answered after its
+    /// role was taken down hands nothing out and commits nothing.
+    pub(super) fn still_operator(&self, client: &Peer, op: &str) -> Result<(), ProtoError> {
+        if self.peer_role(client) == Some(ClientRole::Operator) {
+            Ok(())
+        } else {
+            Err(refused(format!(
+                "this client's role changed while {op} ran; nothing was done or handed out"
+            )))
+        }
+    }
+
+    /// Cuts the loopback detection `key` started, if one is sounding: its burst fades out
+    /// as a lease taken away does.
+    fn cut_detect_of_key(&mut self, name: &str, key: &PublicKey) {
+        let Some(d) = &self.pending.detecting else {
+            return;
+        };
+        if d.reply.client.curve().is_some_and(|(_, k)| k == key) {
+            d.cut.set();
+            tracing::warn!(
+                target: crate::AUDIT_TARGET,
+                "loopback detection of {name:?} cut: its role was taken down"
+            );
+        }
     }
 }

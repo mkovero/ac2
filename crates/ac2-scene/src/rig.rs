@@ -4,7 +4,7 @@
 
 use ac2_proto::model::{
     AuthorizedClient, ClientRole, GenAction, Generator, LocalServer, NetReason, NetReasonKind,
-    OutputSetup, RefusedKey, ServerInfo,
+    OutputSetup, Recordings, RefusedKey, ServerInfo,
 };
 use ac2_proto::units::{Dbfs, WallNs};
 
@@ -158,9 +158,10 @@ pub fn server_lines(s: &ServerInfo) -> Vec<String> {
             None => "Not advertised over mDNS (clients need the address)".to_owned(),
         });
     }
-    v.push(match &s.recording_dir {
-        Some(d) => format!("Recordings: {d}"),
-        None => "Recordings: this daemon does not record".to_owned(),
+    v.push(match &s.recordings {
+        Recordings::Dir { dir } => format!("Recordings: {dir}"),
+        Recordings::Kept => "Recordings: on the rig's host".to_owned(),
+        Recordings::Off => "Recordings: this daemon does not record".to_owned(),
     });
     v
 }

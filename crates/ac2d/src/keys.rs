@@ -180,6 +180,31 @@ fn parse_authorized_lenient(text: &str) -> (AuthorizedKeys, Vec<String>) {
     (keys, dropped)
 }
 
+/// Why the authorized-clients file at `path` cannot be trusted to say who controls the
+/// rig: whoever can write it can make any key an operator. `None` when it is the daemon
+/// user's own regular file that no one else may write, or when it does not exist.
+fn not_trusted(path: &Path) -> io::Result<Option<&'static str>> {
+    let m = match fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if !m.file_type().is_file() {
+        return Ok(Some("not a regular file (a link, a directory or a device)"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if m.uid() != ac2_paths::socket_dir::effective_uid() {
+            return Ok(Some("owned by another user"));
+        }
+        if m.mode() & 0o022 != 0 {
+            return Ok(Some("writable by its group or by other users"));
+        }
+    }
+    Ok(None)
+}
+
 /// The converter that gives a list in the shape before roles a role on every line.
 pub(crate) const CONVERTER: &str = "tools/proto-next/convert.py --auth";
 
@@ -191,6 +216,21 @@ pub(crate) const CONVERTER: &str = "tools/proto-next/convert.py --auth";
 pub(crate) fn load_or_create_authorized(
     path: &Path,
 ) -> Result<(AuthorizedKeys, Option<Damage>), KeyFileError> {
+    if let Some(why) = not_trusted(path).map_err(io_err(path))? {
+        // Left as it is: the daemon has no business rewriting a file another user can
+        // write, or following a link to wherever it points.
+        let d = Damage {
+            kind: StateFile::AuthorizedClients,
+            path: path.to_owned(),
+            set_aside_as: None,
+            reason: format!(
+                "{why}: no network client is admitted until it is a regular file of the \
+                 daemon's user that only that user may write (chmod 600)"
+            ),
+        };
+        d.log();
+        return Ok((AuthorizedKeys::new(), Some(d)));
+    }
     match fs::read(path) {
         Ok(bytes) => {
             let text = String::from_utf8_lossy(&bytes);
@@ -366,5 +406,41 @@ mod tests {
         assert!(load_or_create_authorized(&p).expect("create").0.is_empty());
         assert!(p.exists());
         assert!(load_or_create_authorized(&p).expect("load").0.is_empty());
+    }
+
+    /// A list another user could have written is not read: no client is admitted, the
+    /// damage says why, and the file is left as it is.
+    #[cfg(unix)]
+    #[test]
+    fn an_untrusted_list_admits_no_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let p = dir.path().join("authorized_clients");
+        let mut keys = AuthorizedKeys::new();
+        let kp = ac2_zmq::KeyPair::generate().expect("key");
+        keys.insert("laptop", kp.public, Role::Operator)
+            .expect("insert");
+        keys.save(&p).expect("save");
+        assert_eq!(load_or_create_authorized(&p).expect("load").0.len(), 1);
+
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o620)).expect("chmod");
+        let (none, d) = load_or_create_authorized(&p).expect("refused, not an error");
+        assert!(none.is_empty());
+        let d = d.expect("damage");
+        assert!(
+            d.reason.contains("writable") && d.set_aside_as.is_none(),
+            "{}",
+            d.reason
+        );
+        assert_eq!(
+            fs::metadata(&p).expect("left").permissions().mode() & 0o777,
+            0o620
+        );
+
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o600)).expect("chmod");
+        let link = dir.path().join("linked");
+        std::os::unix::fs::symlink(&p, &link).expect("link");
+        let (none, d) = load_or_create_authorized(&link).expect("refused");
+        assert!(none.is_empty() && d.is_some_and(|d| d.reason.contains("regular file")));
     }
 }

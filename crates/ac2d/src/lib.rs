@@ -106,6 +106,13 @@ use control::{Control, ControlMsg, Setup};
 use io::{Interest, IoSockets};
 use outbox::Outbox;
 
+pub use control::TRANSFER_LIFETIME;
+
+/// The tracing target of the audit trail: who raised the ceiling, authorized, demoted or
+/// revoked a client, made sound or stopped it. `ac2d` writes its events to a file of their
+/// own (`ac2_paths::log::AuditLog`).
+pub const AUDIT_TARGET: &str = "ac2d::audit";
+
 /// ZAP domain of the daemon's CURVE sockets.
 pub(crate) const ZAP_DOMAIN: &str = "ac2";
 /// Kernel send buffer of the network data socket (Q2): a small buffer keeps the
@@ -501,6 +508,7 @@ impl Daemon {
             rig_logs: config.rig_logs.clone(),
             server,
             lease_expiry: config.lease_expiry,
+            transfer_lifetime: config.transfer_lifetime,
             keepalive: config.keepalive,
             replay: config.replay,
             dedup: config.dedup,

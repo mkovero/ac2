@@ -218,12 +218,16 @@ def convert_auth(text):
     return "\n".join(out) + "\n" if changed else None
 
 
-def write_beside(path, text):
-    """Writes `text` over `path` atomically, with its mode; the original kept as `.pre105`."""
-    shutil.copy2(path, path + ".pre105")
+def write_beside(path, text, mode=None):
+    """Writes `text` over `path` atomically, with `mode` (default: its own); the original
+    kept as `.pre105`, with the same mode."""
+    keep = path + ".pre105"
+    shutil.copy2(path, keep)
+    if mode is not None:
+        os.chmod(keep, mode)
     d = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".convert-")
-    os.chmod(tmp, os.stat(path).st_mode & 0o777)
+    os.chmod(tmp, os.stat(path).st_mode & 0o777 if mode is None else mode)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
         f.flush()
@@ -248,7 +252,9 @@ def rewrite_auth(path, _convert):
     if new is None:
         print(f"{path}: already converted")
         return
-    write_beside(path, new)
+    # Whoever may write the list may make any key an operator: the daemon refuses one that
+    # another user or the group could write.
+    write_beside(path, new, mode=0o600)
 
 
 def main(argv):

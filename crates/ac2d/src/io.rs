@@ -455,21 +455,28 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                         }
                     }
                     TAG_EVENT => {
-                        if let [body] = msg.as_slice() {
-                            match (evt_topic.share(), body.share()) {
+                        let (body, net_body) = match msg.as_slice() {
+                            [body] => (body, body),
+                            [body, net_body] => (body, net_body),
+                            _ => continue,
+                        };
+                        match (evt_topic.share(), body.share()) {
+                            (Ok(t), Ok(b)) => {
+                                let parts = [t, b];
+                                peers.outside(&data, &parts, Outside::Event, interest);
+                            }
+                            (Err(e), _) | (_, Err(e)) => tracing::warn!("event not sent: {e}"),
+                        }
+                        if let Some(n) = &mut net {
+                            match (evt_topic.share(), net_body.share()) {
                                 (Ok(t), Ok(b)) => {
                                     let parts = [t, b];
-                                    peers.outside(&data, &parts, Outside::Event, interest);
-                                    if let Some(n) = &mut net {
-                                        n.peers.outside(
-                                            &n.pair.data,
-                                            &parts,
-                                            Outside::Event,
-                                            interest,
-                                        );
-                                    }
+                                    n.peers
+                                        .outside(&n.pair.data, &parts, Outside::Event, interest);
                                 }
-                                (Err(e), _) | (_, Err(e)) => tracing::warn!("event not sent: {e}"),
+                                (Err(e), _) | (_, Err(e)) => {
+                                    tracing::warn!("event not sent: {e}");
+                                }
                             }
                         }
                     }

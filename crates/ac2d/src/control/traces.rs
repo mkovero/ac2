@@ -661,7 +661,7 @@ impl Control {
         owner: TraceOwner,
     ) -> Result<ReplyBody, ProtoError> {
         let (file, content) = self.transfers.take_upload(client, transfer)?;
-        let file_name = super::transfer::file_part(&file).to_owned();
+        let file_name = super::transfer::client_file(&file);
         self.import_trace_file(file_name, format, role, ir, &content, owner)
     }
 
@@ -682,7 +682,8 @@ impl Control {
                 .file_stem()
                 .map_or_else(|| file_name.clone(), |s| s.to_string_lossy().into_owned())
         });
-        let name: String = name.chars().take(meta::MAX_NAME).collect();
+        // A name read from a file follows the rule of a name typed: one line, bounded.
+        let name = ac2_proto::printable::printable(&name, meta::MAX_NAME);
         let name = if name.trim().is_empty() {
             "imported".to_owned()
         } else {

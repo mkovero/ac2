@@ -9,7 +9,8 @@
 use ac2_proto::event::Change;
 use ac2_proto::model::{
     AuthorizedClient, ClientRole, GenAction, LocalServer, NetBind, NetSettingView, NetStatusView,
-    NetworkServer, OutputSetup, RefusedKey, ServerInfo, SweepFailure, check_output_label,
+    NetworkServer, OutputSetup, Recordings, RefusedKey, ServerInfo, SweepFailure,
+    check_output_label,
 };
 use ac2_proto::units::{Dbfs, RigId, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
@@ -128,7 +129,7 @@ impl Control {
             }
         }
         tracing::warn!(
-            target: "ac2d::audit",
+            target: crate::AUDIT_TARGET,
             "system max level {} from {old:.1} to {new:.1} dBFS by {} (bound {bound:.1} dBFS)",
             if raising { "raised" } else { "lowered" },
             client.id().0
@@ -173,16 +174,21 @@ impl Control {
     }
 
     /// `server.info`. A network client gets no local endpoints and no interface list: host
-    /// detail it has no use for.
+    /// detail it has no use for. A viewer is told its own entry only (other clients' keys
+    /// and roles are an operator's business) and not where recordings lie.
     pub(super) fn server_info(&self, peer: &Peer) -> ServerInfo {
         let n = &self.s.server.network;
         let local = peer.curve().is_none();
+        let viewer = self.peer_role(peer) != Some(ClientRole::Operator);
         let key = n.server_key();
         let (authorized, refused) = match &n.authorized {
             Some(a) => {
                 let keys = a.handle.get();
                 let authorized = keys
                     .iter()
+                    .filter(|(name, _)| {
+                        !viewer || peer.curve().is_some_and(|(own, _)| own == *name)
+                    })
                     .map(|(name, k)| AuthorizedClient {
                         name: name.to_owned(),
                         key: k.to_z85(),
@@ -241,11 +247,13 @@ impl Control {
             },
             interfaces: if local { n.interfaces() } else { Vec::new() },
             toggle: n.toggle_for(local),
-            recording_dir: self
-                .s
-                .recording_dir
-                .as_ref()
-                .map(|d| d.display().to_string()),
+            recordings: match &self.s.recording_dir {
+                None => Recordings::Off,
+                Some(_) if viewer => Recordings::Kept,
+                Some(d) => Recordings::Dir {
+                    dir: d.display().to_string(),
+                },
+            },
         }
     }
 
@@ -277,7 +285,7 @@ impl Control {
             self.drop_network_lease();
         }
         tracing::warn!(
-            target: "ac2d::audit",
+            target: crate::AUDIT_TARGET,
             "network {} by {}",
             if enabled { "turned on" } else { "turned off" },
             client.id().0
@@ -321,14 +329,6 @@ impl Control {
                 "{name:?} is admitted as a rig: revoke it with auth.revoke_rig first"
             )));
         }
-        // A client that takes its own control away is locked out of putting it back, as
-        // one that revokes its own key would be.
-        if role == Role::Viewer && client.curve().is_some_and(|(own, _)| own == name) {
-            return Err(refused(
-                "a client cannot make its own key a viewer (that would lock this operator \
-                 out); change it from another client or edit the authorized-clients file",
-            ));
-        }
         self.admit(client, name, key, role)
     }
 
@@ -342,6 +342,19 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         if rig == self.s.rig_id {
             return Err(invalid("that is this rig's own identity"));
+        }
+        // Admitted over an app's name, the rig's key would replace the app's: an app is
+        // revoked by name first, on purpose.
+        if let Some(n) = &self.s.server.network.authorized
+            && n.handle
+                .get()
+                .role_of(name)
+                .is_some_and(|r| !matches!(r, Role::Rig(_)))
+        {
+            return Err(invalid(format!(
+                "{name:?} is an app's name: revoke it with auth.revoke first, or admit the \
+                 rig under another name"
+            )));
         }
         self.admit(client, name, key, Role::Rig(rig.0))
     }
@@ -367,6 +380,17 @@ impl Control {
         let key = PublicKey::from_z85(key.trim()).map_err(|_| {
             invalid("not a client key: expected the 40 Z85 characters the client shows")
         })?;
+        // A client that changes its own entry (another key, another role) is cut off at
+        // once and cannot put it back: only the same key and role again may pass.
+        if let Some((own, own_key)) = client.curve()
+            && own == name
+            && (*own_key != key || n.handle.get().role_of(name) != Some(role))
+        {
+            return Err(refused(
+                "a client cannot change its own key or role (that would lock this operator \
+                 out); change it from another client or edit the authorized-clients file",
+            ));
+        }
         let mut keys = n.handle.get();
         // A name given again replaces its key and role: its old connections are dropped
         // below, as a revoke would.
@@ -392,7 +416,7 @@ impl Control {
             Role::Viewer => "viewer",
         };
         tracing::warn!(
-            target: "ac2d::audit",
+            target: crate::AUDIT_TARGET,
             "{kind} {name:?} (fingerprint {}) authorized by {}",
             key.fingerprint(),
             client.id().0
@@ -427,7 +451,7 @@ impl Control {
         for (name, key) in names.iter().zip(&gone) {
             self.take_down(name, key);
             tracing::warn!(
-                target: "ac2d::audit",
+                target: crate::AUDIT_TARGET,
                 "rig {name:?} (fingerprint {}) revoked by {}",
                 key.fingerprint(),
                 client.id().0
@@ -461,7 +485,7 @@ impl Control {
         // Its data connection, audio included, ends now rather than at its next request.
         self.take_down(name, &key);
         tracing::warn!(
-            target: "ac2d::audit",
+            target: crate::AUDIT_TARGET,
             "client {name:?} (fingerprint {}) revoked by {}",
             key.fingerprint(),
             client.id().0

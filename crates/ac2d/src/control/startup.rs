@@ -64,7 +64,7 @@ impl Control {
         }
         if s.ceiling_dbfs < s.ceiling_bound {
             tracing::info!(
-                target: "ac2d::audit",
+                target: crate::AUDIT_TARGET,
                 "system max level {:.1} dBFS (bound {:.1} dBFS, --max-level)",
                 s.ceiling_dbfs,
                 s.ceiling_bound
@@ -151,7 +151,7 @@ impl Control {
             replay_marks: None,
             working: working::Persist::untitled(),
             replaced_working: None,
-            transfers: transfer::Transfers::default(),
+            transfers: transfer::Transfers::new(s.transfer_lifetime),
             file_jobs: file_jobs::FileJobs::default(),
             sims: sim::Sims::default(),
             remote: remote::RemoteCtl::new(),
