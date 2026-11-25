@@ -105,6 +105,10 @@ impl Pos {
     pub(crate) const fn raw(self) -> u128 {
         self.0
     }
+
+    pub(crate) const fn from_raw(raw: u128) -> Self {
+        Self(raw)
+    }
 }
 
 /// Input samples per output sample, within 1 ± [`Step::MAX_DEVIATION`], as 64.64 fixed

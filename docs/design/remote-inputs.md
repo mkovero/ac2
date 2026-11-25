@@ -286,13 +286,37 @@ step:
 
 A ketunkolo-style flaky link (−228 ppm for 11 min) is just Not locked.
 
-### 3.5 Later: rigs that are not locked
+### 3.5 Rigs that are not locked
 
-A free-running remote rig needs an asynchronous sample-rate converter on its stream, servoed
-on the cross-rig rate. The stamp-derived rate moves 0.4 ppm sd per minute (86° per minute at
-10 kHz), so the ratio would have to come from the audio (the delay track as a servo) or a long
-average. A stage of its own, after this one runs; until then the UI says how to fix it (*lock
-both interfaces to one reference*).
+**The media clock.** Every rig's capture is placed on its system clock (PTP-disciplined) ×
+the nominal rate. A rig whose interface is locked to the reference is already on it and stays
+bit-exact. A rig whose interface runs free (a USB measurement mic: +7 ppm, drifting 0.25 ppm/h)
+resamples its own capture onto the media clock at the source, so every stream that leaves it
+is on the same clock as a locked rig's.
+
+**Two kinds of evidence** steer that resampler (`timing-study.md` §7b, 2026-11-25):
+- *Stamps* (device sample index, capture time) hold the long term but wander: 15.5 µs sd /
+  94 µs p-p on a host with hardware PTP, 27.8 µs sd / 242 µs p-p on one with software PTP;
+  the rate read from them moves 0.22–0.47 ppm sd per 60 s, 0.04–0.14 ppm per 300 s.
+- *Audio*: while a transfer function runs against a stream on the reference clock with good
+  coherence, the delay tracker measures the delay to well under 1 µs within seconds. Only its
+  changes carry clock information: it includes the path, which drifts by itself (0.16 ms per
+  °C over 30 m).
+
+**Stamps alone** track the rate to 0.04 ppm and the phase to about ±15 µs sd. Magnitude and
+coherence are unaffected; the phase is off by about 0.5° at 100 Hz, 5° at 1 kHz and 54° at
+10 kHz, and the UI says so.
+
+**Audio trim** is automatic while a transfer function runs: no operator step. The servo
+combines both, stamps for the long term and the delay for the short term, crossing over at a
+few minutes: the phase then holds within about 2 µs over minutes. A path change faster than
+that partly reads as clock (a 160 µs change over 20 minutes puts 35 µs into the phase, over
+one minute 107 µs); a jump (re-anchored tracker, moved mic) does not move the phase at all.
+
+The constant offset between rigs (path delay and interface latencies) stays unmeasured: the
+delay readout keeps saying it includes it, and measuring it is a later stage.
+
+Built: `ac2-resampler` (converter, servo). Not built: ac2d integration.
 
 ## 4. Buffering: a fixed link offset
 

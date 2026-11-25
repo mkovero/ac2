@@ -9,6 +9,8 @@
 //! exactly (2⁻⁵² near 1), [`Step::from_deviation`] resolves 2⁻⁶⁴.
 //!
 //! One thread, not the audio callback, pushes input and pulls output; see [`Resampler`].
+//! For a device whose crystal runs free, [`servo`] computes those positions from capture
+//! stamps and, while a transfer function runs, the delay it measures.
 //!
 //! ```
 //! use std::sync::Arc;
@@ -68,6 +70,7 @@
 mod kernel;
 mod pos;
 mod resampler;
+pub mod servo;
 
 pub use kernel::{Kernel, KernelSpec};
 pub use pos::{Pos, Step};

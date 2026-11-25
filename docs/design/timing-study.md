@@ -365,6 +365,27 @@ What it says:
 The second buffer size per rig was skipped (operator, 2026-11-09). B2 (shared channel) and B3
 (stamp path value) stay open; §6 says what the first target needs without them.
 
+**Free-running USB mic beside a locked rig (2026-11-25, one hour, 0 xruns).** The CM4's
+ECM8000-U at 96 kHz / 512 frames with hardware PTP, beside pupu's FF400 at 96 kHz / 256
+frames on word clock. pupu's ac2d was restarted twice during the hour.
+
+| | CM4 (ECM8000-U, free) | pupu (FF400, locked) |
+|---|---|---|
+| sample clock vs system time | +7.33 ppm | (locked) |
+| stamp wander: sd / peak-to-peak | 15.5 / 94 µs | 27.8 / 242 µs |
+| rate in windows: sd per 60 s / per 300 s | 0.22 / 0.04 ppm | 0.47 / 0.14 ppm |
+
+CM4 / pupu: **+7.22 ppm**, trend **+0.25 ppm/h**.
+
+What it says:
+- **The stamp path wanders half as much with hardware PTP.** pupu's interface is locked, so
+  all of its 27.8 µs is stamp path (software PTP); the CM4's 15.5 µs is with hardware time
+  stamping.
+- **The wander lives at tens of seconds to minutes**: the rate from 300 s windows is three to
+  five times steadier than from 60 s. A servo on stamps alone needs a time constant of about
+  a minute or more and holds the phase to about ±15 µs sd; the audio from a running transfer
+  function carries the short term (`remote-inputs.md` §3.5, `ac2-resampler`'s servo).
+
 ## 8. Operator decisions
 
 2026-11-09:
