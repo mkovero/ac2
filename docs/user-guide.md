@@ -32,10 +32,9 @@ audio interface ── ac2d (daemon) ──┬── ac2-ui  (the app: plots, ke
 
 The **daemon** owns the audio interface and does all measuring. The app and the CLI are
 clients; several can be connected at once (a laptop at FOH, another at a delay tower) and
-see the same measurements. Locally the daemon is reachable only by your user on Linux and
-macOS (sockets in your runtime directory); on Windows it listens on `127.0.0.1:47822`
-without encryption, so any program on the same computer can reach it. Across the network it
-requires pairing ([install.md](install.md#remote-use-foh--stage)).
+see the same measurements. Locally the daemon is reachable only by your user: its sockets
+lie in a folder only you may enter (your runtime directory on Linux and macOS,
+`%LOCALAPPDATA%\ac2\run` on Windows). Across the network it requires pairing ([install.md](install.md#remote-use-foh--stage)).
 
 **The app starts the daemon.** Started with no arguments, `ac2-ui` connects to this
 computer's `ac2d`, starting it first when none is running: always the `ac2d` installed beside
@@ -456,9 +455,7 @@ live (the session, audio and local apps run on):
   last on, or *all interfaces, the default* if it never was. A pick here goes with the next
   turn-on instead. While it is on, **Enter** moves it to the pick.
 - *Port* (**Enter** types it): the ctrl port; data takes the next one. Off, the kept port, or
-  *47820, the default*. A port the local connection holds is refused before it is sent: on
-  Windows apps on this computer reach `ac2d` over TCP 47822 and 47823, so the network may not
-  take those.
+  *47820, the default*.
 - *Status*, live: *listening on 192.168.1.20:47820*, *waiting: the port is in use ·
   retrying*, *failed: … · retrying*, *off*. `ac2d` retries a network that cannot bind on its
   own; nothing needs an operator. *Not saved: …* means the setting could not be written and
@@ -478,10 +475,9 @@ lost link, and connects again once it is back on. A paired rig that turned its n
 reads *pupu turned its network off; not heard since* on its heading in the measurement tree
 and on *Between rigs*, and its remote inputs say so in the warning colour, not as a fault.
 
-On Windows the local connection is loopback TCP: any user of the computer, and anything
-forwarded to its loopback (ssh `-L`, a port proxy), counts as local and can turn the network
-on and authorize a key. Key files there get no ACL of their own; the per-user config
-folder's default ACL protects them.
+Whoever reaches the local connection can turn the network on and authorize a key; on every
+OS that is only your user, through the socket folder above. On Windows key files and the
+socket folder get no ACL of their own; the per-user folders' default ACL protects them.
 
 With a server key the page lists the clients the rig accepts (name, role, key fingerprint:
 `laptop · operator · fingerprint …`, `phone · viewer · may only look · fingerprint …`,

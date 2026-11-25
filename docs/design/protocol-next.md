@@ -552,15 +552,46 @@ a log of another version is reported in `refused` and stays on disk as plain CSV
 
 ### 8. Local pair on ipc everywhere
 
-`Listen::default_local` returns `ipc://<runtime dir>\ctrl.sock` and `data.sock` on every
-platform; `LOCAL_PORT` goes. The runtime directory on Windows is `%LOCALAPPDATA%\ac2\run`
-(per-user ACL by inheritance), kept short because `sun_path` holds 108 bytes. `ac2-zmq`'s
-build defines `ZMQ_HAVE_IPC` and `ZMQ_HAVE_STRUCT_SOCKADDR_UN` for Windows targets if
-`zeromq-src` does not, and `links_libzmq_4_3_5_with_curve` asserts `libzmq_has("ipc")` on
-every platform. Windows 10 1803 is the floor (AF_UNIX). `Listen::validate` refuses loopback
-TCP as a local endpoint. There is no second local transport: the Wine runs
-(`tools/wine-asio`) use ipc if CI shows Wine's AF_UNIX works, else they run the daemon in
-network mode.
+`Listen::default_local` returns `ipc://<runtime dir>/ctrl.sock` and `data.sock` on every
+platform; `LOCAL_PORT` goes, and with it the network port check's guard of the local ports
+(`check_port` refuses only 0 and 65535; the app's port field no longer refuses 47822/47823).
+`Listen::validate` refuses any local endpoint that is not `ipc://`, and a lock file naming
+TCP endpoints is no daemon to the app. There is no second local transport and no fallback.
+
+- **Runtime directory.** `ac2_paths::runtime_dir`: `$AC2_RUNTIME_DIR`; on Windows
+  `%LOCALAPPDATA%\ac2\run` (the `directories` crate's `data_local_dir`); elsewhere
+  `$XDG_RUNTIME_DIR/ac2`, else `<temp>/ac2-<user>`. The lock, pid and endpoints files lie
+  beside the sockets on every OS.
+- **Protection** (`ac2_paths::socket_dir`, checked by the daemon before it binds and by a
+  client before it connects). Unix: the directory is the user's own, not a link, mode 700
+  (made so if the daemon creates it). Windows: the directory is not a reparse point (link or
+  junction) and its canonical path starts with the canonical `%LOCALAPPDATA%`. The basis:
+  the user profile's ACL, inherited by everything under it, grants only the user, SYSTEM
+  and Administrators; Windows' AF_UNIX checks write access to the socket file on `connect`
+  and to the directory on `bind`. The daemon neither sets nor reads an ACL (no Win32 binding
+  in the workspace), so `AC2_RUNTIME_DIR` on Windows must lie under `%LOCALAPPDATA%` too.
+- **Path length.** `sun_path` is 108 bytes on Linux and Windows, 104 on macOS; a socket
+  path of more than 107 (103) bytes is refused by name, with the advice to set
+  `AC2_RUNTIME_DIR`, before anything binds or connects. No abstract addresses, no autobind.
+- **Stale socket.** libzmq's ipc listener unlinks the path before it binds, so a socket file
+  left by a daemon that died is replaced. A second daemon is kept out by the instance lock
+  (`ac2d.lock`), not by the socket. libzmq leaves the file when the socket closes, so the
+  daemon removes its two socket files once its io thread has closed them.
+- **Tests across a network.** The e2e link tests that freeze a half-open connection relay
+  the daemon's network pair (CURVE on loopback), since the local pair has no TCP to relay.
+- **libzmq.** `ac2-zmq`'s build defines `ZMQ_HAVE_IPC` for MSVC targets, so a failed
+  `afunix.h` probe in `zeromq-src` 0.3.6 fails the build instead of shipping a libzmq that
+  refuses `ipc://`; `ZMQ_HAVE_STRUCT_SOCKADDR_UN` `zeromq-src` defines for Windows itself.
+  `links_libzmq_4_3_5_with_curve` asserts `libzmq_has("ipc")` on every platform. With ipc
+  on, libzmq's own signaler pairs on Windows use AF_UNIX in the temp directory (TCP if that
+  fails); that is internal to the process. `windows-gnu` cannot build it: libzmq includes
+  `afunix.h` only under `_MSC_VER`; nothing builds `ac2-zmq` for that target.
+- **Floor.** Windows 10 1803 (AF_UNIX).
+- **Daemons apart from the user's.** `Listen::apart()` (tests, embedded daemons) names
+  socket files by process and count in `<temp>/ac2-apart-<user>`; the app's simulated rig
+  binds `<runtime dir>/sim-<pid>-ctrl.sock` and `-data.sock`.
+- **Wine.** The Wine runs (`tools/wine-asio`) do not run the daemon; whether Wine's AF_UNIX
+  serves libzmq is untried (open).
 
 ### 9. Mechanical and small changes
 
@@ -666,7 +697,7 @@ until the last has landed.
    Lead rulings taken with it: the CLI's client-key commands move to `ac2 auth add / role /
    remove / list` (no `ac2 server authorize` kept), and the `ac2 cal` flags whose wire field
    is `channel` are `--channel` (no `--input` kept).
-7. `pn-ipc`: §8; then an all-OS CI run (`-f all_os=true`) and the Wine AF_UNIX proof.
+7. `pn-ipc`: §8 (done); then an all-OS CI run (`-f all_os=true`) and the Wine AF_UNIX proof.
 8. `pn-big`: §4 and the one history cap; snapshot transfers exempt from `MAX_TRANSFERS`.
 9. `pn-spool`: §5; then an all-OS CI run for the free-space query per OS.
 10. `pn-frames`: §6 with the `dbtp` tagging and the delta header,
@@ -721,7 +752,8 @@ or it boots without its meter and refuses every network client.
 4. **Salvaged logs as measurements.** The header holds no window configuration.
    Recommendation: default configuration, as §7; the operator re-applies limits to judge.
 5. **Windows ipc.** Whether `zeromq-src` 0.3.6 compiles libzmq's Windows ipc path cleanly
-   with the defines. Recommendation: prove it in `pn-ipc` on CI first.
+   with the define, and the ipc tests pass on the Windows runner: the all-OS CI run of
+   `pn-ipc` decides. The Wine AF_UNIX proof is still to do.
 6. **Frame header name.** `config_rev` now covers the delay too. Recommendation: keep the
    name; the protocol text states the rule.
 7. **`not_stated` as trusted** across boots. Recommendation: accept it; the alternative
