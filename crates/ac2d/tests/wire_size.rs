@@ -7,7 +7,8 @@
 //! meters), with and without a pane in its IR view, must fit a remote client's budget at
 //! 60 frames per second, and a credit-starved peer beside the counted one (a 64 kB window
 //! drained at 250 kB/s) changes nothing for it while its own delay stays the window over
-//! its rate.
+//! its rate. The input meters of eight inputs (`stream/levels`, `stream/gonio` and a rig's
+//! `source/levels`) go as deltas between keyframes.
 //!
 //! Its own binary: the CPU time it reports is the whole process's.
 #![allow(clippy::unwrap_used)]
@@ -28,7 +29,8 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{Dbfs, MeasId};
 use ac2_proto::{Command, ReplyBody, WireFrame, decode_wire};
-use ac2d::{Daemon, DaemonConfig};
+use ac2_zmq::{AuthorizedKeys, CurveClient, KeyPair, Role};
+use ac2d::{Daemon, DaemonConfig, NetworkSecurity};
 use common::*;
 
 /// A direct sound and one reflection `lag` samples later.
@@ -609,4 +611,147 @@ fn tuning_session_bytes() {
             session_sizes(fps, 10.0, ir_view, true);
         }
     }
+}
+
+/// Eight inputs, each with its own noise: every meter, correlation and loudness moves from
+/// frame to frame, as on a rig with programme on every input.
+fn levels_rig() -> FakeBackend {
+    FakeBackend::new(FakeConfig {
+        sample_rate: FS,
+        block_frames: BLOCK,
+        inputs: 8,
+        outputs: 2,
+        drive: FakeDrive::Thread(Pace::Realtime),
+        seed: 11,
+        input_noise_rms: 1e-2,
+        ..FakeConfig::default()
+    })
+    .unwrap()
+}
+
+fn line(channel: u16) -> ac2_proto::model::InputSetup {
+    ac2_proto::model::InputSetup {
+        channel,
+        kind: ac2_proto::model::InputKind::Line,
+        pair: None,
+    }
+}
+
+/// Counts every frame `s` holds now into `sizes`, until it holds none.
+fn count_into(sizes: &mut Sizes, s: &Sub) {
+    while let Some(m) = s.raw(Duration::from_millis(1)) {
+        let parts: Vec<&[u8]> = m.iter().map(Vec::as_slice).collect();
+        let Ok(w) = decode_wire(&parts) else {
+            continue;
+        };
+        let bytes: u64 = parts.iter().map(|p| p.len() as u64).sum();
+        let e = sizes
+            .entry(String::from_utf8_lossy(parts[0]).into_owned())
+            .or_default();
+        match w {
+            WireFrame::Key(_) => {
+                e.keys += 1;
+                e.key_bytes += bytes;
+            }
+            WireFrame::Delta(_) => {
+                e.deltas += 1;
+                e.delta_bytes += bytes;
+            }
+        }
+    }
+}
+
+/// The input meters of eight line inputs (three pairs and two unpaired inputs: five
+/// loudness sources) as an app (`stream/levels`, `stream/gonio`) and an admitted rig
+/// (`source/levels`) receive them.
+fn levels_sizes(seconds: f64) -> Sizes {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let rig_keys = KeyPair::generate().unwrap();
+    let mut keys = AuthorizedKeys::new();
+    keys.insert("rig-b", rig_keys.public, Role::Rig(2)).unwrap();
+    let security = NetworkSecurity {
+        server_key_file: dir.path().join("server.key"),
+        authorized_clients_file: dir.path().join("authorized_clients"),
+    };
+    keys.save(&security.authorized_clients_file).unwrap();
+    let h = Daemon::start(net_config(levels_rig(), security)).unwrap();
+    let (mut c, app) = connect(&h, &[b"stream/levels", b"stream/gonio"]);
+    c.ok(Command::StreamOpen {
+        config: StreamConfig {
+            input_channels: (0..8).collect(),
+            ..stream(false)
+        },
+    });
+    let pair = |left: u16| ac2_proto::model::Pair {
+        left,
+        right: left + 1,
+        name: None,
+    };
+    c.ok(Command::StreamInputs {
+        inputs: (0..8).map(line).collect(),
+        pairs: vec![pair(0), pair(2), pair(4)],
+    });
+    let rig = Sub::connect_with(
+        h.context(),
+        net_endpoints(&h).1.as_str(),
+        &[b"source/levels"],
+        Some(&CurveClient {
+            keys: rig_keys,
+            server_key: h.server_public_key().unwrap(),
+        }),
+        None,
+    );
+    // Let the short-term loudness and the correlation windows fill before counting.
+    let t0 = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < t0 {
+        count_into(&mut Sizes::new(), &app);
+        count_into(&mut Sizes::new(), &rig);
+    }
+    let mut sizes = Sizes::new();
+    let t0 = Instant::now();
+    while t0.elapsed() < Duration::from_secs_f64(seconds) {
+        count_into(&mut sizes, &app);
+        count_into(&mut sizes, &rig);
+    }
+    for (topic, c) in &sizes {
+        eprintln!(
+            "{topic:>16}: {:>6} B/frame {:>5.1} frames/s {:>7.0} B/s; keyframes {:>4.1} % at {:>5} B, deltas {:>5} B",
+            c.per_frame(),
+            c.frames() as f64 / seconds,
+            c.bytes() as f64 / seconds,
+            c.key_share() * 100.0,
+            c.per_key(),
+            c.per_delta(),
+        );
+    }
+    h.shutdown();
+    sizes
+}
+
+/// With their readings in arrays the meter topics go as deltas between keyframes every
+/// 500 ms: a rig's `source/levels` and an app's `stream/levels` well under their keyframes,
+/// the goniometer's points (fresh every frame) about as their keyframes.
+#[test]
+fn slow_meter_topics_go_as_deltas() {
+    let sizes = levels_sizes(4.0);
+    for topic in ["source/levels", "stream/levels"] {
+        let c = sizes[topic];
+        assert!(c.per_delta() < 190, "{topic} delta {} B", c.per_delta());
+        assert!(c.per_key() < 900, "{topic} keyframe {} B", c.per_key());
+        assert!(c.key_share() < 0.25, "{topic} keyframes {}", c.key_share());
+    }
+    let g = sizes["stream/gonio"];
+    assert!(g.per_frame() < 1_700, "stream/gonio {} B", g.per_frame());
+    assert!(
+        g.deltas > 0,
+        "the goniometer's gains move as per-frame metadata"
+    );
+}
+
+/// The meter topics of eight inputs, printed (`--ignored --nocapture`).
+#[test]
+#[ignore = "measurement, not a check"]
+fn levels_bytes() {
+    levels_sizes(10.0);
 }

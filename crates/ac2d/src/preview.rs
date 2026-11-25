@@ -138,8 +138,7 @@ impl Preview {
             inputs: declared,
             pairs,
             ballistic: Ballistic::default(),
-            pair_levels: Vec::new(),
-            loudness: Vec::new(),
+            sources: Vec::new(),
         };
         let frame_meta = meta.clone();
         // The declared pairs stay as the dialog declared them; the pairs of a stream do
@@ -198,8 +197,7 @@ impl Preview {
                         if em.wants(Topic::PreviewLevels) {
                             let mut meta = frame_meta.clone();
                             meta.ballistic = r.ballistic;
-                            meta.pair_levels = r.pair_levels;
-                            meta.loudness = r.loudness;
+                            meta.sources = r.sources;
                             em.send(
                                 stamp,
                                 FrameData::PreviewLevels(PreviewLevelsFrame {
@@ -211,6 +209,8 @@ impl Preview {
                                     true_peak: r.true_peak,
                                     max: r.max,
                                     overs: r.overs,
+                                    pair_levels: r.pair_levels,
+                                    loudness: r.loudness,
                                 }),
                             );
                         }

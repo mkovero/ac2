@@ -32,6 +32,7 @@ mod inputs;
 mod jack;
 mod leq;
 mod levels;
+mod levels_chain;
 mod limits;
 mod loudness;
 mod loudness_bars;

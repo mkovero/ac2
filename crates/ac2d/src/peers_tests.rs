@@ -53,7 +53,13 @@ impl Rig {
         router.set_send_hwm(DATA_SNDHWM).unwrap();
         router.bind("tcp://127.0.0.1:*").unwrap();
         let endpoint = router.last_endpoint().unwrap();
-        let frame = ac2_proto::samples::tf_frame();
+        let mut frame = ac2_proto::samples::tf_frame();
+        // Deltas as small as a frame's go: no alignment fit riding in each.
+        if let ac2_proto::FrameData::Tf(t) = &mut frame.data
+            && let Some(m) = &mut t.meta.math
+        {
+            m.align = None;
+        }
         let topic = CodedFrame::from_frame(&frame).unwrap().topic;
         Self {
             ctx,

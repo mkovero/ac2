@@ -274,6 +274,9 @@ mod tests {
         let mut big = (*s[1].frame).clone();
         let per = big.codes.len() / big.n as usize;
         big.n = u32::try_from(MAX_FRAME_BYTES / per + 1).unwrap();
+        for d in &mut big.arrays {
+            d.len = big.n;
+        }
         let mut x = 0x9e37_79b9_u32;
         big.codes = (0..big.n as usize * per)
             .map(|_| {

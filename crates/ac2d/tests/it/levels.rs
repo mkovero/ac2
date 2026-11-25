@@ -247,15 +247,15 @@ fn slow_stream_meters_carry_the_programme_columns_and_count_an_over_once() {
     .unwrap();
     // Silence first: every column present, nothing over, the pair quiet on the left (the
     // first side checked).
-    let f = meters(&s, "silence", |l| l.meta.pair_levels.len() == 1);
+    let f = meters(&s, "silence", |l| l.meta.pairs.len() == 1);
     assert_eq!(f.meta.channels, [0, 1, 2, 3]);
     assert_eq!(f.meta.ballistic, Ballistic::TruePeak);
     assert_eq!(f.ppm.len(), 4);
     assert_eq!(f.true_peak.len(), 4);
     assert_eq!(f.max.len(), 4);
     assert_eq!(f.overs, [0, 0, 0, 0]);
-    let p = &f.meta.pair_levels[0];
-    assert_eq!((p.left, p.right), (1, 2));
+    assert_eq!((f.meta.pairs[0].left, f.meta.pairs[0].right), (1, 2));
+    let p = &f.pair_levels[0];
     assert_eq!(p.quiet, Some(PairSide::Left));
     assert_eq!(p.correlation, None);
     // A −12 dBFS tone out of output 0: input 0 (loopback) reads −12 dBTP, input 1
@@ -282,7 +282,7 @@ fn slow_stream_meters_carry_the_programme_columns_and_count_an_over_once() {
     assert_eq!(f.overs[0], 1);
     assert_eq!(f.overs[1], 1);
     assert_eq!(f.overs[2], 0);
-    let p = &f.meta.pair_levels[0];
+    let p = &f.pair_levels[0];
     assert_eq!(p.quiet, Some(PairSide::Right));
     assert_eq!(p.correlation, None);
     // A second later the tone still sounds and the count is still one.
