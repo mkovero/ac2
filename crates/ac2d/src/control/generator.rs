@@ -154,8 +154,8 @@ impl Control {
         }
     }
 
-    /// Client key `key` was revoked: its connections are cut, so a lease it holds ends
-    /// now for the same reason.
+    /// Client key `key` was revoked or made a viewer: its connections are cut, so a lease
+    /// it holds ends now for the same reason (a viewer never holds the lease).
     pub(super) fn drop_lease_of_key(&mut self, key: &ac2_zmq::PublicKey) {
         if self
             .out
@@ -163,7 +163,7 @@ impl Control {
             .as_ref()
             .is_some_and(|l| l.owner.curve().is_some_and(|(_, k)| k == key))
         {
-            self.end_lease("ended with its key revoked");
+            self.end_lease("ended with its key revoked or made a viewer");
         }
     }
 

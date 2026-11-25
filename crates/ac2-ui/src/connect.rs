@@ -454,7 +454,7 @@ impl ConnectDialog {
                 let name = ac2_discovery::local_host_label();
                 PairOutcome::Pinned {
                     host,
-                    authorized_line: format!("{name} {}", kp.public.to_z85()),
+                    authorized_line: format!("{name} {} viewer", kp.public.to_z85()),
                 }
             }
             Err(e) => PairOutcome::Refused(e.to_string()),
@@ -610,7 +610,7 @@ impl ConnectDialog {
                 ui.colored_label(ch.ok, format!("Pinned the daemon key for {host}."));
                 ui.label(
                     egui::RichText::new(
-                        "Now authorize this computer: add this line to authorized_clients on the daemon host, then connect.",
+                        "Now authorize this computer: add this line to authorized_clients on the daemon host (viewer only looks; operator drives the rig), then connect.",
                     )
                     .small(),
                 );
@@ -694,7 +694,7 @@ mod tests {
                 let kp = KeyDir::new(tmp.path())
                     .client_keypair()
                     .unwrap_or_else(|e| panic!("{e}"));
-                assert!(authorized_line.ends_with(&kp.public.to_z85()));
+                assert!(authorized_line.ends_with(&format!("{} viewer", kp.public.to_z85())));
             }
             other => panic!("{other:?}"),
         }

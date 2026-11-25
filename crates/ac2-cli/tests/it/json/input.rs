@@ -49,7 +49,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     // No mic name on input 2 yet: cal commands ask for one instead of guessing.
     let r = ac2(
         &f,
-        &["cal", "spl", "--input", "2", "--ref", "94db", "--json"],
+        &["cal", "spl", "--channel", "2", "--ref", "94db", "--json"],
     )
     .await?;
     assert_ne!(r.code, 0);
@@ -93,7 +93,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     // The input's mic name is the default for --mic.
     let c = ok_json(
         &f,
-        &["cal", "spl", "--input", "2", "--ref", "114db", "--json"],
+        &["cal", "spl", "--channel", "2", "--ref", "114db", "--json"],
     )
     .await?;
     assert_eq!(c["key"]["mic"], "MM1 34804", "{c}");
@@ -104,7 +104,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     let ninety = mic_curve_file("449350_34804_90Grad.txt");
     let m = ok_json(
         &f,
-        &["cal", "curve", "import", &zero, "--input", "2", "--json"],
+        &["cal", "curve", "import", &zero, "--channel", "2", "--json"],
     )
     .await?;
     assert_eq!(m["curves"][0]["label"], "0°");
@@ -112,7 +112,15 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     assert_eq!(m["curves"][0]["stated_sensitivity"], 15.0);
     let m = ok_json(
         &f,
-        &["cal", "curve", "import", &ninety, "--input", "2", "--json"],
+        &[
+            "cal",
+            "curve",
+            "import",
+            &ninety,
+            "--channel",
+            "2",
+            "--json",
+        ],
     )
     .await?;
     assert_eq!(m["curves"][1]["label"], "90°");
@@ -187,7 +195,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     let path = file.to_string_lossy().into_owned();
     let r = ac2(
         &f,
-        &["cal", "curve", "import", &path, "--input", "2", "--json"],
+        &["cal", "curve", "import", &path, "--channel", "2", "--json"],
     )
     .await?;
     assert_ne!(r.code, 0);
@@ -200,7 +208,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
         &[
             "cal",
             "electrical",
-            "--input",
+            "--channel",
             "2",
             "--volts",
             "15mv",
@@ -217,7 +225,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
         &[
             "cal",
             "electrical",
-            "--input",
+            "--channel",
             "2",
             "--volts",
             "15mv",
@@ -240,7 +248,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
         &[
             "cal",
             "electrical",
-            "--input",
+            "--channel",
             "2",
             "--volts",
             "0.1v",
@@ -280,7 +288,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
         &[
             "cal",
             "electrical",
-            "--input",
+            "--channel",
             "2",
             "--volts",
             "15mv",
@@ -312,14 +320,14 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
 
     // `cal rm`: the sensitivity calibration of the stream's device, the input's mic by
     // default.
-    let d = ok_json(&f, &["cal", "rm", "--input", "2", "--json"]).await?;
+    let d = ok_json(&f, &["cal", "rm", "--channel", "2", "--json"]).await?;
     assert_eq!(
         d["key"],
         json!({ "device": "fake", "channel": 1, "mic": "MM1 34804" })
     );
     let l = ok_json(&f, &["cal", "list", "--json"]).await?;
     assert_eq!(l["calibrations"], json!([]));
-    let text = ac2(&f, &["cal", "rm", "--input", "2", "--mic", "M30"]).await?;
+    let text = ac2(&f, &["cal", "rm", "--channel", "2", "--mic", "M30"]).await?;
     assert_ne!(text.code, 0);
     Ok(())
 }
@@ -347,7 +355,15 @@ async fn cal_and_unreachable_daemon() -> R {
     let c = ok_json(
         &f,
         &[
-            "cal", "spl", "--input", "3", "--ref", "94db", "--mic", "M30", "--json",
+            "cal",
+            "spl",
+            "--channel",
+            "3",
+            "--ref",
+            "94db",
+            "--mic",
+            "M30",
+            "--json",
         ],
     )
     .await?;

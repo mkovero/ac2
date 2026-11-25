@@ -31,7 +31,7 @@ fn admitted(name: &str, key: &str, rig: RigId) -> AuthorizedClient {
         name: name.into(),
         key: key.into(),
         fingerprint: "ab12".into(),
-        rig: Some(rig),
+        role: ac2_proto::model::ClientRole::Rig { rig_id: rig },
     }
 }
 

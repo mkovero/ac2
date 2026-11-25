@@ -29,7 +29,8 @@ const FAST: Backoff = Backoff {
 /// A key file with `laptop` authorized, in `dir`.
 fn security(dir: &std::path::Path, laptop: &KeyPair) -> NetworkSecurity {
     let mut keys = AuthorizedKeys::new();
-    keys.insert("laptop", laptop.public).unwrap();
+    keys.insert("laptop", laptop.public, ac2_zmq::Role::Operator)
+        .unwrap();
     let authorized = dir.join("authorized_clients");
     keys.save(&authorized).unwrap();
     NetworkSecurity {
@@ -96,7 +97,8 @@ fn a_local_looking_name_is_refused_but_one_already_on_file_still_connects() {
     let old = KeyPair::generate().unwrap();
     let sec = security(dir.path(), &laptop);
     let mut keys = AuthorizedKeys::load(&sec.authorized_clients_file).unwrap();
-    keys.insert("local-x", old.public).unwrap();
+    keys.insert("local-x", old.public, ac2_zmq::Role::Operator)
+        .unwrap();
     keys.save(&sec.authorized_clients_file).unwrap();
     let h = Daemon::start(net_config(manual_rig(), sec)).unwrap();
     let ctx = Context::new().unwrap();
@@ -107,6 +109,7 @@ fn a_local_looking_name_is_refused_but_one_already_on_file_still_connects() {
         .call(Command::AuthAuthorize {
             name: "local-y".into(),
             key: KeyPair::generate().unwrap().public.to_z85(),
+            role: ac2_proto::model::ClientRole::Operator,
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");

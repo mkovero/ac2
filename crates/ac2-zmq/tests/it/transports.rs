@@ -12,7 +12,7 @@ fn round_trip(t: Transport, curve: bool) -> TestResult {
     let client_keys = KeyPair::generate()?;
     let server_keys = KeyPair::generate()?;
     let mut keys = AuthorizedKeys::new();
-    keys.insert("local", client_keys.public)?;
+    keys.insert("local", client_keys.public, ac2_zmq::Role::Operator)?;
     let secure = SecureContext::new("ac2", keys, |_| {})?;
     let ctx = secure.context();
     let (router, xpub) = if curve {

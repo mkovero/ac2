@@ -18,7 +18,8 @@ fn curve_authorized_ok_unauthorized_refused_on_both_sockets() {
     let laptop = KeyPair::generate().unwrap();
     let stranger = KeyPair::generate().unwrap();
     let mut keys = AuthorizedKeys::new();
-    keys.insert("laptop", laptop.public).unwrap();
+    keys.insert("laptop", laptop.public, ac2_zmq::Role::Operator)
+        .unwrap();
     let authorized = dir.path().join("authorized_clients");
     keys.save(&authorized).unwrap();
     let security = NetworkSecurity {

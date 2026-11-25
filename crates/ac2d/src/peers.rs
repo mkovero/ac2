@@ -36,7 +36,7 @@ use ac2_proto::flow::{
     FRAME_CHARGE_MIN, frame_charge,
 };
 use ac2_proto::{DataUp, FlowNotice, Subscription, Topic, decode_data_request, encode_notice};
-use ac2_zmq::{Admission, Error as ZmqError, Part, PublicKey, Socket};
+use ac2_zmq::{Admission, Error as ZmqError, Part, PublicKey, Role, Socket};
 
 use crate::chain::{Chain, Encoded, Encodes, Slot};
 use crate::io::Interest;
@@ -473,8 +473,10 @@ impl Peers {
                 self.drop_peer(rid, interest, "its key was revoked");
                 return;
             }
-            DataClient::Curve(_, Admission::App) => false,
-            DataClient::Curve(_, Admission::Rig(_)) => true,
+            // A viewer is served as an operator's app is: every topic but the rigs-only ones,
+            // which the gate below keeps from every non-rig.
+            DataClient::Curve(_, Admission::Listed(Role::Operator | Role::Viewer)) => false,
+            DataClient::Curve(_, Admission::Listed(Role::Rig(_))) => true,
         };
         if self.map.get(rid.as_slice()).is_some_and(|p| p.rig != rig) {
             // What it may receive changed with its kind: it starts over as the new kind.
@@ -609,9 +611,12 @@ impl Peers {
         }
     }
 
-    /// Drops every peer connected with `key`, whose authorization was just withdrawn: a
-    /// revoked rig must stop receiving audio now, not at its next handshake.
-    pub(crate) fn drop_key(&mut self, key: &PublicKey, interest: &Interest) {
+    /// Drops every peer connected with `key`, whose authorization was just withdrawn or
+    /// changed: a revoked rig must stop receiving audio now, not at its next handshake. Each
+    /// is told `rejoin` first, so a client whose role changed states its subscriptions again
+    /// under the new role (and learns it) without waiting to notice the silence; a revoked
+    /// one's restatement is refused like any unlisted key's.
+    pub(crate) fn drop_key(&mut self, sock: &Socket, key: &PublicKey, interest: &Interest) {
         let rids: Vec<Vec<u8>> = self
             .map
             .iter()
@@ -619,7 +624,10 @@ impl Peers {
             .map(|(rid, _)| rid.clone())
             .collect();
         for rid in rids {
-            self.drop_peer(&rid, interest, "its key was revoked");
+            if let Some(p) = self.map.get_mut(&rid) {
+                let _ = p.notice(sock, FlowNotice::Rejoin);
+            }
+            self.drop_peer(&rid, interest, "its key was revoked or its role changed");
         }
     }
 

@@ -2,7 +2,7 @@
 //! network of a rig on this computer ([`super::network`]), and the authorized and refused
 //! clients.
 
-use ac2_proto::model::{NetBind, NetworkServer, ServerInfo, ServerSummary};
+use ac2_proto::model::{ClientRole, NetBind, NetworkServer, ServerInfo, ServerSummary};
 use ac2_scene::network::NetChange;
 
 use super::network::NetPicks;
@@ -51,9 +51,11 @@ pub enum ConnAction {
     ConnectOther,
     ToggleStartLocal,
     ToggleStopOnQuit,
+    /// `auth.authorize`: a new key, or a role changed (the same key again).
     Authorize {
         name: String,
         key: String,
+        role: ClientRole,
     },
     Revoke(String),
     /// `server.network`: `None` keeps what the rig has.
@@ -99,6 +101,8 @@ pub struct ConnectionPage {
     pub edit: Option<(ConnEdit, String)>,
     /// The authorized client Delete was pressed on once; a second press revokes.
     pub confirm: Option<String>,
+    /// The authorized client ←/→ was pressed on once; a second press changes its role.
+    pub role_confirm: Option<String>,
     pub notice: Option<String>,
     pub error: Option<String>,
     /// The open stream takes remote inputs: the link offset line is listed.
@@ -145,8 +149,8 @@ pub fn conn_lines(server: Option<&ServerInfo>, pairing: &Pairing, remote: bool) 
         v.extend(
             authorized
                 .iter()
-                .filter(|a| a.rig.is_none())
-                .chain(authorized.iter().filter(|a| a.rig.is_some()))
+                .filter(|a| a.role.rig_id().is_none())
+                .chain(authorized.iter().filter(|a| a.role.rig_id().is_some()))
                 .map(|a| ConnLine::Authorized(a.name.clone())),
         );
         v.extend(
@@ -191,6 +195,7 @@ impl ConnectionPage {
     pub(super) fn clear(&mut self) {
         self.net.confirm_on = false;
         self.confirm = None;
+        self.role_confirm = None;
         self.pairing.confirm = None;
         self.notice = None;
         self.error = None;
@@ -213,15 +218,22 @@ impl ConnectionPage {
             let t = text.trim();
             return match kind {
                 ConnEdit::Name { key } => {
-                    if t.is_empty() || t.contains(char::is_whitespace) {
-                        self.error = Some("type a name without spaces (e.g. tablet)".into());
-                        self.edit = Some((ConnEdit::Name { key }, text));
-                        None
-                    } else {
-                        Some(ConnAction::Authorize {
-                            name: t.to_owned(),
+                    let mut parts = t.split_whitespace();
+                    match (parts.next(), parts.next().and_then(role_of), parts.next()) {
+                        (Some(name), Some(role), None) => Some(ConnAction::Authorize {
+                            name: name.to_owned(),
                             key,
-                        })
+                            role,
+                        }),
+                        _ => {
+                            self.error = Some(
+                                "type a name without spaces, a space and viewer or operator \
+                                 (e.g. tablet viewer)"
+                                    .into(),
+                            );
+                            self.edit = Some((ConnEdit::Name { key }, text));
+                            None
+                        }
                     }
                 }
                 ConnEdit::LinkOffset => match ac2_scene::cross_rig::parse_link_offset(t) {
@@ -235,15 +247,21 @@ impl ConnectionPage {
                 ConnEdit::Address | ConnEdit::Port => self.net_edit(kind, text),
                 ConnEdit::NameAndKey => {
                     let mut parts = t.split_whitespace();
-                    match (parts.next(), parts.next(), parts.next()) {
-                        (Some(name), Some(key), None) => Some(ConnAction::Authorize {
+                    match (
+                        parts.next(),
+                        parts.next(),
+                        parts.next().and_then(role_of),
+                        parts.next(),
+                    ) {
+                        (Some(name), Some(key), Some(role), None) => Some(ConnAction::Authorize {
                             name: name.to_owned(),
                             key: key.to_owned(),
+                            role,
                         }),
                         _ => {
                             self.error = Some(
-                                "type the name, a space and the client's key (40 characters, as \
-                                 `ac2 auth show` prints it)"
+                                "type the name, the client's key (40 characters, as `ac2 auth \
+                                 show` prints it) and viewer or operator, spaces between"
                                     .into(),
                             );
                             self.edit = Some((ConnEdit::NameAndKey, text));
@@ -266,8 +284,15 @@ impl ConnectionPage {
                 self.start_authorize();
                 None
             }
-            ConnLine::Authorized(_) => {
-                self.notice = Some("Delete twice revokes this client's key".into());
+            ConnLine::Authorized(name) => {
+                self.notice = Some(match self.authorized(&name).map(|a| a.role) {
+                    Some(ClientRole::Rig { .. }) => {
+                        "Delete twice revokes this rig's admission".into()
+                    }
+                    _ => "←/→ twice changes its role (operator or viewer) · Delete twice \
+                          revokes this client's key"
+                        .into(),
+                });
                 None
             }
             ConnLine::LinkOffset => {
@@ -327,8 +352,47 @@ impl ConnectionPage {
                 self.cycle_interface(d);
                 None
             }
+            ConnLine::Authorized(name) => self.change_role(name),
             _ => None,
         }
+    }
+
+    fn authorized(&self, name: &str) -> Option<&ac2_proto::model::AuthorizedClient> {
+        self.server_info()?
+            .network
+            .authorized
+            .iter()
+            .find(|a| a.name == name)
+    }
+
+    /// ←/→ on an authorized client: an operator made a viewer or a viewer an operator, its
+    /// key kept, on the second press. A rig's admission has no such choice.
+    fn change_role(&mut self, name: String) -> Option<ConnAction> {
+        let a = self.authorized(&name)?;
+        let (role, says) = match a.role {
+            ClientRole::Operator => (
+                ClientRole::Viewer,
+                "a viewer: it may only look, and loses the generator (output fades out)",
+            ),
+            ClientRole::Viewer => (ClientRole::Operator, "an operator: it may drive the rig"),
+            ClientRole::Rig { .. } => {
+                self.notice = Some(format!(
+                    "{name} is a rig: it may take this rig's inputs, no other role (Delete twice \
+                     revokes it)"
+                ));
+                return None;
+            }
+        };
+        let key = a.key.clone();
+        if self.role_confirm.as_deref() == Some(name.as_str()) {
+            self.role_confirm = None;
+            return Some(ConnAction::Authorize { name, key, role });
+        }
+        self.notice = Some(format!(
+            "←/→ again makes {name} {says}; its connections drop and come back"
+        ));
+        self.role_confirm = Some(name);
+        None
     }
 
     /// A on a refused key: types the name it is authorized under.
@@ -412,8 +476,12 @@ impl ConnectionPage {
     /// What the edit line says before the typed text.
     pub fn edit_label(&self) -> Option<&'static str> {
         match &self.edit {
-            Some((ConnEdit::Name { .. }, _)) => Some("Authorize this key as (name):"),
-            Some((ConnEdit::NameAndKey, _)) => Some("Authorize a client (name, space, key):"),
+            Some((ConnEdit::Name { .. }, _)) => {
+                Some("Authorize this key as (name, then viewer or operator):")
+            }
+            Some((ConnEdit::NameAndKey, _)) => {
+                Some("Authorize a client (name, key, then viewer or operator):")
+            }
             Some((ConnEdit::LinkOffset, _)) => Some(ac2_scene::cross_rig::LINK_OFFSET_PROMPT),
             Some((ConnEdit::Address, _)) => Some(ac2_scene::network::ADDRESS_PROMPT),
             Some((ConnEdit::Port, _)) => Some(ac2_scene::network::PORT_PROMPT),
@@ -517,5 +585,14 @@ pub fn conn_line_text(l: &ConnLine, server: Option<&ServerInfo>) -> String {
         | ConnLine::PairOffer(_) => String::new(),
         ConnLine::PairWith => ac2_scene::pairing::PAIR_WITH.into(),
         ConnLine::AddKey => "Authorize a client by its key… (Enter)".into(),
+    }
+}
+
+/// The role typed after a name: the two an app's key may have.
+fn role_of(word: &str) -> Option<ClientRole> {
+    match word.to_ascii_lowercase().as_str() {
+        "operator" => Some(ClientRole::Operator),
+        "viewer" => Some(ClientRole::Viewer),
+        _ => None,
     }
 }

@@ -61,6 +61,7 @@ fn remote<'a>(line: &'a StreamLine) -> BarInputs<'a> {
         link: BarLink::Connected {
             responding: true,
             synced: true,
+            view_only: false,
         },
         audio: Some(BarAudio::Open {
             device: "Fireface USB",
@@ -177,7 +178,8 @@ fn link_trouble_takes_the_segment_over() {
     assert_eq!(
         says(BarLink::Connected {
             responding: false,
-            synced: true
+            synced: true,
+            view_only: false,
         }),
         (
             LinkTone::Fault,
@@ -187,12 +189,23 @@ fn link_trouble_takes_the_segment_over() {
     assert_eq!(
         says(BarLink::Connected {
             responding: true,
-            synced: false
+            synced: false,
+            view_only: false,
         }),
         (
             LinkTone::Warn,
             format!("remote: ac2pi-0ab1c6 · syncing{after}")
         )
+    );
+    let (tone, text) = says(BarLink::Connected {
+        responding: true,
+        synced: true,
+        view_only: true,
+    });
+    assert_eq!(tone, LinkTone::Ok);
+    assert!(
+        text.starts_with("remote: ac2pi-0ab1c6 · view only "),
+        "{text}"
     );
     assert_eq!(
         says(BarLink::Connecting),

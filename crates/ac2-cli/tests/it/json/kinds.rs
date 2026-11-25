@@ -104,7 +104,7 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
         .tone(Signal::Sine { freq: Hz(1000.0) }, -20.0, vec![0])
         .await?;
     f.run_for(8.0).await?;
-    let r = ac2(&f, &["cal", "line", "--input", "3", "--volts", "1.228v"]).await?;
+    let r = ac2(&f, &["cal", "line", "--channel", "3", "--volts", "1.228v"]).await?;
     assert_eq!(r.code, 0, "{} {}", r.stdout, r.stderr);
     assert_eq!(
         r.stdout.trim(),
@@ -112,7 +112,15 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     );
     let j = ok_json(
         &f,
-        &["cal", "line", "--input", "3", "--volts", "1.228v", "--json"],
+        &[
+            "cal",
+            "line",
+            "--channel",
+            "3",
+            "--volts",
+            "1.228v",
+            "--json",
+        ],
     )
     .await?;
     assert_eq!(j["key"]["channel"], 2);
@@ -127,7 +135,15 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     // On a digital input: the daemon's refusal, verbatim.
     let r = ac2(
         &f,
-        &["cal", "line", "--input", "2", "--volts", "1.228v", "--json"],
+        &[
+            "cal",
+            "line",
+            "--channel",
+            "2",
+            "--volts",
+            "1.228v",
+            "--json",
+        ],
     )
     .await?;
     assert_ne!(r.code, 0);
@@ -161,7 +177,7 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     assert_eq!(row("2"), "2 digital dBFS");
 
     // `cal rm --line` removes it; the mic form still needs a mic.
-    let r = ac2(&f, &["cal", "rm", "--input", "3", "--line"]).await?;
+    let r = ac2(&f, &["cal", "rm", "--channel", "3", "--line"]).await?;
     assert_eq!(r.code, 0, "{} {}", r.stdout, r.stderr);
     assert_eq!(
         r.stdout.trim(),
@@ -172,10 +188,10 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     let t = ac2(&f, &["cal", "list"]).await?.stdout;
     has(&t, "line calibrations\nnone");
     // A second removal: the device is the stream's, so the daemon says what is not there.
-    let r = ac2(&f, &["cal", "rm", "--input", "3", "--line", "--json"]).await?;
+    let r = ac2(&f, &["cal", "rm", "--channel", "3", "--line", "--json"]).await?;
     assert_ne!(r.code, 0);
     assert_eq!(r.json()?["error"]["code"], "not_found");
-    let r = ac2(&f, &["cal", "rm", "--input", "3", "--json"]).await?;
+    let r = ac2(&f, &["cal", "rm", "--channel", "3", "--json"]).await?;
     assert_ne!(r.code, 0);
     has(&r.stdout, "input 3 is a line input");
 

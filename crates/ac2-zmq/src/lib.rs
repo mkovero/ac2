@@ -35,7 +35,9 @@ mod raw;
 mod socket;
 pub mod zap;
 
-pub use authorized::{Admission, AuthorizedKeys, KeyStoreError, MAX_NAME_LEN};
+pub use authorized::{
+    Admission, AuthorizedKeys, KeyStoreError, MAX_NAME_LEN, Role, is_before_roles,
+};
 pub use curve::{CurveClient, KeyPair, PublicKey, SecretKey, z85_decode, z85_encode};
 pub use error::{Error, Result};
 pub use monitor::{Monitor, MonitorEvent, SocketEvent};

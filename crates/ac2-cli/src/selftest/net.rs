@@ -356,7 +356,7 @@ pub fn listen(addr: &str) -> Result<Endpoint, NetError> {
     let keys = KeyPair::generate().map_err(zerr("server key"))?;
     let mut authorized = AuthorizedKeys::new();
     authorized
-        .insert("selftest-net", client_keys()?.public)
+        .insert("selftest-net", client_keys()?.public, ac2_zmq::Role::Viewer)
         .map_err(|e| NetError::Handshake(e.to_string()))?;
     let secure = SecureContext::new(ZAP_DOMAIN, authorized, |_| {}).map_err(zerr("ZAP"))?;
     let sock = secure

@@ -64,7 +64,8 @@ fields first:
 The first request on a connection is `hello` {`client`: string, the client software's
 name}; its reply `welcome` carries `server` (`ac2d <version> (build <id>)`), `client_id`
 (`ClientId`, a string: the identity the daemon bound to the connection: the ZAP User-Id under CURVE, otherwise a
-daemon-assigned id), `daemon_incarnation`, `stream_epoch`, `rev`, `rig_id` and `name`.
+daemon-assigned id), `daemon_incarnation`, `stream_epoch`, `rev`, `rig_id`, `name` and `role` (`ClientRole`,
+§3.5: what this connection may send; `operator` for a local client).
 A `hello` that is not the first request gets another `welcome`.
 
 `rig_id` (u64, never 0) is the daemon's identity: random, made once and kept in a file
@@ -244,7 +245,7 @@ from the store.
 | `stream.replay` | `recording: RecordingRef`, `pace: realtime \| fast` | `stream` | |
 | `server.info` | — | `server` | read |
 | `server.network` | `enabled: bool`, `bind: NetBind \| nil`, `port: u16 \| nil` | `server` | local clients only |
-| `auth.authorize` | `name`, `key` (Z85) | `server` | |
+| `auth.authorize` | `name`, `key` (Z85), `role: ClientRole` (`operator` \| `viewer`) | `server` | |
 | `auth.revoke` | `name` | `server` | |
 | `auth.admit_rig` | `key` (Z85), `rig_id: RigId`, `name` | `server` | |
 | `auth.revoke_rig` | `rig_id: RigId` | `server` | |
@@ -458,7 +459,7 @@ network client; `NetStatus`: `off` \| `listening` {`ctrl`, `data`} \| `waiting` 
 {`detail`}; `PeerNetStatus` is the same with `reason` a plain `NetReasonKind` string, `other`
 without its `detail`: the OS's words about the host stay on it), `server_key` (Z85) \| nil (made
 at the first turn-on), `fingerprint` \| nil, `advertised_as`: string \| nil (the mDNS name),
-`authorized`: [`AuthorizedClient` {`name`, `key`, `fingerprint`, `rig`: RigId \| nil}],
+`authorized`: [`AuthorizedClient` {`name`, `key`, `fingerprint`, `role`: `ClientRole`}],
 `refused`: [`RefusedKey` {`key`: string \| nil (nil: not CURVE), `fingerprint`: string \|
 nil, `address`, `count`, `last_at`: WallNs}] \| nil, newest first, at most 32; nil to a
 network client, which gets the authorized names and public keys (pairing shows them) but
@@ -480,9 +481,16 @@ first IPv4 address, else its first global IPv6 one) \| `addr` {`addr`: the addre
 text}. `interfaces`: [`NetInterface` {`name`, `addrs`: [address as text], `up`}], the
 host's interfaces read at each `server.info`, loopback left out; empty to a network
 client. `recording_dir`: string \| nil (where `rec.start`
-records on the daemon host). `auth.authorize` adds `key` under `name` to the
+records on the daemon host). `auth.authorize` adds `key` under `name` with `role` to the
 authorized-clients file (atomic write) and to the running handshake check; `auth.revoke`
-removes `name`. A revoked or replaced key's requests are `refused`, its data connection is
+removes `name`. `ClientRole` is tagged by `type`: `operator` \| `viewer` \| `rig`
+{`rig_id`} (§3.5); `auth.authorize` takes `operator` or `viewer` (`invalid` for `rig`:
+a rig is admitted with `auth.admit_rig`, and for a name admitted as a rig: `auth.revoke_rig`
+it first). The same key given again with another role changes the role: the key's
+connections are dropped by the revoke rule below and come back with the new role, and an
+operator made a viewer loses a generator lease it holds then (output fading out, its sweep
+or dynamics run aborted, as on lease expiry). Making the requesting client's own key a
+viewer is `refused`, as revoking it is. A revoked or replaced key's requests are `refused`, its data connection is
 dropped at once (its subscriptions and audio end) and it cannot connect again. A connection
 is bound to the key it authenticated with, so authorizing a different key under a revoked
 name does not let a connection made with the old key act again: the rule above holds for
@@ -492,8 +500,8 @@ daemon, which has no key files, answers `unsupported`. A name is 1–64 characte
 without whitespace. A name given again replaces its key (and kind): the connections of the
 key it had are dropped by the same rule. `invalid` for a key already under another name or
 a malformed key; `not_found` for revoking an unknown name; `refused` for revoking the
-requesting client's own name (that would lock the operator out). Any authorized client may use them: every authorized client is equally
-trusted.
+requesting client's own name (that would lock the operator out). Any operator may use them,
+local or over the network; a viewer may not (§3.5).
 
 `server.network` {`enabled`, `bind`, `port`} turns the network listener on or off while the
 daemon runs; a nil `bind` or `port` keeps the one set before (at first `all` and 47820, data
@@ -518,8 +526,8 @@ starts off. Answers the new `server` info; `State.server` follows.
 `source.state`).** A rig takes another rig's
 inputs over a link of its own: it connects to the other rig's ctrl and data endpoints under
 CURVE with its own server key pair as the client key. The other rig must first admit that
-key with `auth.admit_rig` {`key`, `rig_id`, `name`}: an authorized-clients entry marked as
-a rig (`AuthorizedClient.rig` = the admitted rig's id; nil for an operator's client).
+key with `auth.admit_rig` {`key`, `rig_id`, `name`}: an authorized-clients entry with the
+role `rig` {`rig_id`: the admitted rig's id}.
 Admitting a name already present replaces its entry, and admitting the rig's own id is
 `invalid`; a replaced or `auth.revoke`d key follows the revoke rule above (requests
 `refused`, data connection and audio dropped at once, no reconnect). `auth.revoke_rig` {`rig_id`} removes
@@ -2202,7 +2210,39 @@ exceeds the 4 MiB ctrl message limit, §3.1).
 `resync` {oldest}, `import` {line, problem} (§3.2 traces),
 `session_version` {found, supported}, `unsaved_changes` {origin}, `session_exists` {name,
 saved_at} (§3.2 sessions), `mic_curve_file` {line, reason} and
-`cal_store` {path, reason} (§3.2 calibration), `sim` {reason} (§3.2 room simulation).
+`cal_store` {path, reason} (§3.2 calibration), `sim` {reason} (§3.2 room simulation),
+`view_only` (with `refused`: the client is a viewer and the command is not one a viewer may
+send, §3.5).
+
+### 3.5 Roles
+
+Every connection has a role, fixed when it connects and carried in `welcome`: a local
+client (the local pair: the OS user is the boundary) is an `operator`; a network client has
+the role its key is listed with in the authorized-clients file (one line per key: `<name>
+<Z85 key> <operator | viewer | rig=<rig id, 16 hex digits>>`; a file whose key lines have
+no role, the shape before roles, is set aside whole and the daemon starts with no client
+authorized, a `damaged_files` entry naming the converter). The daemon reads the role from
+the list at every request, so a change takes effect on the next one; a change also drops
+the key's data connections (§5.8 `rejoin`), so the client says `hello` again and learns it.
+
+- **operator**: every command (`source.state` aside), subject to the lease and to
+  `server.network`'s local-only rule.
+- **viewer**: what reads the rig without acting on it, and `gen.stop` (anyone who hears
+  the output may stop it): `hello`, `state.snapshot`, `state.since`, `grid.get`,
+  `stream.status`, `trace.list`, `trace.get`, `trace.export`, `dynamics.table`,
+  `dynamics.envelope`, `cal.list`, `spl.log_get`, `spl.history_get`, `spl.band_log_get`,
+  `file.list`, `rec.list`, `plan.list`, `server.info`, `gen.stop`,
+  `file.download_chunk`, `file.download_begin` with a nil `session` (the working state),
+  `file.download_end` with a nil `saved_as`. A viewer holds one transfer at a time
+  (`refused` for a second `trace.export` or `file.download_begin` while one is open).
+  Everything else is `refused` with detail `view_only` before it runs, so it stores and
+  changes nothing: no lease (`gen.acquire`, `gen.refresh`), no level, no output, no upload,
+  no delete, no `auth.*`. A viewer's data subscriptions are an operator's (`ka`,
+  measurement frames, `stream/` meters); `audio/<channel>` and `source/levels` stay a rig's.
+- **rig** {`rig_id`}: `hello` and `source.state` only (§3.2 remote inputs).
+
+The classification is one exhaustive match over the commands in `ac2-proto`
+(`Command::allowed`), so a new command is placed when it is added.
 
 ## 4. State and events
 

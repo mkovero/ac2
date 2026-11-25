@@ -129,10 +129,10 @@ pub(crate) async fn stream_inputs(
 pub(crate) async fn cal_spl(cli: &Cli, a: &CalSpl, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
     let s = state(&c).await?;
-    let mic = mic_for(&s, a.input.0, a.mic.as_ref())?;
+    let mic = mic_for(&s, a.channel.0, a.mic.as_ref())?;
     let r = c
         .call(Command::CalSpl {
-            channel: a.input.0,
+            channel: a.channel.0,
             mic,
             calibrator_level: a.reference.0,
             calibrator_freq: a.freq.0,
@@ -147,14 +147,14 @@ pub(crate) async fn cal_spl(cli: &Cli, a: &CalSpl, out: &mut Out<'_>) -> Result<
 async fn cal_electrical(cli: &Cli, a: &CalElectrical, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
     let s = state(&c).await?;
-    let mic = mic_for(&s, a.input.0, a.mic.as_ref())?;
+    let mic = mic_for(&s, a.channel.0, a.mic.as_ref())?;
     let connection = match a.method {
         ElectricalMethodArg::Inline => ElectricalConnection::InLine,
         ElectricalMethodArg::Injected => ElectricalConnection::Injected,
     };
     let r = c
         .call(Command::CalSplElectrical(CalSplElectricalArgs {
-            channel: a.input.0,
+            channel: a.channel.0,
             mic,
             connection,
             volts: a.volts.0,
@@ -182,7 +182,7 @@ async fn cal_line(cli: &Cli, a: &CalLine, out: &mut Out<'_>) -> Result<(), CliEr
     let c = connect(cli, false).await?;
     let r = c
         .call(Command::CalLine {
-            channel: a.input.0,
+            channel: a.channel.0,
             volts: a.volts.0,
         })
         .await?;
@@ -224,10 +224,10 @@ fn mic_text(m: &Mic, s: &State) -> String {
 async fn curve_import(cli: &Cli, a: &CalCurveImport, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
     let s = state(&c).await?;
-    let mic = match (&a.mic, a.input) {
+    let mic = match (&a.mic, a.channel) {
         (Some(m), _) => m.clone(),
         (None, Some(i)) => mic_for(&s, i.0, None)?,
-        (None, None) => return Err(CliError::Usage("give --mic NAME or --input N".into())),
+        (None, None) => return Err(CliError::Usage("give --mic NAME or --channel N".into())),
     };
     let r = c
         .call(Command::CalCurveImport {
@@ -242,7 +242,7 @@ async fn curve_import(cli: &Cli, a: &CalCurveImport, out: &mut Out<'_>) -> Resul
                     CliError::Usage(format!("cannot read {}: {e}", a.file.display()))
                 })?,
             ),
-            channel: a.input.map(|i| i.0),
+            channel: a.channel.map(|i| i.0),
         })
         .await?;
     let m = expect_body!("cal.curve_import", r, ReplyBody::Mic(m) => m)?;
@@ -340,10 +340,10 @@ fn rm_device(
     holders.dedup();
     match holders.as_slice() {
         [d] => Ok((*d).clone()),
-        [] => Err(CliError::Usage(format!("no {what} on input {}", a.input))),
+        [] => Err(CliError::Usage(format!("no {what} on input {}", a.channel))),
         many => Err(CliError::Usage(format!(
             "{what}s on input {} exist for several devices ({}): give --device",
-            a.input,
+            a.channel,
             many.iter()
                 .map(|d| d.0.as_str())
                 .collect::<Vec<_>>()
@@ -363,35 +363,35 @@ async fn rm(cli: &Cli, a: &CalRm, out: &mut Out<'_>) -> Result<(), CliError> {
         let holders = s
             .line_calibrations
             .iter()
-            .filter(|e| e.key.channel == a.input.0)
+            .filter(|e| e.key.channel == a.channel.0)
             .map(|e| &e.key.device)
             .collect();
         let key = LineCalKey {
             device: rm_device(&s, a, holders, "line calibration")?,
-            channel: a.input.0,
+            channel: a.channel.0,
         };
         let text = format!(
             "line calibration of input {} of {} deleted",
-            a.input, key.device.0
+            a.channel, key.device.0
         );
         let key_json = json!(key);
         (CalRef::Line(key), key_json, text)
     } else {
-        let mic = mic_for(&s, a.input.0, a.mic.as_ref())?;
+        let mic = mic_for(&s, a.channel.0, a.mic.as_ref())?;
         let holders = s
             .calibrations
             .iter()
-            .filter(|e| e.key.channel == a.input.0 && e.key.mic == mic)
+            .filter(|e| e.key.channel == a.channel.0 && e.key.mic == mic)
             .map(|e| &e.key.device)
             .collect();
         let key = CalKey {
             device: rm_device(&s, a, holders, &format!("calibration of {mic}"))?,
-            channel: a.input.0,
+            channel: a.channel.0,
             mic,
         };
         let text = format!(
             "sensitivity calibration of {} on input {} of {} deleted",
-            key.mic, a.input, key.device.0
+            key.mic, a.channel, key.device.0
         );
         let key_json = json!(key);
         (CalRef::Spl(key), key_json, text)
@@ -409,7 +409,7 @@ pub(crate) async fn run(cli: &Cli, cmd: &CalCmd, out: &mut Out<'_>) -> Result<()
         CalCmd::Electrical(a) => cal_electrical(cli, a, out).await,
         CalCmd::Line(a) => cal_line(cli, a, out).await,
         CalCmd::Curve(c) => curve(cli, c, out).await,
-        CalCmd::Use { input, curve } => use_curve(cli, *input, curve, out).await,
+        CalCmd::Use { channel, curve } => use_curve(cli, *channel, curve, out).await,
         CalCmd::Rm(a) => rm(cli, a, out).await,
         CalCmd::List => {
             let c = connect(cli, false).await?;

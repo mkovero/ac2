@@ -89,14 +89,14 @@ fn input_kinds_pairs_and_line_cal_grammar() {
     assert!(parse(&["stream", "inputs", "--pair", "3,x"]).is_err());
     assert!(parse(&["stream", "inputs", "--pair", "3,4", "--no-pairs"]).is_err());
 
-    let c = ok(&["cal", "line", "--input", "3", "--volts", "1.228v"]);
+    let c = ok(&["cal", "line", "--channel", "3", "--volts", "1.228v"]);
     let Cmd::Cal {
         cmd: CalCmd::Line(a),
     } = c.cmd
     else {
         panic!("not cal line");
     };
-    assert_eq!(a.input, Channel(2));
+    assert_eq!(a.channel, Channel(2));
     assert!((a.volts.0.0 - 1.228).abs() < 1e-9);
     assert!(
         ok(&["cal", "line", "--channel", "3", "--volts", "775mv"])
@@ -104,22 +104,29 @@ fn input_kinds_pairs_and_line_cal_grammar() {
             .is_cal()
     );
     // The voltage is required and carries its unit; the level is the daemon's to measure.
-    assert!(parse(&["cal", "line", "--input", "3"]).is_err());
-    assert!(parse(&["cal", "line", "--input", "3", "--volts", "1.228"]).is_err());
+    assert!(parse(&["cal", "line", "--channel", "3"]).is_err());
+    assert!(parse(&["cal", "line", "--channel", "3", "--volts", "1.228"]).is_err());
     assert!(
         parse(&[
-            "cal", "line", "--input", "3", "--volts", "1.228v", "--read", "-9dbfs"
+            "cal",
+            "line",
+            "--channel",
+            "3",
+            "--volts",
+            "1.228v",
+            "--read",
+            "-9dbfs"
         ])
         .is_err()
     );
 
-    let Cmd::Cal { cmd: CalCmd::Rm(a) } = ok(&["cal", "rm", "--input", "3", "--line"]).cmd else {
+    let Cmd::Cal { cmd: CalCmd::Rm(a) } = ok(&["cal", "rm", "--channel", "3", "--line"]).cmd else {
         panic!("not cal rm");
     };
     assert!(a.line);
     assert_eq!(a.mic, None);
     // A line calibration has no mic to name.
-    assert!(parse(&["cal", "rm", "--input", "3", "--line", "--mic", "M30"]).is_err());
+    assert!(parse(&["cal", "rm", "--channel", "3", "--line", "--mic", "M30"]).is_err());
 }
 
 trait CmdKind {

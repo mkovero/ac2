@@ -7,8 +7,8 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, StateSnapshot};
 use crate::grid::GridDef;
 use crate::model::{
-    BackendInfo, CalEntry, Delay, DelayFinding, DynamicsRun, Generator, InputSetups, Lease,
-    LineCalEntry, LoopbackDetection, Measurement, Mic, OutputSetup, Preview, RecordingFile,
+    BackendInfo, CalEntry, ClientRole, Delay, DelayFinding, DynamicsRun, Generator, InputSetups,
+    Lease, LineCalEntry, LoopbackDetection, Measurement, Mic, OutputSetup, Preview, RecordingFile,
     RecordingRun, ServerInfo, SessionFile, SourceState, SplHistory, SplLogPage, Stream, SweepRun,
     TraceData, TraceMeta,
 };
@@ -32,6 +32,9 @@ pub struct Welcome {
     pub rig_id: RigId,
     /// The rig's name (`ac2d --name`, default *ac2 on <hostname>*), for display only.
     pub name: String,
+    /// What this connection may do: a local one is always an operator; a network one has
+    /// the role its key is authorized with now.
+    pub role: ClientRole,
 }
 
 /// Successful reply payloads. Wire: `{"type": "<name>", "value": …}`.

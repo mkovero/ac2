@@ -278,7 +278,7 @@ was ≈ 83.2 dB SPL at the mic. Holds only at this preamp gain.
 Operator's 1 kHz calibrator (94 / 104 / 114 dB steps) with a ½" fit for the Behringer; the MM1
 is thinner and needs a careful seal. Both preamps 20 dB, phantom on.
 
-- **in 2, Vilppu behringer #3** (`cal spl --input 2`): 94 → −25.3 dBFS (0 dBFS = 119.3 dB SPL),
+- **in 2, Vilppu behringer #3** (`cal spl --channel 2`): 94 → −25.3 dBFS (0 dBFS = 119.3 dB SPL),
   104 → −15.4 (119.4), 114 → −5.4 (119.4); stored the 114 dB one, **0 dBFS = 119.4 dB SPL**.
   Linear within 0.1 dB over 20 dB; in 2 clips at ≈ 119 dB SPL at this gain.
 - **in 1, MM1 34804, read only** (its electrical cal kept, 0 dBFS = 120.5): a loose fit read

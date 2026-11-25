@@ -277,6 +277,7 @@ impl Inner {
         let g = &self.state.generator;
         MirrorView {
             client_id: Some(ClientId("ac2-ui test".into())),
+            role: Some(ac2_proto::model::ClientRole::Operator),
             phase: Phase::Live,
             incarnation: Some(INCARNATION),
             stream_epoch: Some(self.state.stream.epoch),

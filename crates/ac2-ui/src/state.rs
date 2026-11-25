@@ -122,6 +122,7 @@ pub use stim_keys::OwnStim;
 mod stimulus;
 mod text;
 mod undo;
+mod view_only;
 mod walk_impl;
 pub use ac2_proto::model::layout::EntryRef;
 pub use panes::entries::{MAX_WITH, Pick, With};
@@ -472,6 +473,7 @@ impl AppState {
             self.plot_px.retain(|p, _| views.contains_key(p));
         }
         self.chain_meas_edits(&mut out);
+        self.refuse_view_only(&mut out);
         out
     }
 

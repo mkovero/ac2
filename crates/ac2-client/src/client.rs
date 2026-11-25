@@ -5,11 +5,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ac2_proto::model::State;
+use ac2_proto::model::{ClientRole, State};
 use ac2_proto::units::{ClientId, RequestId};
 use ac2_proto::{
-    Command, ErrorCode, GridDef, GridId, ReplyBody, Request, StateSnapshot, Subscription, Warning,
-    Welcome, encode_request,
+    Command, ErrorCode, ErrorDetail, GridDef, GridId, ProtoError, ReplyBody, Request,
+    StateSnapshot, Subscription, Warning, Welcome, encode_request,
 };
 use ac2_zmq::{Context, CurveClient, Socket, SocketType, TcpLiveness};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -472,6 +472,12 @@ impl Client {
         self.welcome().client_id
     }
 
+    /// What this connection may do, as the latest `welcome` said: a demotion or promotion
+    /// drops the data connection, and the client asks again when it rejoins.
+    pub fn role(&self) -> ClientRole {
+        self.welcome().role
+    }
+
     /// The name sent in `hello`.
     pub fn name(&self) -> &str {
         &self.inner.name
@@ -479,6 +485,7 @@ impl Client {
 
     /// Sends `cmd` with the default retry policy.
     pub async fn call(&self, cmd: Command) -> Result<ReplyBody, ClientError> {
+        view_only_gate(self.role(), &cmd)?;
         let r = self.inner.core.retry;
         self.inner.core.call(cmd, r).await
     }
@@ -490,12 +497,14 @@ impl Client {
         &self,
         cmd: Command,
     ) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
+        view_only_gate(self.role(), &cmd)?;
         let r = self.inner.core.retry;
         self.inner.core.call_warned(cmd, r).await
     }
 
     /// Sends `cmd` with an explicit retry policy.
     pub async fn call_with(&self, cmd: Command, retry: Retry) -> Result<ReplyBody, ClientError> {
+        view_only_gate(self.role(), &cmd)?;
         self.inner.core.call(cmd, retry).await
     }
 
@@ -752,11 +761,29 @@ impl Client {
     }
 }
 
+/// A viewer's command that the daemon would refuse is refused here, unsent: the daemon
+/// decides, and this only spares the round trip and gives the same `view_only` answer.
+fn view_only_gate(role: ClientRole, cmd: &Command) -> Result<(), ClientError> {
+    if role == ClientRole::Viewer && !cmd.allowed(&role) {
+        return Err(ClientError::Daemon(ProtoError {
+            code: ErrorCode::Refused,
+            msg: format!(
+                "{}: this client is authorized as a viewer on this rig; it may only look \
+                 (not sent)",
+                cmd.name()
+            ),
+            detail: Some(ErrorDetail::ViewOnly),
+        }));
+    }
+    Ok(())
+}
+
 /// The mirror view with the identity of the `welcome` that belongs to its incarnation.
 fn view_of(mirror: &Mirror, w: &Welcome) -> MirrorView {
     let mut v = mirror.view();
     if v.incarnation.is_none_or(|i| i == w.daemon_incarnation) {
         v.client_id = Some(w.client_id.clone());
+        v.role = Some(w.role);
     }
     v
 }
@@ -797,6 +824,15 @@ async fn run_sync(
                     (mirror.on_ka(&stamp, *meta, at, local_wall_ns), true)
                 }
                 Some(SyncIn::Resync) => (mirror.on_resync_required(now), true),
+                Some(SyncIn::Rejoined) => {
+                    // Only the welcome: the state itself is unchanged by a role.
+                    if let Ok(w) = hello(&core, &name).await
+                        && let Ok(mut slot) = welcome.lock()
+                    {
+                        *slot = w;
+                    }
+                    (None, true)
+                }
             },
             _ = tick.tick(), if ticking => (mirror.on_tick(Instant::now()), false),
         };

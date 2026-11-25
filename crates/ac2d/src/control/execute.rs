@@ -4,7 +4,9 @@
 use std::time::Instant;
 
 use ac2_proto::event::{Change, Patch};
-use ac2_proto::model::{ColourFamily, GenAction, MeasConfig, MeasKind, Measurement, SweepFailure};
+use ac2_proto::model::{
+    ClientRole, ColourFamily, GenAction, MeasConfig, MeasKind, Measurement, SweepFailure,
+};
 use ac2_proto::units::{Db, MeasId, Rev, Seconds};
 use ac2_proto::{
     CalSplElectricalArgs, Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, TraceImportArgs,
@@ -41,6 +43,7 @@ impl Control {
                     rev: self.store.rev(),
                     rig_id: self.s.rig_id,
                     name: self.s.name.clone(),
+                    role: self.peer_role(peer).unwrap_or(ClientRole::Viewer),
                 }))
             }
             Command::StreamDevices => Err(internal("stream.devices is answered asynchronously")),
@@ -105,7 +108,9 @@ impl Control {
                 bind,
                 port,
             } => self.server_network(peer, enabled, bind, port),
-            Command::AuthAuthorize { name, key } => self.server_authorize(peer, &name, &key),
+            Command::AuthAuthorize { name, key, role } => {
+                self.server_authorize(peer, &name, &key, role)
+            }
             Command::AuthRevoke { name } => self.server_revoke(peer, &name),
             Command::AuthAdmitRig { key, rig_id, name } => {
                 self.admit_rig(peer, &name, &key, rig_id)

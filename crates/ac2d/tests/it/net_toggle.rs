@@ -56,7 +56,8 @@ fn interfaces() -> Interfaces {
 /// `laptop` authorized in `dir`; no server key yet.
 fn security(dir: &Path, laptop: &KeyPair) -> NetworkSecurity {
     let mut keys = AuthorizedKeys::new();
-    keys.insert("laptop", laptop.public).unwrap();
+    keys.insert("laptop", laptop.public, ac2_zmq::Role::Operator)
+        .unwrap();
     let authorized = dir.join("authorized_clients");
     keys.save(&authorized).unwrap();
     NetworkSecurity {
@@ -197,6 +198,7 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
     c.call(Command::AuthAuthorize {
         name: "tablet".into(),
         key: tablet.public.to_z85(),
+        role: ac2_proto::model::ClientRole::Operator,
     })
     .unwrap();
     let named = |s: &ServerInfo| -> Vec<String> {
@@ -748,6 +750,7 @@ fn a_request_retried_across_off_and_on_is_answered_once() {
         Command::AuthAuthorize {
             name: "tablet".into(),
             key: tablet.public.to_z85(),
+            role: ac2_proto::model::ClientRole::Operator,
         },
     );
     let first = Client::connect_with(&ctx, &ep, Some(&curve));

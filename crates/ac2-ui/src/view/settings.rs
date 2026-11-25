@@ -677,7 +677,11 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
                 // not "none refused", so the list is left out rather than shown empty.
                 let told = refused.is_some();
                 let refused = refused.as_deref().unwrap_or_default();
-                let is_rig = |n: &str| authorized.iter().any(|a| a.name == n && a.rig.is_some());
+                let is_rig = |n: &str| {
+                    authorized
+                        .iter()
+                        .any(|a| a.name == n && a.role.rig_id().is_some())
+                };
                 for (title, rigs) in [
                     ("Authorized clients", false),
                     (ac2_scene::remote_inputs::ADMITTED, true),

@@ -142,6 +142,7 @@ fn mirror_of(state: State, incarnation: u64, me: Option<&str>) -> ConnEvent {
     };
     ConnEvent::Mirror(Arc::new(MirrorView {
         client_id: me.map(|m| ClientId(m.into())),
+        role: me.map(|_| ac2_proto::model::ClientRole::Operator),
         phase: Phase::Live,
         incarnation: Some(DaemonIncarnation(incarnation)),
         stream_epoch: Some(StreamEpoch(2)),
@@ -884,6 +885,7 @@ mod drag_undo;
 mod plates;
 
 mod sim;
+mod view_only;
 mod walk;
 
 /// Shift+C steps the selected measurement's colour to one no other measurement has

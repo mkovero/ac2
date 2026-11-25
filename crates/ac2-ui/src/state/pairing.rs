@@ -25,7 +25,7 @@ fn admitted(
             .network
             .authorized
             .iter()
-            .filter_map(|a| Some((a.rig?, a.name.clone(), a.key.clone())))
+            .filter_map(|a| Some((a.role.rig_id()?, a.name.clone(), a.key.clone())))
             .collect()),
     }
 }

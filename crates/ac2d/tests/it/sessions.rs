@@ -488,7 +488,8 @@ fn remote_clients_never_name_daemon_paths() {
     let dir = tempfile::tempdir().unwrap();
     let laptop = KeyPair::generate().unwrap();
     let mut keys = AuthorizedKeys::new();
-    keys.insert("laptop", laptop.public).unwrap();
+    keys.insert("laptop", laptop.public, ac2_zmq::Role::Operator)
+        .unwrap();
     let authorized = dir.path().join("authorized_clients");
     keys.save(&authorized).unwrap();
     let security = ac2d::NetworkSecurity {

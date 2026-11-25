@@ -32,7 +32,8 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
     let laptop = KeyPair::generate().unwrap();
     let tablet = KeyPair::generate().unwrap();
     let mut keys = AuthorizedKeys::new();
-    keys.insert("laptop", laptop.public).unwrap();
+    keys.insert("laptop", laptop.public, ac2_zmq::Role::Operator)
+        .unwrap();
     let file = dir.path().join("authorized_clients");
     keys.save(&file).unwrap();
     let security = NetworkSecurity {
@@ -96,6 +97,7 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
         .call(Command::AuthAuthorize {
             name: "tablet".into(),
             key: "not a key".into(),
+            role: ac2_proto::model::ClientRole::Operator,
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid);
@@ -104,6 +106,7 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
     let authorized = c.server(Command::AuthAuthorize {
         name: "tablet".into(),
         key: tablet.public.to_z85(),
+        role: ac2_proto::model::ClientRole::Operator,
     });
     assert_eq!(names(&authorized), vec!["laptop", "tablet"]);
     assert_eq!(authorized.network.refused, None);
@@ -156,8 +159,10 @@ fn a_revoked_connection_stays_refused_when_its_name_goes_to_a_new_key() {
     let old_tablet = KeyPair::generate().unwrap();
     let new_tablet = KeyPair::generate().unwrap();
     let mut keys = AuthorizedKeys::new();
-    keys.insert("laptop", laptop.public).unwrap();
-    keys.insert("tablet", old_tablet.public).unwrap();
+    keys.insert("laptop", laptop.public, ac2_zmq::Role::Operator)
+        .unwrap();
+    keys.insert("tablet", old_tablet.public, ac2_zmq::Role::Operator)
+        .unwrap();
     let file = dir.path().join("authorized_clients");
     keys.save(&file).unwrap();
     let security = NetworkSecurity {
@@ -190,6 +195,7 @@ fn a_revoked_connection_stays_refused_when_its_name_goes_to_a_new_key() {
     c.ok(Command::AuthAuthorize {
         name: "tablet".into(),
         key: new_tablet.public.to_z85(),
+        role: ac2_proto::model::ClientRole::Operator,
     });
     let e = old
         .call(Command::MeasCreate {
@@ -240,6 +246,7 @@ fn a_local_daemon_has_no_client_keys() {
         .call(Command::AuthAuthorize {
             name: "x".into(),
             key: KeyPair::generate().unwrap().public.to_z85(),
+            role: ac2_proto::model::ClientRole::Operator,
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Unsupported);

@@ -12,7 +12,7 @@ use ac2_proto::frame::Frame;
 use ac2_proto::{
     CodedFrame, DataRequest, WireFrame, decode_notice, decode_wire, encode_data_request,
 };
-use ac2_zmq::{Context, SocketType};
+use ac2_zmq::{Context, Role, SocketType};
 
 use crate::io::Interest;
 
@@ -67,7 +67,7 @@ impl Rig {
             frame,
             topic,
             client: None,
-            admission: Admission::App,
+            admission: Admission::Listed(Role::Operator),
         }
     }
 
@@ -397,7 +397,7 @@ fn audio_queues_under_a_credit_stall_and_drops_the_oldest() {
         name: "pupu".into(),
         key: ac2_zmq::KeyPair::generate().unwrap().public,
     });
-    r.admission = Admission::Rig(1);
+    r.admission = Admission::Listed(Role::Rig(1));
     let d = r.ctx.socket(SocketType::Dealer).unwrap();
     d.set_linger(Some(Duration::ZERO)).unwrap();
     d.connect(&r.endpoint).unwrap();
@@ -526,7 +526,7 @@ fn source_levels_go_to_a_rig_and_never_to_an_app() {
         name: "pupu".into(),
         key: ac2_zmq::KeyPair::generate().unwrap().public,
     });
-    r.admission = Admission::Rig(1);
+    r.admission = Admission::Listed(Role::Rig(1));
     let d = r.ctx.socket(SocketType::Dealer).unwrap();
     d.set_linger(Some(Duration::ZERO)).unwrap();
     d.connect(&r.endpoint).unwrap();
@@ -548,7 +548,7 @@ fn a_revoked_key_is_dropped_at_once() {
         name: "pupu".into(),
         key,
     });
-    r.admission = Admission::Rig(1);
+    r.admission = Admission::Listed(Role::Rig(1));
     let d = r.ctx.socket(SocketType::Dealer).unwrap();
     d.set_linger(Some(Duration::ZERO)).unwrap();
     d.connect(&r.endpoint).unwrap();
@@ -559,7 +559,7 @@ fn a_revoked_key_is_dropped_at_once() {
         },
     );
     r.pump_until(|r| r.interest.count(b"audio/1") == 1);
-    r.peers.drop_key(&key, &r.interest);
+    r.peers.drop_key(&r.router, &key, &r.interest);
     assert_eq!(r.peers.len(), 0);
     assert_eq!(r.interest.count(b"audio/1"), 0);
 
@@ -599,7 +599,7 @@ fn a_rig_made_an_app_loses_its_audio_and_no_rig_gets_keepalives() {
         name: "pupu".into(),
         key: ac2_zmq::KeyPair::generate().unwrap().public,
     });
-    r.admission = Admission::Rig(1);
+    r.admission = Admission::Listed(Role::Rig(1));
     let d = r.ctx.socket(SocketType::Dealer).unwrap();
     d.set_linger(Some(Duration::ZERO)).unwrap();
     d.connect(&r.endpoint).unwrap();
@@ -624,7 +624,7 @@ fn a_rig_made_an_app_loses_its_audio_and_no_rig_gets_keepalives() {
             .is_none()
     );
 
-    r.admission = Admission::App;
+    r.admission = Admission::Listed(Role::Operator);
     up(&d, DataUp::Window { bytes: 4096 });
     r.pump_until(|r| r.interest.count(b"ka") == 1);
     assert_eq!(r.peers.len(), 1);
@@ -640,7 +640,7 @@ fn a_rig_is_refused_stage_bins() {
         name: "pupu".into(),
         key: ac2_zmq::KeyPair::generate().unwrap().public,
     });
-    r.admission = Admission::Rig(1);
+    r.admission = Admission::Listed(Role::Rig(1));
     let d = r.ctx.socket(SocketType::Dealer).unwrap();
     d.set_linger(Some(Duration::ZERO)).unwrap();
     d.connect(&r.endpoint).unwrap();

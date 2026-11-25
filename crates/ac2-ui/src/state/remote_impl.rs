@@ -218,7 +218,7 @@ impl AppState {
         let as_name = admit_name(&self.rig_label(taker));
         if n.authorized
             .iter()
-            .any(|a| a.name == as_name && a.rig != Some(taker.id))
+            .any(|a| a.name == as_name && a.role.rig_id() != Some(taker.id))
         {
             return Err(PairRefusal::NameTaken(as_name));
         }

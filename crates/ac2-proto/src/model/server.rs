@@ -483,8 +483,36 @@ pub struct AuthorizedClient {
     pub key: String,
     /// Fingerprint of the key.
     pub fingerprint: String,
-    /// The rig it is, for a key admitted as a rig (`auth.admit_rig`); `None` for an app.
-    pub rig: Option<RigId>,
+    /// What it may do.
+    pub role: ClientRole,
+}
+
+/// What a client key may do, fixed by the authorized-clients file and given in `welcome`.
+/// Every command decides per role (`Command::allowed`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ClientRole {
+    /// Drives the rig: every command but `source.state`. The local pair is always one.
+    Operator,
+    /// Reads the rig, and may stop the generator (`gen.stop`); is refused every other
+    /// command with `view_only`.
+    Viewer,
+    /// Another rig's daemon (`auth.admit_rig`): says `hello`, reads `source.state` and
+    /// takes this rig's inputs, nothing else.
+    Rig {
+        /// The rig it is.
+        rig_id: RigId,
+    },
+}
+
+impl ClientRole {
+    /// The rig it is, for a rig's key; `None` for an app's.
+    pub fn rig_id(&self) -> Option<RigId> {
+        match self {
+            Self::Rig { rig_id } => Some(*rig_id),
+            Self::Operator | Self::Viewer => None,
+        }
+    }
 }
 
 /// A client key the daemon refused.

@@ -60,6 +60,7 @@ fn mirror(ms: Vec<Measurement>) -> Msg {
         ac2_ui::state::UNKNOWN_RIG,
         Box::new(ConnEvent::Mirror(Arc::new(MirrorView {
             client_id: Some(ClientId("pane-title".into())),
+            role: Some(ac2_proto::model::ClientRole::Operator),
             phase: Phase::Live,
             incarnation: Some(DaemonIncarnation(1)),
             stream_epoch: Some(StreamEpoch(1)),

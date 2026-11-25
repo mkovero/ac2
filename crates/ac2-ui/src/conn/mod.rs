@@ -34,6 +34,7 @@ mod event;
 mod meas_edit;
 mod pacing;
 mod request;
+mod role;
 mod stimulus;
 
 use pacing::*;

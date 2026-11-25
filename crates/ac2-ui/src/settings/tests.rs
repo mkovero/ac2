@@ -1,7 +1,7 @@
 //! Tests of the Settings view.
 
 use super::*;
-use ac2_proto::model::GenAudit;
+use ac2_proto::model::{ClientRole, GenAudit};
 use ac2_scene::theme::ThemeName;
 use ac2_scene::view::{
     CoherencePlacement, DistortionUnit, LeqLayout, LeqStyle, SpectrumMode, SweepMode,
@@ -190,10 +190,11 @@ fn connection_lines_authorize_and_revoke() {
     assert_eq!(lines[5], ConnLine::Interface);
     assert_eq!(lines[6], ConnLine::Port);
     assert_eq!(lines[7], ConnLine::Authorized("laptop".into()));
-    assert_eq!(lines[8], ConnLine::Authorized("pupu".into()));
-    assert!(matches!(&lines[9], ConnLine::Refused(Some(_), a) if a == "192.168.1.40"));
-    assert!(matches!(&lines[10], ConnLine::Refused(None, _)));
-    assert_eq!(lines[11], ConnLine::AddKey);
+    assert_eq!(lines[8], ConnLine::Authorized("phone".into()));
+    assert_eq!(lines[9], ConnLine::Authorized("pupu".into()));
+    assert!(matches!(&lines[10], ConnLine::Refused(Some(_), a) if a == "192.168.1.40"));
+    assert!(matches!(&lines[11], ConnLine::Refused(None, _)));
+    assert_eq!(lines[12], ConnLine::AddKey);
     assert_eq!(p.enter(), Some(ConnAction::Reconnect));
     assert_eq!(p.toggle(1), None);
 
@@ -215,39 +216,62 @@ fn connection_lines_authorize_and_revoke() {
     );
     assert_eq!(p.delete(), Some(ConnAction::Revoke("laptop".into())));
 
+    // Its role changes on the second ←/→, its key kept.
+    assert_eq!(p.toggle(1), None);
+    assert!(
+        p.notice
+            .as_deref()
+            .expect("set")
+            .starts_with("←/→ again makes laptop a viewer")
+    );
+    assert!(matches!(
+        p.toggle(-1),
+        Some(ConnAction::Authorize {
+            role: ClientRole::Viewer,
+            ..
+        })
+    ));
+
     // A refused key: a name, then Enter authorizes it.
-    p.focus = 9;
+    p.focus = 10;
     assert!(p.start_authorize());
     p.type_text("tablet");
+    assert_eq!(p.enter(), None);
+    assert!(p.error.is_some(), "a name without a role is not enough");
+    p.type_text(" viewer");
     let key = "D:)Q[IlAW!ahhC2ac:9*A}h:p?([4%wOTJ%JR%cs".to_owned();
     assert_eq!(
         p.enter(),
         Some(ConnAction::Authorize {
             name: "tablet".into(),
-            key
+            key,
+            role: ClientRole::Viewer,
         })
     );
     // A peer without CURVE has nothing to authorize.
-    p.focus = 10;
+    p.focus = 11;
     assert!(!p.start_authorize());
 
     // By hand: name and key.
-    p.focus = 11;
+    p.focus = 12;
     assert_eq!(p.enter(), None);
     p.type_text("phone");
     assert_eq!(p.enter(), None);
     assert!(p.error.is_some(), "a name alone is not enough");
     p.type_text(" KEY40");
+    assert_eq!(p.enter(), None);
+    p.type_text(" operator");
     assert_eq!(
         p.enter(),
         Some(ConnAction::Authorize {
             name: "phone".into(),
-            key: "KEY40".into()
+            key: "KEY40".into(),
+            role: ClientRole::Operator,
         })
     );
     assert_eq!(
         conn_line_text(&ConnLine::Authorized("laptop".into()), Some(&s)),
-        "laptop · app · fingerprint SHA256:b2aa 0c3d 9e41 7f60"
+        "laptop · operator · fingerprint SHA256:b2aa 0c3d 9e41 7f60"
     );
 }
 

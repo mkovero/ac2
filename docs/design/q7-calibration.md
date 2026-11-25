@@ -60,7 +60,7 @@ them, and recalibrating after a gain change is the operator's job.
 - `cal.delete {key}` removes the sensitivity calibration `key`, on any device: a mic sold or
   an interface retired leaves entries that no session can reach through `cal.spl`, so
   deletion is by the full key and needs no open session. The input setup is untouched.
-  `not_found` when there is none. CLI `ac2 cal rm --input N [--mic NAME] [--device ID]`
+  `not_found` when there is none. CLI `ac2 cal rm --channel N [--mic NAME] [--device ID]`
   (device: the open session's, else the one device holding that input + mic); UI palette
   `Calibration: delete a sensitivity calibration…` and the calibrations view.
 - `session.inputs {inputs: [InputSetup]}` upserts the listed rows (others unchanged); reply
@@ -485,7 +485,7 @@ sensitivity prefilled from the data sheet with its source (`data sheet (MM1 3480
 makes it `typed`), and optionally the mic's output and the preamp's input impedance (`330
 ohm`, `2 k`; blank = no loading) with the correction shown live (`loaded 330 Ω → 2.0 kΩ
 −1.3 dB`); Enter reads and stores, a refusal stays in the dialog to retry, success
-closes it with what to do next. **CLI.** `ac2 cal electrical --input N --volts 15.03mv
+closes it with what to do next. **CLI.** `ac2 cal electrical --channel N --volts 15.03mv
 [--freq 1khz] [--sensitivity 15.0mv/pa | -36.5dbv/pa] [--method inline|injected]
 [--mic-impedance 330ohm --input-impedance 2kohm]
 [--uncertainty 1db] [--mic NAME] [--replace-acoustic]` prints the record, `0 dBFS = … dB SPL`,
