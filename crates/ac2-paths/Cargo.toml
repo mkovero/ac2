@@ -24,6 +24,10 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"], optio
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
+# The free-space query (`free_space`).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 log = { workspace = true }
 tempfile = { workspace = true }
