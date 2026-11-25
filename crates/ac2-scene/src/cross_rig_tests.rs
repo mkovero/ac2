@@ -93,7 +93,8 @@ fn not_locked_stops_holds_and_says_what_to_do() {
         assert_eq!(
             banner("TF 3", &x, &r, "pupu"),
             Some(format!(
-                "TF 3 stopped: {name}'s interface runs +5.6 ppm off"
+                "TF 3 stopped: {name}'s interface runs +5.6 ppm off · lock it to its host's \
+                 reference"
             ))
         );
     }
@@ -417,7 +418,10 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
     assert_eq!(b[0].text, "Clocks not locked: averaging stopped");
     assert_eq!(
         b[0].detail.as_deref(),
-        Some("TF 3 stopped: clocks +5.6 ppm apart · lock both to one reference")
+        Some(
+            "TF 3 stopped: clocks +5.6 ppm apart · lock both to one reference · result from \
+             before, phase faint"
+        )
     );
     assert!(b[0].warn);
     let x = tf(
@@ -431,7 +435,10 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
         pane_banners("TF 3", &x, &r, "pupu", "X")[0]
             .detail
             .as_deref(),
-        Some("TF 3 stopped: clocks +5.6 ppm apart · lock both to one reference")
+        Some(
+            "TF 3 stopped: clocks +5.6 ppm apart · lock both to one reference · no result from \
+             before"
+        )
     );
     let x = tf(RemoteSide::Measurement, STOPPED_HELD);
     assert_eq!(caption(&x, &r), None, "the banner says it");
@@ -449,7 +456,7 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
     assert_eq!(b[0].text, "Measuring clocks…: averaging waits");
     assert_eq!(
         b[0].detail.as_deref(),
-        Some("under a minute of audio from ketunkolo yet")
+        Some("under a minute of audio from ketunkolo yet · no result from before")
     );
     assert!(!b[0].warn);
 
@@ -481,7 +488,14 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
             ),
         ]
     );
-    assert_eq!(b[0].detail, None, "the banner says the key");
+    assert_eq!(
+        b[0].detail.as_deref(),
+        Some("X finds the delay · phase faint until then")
+    );
+    assert_eq!(
+        b[1].detail.as_deref(),
+        Some("delay moved over 0.05 ms a minute for two minutes")
+    );
     assert_eq!(
         b[2].detail.as_deref(),
         Some("audio from ketunkolo arrives late · Settings › Connection")

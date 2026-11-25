@@ -266,11 +266,9 @@ fn slow_clocks_not_locked_across_rigs() -> R {
             .collect::<Vec<_>>()
     };
     d.until("Main L stopped by the clocks", |s| {
-        details(s).iter().any(|b| {
-            b.starts_with(&format!(
-                "Main L stopped: pupu and kettu are not on one clock ({ppm} ppm)"
-            ))
-        })
+        details(s)
+            .iter()
+            .any(|b| b.starts_with(&format!("Main L stopped: clocks {ppm} ppm apart")))
     })?;
     let row = d.st.meas_rows().into_iter().find(|r| r.id == m.id);
     let cue = row.ok_or("Main L's row")?.text;

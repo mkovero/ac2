@@ -45,6 +45,7 @@ MEASUREMENTS
                            delay −145.062 ms
                            includes the clock offset between pupu and ac2 on ac2pi-0ab1c6 (not measured)
                            stopped: ac2 on ac2pi-0ab1c6's interface runs +7.8 ppm off
+                           lock it to its host's reference
 
 INPUTS
   1+2                        mic MM1 34804   pair   L 90° · electrical ±1 dB · 43 d ago

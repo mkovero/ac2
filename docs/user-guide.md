@@ -209,7 +209,9 @@ waits (*Measuring clocks…: averaging waits*); when they are *not locked* or th
 it was, phase faint under *clocks not locked* / *clocks: can't tell* (nothing is shown if
 no result was kept from before it), with why and what to do: *TF 3 stopped: clocks +5.6
 ppm apart · lock both to one reference* (the two rigs' interfaces run on different clocks;
-locking both to one reference, word clock or the like, is the fix). When
+locking both to one reference, word clock or the like, is the fix). One rig's interface
+drifting against its own host reads *TF 3 stopped: ketunkolo's interface runs +5.6 ppm off ·
+lock it to its host's reference*. When
 the clocks agree again the averages restart; with delay tracking on, the finder tracks the
 delay again from the held one and says it for a minute (*clocks were not locked for 3 min
 10 s · delay tracked again: 13.41 ms (was 12.38 ms)*), or asks for a pick if two arrivals
@@ -278,8 +280,8 @@ is never only a colour):
   *· ref from ketunkolo*), its caption starts *clocks agree · ketunkolo*
   while it averages and the clocks agree. Stopped, its banner strip says *Clocks not locked: averaging stopped*
   (with **T** too: banners are not plot chrome), the banner's detail why and what to do
-  (*Main L stopped: pupu and ketunkolo are not on one clock (+5.6 ppm). Lock both
-  interfaces to one reference.*), and the held curve's phase is faint; the
+  (*Main L stopped: clocks +5.6 ppm apart · lock both to one reference · result from before,
+  phase faint*, or *· no result from before*), and the held curve's phase is faint; the
   relock, slip, drift and *link offset too small* lines show there as well. The legend's
   delay and the IR's time zero say *includes the clock offset between pupu and ketunkolo
   (not measured)* instead of a distance.

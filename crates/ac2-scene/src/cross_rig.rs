@@ -168,7 +168,8 @@ pub fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) ->
             NotLockedReason::OwnClock { rig: who, ppm } => {
                 let who = if who == x.rig { theirs.as_str() } else { ours };
                 format!(
-                    "{label} stopped: {who}'s interface runs {} ppm off",
+                    "{label} stopped: {who}'s interface runs {} ppm off · lock it to its host's \
+                     reference",
                     format::signed(ppm, 1)
                 )
             }
@@ -301,15 +302,25 @@ pub fn pane_banners(
 ) -> Vec<PaneBanner> {
     let rig = name_of(r, x.rig);
     let mut out = Vec::new();
-    if let (Some(v), CrossTfState::Stopped { why, .. }) = (stop_verdict(x), x.state) {
+    if let (Some(v), CrossTfState::Stopped { why, held }) = (stop_verdict(x), x.state) {
         let why_text = match why {
             StopWhy::Measuring => Some(format!("under a minute of audio from {rig} yet")),
             _ => banner(label, x, r, ours),
         };
-        // Whether a result from before stands shows on the plot: its phase drawn faint.
+        // What stands on the plot: a held result's phase is drawn faint. A measuring verdict
+        // already names a held result.
+        let kept = match (why, held) {
+            (StopWhy::Measuring, true) => None,
+            (_, true) => Some("result from before, phase faint"),
+            (_, false) => Some("no result from before"),
+        };
+        let detail = match (why_text, kept) {
+            (Some(w), Some(k)) => Some(format!("{w} · {k}")),
+            (w, k) => w.or(k.map(str::to_owned)),
+        };
         out.push(PaneBanner {
             text: v.to_owned(),
-            detail: why_text,
+            detail,
             warn: why != StopWhy::Measuring,
         });
     }
@@ -320,7 +331,7 @@ pub fn pane_banners(
         );
         out.push(PaneBanner {
             text: t,
-            detail: None,
+            detail: asks.then(|| format!("{find} finds the delay · phase faint until then")),
             warn: asks,
         });
     }
@@ -337,7 +348,7 @@ pub fn pane_banners(
     if let Some(d) = drift_text(x) {
         out.push(PaneBanner {
             text: format!("{d}: path or clocks"),
-            detail: Some("over 0.05 ms a minute for two minutes".into()),
+            detail: Some("delay moved over 0.05 ms a minute for two minutes".into()),
             warn: false,
         });
     }

@@ -178,7 +178,10 @@ fn clocks_not_locked_stop_it_and_say_so_everywhere() {
     );
     assert_eq!(
         pane_details(&t),
-        vec!["Main L stopped: clocks +5.6 ppm apart · lock both to one reference"]
+        vec![
+            "Main L stopped: clocks +5.6 ppm apart · lock both to one reference · result from \
+             before, phase faint"
+        ]
     );
     assert_eq!(
         pane_banners(&t),
