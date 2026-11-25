@@ -623,11 +623,7 @@ fn another_rigs_measurement_dropped_into_a_pane() -> R {
     let pupu = named("pupu", &dir.path().join("pupu-id"))?;
     let kettu = named("kettu", &dir.path().join("kettu-id"))?;
     // Kettu's spectrum goes by another name than pupu's of the same id.
-    let m = kettu
-        .cli
-        .state()
-        .and_then(|s| s.measurements.iter().find(|m| m.id == MIC_FFT).cloned())
-        .ok_or("kettu's spectrum")?;
+    let m = kettu.meas(MIC_FFT)?;
     kettu.call(Command::MeasUpdate {
         meas: MIC_FFT,
         base: m.edit_rev,

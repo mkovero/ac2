@@ -15,12 +15,7 @@ fn leq_page_holds_its_scroll_while_the_rig_meters() -> R {
     }
     let rig = Rig::start()?;
     // The rig's SPL meter, the page's, with the band meter's 545 windows.
-    let state = rig.cli.state().ok_or("no state")?;
-    let m = state
-        .measurements
-        .iter()
-        .find(|m| m.id == FOH_SPL)
-        .ok_or("no FOH SPL")?;
+    let m = rig.meas(FOH_SPL)?;
     let mut config = m.config.clone();
     if let MeasKind::Spl { config } = &mut config.kind {
         config.bands = Some(Box::new(BandLeqPreset::Finland545Lf.apply(None)));
