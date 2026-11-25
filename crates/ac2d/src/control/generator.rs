@@ -79,7 +79,6 @@ impl Control {
         }
     }
 
-    /// Fades the output out (the gate makes the source fade on its own as well).
     /// Whether `gen.stop` has anything to stop: the generator armed or firing, a sweep or
     /// dynamics run under way, a loopback burst, or the output still sounding.
     pub(super) fn generator_active(&self) -> bool {
@@ -95,8 +94,14 @@ impl Control {
                 .is_some_and(|rt| rt.gen_handle.state() != OutputState::Silent)
     }
 
+    /// Fades the output out (the gate makes the source fade on its own as well), a loopback
+    /// detection's burst with it: whatever stops the stimulus (`gen.stop`, a lease released,
+    /// expired or taken over) stops every sound the rig makes for a client.
     pub(super) fn stop_output(&mut self) {
         self.out.gate.close();
+        if let Some(d) = &self.pending.detecting {
+            d.cut.set();
+        }
         let sounding = self
             .stream
             .as_ref()

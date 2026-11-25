@@ -570,6 +570,17 @@ impl Control {
         if d.sounding == sounding {
             return;
         }
+        // A burst may only start while its requester holds the lease: one that ended has
+        // already cut it, and the state must never show firing with no owner.
+        let leased = self
+            .out
+            .lease
+            .as_ref()
+            .is_some_and(|l| l.owner == d.reply.client);
+        if sounding && !leased {
+            d.cut.set();
+            return;
+        }
         d.sounding = sounding;
         let (level, output, client) = (d.level, d.output, d.reply.client.clone());
         let mut g = self.store.state().generator.clone();

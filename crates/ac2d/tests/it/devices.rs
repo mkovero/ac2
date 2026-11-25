@@ -392,6 +392,68 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
     assert_eq!(e.code, ErrorCode::Refused);
 }
 
+/// The lease released while a loopback detection runs, before its burst and while it
+/// sounds: the burst is cut with the stimulus, the detection is refused, and the generator
+/// never shows firing once the lease is gone.
+#[test]
+fn a_released_lease_cuts_the_detection_burst() {
+    let h = start(Arc::new(named_rig(FakeDrive::Thread(Pace::Realtime), 0.0)));
+    let (mut c, s) = connect(&h, &[b"evt"]);
+    for while_sounding in [false, true] {
+        let token = c.acquire();
+        let detect = c.next_id();
+        c.send(&ac2_proto::Request::new(
+            detect,
+            Command::StreamDetectLoopback {
+                lease_token: token,
+                backend: BackendKind::Fake,
+                input_device: fake_dev(),
+                output_device: fake_dev(),
+                output: 0,
+                level: Dbfs(-30.0),
+            },
+        ));
+        let firing =
+            |e: &ac2_proto::Event| matches!(&e.change, ac2_proto::Change::Generator(g) if g.firing);
+        if while_sounding {
+            assert!(
+                s.event(Duration::from_secs(5), firing).is_some(),
+                "the burst"
+            );
+        }
+        let release = c.next_id();
+        c.send(&ac2_proto::Request::new(
+            release,
+            Command::GenRelease { lease_token: token },
+        ));
+        let mut detected = None;
+        let mut released = None;
+        while detected.is_none() || released.is_none() {
+            let r = c.recv(Duration::from_secs(10)).expect("a reply");
+            if r.id == detect {
+                detected = Some(r.result);
+            } else if r.id == release {
+                released = Some(r.result);
+            }
+        }
+        assert!(released.unwrap().is_ok());
+        let e = detected.unwrap().expect_err("cut");
+        assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+        assert!(e.msg.contains("cut"), "{e:?}");
+        // Nothing fires once the release has left the generator without an owner.
+        let mut released = false;
+        while let Some(e) = s.event(Duration::from_millis(500), |_| true) {
+            if let ac2_proto::Change::Generator(g) = &e.change {
+                assert!(!(released && g.firing), "firing with no lease: {g:?}");
+                released |= g.owner.is_none();
+            }
+        }
+        assert!(released);
+        let g = c.state().generator;
+        assert!(!g.firing && g.owner.is_none(), "{g:?}");
+    }
+}
+
 /// Input and output listed as two devices (a built-in mic and speakers): each says which direction it
 /// has, the loopback is found across them, and a stream opens with the output on the other
 /// device, reported as of unknown clock relation.
