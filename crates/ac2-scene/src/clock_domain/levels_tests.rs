@@ -151,8 +151,8 @@ fn levels_still_measuring_cannot_tell_and_say_the_count() {
         tip(&d, 1),
         format!(
             "can't tell: measuring clocks… · ketunkolo runs +2.71 ppm against pupu over 60 s · \
-             beyond 2 ppm for 4 min running · not locked at 10, agree after 2 min running \
-             within · marks for 5 min 12 s · {LEVELS}"
+             beyond 2 ppm for 4 min running · a verdict at 10, agree after 2 min below \
+             1.8 · marks for 5 min 12 s · {LEVELS}"
         )
     );
 }

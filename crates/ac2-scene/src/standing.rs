@@ -105,19 +105,19 @@ pub fn figure(s: &StandingRig, who: &str, against: &str) -> Option<String> {
     Some(figure_text(who, against, p, span.0))
 }
 
-/// The count toward a not-locked verdict, while one runs, with both ways out of it: the
-/// verdict at the minutes it needs, or agreement after two minutes in a row within the rule.
+/// The count toward a not-locked verdict, while one runs, with both ways out of it: a
+/// verdict (not locked, or can't tell) at the minutes it needs, or agreement after two
+/// minutes in a row below 1.8 ppm, a margin under the rule.
 pub fn count(s: &StandingRig) -> Option<String> {
     let c = s.counting?;
     Some(if c.beyond == c.counted {
         format!(
-            "beyond 2 ppm for {} min running · not locked at {}, agree after 2 min running \
-             within",
+            "beyond 2 ppm for {} min running · a verdict at {}, agree after 2 min below 1.8",
             c.beyond, c.needed
         )
     } else {
         format!(
-            "beyond 2 ppm in {} of {} min · a verdict at {}, agree after 2 min running within",
+            "beyond 2 ppm in {} of {} min · a verdict at {}, agree after 2 min below 1.8",
             c.beyond, c.counted, c.needed
         )
     })
@@ -216,8 +216,8 @@ mod tests {
         assert_eq!(
             one(&counting),
             "from levels ketunkolo · measuring clocks… · ketunkolo runs +2.71 ppm against this \
-             rig over 60 s · beyond 2 ppm for 4 min running · not locked at 10, agree after 2 \
-             min running within · marks for 5 min 12 s · 96 kHz, 3 inputs · link up"
+             rig over 60 s · beyond 2 ppm for 4 min running · a verdict at 10, agree after 2 \
+             min below 1.8 · marks for 5 min 12 s · 96 kHz, 3 inputs · link up"
         );
         counting.standing[0].counting = Some(MinuteCount {
             beyond: 2,
@@ -229,7 +229,7 @@ mod tests {
             one(&counting),
             "from levels ketunkolo · measuring clocks… · ketunkolo runs +2.71 ppm against this \
              rig over 60 s · beyond 2 ppm in 2 of 3 min · a verdict at 10, agree after 2 min \
-             running within · marks for 12 s · 96 kHz, 3 inputs · link up"
+             below 1.8 · marks for 12 s · 96 kHz, 3 inputs · link up"
         );
         assert_eq!(
             one(&rig(

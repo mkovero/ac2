@@ -242,7 +242,7 @@ is never only a colour):
   `AGREE`, or stays `UNKNOWN`; a not-locked verdict from levels needs ten minutes beyond
   2 ppm, and until then `UNKNOWN`'s tooltip says *measuring clocks…* with the figure, how
   many minutes have been beyond 2 ppm with the two ways the count ends (a verdict at ten,
-  agreement after two minutes running within) and how long the marks have come, or why it
+  agreement after two minutes running below 1.8 ppm) and how long the marks have come, or why it
   can't tell (*no timing in ketunkolo's levels*, *figure not steady*, *ketunkolo's
   interface against its system clock not steady*, *ketunkolo's timing keeps breaking off
   before a minute is in*, *no link to ketunkolo*). A tooltip resting on the levels says *measured from the rigs' level frames,
@@ -292,7 +292,7 @@ shows them (*from levels ketunkolo · clocks agree · ketunkolo runs +0.12 ppm a
 rig over 60 s · marks for 5 min 12 s · 96 kHz, 3 inputs · link up*). *measuring clocks…* means there is no verdict yet:
 the first whole minute of timing is not in, or the figure is beyond 2 ppm and is being
 watched before it is called (*ketunkolo runs +2.71 ppm against this rig over 60 s ·
-beyond 2 ppm for 4 min running · not locked at 10, agree after 2 min running within*); the figure is always the other rig's
+beyond 2 ppm for 4 min running · a verdict at 10, agree after 2 min below 1.8*); the figure is always the other rig's
 clock against the rig shown. A time sync slewing either computer's clock looks like a rate for a minute
 or two, so *clocks agree* comes after one minute within 2 ppm, and again after two minutes
 running below 1.8 ppm once a minute went beyond, while *CLOCKS NOT LOCKED: ketunkolo runs
