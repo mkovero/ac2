@@ -40,9 +40,16 @@ pub(crate) async fn take(
         )
         .await;
     let data = data?;
-    end?;
     answered();
     ac2_archive::verify(&data, &t.transfer.sha256).map_err(ClientError::Archive)?;
+    if let Err(e) = end {
+        // Every byte is in and matches its hash: the snapshot stands whatever became of the
+        // daemon's copy, which it drops when the transfer expires.
+        tracing::warn!(
+            "{}: ending the download failed ({e}); the snapshot is whole and used",
+            t.transfer.file_name
+        );
+    }
     let snap = ac2_proto::decode_snapshot(&data)
         .map_err(|e| ClientError::Snapshot(format!("{}: {e}", t.transfer.file_name)))?;
     if snap.rev != t.rev {

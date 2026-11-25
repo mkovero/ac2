@@ -184,3 +184,76 @@ async fn calls_are_sent_in_order_before_their_replies_are_awaited() {
         assert_eq!(body, ReplyBody::Ack { rev: Rev(id) });
     }
 }
+
+/// A snapshot whose bytes all came in and match their hash is the state, though ending its
+/// download fails (the daemon dropped the transfer, the reply to the end was lost).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_whole_snapshot_stands_when_its_download_end_fails() {
+    use ac2_proto::model::Transfer;
+    use ac2_proto::units::{Blob, TransferId};
+    use ac2_proto::{ErrorCode, ProtoError, SnapshotTransfer, StateSnapshot};
+    let retry = Retry {
+        timeout: Duration::from_millis(500),
+        retries: 1,
+    };
+    let (core, router, _ctx) = core(retry);
+    let snap = StateSnapshot {
+        state: ac2_proto::samples::state(),
+        rev: Rev(41),
+        daemon_incarnation: Default::default(),
+        stream_epoch: Default::default(),
+    };
+    let bytes = ac2_proto::encode_snapshot(&snap).unwrap();
+    let transfer = Transfer {
+        transfer: TransferId(9),
+        file_name: SnapshotTransfer::file_name(Rev(41)),
+        bytes: bytes.len() as u64,
+        sha256: ac2_archive::sha256_hex(&bytes),
+        chunk_bytes: 4096,
+    };
+    let daemon = std::thread::spawn(move || {
+        loop {
+            let Some(m) = router.recv_timeout(Duration::from_secs(5)).unwrap() else {
+                return;
+            };
+            let f = m.frames();
+            let req = decode_request(&f[f.len() - 1]).unwrap();
+            let (body, done) = match req.cmd {
+                Command::StateSnapshot => (
+                    Ok(ReplyBody::SnapshotTransfer(SnapshotTransfer {
+                        rev: Rev(41),
+                        transfer: transfer.clone(),
+                    })),
+                    false,
+                ),
+                Command::FileDownloadChunk { offset, .. } => {
+                    let at = offset as usize;
+                    let end = (at + 4096).min(bytes.len());
+                    (Ok(ReplyBody::Chunk(Blob(bytes[at..end].to_vec()))), false)
+                }
+                Command::FileDownloadEnd { .. } => (
+                    Err(ProtoError {
+                        code: ErrorCode::NotFound,
+                        msg: "no such transfer".into(),
+                        detail: None,
+                    }),
+                    true,
+                ),
+                other => panic!("{other:?}"),
+            };
+            let reply = Reply::new(req.id, body);
+            router
+                .send(&[f[0].clone(), encode_reply(&reply).unwrap()])
+                .unwrap();
+            if done {
+                return;
+            }
+        }
+    });
+    let got = crate::snapshot::take(&core, retry, &mut || {})
+        .await
+        .unwrap();
+    assert_eq!(got.rev, Rev(41));
+    assert_eq!(got.state, snap.state);
+    daemon.join().unwrap();
+}
