@@ -65,14 +65,21 @@ pub fn new_edit(id: TraceId, name: String, slot: Option<u8>, owner: TraceOwner) 
 }
 
 /// The rule every name an operator gives (a trace's, a measurement's, a walk's) follows:
-/// something to read, and at most `max` characters so lists, legends and the names
-/// derived from it stay bounded. `what` names the thing in the message.
+/// something to read on one line, and at most `max` characters so lists, legends and the
+/// names derived from it stay bounded. A control character (a newline) would break the
+/// one-line lists and let a name in a log line read as a line of its own. `what` names the
+/// thing in the message.
 pub fn check_name(what: &str, name: &str, max: usize) -> Result<(), String> {
     if name.trim().is_empty() {
         return Err(format!("a {what} needs a name"));
     }
     if name.chars().count() > max {
         return Err(format!("{what} names are at most {max} characters"));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(format!(
+            "a {what} name is one line without control characters"
+        ));
     }
     Ok(())
 }

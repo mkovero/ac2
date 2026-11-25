@@ -14,6 +14,7 @@ pub mod frame;
 pub mod grid;
 pub mod model;
 mod packing;
+pub mod printable;
 #[cfg(feature = "samples")]
 pub mod samples;
 pub mod spl_log;
