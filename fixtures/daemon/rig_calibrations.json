@@ -31,14 +31,14 @@
             "mic": "MM1 34804"
           },
           "spl": {
-            "calibrated_at": "now-7512724",
+            "calibrated_at": "now-5654544",
             "freq": 1000.0,
-            "measured": -25.98,
+            "measured": -25.99,
             "method": {
               "calibrator_level": 94.0,
               "type": "acoustic"
             },
-            "sensitivity": 119.98
+            "sensitivity": 119.99
           }
         }
       ],
@@ -86,7 +86,7 @@
         "firing": false,
         "last_action": {
           "action": "release",
-          "at": "now-6510936",
+          "at": "now-4522310",
           "client": "local-006b8b4567"
         },
         "owner": null,
@@ -150,12 +150,13 @@
             "scope": "session"
           },
           "config_rev": 3,
-          "edit_rev": 6,
+          "edit_rev": 3,
           "eq": [],
           "grid_id": "12070133294201089888",
           "id": 1,
           "layout": null,
           "offset": 0.0,
+          "rev": 6,
           "running": true
         },
         {
@@ -189,12 +190,13 @@
             "scope": "session"
           },
           "config_rev": 7,
-          "edit_rev": 9,
+          "edit_rev": 7,
           "eq": [],
           "grid_id": "12070133294201089888",
           "id": 2,
           "layout": null,
           "offset": 0.0,
+          "rev": 9,
           "running": true
         },
         {
@@ -226,12 +228,13 @@
             "scope": "session"
           },
           "config_rev": 10,
-          "edit_rev": 11,
+          "edit_rev": 10,
           "eq": [],
           "grid_id": "18085098523030766332",
           "id": 3,
           "layout": null,
           "offset": 0.0,
+          "rev": 11,
           "running": true
         },
         {
@@ -297,12 +300,13 @@
             "scope": "session"
           },
           "config_rev": 12,
-          "edit_rev": 14,
+          "edit_rev": 12,
           "eq": [],
           "grid_id": null,
           "id": 4,
           "layout": null,
           "offset": 0.0,
+          "rev": 14,
           "running": true
         }
       ],
@@ -314,7 +318,7 @@
               "f_hi": 19980.0,
               "f_lo": 50.0,
               "file_name": "449350_34804_0Grad.txt",
-              "imported_at": "now-4568154034",
+              "imported_at": "now-4553247372",
               "label": "0°",
               "points": 100,
               "stated_sensitivity": 15.0
@@ -324,7 +328,7 @@
               "f_hi": 19980.0,
               "f_lo": 50.0,
               "file_name": "449350_34804_90Grad.txt",
-              "imported_at": "now-4567353536",
+              "imported_at": "now-4552362916",
               "label": "90°",
               "points": 100,
               "stated_sensitivity": 15.0
@@ -386,43 +390,43 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-4573381412"
+              "since": "now-4562276134"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-4573381412"
+              "since": "now-4562276134"
             }
           },
-          "started_at": "now-4574319899",
+          "started_at": "now-4573378937",
           "windows": [
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-4573381412",
+              "since": "now-4562276134",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-4573381412",
+              "since": "now-4562276134",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-4573381412",
+              "since": "now-4562276134",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-4573381412",
+              "since": "now-4562276134",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-4573381412",
+              "since": "now-4562276134",
               "weighting": "a"
             }
           ]
@@ -463,7 +467,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-4623133078",
+          "opened_at": "now-4605752919",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -492,7 +496,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-6381473"
+        "saved_at": "now-4319188"
       }
     },
     "traces": []

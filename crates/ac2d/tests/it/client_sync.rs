@@ -66,7 +66,7 @@ async fn hello_snapshot_and_live_events() {
     stop(h).await;
 }
 
-/// An edit made on a measurement another commit has moved since is refused with its
+/// An edit made on a configuration another edit has changed since is refused with its
 /// current `edit_rev`, and goes through once made on that.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stale_base_is_a_conflict() {
@@ -84,9 +84,10 @@ async fn a_stale_base_is_a_conflict() {
         other => panic!("{other:?}"),
     };
     let moved = match c
-        .call(Command::MeasOffset {
+        .call(Command::MeasUpdate {
             meas: m.id,
-            offset: ac2_proto::units::Db(3.0),
+            base: m.edit_rev,
+            config: spl("moved", 0),
         })
         .await
         .unwrap()

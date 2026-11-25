@@ -448,6 +448,7 @@ pub fn spl_measurement() -> Measurement {
         },
         config_rev: Rev(40),
         edit_rev: Rev(40),
+        rev: Rev(40),
         running: true,
         grid_id: None,
         colour: None,

@@ -30,17 +30,25 @@ Several parts of the protocol carry two jobs in one field or have no way out pas
 
 ### 1. Measurement edit token and the delay entity
 
-**Edit token.** `Measurement` gains `edit_rev: Rev`: the store rev of the last commit of
-this measurement entity, whatever changed (configuration, display, name, colour, offset,
-layout, EQ sets, running). `Store::commit` stamps it on the `measurement` set before it
-clones the change into the event and the replay queue, so no command path can forget it, and
-every reply that carries a measurement reads it back from the store after the commit (never
-the clone made before it), so the caller's next `base` is current. `meas.update.base` is
-compared against `edit_rev`; a mismatch is `conflict` whose detail (`stale_meas`) carries the
-current `edit_rev`. The commands that change one field (`meas.colour`, `meas.offset`,
-`meas.layout`, `meas.eq` other than `put`) take no base and are last write wins; they still
-move `edit_rev`, so a whole-config write prepared before them is refused and re-read rather
-than replayed over them.
+**Edit token.** `Measurement` gains `edit_rev: Rev`: the store rev of the commit that
+created the measurement or last changed its `config` (name, kind with every setting,
+display ones included, scope). `base` protects a `meas.update`, which replaces the
+configuration and nothing else, from being built on a configuration someone else changed;
+a commit that leaves the configuration cannot make it stale, so it leaves the token.
+`Store::commit` stamps it on the `measurement` set before it clones the change into the
+event and the replay queue, comparing the configuration with the stored one (this commit's
+rev when new or different, else the stored token), so no command path, present or future,
+can move it or forget to. Every reply that carries a measurement reads it back from the
+store after the commit (never the clone made before it), so the caller's next `base` is
+current. `meas.update.base` is compared against `edit_rev`; a mismatch is `conflict` whose
+detail (`stale_meas`) carries the current `edit_rev`. The commands that change other fields
+(`meas.colour`, `meas.offset`, `meas.layout`, `meas.eq`, `meas.start`, `meas.stop`) take no
+`edit_rev` base, are last write wins and leave `edit_rev`, as do the daemon's own commits of
+those fields (a job started or restarted on a new grid, a stream reopen, panes pruned when a
+measurement or trace they draw goes). Two configuration edits made on one base: the second
+is refused. `Measurement` also carries `rev`, the rev of its last commit whatever changed,
+stamped in the same place: it orders two copies of the measurement (a reply, the mirror's)
+for a client that overlays its own edits, and is never a base.
 
 Every `base` taken today from `config_rev` moves to `edit_rev`: in the daemon the internal
 `meas_update` call (`control/walks.rs`) and the `MeasUpdate` that `control/leq.rs` executes
@@ -50,13 +58,14 @@ for a band transfer; in the CLI `cmd/leq.rs`, `cmd/osc.rs`, `cmd/bands.rs`, `cmd
 `config_rev`: in the app `conn/pacing.rs`, `state/glide.rs`, `state/walk_bar.rs`,
 `state/leq.rs`, and the bins-to-`tf` match in `ac2-scene` `tf/bins.rs`.
 
-Because every commit of the measurement moves `edit_rev`, a second edit built from the mirror
-before the first one's event arrives (a key repeat, an offset drag followed by a configuration
-key) would be refused. The app chains the edits of each measurement (`meas.update`,
+Because a configuration edit moves `edit_rev`, a second one built from the mirror before the
+first one's event arrives (a key repeat) would be refused. The app chains the edits of each
+measurement (`meas.update`,
 `meas.colour`, `meas.offset`, `meas.layout`, `meas.eq`, `meas.start`, `meas.stop`; each
 answers with the measurement as committed). An edit that carries a base (`meas.update`,
 `meas.eq put`) waits for the replies of the edits of that measurement in flight and takes
-its `base` from the measurement the last reply carries, not from the mirror; the edits
+its `base` from the newer (by `rev`) of the measurement the last reply carries and the
+mirror (the event of a commit may come before its reply); the edits
 without a base are last write wins and go at once unless a based edit waits ahead of them,
 since the daemon runs one client's requests in the order sent (the app's link puts each
 request on the socket as it is made and only awaits the reply apart). Chains are per rig:
@@ -66,21 +75,20 @@ reply, with the configuration of the newest `meas.update` sent or waiting, so a 
 pressed twice before the first reply steps twice and a toggle pressed twice ends where it
 began. A queued edit then only takes the newer `edit_rev` (or, for an EQ `put`, the set's
 newer `rev`), and only when its own base was the one the app knew when it was made and the
-reply shows what it replaces (the configuration, the set's body) as it was made on: nothing
+newer of the two shows what it replaces (the configuration, the set's body) as it was made on: nothing
 but this app's own edits came between. Otherwise it goes as made and the daemon refuses
 it; a base deliberately older (the SPL / Leq page, below) always goes as made. A
 `stale_meas` refusal then means another client or the daemon
-committed the measurement in between: the app shows the conflict toast (`<what>: changed
+changed the configuration in between: the app shows the conflict toast (`<what>: changed
 elsewhere — reloaded`, as for any refused base), drops that measurement's queued edits and
 warns how many were not sent (`<name>: n later edits not sent — it changed elsewhere, shown
 as it is now`). The queued edits are dropped as well when the link goes down or another
 daemon incarnation answers (`n measurement edits not sent — the link to the rig went down`):
 the ids they name may be another measurement's. Every edit dropped, or refused before it is
 sent to a viewer, is answered to what waits for its reply as a refusal would be (the layout
-queue, the EQ editor, the SPL / Leq page). A page held open over time (the SPL / Leq page) is made on the `edit_rev` it opened on;
-while the meter's name, scope and SPL configuration stay what the page was made on, it takes
-each newer `edit_rev` the mirror shows (a pane laid out, a start, a job restart), so only a
-change of what Apply writes refuses it. The one `meas.update` the connection sends on its own (a sweep's stimulus
+queue, the EQ editor, the SPL / Leq page). A page held open over time (the SPL / Leq page) is made on the `edit_rev` it opened on
+and keeps it: a pane laid out, a start or a job restart leaves the token, so only a change
+of the configuration refuses its Apply. The one `meas.update` the connection sends on its own (a sweep's stimulus
 settings, `conn/stimulus.rs`) is outside the chain and takes the mirror's `edit_rev`; a
 refusal there is reported like any failed call.
 
@@ -156,7 +164,7 @@ the `tf` emit they belong to (`jobs/bins.rs`), so the same rule holds for them.
 
 **Mirror and session file.** `apply_change` gains `Delay` and `DelayFinding` upserts keyed
 by `meas`; deletes arrive as events. The saved measurement already keeps its delay apart
-(`SavedDelay`), and `edit_rev` is never saved in a session: a load commits every entity
+(`SavedDelay`), and neither `edit_rev` nor `rev` is saved in a session: a load commits every entity
 afresh.
 
 ### 2. Retiring `expect_rev`; `base` on `meas.eq put`

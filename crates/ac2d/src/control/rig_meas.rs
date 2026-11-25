@@ -430,6 +430,7 @@ impl Control {
                 config: sm.config,
                 config_rev: Rev(0),
                 edit_rev: Rev(0),
+                rev: Rev(0),
                 grid_id,
                 colour: sm.colour,
                 layout: sm.layout,

@@ -630,6 +630,7 @@ impl Control {
                 config: sm.config,
                 config_rev: Rev(self.store.rev().0 + 1),
                 edit_rev: Rev(self.store.rev().0 + 1),
+                rev: Rev(self.store.rev().0 + 1),
                 // A sweep measurement never runs on its own: only `sweep.run` plays it.
                 running,
                 grid_id,

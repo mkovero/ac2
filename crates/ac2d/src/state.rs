@@ -160,13 +160,22 @@ impl Store {
         &self.state
     }
 
-    /// Applies `change`, bumps `rev` and records the event for replay. A measurement is
-    /// stamped with this commit's rev as its `edit_rev` here, before the event and the
-    /// replay copy are made, so no command path can commit one without moving its token.
+    /// Applies `change`, bumps `rev` and records the event for replay. A measurement's
+    /// `rev` and `edit_rev` are stamped here, before the event and the replay copy are made,
+    /// so no command path can set them. `rev` is this commit's. `edit_rev` is this commit's
+    /// rev when the measurement is new or its configuration differs from the stored one,
+    /// else the stored token: a `meas.update` replaces the configuration and nothing else,
+    /// so only a commit that changes the configuration can make one built before it
+    /// overwrite what its maker never saw.
     pub(crate) fn commit(&mut self, mut change: Change, now: Instant) -> Event {
         self.rev = Rev(self.rev.0 + 1);
         if let Change::Measurement(Patch::Set(m)) = &mut change {
-            m.edit_rev = self.rev;
+            let stored = self.state.measurements.iter().find(|o| o.id == m.id);
+            m.edit_rev = match stored {
+                Some(o) if o.config == m.config => o.edit_rev,
+                _ => self.rev,
+            };
+            m.rev = self.rev;
         }
         apply(&mut self.state, &change);
         let ev = Event {

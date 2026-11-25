@@ -27,7 +27,7 @@ impl AppState {
     }
 
     /// `meas.update` of `meas` to `config`, made on the measurement as this app has it
-    /// (the daemon refuses it as stale when another commit moved it since). The
+    /// (the daemon refuses it as stale when its configuration changed since). The
     /// measurement stays the session's or the rig's, as it is.
     pub fn meas_update(&self, meas: MeasId, mut config: ac2_proto::model::MeasConfig) -> Command {
         let m = self.meas(meas);

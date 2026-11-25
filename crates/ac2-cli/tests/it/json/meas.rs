@@ -235,6 +235,7 @@ async fn session_meas_delay_trace_flow() -> R {
             },
             "config_rev": 3,
             "edit_rev": 3,
+            "rev": 3,
             "running": false,
             "eq": [],
             "grid_id": null,
@@ -247,9 +248,9 @@ async fn session_meas_delay_trace_flow() -> R {
     let m = ok_json(&f, &["meas", "layout", "clear", "foh", "--json"]).await?;
     assert_eq!(m["layout"], serde_json::Value::Null);
     assert_eq!(m["config_rev"], 3);
-    assert!(
-        m["edit_rev"].as_u64() > Some(3),
-        "every commit moves edit_rev: {m}"
+    assert_eq!(
+        m["edit_rev"], 3,
+        "only a configuration change moves edit_rev: {m}"
     );
 
     let tf = ok_json(

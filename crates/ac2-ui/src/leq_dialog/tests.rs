@@ -16,6 +16,7 @@ fn meter() -> Measurement {
         },
         config_rev: Rev(3),
         edit_rev: Rev(3),
+        rev: Rev(3),
         running: true,
         grid_id: None,
         colour: None,

@@ -33,6 +33,7 @@ pub fn dynamics_measurement() -> Measurement {
         },
         config_rev: Rev(70),
         edit_rev: Rev(70),
+        rev: Rev(70),
         running: false,
         grid_id: None,
         colour: Some(ColourFamily::Neutral),

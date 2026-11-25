@@ -742,9 +742,14 @@ pub struct Measurement {
     /// Rev of the last commit that changed what its job computes from its configuration;
     /// frames whose `config_rev` stamp is ≥ this show it.
     pub config_rev: Rev,
-    /// Rev of the last commit of this measurement, whatever changed: the token an edit
-    /// names as its `base`, refused when another commit came between.
+    /// Rev of the last commit that created the measurement or changed its `config`: the
+    /// token a `meas.update` names as its `base`, refused when the configuration changed
+    /// since. Commits of the other fields (running, grid, colour, layout, offset, EQ sets)
+    /// leave it, as a `meas.update` writes none of them.
     pub edit_rev: Rev,
+    /// Rev of the last commit of this measurement, whatever changed: which of two copies
+    /// of it (a reply, the mirror's) is the newer. Never a base.
+    pub rev: Rev,
     /// Job running.
     pub running: bool,
     /// Grid of the measurement's main stream.

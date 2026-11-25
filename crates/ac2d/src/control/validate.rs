@@ -91,13 +91,14 @@ pub(super) fn upsert_inputs(current: &[InputSetup], rows: Vec<InputSetup>) -> Ve
     out
 }
 
-/// A `meas.update` made on a measurement committed since: the client re-reads it rather
+/// A `meas.update` made on a configuration changed since: the client re-reads it rather
 /// than overwrite the other edit.
 pub(super) fn stale_meas(meas: MeasId, edit_rev: Rev) -> ProtoError {
     perr_detail(
         ErrorCode::Conflict,
         format!(
-            "measurement {} was changed since this edit was made (now at rev {}); re-read it",
+            "measurement {}'s configuration was changed since this edit was made (now at rev \
+             {}); re-read it",
             meas.0, edit_rev.0
         ),
         ErrorDetail::StaleMeas { meas, edit_rev },

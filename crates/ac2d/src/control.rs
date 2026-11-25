@@ -901,7 +901,7 @@ impl Control {
     }
 
     /// Commits `m` as its measurement's new state and answers with it as stored: the commit
-    /// gave it its `edit_rev`, which the caller's next edit names as its base.
+    /// stamped its `edit_rev`, which the caller's next `meas.update` names as its base.
     fn reply_meas(&mut self, m: Measurement) -> ReplyBody {
         ReplyBody::Measurement(self.commit_meas_read(m))
     }

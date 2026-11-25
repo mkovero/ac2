@@ -105,7 +105,7 @@
             "scope": "session"
           },
           "config_rev": 3,
-          "edit_rev": 19,
+          "edit_rev": 3,
           "eq": [
             {
               "body": {
@@ -158,6 +158,7 @@
           "id": 1,
           "layout": null,
           "offset": 0.0,
+          "rev": 19,
           "running": true
         },
         {
@@ -191,12 +192,13 @@
             "scope": "session"
           },
           "config_rev": 7,
-          "edit_rev": 9,
+          "edit_rev": 7,
           "eq": [],
           "grid_id": "12070133294201089888",
           "id": 2,
           "layout": null,
           "offset": 0.0,
+          "rev": 9,
           "running": true
         },
         {
@@ -228,12 +230,13 @@
             "scope": "session"
           },
           "config_rev": 10,
-          "edit_rev": 11,
+          "edit_rev": 10,
           "eq": [],
           "grid_id": "18085098523030766332",
           "id": 3,
           "layout": null,
           "offset": 0.0,
+          "rev": 11,
           "running": true
         },
         {
@@ -299,12 +302,13 @@
             "scope": "session"
           },
           "config_rev": 12,
-          "edit_rev": 14,
+          "edit_rev": 12,
           "eq": [],
           "grid_id": null,
           "id": 4,
           "layout": null,
           "offset": 0.0,
+          "rev": 14,
           "running": true
         },
         {
@@ -348,12 +352,13 @@
             "scope": "session"
           },
           "config_rev": 20,
-          "edit_rev": 21,
+          "edit_rev": 20,
           "eq": [],
           "grid_id": "12070133294201089888",
           "id": 5,
           "layout": null,
           "offset": 0.0,
+          "rev": 21,
           "running": true
         }
       ],
@@ -411,11 +416,11 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-15016789"
+              "since": "now-21235290"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-15016789"
+              "since": "now-21235290"
             }
           },
           "started_at": null,
@@ -423,31 +428,31 @@
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-15016789",
+              "since": "now-21235290",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-15016789",
+              "since": "now-21235290",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-15016789",
+              "since": "now-21235290",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-15016789",
+              "since": "now-21235290",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-15016789",
+              "since": "now-21235290",
               "weighting": "a"
             }
           ]
@@ -488,7 +493,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-56651023",
+          "opened_at": "now-63841897",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -513,7 +518,7 @@
             "type": "uncalibrated"
           },
           "captured_unsettled": false,
-          "created_at": "now-10996124",
+          "created_at": "now-14208902",
           "delay": 0.0,
           "depth": null,
           "edit": {
@@ -564,7 +569,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-8465898"
+        "saved_at": "now-11971997"
       }
     },
     "traces": [
@@ -1300,7 +1305,7 @@
             "type": "uncalibrated"
           },
           "captured_unsettled": false,
-          "created_at": "now-10996124",
+          "created_at": "now-14208902",
           "delay": 0.0,
           "depth": null,
           "edit": {

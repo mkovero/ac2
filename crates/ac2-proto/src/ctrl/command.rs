@@ -269,16 +269,16 @@ pub enum Command {
     MeasUpdate {
         /// Measurement.
         meas: MeasId,
-        /// The measurement's `edit_rev` the edit was made on; another (it was committed
-        /// since, by anyone, for any field) is refused with `conflict` (`stale_meas`), and
-        /// the client re-reads it.
+        /// The measurement's `edit_rev` the edit was made on; another (its configuration
+        /// was changed since, by anyone) is refused with `conflict` (`stale_meas`), and the
+        /// client re-reads it.
         base: Rev,
         /// New configuration.
         config: MeasConfig,
     },
     /// Choose the colour family a measurement's curves are drawn in (`None`: the one its
     /// id gives). Its job and config rev go on. Refused for a math trace, which takes its
-    /// owner's. Last write wins; it moves `edit_rev`.
+    /// owner's. Last write wins; it leaves `edit_rev`.
     #[serde(rename = "meas.colour")]
     MeasColour {
         /// Measurement.
@@ -287,7 +287,7 @@ pub enum Command {
         colour: Option<ColourFamily>,
     },
     /// Set the panes a client shows while the measurement is selected, or clear them
-    /// (`None`). Its job and config rev go on. Last write wins; it moves `edit_rev`.
+    /// (`None`). Its job and config rev go on. Last write wins; it leaves `edit_rev`.
     #[serde(rename = "meas.layout")]
     MeasLayout {
         /// Measurement.
@@ -296,7 +296,7 @@ pub enum Command {
         layout: Option<PaneLayout>,
     },
     /// Set the display offset of the measurement's live curves, wherever they are drawn.
-    /// Its job and config rev go on. Last write wins; it moves `edit_rev`.
+    /// Its job and config rev go on. Last write wins; it leaves `edit_rev`.
     #[serde(rename = "meas.offset")]
     MeasOffset {
         /// Measurement.
@@ -316,7 +316,7 @@ pub enum Command {
     },
     /// Edit a measurement's EQ what-if sets (transfer and sweep measurements). Its job and
     /// config rev go on; replies with the measurement. A `put` names the set's rev it was
-    /// made on; every other edit is last write wins. Each moves `edit_rev`.
+    /// made on; every other edit is last write wins. None moves `edit_rev`.
     #[serde(rename = "meas.eq")]
     MeasEq {
         /// Measurement.
