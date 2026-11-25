@@ -75,18 +75,16 @@ fn trace(id: u32) -> StoredTrace {
         }
     };
     let envelope = |k: usize| {
-        (0..5)
-            .map(|j| DynamicsPoint {
-                edge: if j < 3 {
-                    DynamicsEdge::Start
-                } else {
-                    DynamicsEdge::End
-                },
-                t: -0.05 + j as f32 * 0.0137,
-                gr_db: if j == 0 { 0.0 } else { 6.1 / (k + j) as f32 },
-                h_db: [-40.0, f32::NAN, -71.3, f32::NAN],
-            })
-            .collect()
+        let mut e = DynamicsEdges::default();
+        for j in 0..5 {
+            let c = if j < 3 { &mut e.start } else { &mut e.end };
+            c.push(
+                -0.05 + j as f32 * 0.0137,
+                if j == 0 { 0.0 } else { 6.1 / (k + j) as f32 },
+                [-40.0, f32::NAN, -71.3, f32::NAN],
+            );
+        }
+        e
     };
     let inputs = [4u16, 5]
         .iter()
@@ -131,17 +129,15 @@ fn same(a: &DynamicsData, b: &DynamicsData) {
             (y.input, &y.name, y.delay, y.g0, &y.rows)
         );
     }
-    let bits = |e: &Vec<Vec<DynamicsPoint>>| -> Vec<(DynamicsEdge, u32, u32, [u32; 4])> {
+    let bits = |e: &Vec<DynamicsEdges>| -> Vec<Vec<u32>> {
         e.iter()
-            .flatten()
-            .map(|p| {
-                (
-                    p.edge,
-                    p.t.to_bits(),
-                    p.gr_db.to_bits(),
-                    p.h_db.map(f32::to_bits),
-                )
+            .flat_map(|e| [&e.start, &e.end])
+            .flat_map(|c| {
+                [
+                    &c.t, &c.gr_db, &c.h_db[0], &c.h_db[1], &c.h_db[2], &c.h_db[3],
+                ]
             })
+            .map(|v| v.iter().map(|x| x.to_bits()).collect())
             .collect()
     };
     assert_eq!(a.envelopes.len(), b.envelopes.len());

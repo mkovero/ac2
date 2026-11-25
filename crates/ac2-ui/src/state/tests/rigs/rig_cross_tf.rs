@@ -28,7 +28,6 @@ fn cross_tf(t: &mut T, relation: PeerRelation, state: CrossTfState) {
             rig: PUPU,
             name: "pupu".into(),
             ctrl: "tcp://192.168.9.27:7700".into(),
-            data: "tcp://192.168.9.27:7701".into(),
             key: "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID".into(),
         }];
         s.remote.rigs[0].clock.relation = relation;

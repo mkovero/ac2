@@ -174,7 +174,6 @@ fn slow_clocks_not_locked_across_rigs() -> R {
                 rig: kettu_id,
                 name: "kettu".into(),
                 ctrl: net_endpoints(&kettu).0,
-                data: net_endpoints(&kettu).1,
                 key: kettu_keys.public.to_z85(),
             },
         },

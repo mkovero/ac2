@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ErrorCode, ErrorDetail, ProtoError, Warning};
+use super::{ErrorCode, ProtoError, Warning};
 use crate::PROTO_VERSION;
 use crate::event::{Event, StateSnapshot};
 use crate::grid::GridDef;
@@ -172,7 +172,8 @@ impl Reply {
         self
     }
 
-    /// The daemon's answer to a request at another version (or without one).
+    /// The daemon's answer to a request at another version (or without one). The daemon's
+    /// version is the reply's own `v`, which every client reads before the body.
     pub fn version_refusal(id: RequestId, client: Option<u16>) -> Self {
         let client = client.unwrap_or(0);
         Self::new(
@@ -180,10 +181,7 @@ impl Reply {
             Err(ProtoError {
                 code: ErrorCode::VersionMismatch,
                 msg: format!("daemon speaks protocol {PROTO_VERSION}, client sent {client}"),
-                detail: Some(ErrorDetail::Version {
-                    daemon: PROTO_VERSION,
-                    client,
-                }),
+                detail: None,
             }),
         )
     }

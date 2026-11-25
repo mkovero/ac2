@@ -102,18 +102,13 @@ fn tcp(host: &str, port: u16) -> String {
     }
 }
 
-/// Where another rig reaches a source rig whose daemon is bound at `ctrl`/`data`: at the
+/// Where another rig reaches a source rig whose daemon's ctrl is bound at `ctrl` (its data
+/// is on the next port, which the pairing rig derives): at the
 /// host this app reaches it at over the network (`via`), else at the address it is bound to,
 /// else, bound to every interface of this computer, at this computer's name (`local_host`).
 /// `None` when it listens on loopback only: no other rig can reach it.
-pub fn peer_endpoints(
-    ctrl: &str,
-    data: &str,
-    via: Option<&str>,
-    local_host: &str,
-) -> Option<(String, String)> {
+pub fn peer_endpoints(ctrl: &str, via: Option<&str>, local_host: &str) -> Option<String> {
     let (bound, ctrl_port) = split_endpoint(ctrl)?;
-    let (_, data_port) = split_endpoint(data)?;
     let ip = bound.parse::<std::net::IpAddr>().ok();
     // Any address in 127/8 or ::1 is this computer only, as is the name `localhost`.
     let loopback = ip.is_some_and(|a| a.is_loopback()) || bound.eq_ignore_ascii_case("localhost");
@@ -124,7 +119,7 @@ pub fn peer_endpoints(
         _ if wildcard => local_host.to_owned(),
         _ => bound,
     };
-    Some((tcp(&host, ctrl_port), tcp(&host, data_port)))
+    Some(tcp(&host, ctrl_port))
 }
 
 /// The stream channels measurement kind `kind` names.
@@ -174,20 +169,17 @@ mod tests {
 
     #[test]
     fn the_source_is_reached_where_the_app_reaches_it_else_where_it_listens() {
-        let ep = |c: &str, via, local| peer_endpoints(c, &c.replace("7700", "7701"), via, local);
+        let ep = peer_endpoints;
         assert_eq!(
             ep("tcp://0.0.0.0:7700", Some("192.168.9.27"), "app"),
-            Some((
-                "tcp://192.168.9.27:7700".into(),
-                "tcp://192.168.9.27:7701".into()
-            ))
+            Some("tcp://192.168.9.27:7700".into())
         );
         assert_eq!(
-            ep("tcp://0.0.0.0:7700", None, "ketunkolo").map(|e| e.0),
+            ep("tcp://0.0.0.0:7700", None, "ketunkolo"),
             Some("tcp://ketunkolo:7700".into())
         );
         assert_eq!(
-            ep("tcp://10.0.0.5:7700", None, "ketunkolo").map(|e| e.0),
+            ep("tcp://10.0.0.5:7700", None, "ketunkolo"),
             Some("tcp://10.0.0.5:7700".into())
         );
         assert_eq!(ep("tcp://127.0.0.1:7700", None, "ketunkolo"), None);
@@ -200,11 +192,11 @@ mod tests {
             );
         }
         assert_eq!(
-            ep("tcp://[0:0:0:0:0:0:0:0]:7700", None, "ketunkolo").map(|e| e.0),
+            ep("tcp://[0:0:0:0:0:0:0:0]:7700", None, "ketunkolo"),
             Some("tcp://ketunkolo:7700".into())
         );
         assert_eq!(
-            ep("tcp://[::]:7700", Some("fe80::1"), "x").map(|e| e.0),
+            ep("tcp://[::]:7700", Some("fe80::1"), "x"),
             Some("tcp://[fe80::1]:7700".into())
         );
     }

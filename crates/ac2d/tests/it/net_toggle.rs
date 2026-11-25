@@ -641,7 +641,6 @@ fn slow_turned_on_mid_stream_a_paired_rig_gets_its_audio() {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: format!("tcp://127.0.0.1:{port}"),
-            data: format!("tcp://127.0.0.1:{}", port + 1),
             key: b.server_public_key().unwrap().to_z85(),
         },
     });
@@ -711,7 +710,6 @@ fn slow_turned_on_mid_stream_a_paired_rig_gets_its_audio() {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: format!("tcp://127.0.0.1:{moved}"),
-            data: format!("tcp://127.0.0.1:{}", moved + 1),
             key: b.server_public_key().unwrap().to_z85(),
         },
     });

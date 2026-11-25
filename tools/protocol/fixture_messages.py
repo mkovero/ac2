@@ -21,7 +21,6 @@ KETUNKOLO_PEER = {
     "rig": KETUNKOLO,
     "name": "ketunkolo",
     "ctrl": "tcp://192.168.9.20:47820",
-    "data": "tcp://192.168.9.20:47821",
     "key": "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7",
 }
 

@@ -191,7 +191,7 @@ fn a_detection_while_a_preview_opens_is_refused_in_time_and_keeps_the_lease() {
             input_device: fake_dev(),
             output_device: fake_dev(),
             output: 0,
-            level: Some(Dbfs(-30.0)),
+            level: Dbfs(-30.0),
         })
         .unwrap_err();
     assert!(

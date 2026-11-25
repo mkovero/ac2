@@ -20,10 +20,9 @@ use ac2_core::dynamics::{
     self as core, DynamicsResult, Onset, Phase, Programme, ProgrammeConfig, Release,
 };
 use ac2_proto::model::{
-    DynamicsData, DynamicsEdge, DynamicsFailure, DynamicsHarmonics, DynamicsInfo, DynamicsInput,
-    DynamicsLevel, DynamicsOnset, DynamicsOvershoot, DynamicsPhase, DynamicsPoint, DynamicsRow,
-    DynamicsRun, DynamicsStatus, DynamicsStep, DynamicsThump, DynamicsTime, DynamicsWindows,
-    Signal, TraceOwner,
+    DynamicsData, DynamicsEdges, DynamicsFailure, DynamicsHarmonics, DynamicsInfo, DynamicsInput,
+    DynamicsLevel, DynamicsOnset, DynamicsOvershoot, DynamicsPhase, DynamicsRow, DynamicsRun,
+    DynamicsStatus, DynamicsStep, DynamicsThump, DynamicsTime, DynamicsWindows, Signal, TraceOwner,
 };
 use ac2_proto::units::{Db, Dbfs, DynamicsId, Hz, MeasId, TraceId};
 use ac2_traces::meta;
@@ -481,12 +480,7 @@ impl Control {
             envelopes: r
                 .inputs
                 .iter()
-                .map(|i| {
-                    i.envelopes
-                        .iter()
-                        .map(|e| e.iter().map(point).collect())
-                        .collect()
-                })
+                .map(|i| i.envelopes.iter().map(|e| edges(e)).collect())
                 .collect(),
         };
         let grid = ac2_traces::text::dynamics::grid(run.carrier);
@@ -600,16 +594,16 @@ fn row(r: &core::StepRow) -> DynamicsRow {
     }
 }
 
-fn point(p: &core::EnvelopePoint) -> DynamicsPoint {
-    DynamicsPoint {
-        edge: match p.edge {
-            core::Edge::Start => DynamicsEdge::Start,
-            core::Edge::End => DynamicsEdge::End,
-        },
-        t: p.t as f32,
-        gr_db: p.gr_db,
-        h_db: p.h_db,
+fn edges(points: &[core::EnvelopePoint]) -> DynamicsEdges {
+    let mut e = DynamicsEdges::default();
+    for p in points {
+        let curve = match p.edge {
+            core::Edge::Start => &mut e.start,
+            core::Edge::End => &mut e.end,
+        };
+        curve.push(p.t as f32, p.gr_db, p.h_db);
     }
+    e
 }
 
 impl Control {

@@ -19,7 +19,6 @@ pub(super) struct Source {
     pub(super) id: RigId,
     pub(super) name: String,
     ctrl: String,
-    data: String,
     pub(super) key: String,
 }
 
@@ -30,7 +29,6 @@ impl Source {
             rig: self.id,
             name: self.name.clone(),
             ctrl: self.ctrl.clone(),
-            data: self.data.clone(),
             key: self.key.clone(),
         }
     }
@@ -203,10 +201,10 @@ impl AppState {
             Some(Ok(i)) => i,
         };
         let n = &info.network;
-        let (Some((ctrl, data)), Some(server_key)) = (n.status.endpoints(), &n.server_key) else {
+        let (Some((ctrl, _)), Some(server_key)) = (n.status.endpoints(), &n.server_key) else {
             return Err(PairRefusal::LocalOnly);
         };
-        let (ctrl, data) = peer_endpoints(ctrl, data, b.daemon_addr.as_deref(), &self.local_host)
+        let ctrl = peer_endpoints(ctrl, b.daemon_addr.as_deref(), &self.local_host)
             .ok_or(PairRefusal::LocalOnly)?;
         let name = self.rig_label(b);
         if taker.daemon().is_some_and(|s| {
@@ -228,7 +226,6 @@ impl AppState {
             id: b.id,
             name,
             ctrl,
-            data,
             key: server_key.clone(),
         })
     }

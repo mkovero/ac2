@@ -40,7 +40,6 @@ fn peer(rig: RigId, name: &str, key: &str) -> RigPeer {
         rig,
         name: name.into(),
         ctrl: "tcp://192.168.9.27:7700".into(),
-        data: "tcp://192.168.9.27:7701".into(),
         key: key.into(),
     }
 }

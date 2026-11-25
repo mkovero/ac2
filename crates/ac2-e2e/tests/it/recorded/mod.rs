@@ -184,7 +184,7 @@ fn record() -> R<Vec<(&'static str, Value)>> {
         input_device: device.clone(),
         output_device: device,
         output: 0,
-        level: Some(Dbfs(-30.0)),
+        level: Dbfs(-30.0),
     })? {
         ReplyBody::LoopbackDetection(x) => x,
         other => return Err(format!("stream.detect_loopback: {other:?}").into()),

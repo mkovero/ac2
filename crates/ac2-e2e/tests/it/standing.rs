@@ -59,7 +59,6 @@ fn paired_both_ways(dir: &std::path::Path) -> R<(ac2d::Handle, ac2d::Handle, Dri
                     rig: id,
                     name: name.into(),
                     ctrl: net_endpoints(h).0,
-                    data: net_endpoints(h).1,
                     key: h.server_public_key().ok_or("no server key")?.to_z85(),
                 },
             },

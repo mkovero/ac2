@@ -13,9 +13,9 @@ use ac2_audio::fake::{FakeDrive, FakePath};
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    DynamicsConfig, DynamicsEdge, DynamicsFailure, DynamicsOnset, DynamicsRun, DynamicsStatus,
-    DynamicsTime, ExportFormat, GeneratorDesired, GeneratorSettings, ImportFormat, ImportRole,
-    MeasConfig, MeasKind, OwnedTraces, Signal, TraceKind, TraceOwner, TraceSource,
+    DynamicsConfig, DynamicsFailure, DynamicsOnset, DynamicsRun, DynamicsStatus, DynamicsTime,
+    ExportFormat, GeneratorDesired, GeneratorSettings, ImportFormat, ImportRole, MeasConfig,
+    MeasKind, OwnedTraces, Signal, TraceKind, TraceOwner, TraceSource,
 };
 use ac2_proto::units::{Blob, Dbfs, Hz, LeaseToken, MeasId, Seconds, TraceId};
 use ac2_proto::{Command, ErrorCode};
@@ -272,21 +272,16 @@ fn slow_dynamics_run_stores_one_trace_that_exports_and_imports() {
         c.dynamics_table(Command::DynamicsTable { trace }),
         dyn_data.table()
     );
-    // One step's envelopes of one input are its points split by edge, in order.
+    // One step's envelopes of one input are the trace's, edge by edge.
     let env = |input, step| {
         Command::DynamicsEnvelope(ac2_proto::DynamicsEnvelopeArgs { trace, input, step })
     };
     let e1 = c.dynamics_envelope(env(1, 1));
-    let points = &dyn_data.envelopes[0][1];
-    let starts: Vec<f32> = points
-        .iter()
-        .filter(|p| p.edge == DynamicsEdge::Start)
-        .map(|p| p.t)
-        .collect();
-    assert_eq!(e1.start.t, starts);
-    assert_eq!(e1.start.t.len() + e1.end.t.len(), points.len());
-    assert_eq!(e1.end.gr_db.len(), e1.end.t.len());
-    assert!(e1.start.h_db.iter().all(|h| h.len() == starts.len()));
+    let edges = &dyn_data.envelopes[0][1];
+    assert_eq!(e1.start.t, edges.start.t);
+    assert_eq!(e1.end.t, edges.end.t);
+    assert!(e1.start.points().is_some_and(|n| n > 0));
+    assert!(e1.end.points().is_some());
     for bad in [env(0, 0), env(1, 2)] {
         let e = c.call(bad).unwrap_err();
         assert_eq!(e.code, ErrorCode::Invalid, "{}", e.msg);
@@ -555,7 +550,7 @@ fn the_largest_programmes_table_and_envelope_fit_a_ctrl_message() {
 /// their envelopes; its CSV is several ctrl messages long.
 fn big_dynamics_csv() -> Vec<u8> {
     use ac2_proto::model::{
-        CalState, DynamicsData, DynamicsInfo, DynamicsPoint, DynamicsStep, TraceMeta,
+        CalState, DynamicsData, DynamicsEdges, DynamicsInfo, DynamicsStep, TraceMeta,
     };
     use ac2_proto::units::{DynamicsId, StreamEpoch, WallNs};
     use ac2_traces::StoredTrace;
@@ -578,23 +573,19 @@ fn big_dynamics_csv() -> Vec<u8> {
         })
         .collect();
     let n = steps.len();
-    let envelope = |seed: usize| -> Vec<DynamicsPoint> {
-        (0..POINTS)
-            .map(|j| {
-                let start = j < POINTS * 2 / 3;
-                let k = if start { j } else { j - POINTS * 2 / 3 };
-                DynamicsPoint {
-                    edge: if start {
-                        DynamicsEdge::Start
-                    } else {
-                        DynamicsEdge::End
-                    },
-                    t: -0.05 + k as f32 * 0.000_125,
-                    gr_db: ((seed * 31 + j) % 977) as f32 * 0.010_3,
-                    h_db: [-40.5 - (j % 13) as f32, -55.25, -70.0, -81.5],
-                }
-            })
-            .collect()
+    let envelope = |seed: usize| -> DynamicsEdges {
+        let mut e = DynamicsEdges::default();
+        for j in 0..POINTS {
+            let start = j < POINTS * 2 / 3;
+            let k = if start { j } else { j - POINTS * 2 / 3 };
+            let c = if start { &mut e.start } else { &mut e.end };
+            c.push(
+                -0.05 + k as f32 * 0.000_125,
+                ((seed * 31 + j) % 977) as f32 * 0.010_3,
+                [-40.5 - (j % 13) as f32, -55.25, -70.0, -81.5],
+            );
+        }
+        e
     };
     let input = |i: u16| ac2_proto::model::DynamicsInput {
         input: i,

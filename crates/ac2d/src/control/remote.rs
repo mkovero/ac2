@@ -118,10 +118,11 @@ pub(crate) fn check_peers(peers: &[RigPeer]) -> Result<(), String> {
         if peers[..i].iter().any(|o| o.rig == p.rig) {
             return Err(format!("{} listed twice", p.name));
         }
-        for ep in [&p.ctrl, &p.data] {
-            if !ep.starts_with("tcp://") {
-                return Err(format!("{}: {ep} is not a tcp:// endpoint", p.name));
-            }
+        if p.data_endpoint().is_none() {
+            return Err(format!(
+                "{}: {} is not a tcp://host:port endpoint with a port from 1 to 65534",
+                p.name, p.ctrl
+            ));
         }
         if PublicKey::from_z85(&p.key).is_err() {
             return Err(format!(
@@ -528,7 +529,7 @@ impl Control {
             return;
         };
         let link = self.remote.link_state.get(&rig).map(|s| &s.0);
-        let Some((ctrl, data)) =
+        let Some(ctrl) =
             self.remote
                 .followed
                 .entry(rig)
@@ -543,7 +544,6 @@ impl Control {
             p.ctrl
         );
         p.ctrl = ctrl;
-        p.data = data;
         if let Err(e) = self.set_rig_peers(peers) {
             tracing::warn!("the new address of a paired rig is not saved: {}", e.msg);
         }

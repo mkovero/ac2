@@ -10,8 +10,11 @@ Each file is rewritten atomically; the original is kept beside it as `<name>.pre
 A file already in the new shape is left alone. Covers, per file:
 
 - rig.json (rig settings) 11 -> 12: `monitor_session` -> `monitor_stream`; a band
-  transfer's bands tagged by `type`, not `status`.
-- calibration store 4 -> 5: an input's `InputKind` tagged by `type`, not `kind`.
+  transfer's bands tagged by `type`, not `status`; a paired rig without `data` (its data
+  endpoint is the port after `ctrl`); a pane layout's `levels` and `plates` written out
+  where missing (none set, every plate at its default place and size).
+- calibration store 4 -> 5: an input's `InputKind` tagged by `type`, not `kind`; an
+  electrical calibration's `loading` written out (`null`, unloaded) where missing.
 - plan files (`plans/*.json`), unversioned -> `version: 1`: a surface tagged by `type`,
   not `kind`.
 
@@ -49,6 +52,36 @@ def band_transfer_types(node):
             band_transfer_types(v)
 
 
+LAYOUT_LEVELS = ("transfer", "spectrum_dbfs", "spectrum_spl", "distortion")
+LAYOUT_PLATES = ("legend", "readout", "mark", "peaks", "harmonics", "loudness")
+
+
+def layout_fields(node):
+    """Every pane layout under `node` (a map with `chrome` and `content`) with its `levels`
+    and `plates`, as a layout that never set them reads."""
+    if isinstance(node, dict):
+        if "chrome" in node and "content" in node:
+            node.setdefault("levels", {k: None for k in LAYOUT_LEVELS})
+            node.setdefault("plates", {k: {"at": None, "scale": 1.0} for k in LAYOUT_PLATES})
+        for v in node.values():
+            layout_fields(v)
+    elif isinstance(node, list):
+        for v in node:
+            layout_fields(v)
+
+
+def electrical_loading(node):
+    """Every electrical calibration under `node` with its `loading`, `null` where missing."""
+    if isinstance(node, dict):
+        if node.get("type") == "electrical" and "mic_sensitivity_from" in node:
+            node.setdefault("loading", None)
+        for v in node.values():
+            electrical_loading(v)
+    elif isinstance(node, list):
+        for v in node:
+            electrical_loading(v)
+
+
 def convert_rig(doc):
     """The rig settings document in format 12; raises ValueError on another version."""
     if doc.get("format") != RIG_FORMAT:
@@ -62,6 +95,11 @@ def convert_rig(doc):
     for key, value in doc.items():
         out["monitor_stream" if key == "monitor_session" else key] = value
     band_transfer_types(out.get("meters"))
+    layout_fields(out.get("meters"))
+    out["peers"] = [
+        {k: v for k, v in p.items() if k != "data"} if isinstance(p, dict) else p
+        for p in out.get("peers", [])
+    ]
     out["version"] = 12
     return out
 
@@ -80,6 +118,7 @@ def convert_cal(doc):
         {**i, "kind": retag(i.get("kind"), "kind")} if isinstance(i, dict) else i
         for i in doc.get("inputs", [])
     ]
+    electrical_loading(out.get("sensitivities"))
     out["version"] = 5
     return out
 

@@ -344,7 +344,10 @@ impl<'p> Link<'p> {
         local: Arc<LocalClock>,
     ) -> ac2_zmq::Result<Self> {
         let (ctrl, ctrl_mon) = dealer(ctx, curve, &peer.ctrl, ac2_proto::MAX_CTRL_BYTES)?;
-        let (data, data_mon) = dealer(ctx, curve, &peer.data, ac2_proto::MAX_DATA_PART_BYTES)?;
+        let data_ep = peer.data_endpoint().ok_or(ac2_zmq::Error::InvalidArgument(
+            "a paired rig's ctrl endpoint",
+        ))?;
+        let (data, data_mon) = dealer(ctx, curve, &data_ep, ac2_proto::MAX_DATA_PART_BYTES)?;
         let now = Instant::now();
         Ok(Self {
             peer,

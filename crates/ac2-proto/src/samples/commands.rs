@@ -200,7 +200,7 @@ pub fn commands() -> Vec<Command> {
             input_device: DeviceId("jack".into()),
             output_device: DeviceId("jack".into()),
             output: 0,
-            level: Some(Dbfs(-30.0)),
+            level: Dbfs(-30.0),
         },
         Command::TraceMicCurve {
             trace: TraceId(8),

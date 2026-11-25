@@ -239,10 +239,8 @@ pub struct LayoutPane {
     pub content: PaneContent,
     /// The level axis ranges the operator set on the pane (zoomed, panned, reset, fitted);
     /// one left `None` is framed by the client when the pane first shows a curve.
-    #[serde(default)]
     pub levels: LayoutLevels,
     /// Where the operator dropped the plates over the plot and their text size.
-    #[serde(default)]
     pub plates: LayoutPlates,
 }
 

@@ -135,7 +135,10 @@ fn picking_another_rigs_input_pairs_both_rigs_and_reopens_the_stream() {
     assert_eq!(peer.rig, PUPU);
     assert_eq!(peer.key, KEY_B);
     assert_eq!(peer.ctrl, "tcp://192.168.9.27:7700");
-    assert_eq!(peer.data, "tcp://192.168.9.27:7701");
+    assert_eq!(
+        peer.data_endpoint().as_deref(),
+        Some("tcp://192.168.9.27:7701")
+    );
     assert_eq!(
         config.remote_inputs,
         vec![RemoteInput {

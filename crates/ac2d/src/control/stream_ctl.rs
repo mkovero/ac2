@@ -490,15 +490,10 @@ impl Control {
         kind: ac2_proto::model::BackendKind,
         (input_device, output_device): (ac2_proto::model::DeviceId, ac2_proto::model::DeviceId),
         output: u16,
-        level: Option<Dbfs>,
+        level: Dbfs,
     ) -> Result<u64, ProtoError> {
         self.check_lease(Instant::now());
         self.lease_check(client, token)?;
-        let Some(level) = level else {
-            return Err(refused(
-                "type the burst level: loopback detection has no default level",
-            ));
-        };
         if !level.0.is_finite() {
             return Err(invalid("level must be finite"));
         }

@@ -334,7 +334,7 @@ DELTA_META = {
 }
 DELTA_HEADER = [
     ("v", None), ("form", None), ("seq", None), ("base", None), ("audio_sample", None),
-    ("capture_wall_ns", None), ("protection", None), ("crc", None), ("meta", None),
+    ("capture_wall_ns", None), ("protection", None), ("meta", None), ("crc", None),
 ]
 # Header fields a delta inherits from its base.
 _STATIC = ("kind", "stream_epoch", "daemon_incarnation", "config_rev", "config_applied_at",
@@ -779,7 +779,7 @@ def encode_delta(c: dict, base: dict):
             return None
         raw.append(w)
     head = [PROTO_VERSION, FORM_DELTA, h["seq"], b["seq"], h["audio_sample"], h["capture_wall_ns"],
-            h["protection"], zlib.crc32(c["codes"]), _per_frame(h)]
+            h["protection"], _per_frame(h), zlib.crc32(c["codes"])]
     payload = _deflate(b"".join(raw)) if h["arrays"] else b""
     return [c["topic"].encode(), _body(head, payload)]
 
@@ -815,9 +815,9 @@ def decode_wire(parts: list):
     if form == FORM_DELTA:
         d = named(DELTA_HEADER, raw)
         fields = DELTA_META.get(expected_kind)
-        d["meta"] = None if fields is None else named(fields, d["meta"])
-        if fields is None and raw[8] is not None:
+        if fields is None and d["meta"] is not None:
             raise DecodeError("per-frame metadata on a kind without any")
+        d["meta"] = None if fields is None else named(fields, d["meta"])
         return "delta", {"topic": parts[0].decode(), "header": d, "payload": payload}
     if form != FORM_KEY:
         raise DecodeError(f"form {form!r}")

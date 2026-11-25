@@ -50,14 +50,8 @@ pub enum ErrorDetail {
         /// Holder.
         owner: ClientId,
     },
-    /// `version_mismatch`.
-    Version {
-        /// Daemon's version.
-        daemon: u16,
-        /// Version the client sent.
-        client: u16,
-    },
-    /// `invalid` from `sim.run` / `sim.fit`: why the simulation was refused.
+    /// `invalid` from `sim.run` / `sim.fit`, `refused` when one is running
+    /// ([`crate::model::SimRefusal::Busy`]): why the simulation was refused.
     Sim {
         /// Why.
         reason: crate::model::SimRefusal,

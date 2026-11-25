@@ -60,9 +60,7 @@ pub enum CalMethod {
         mic_sensitivity_from: SensitivitySource,
         /// The mic's output impedance against the preamp's input impedance, when stated:
         /// the voltage per pascal at the input is the open-circuit one divided down by
-        /// them, and `SplCal::sensitivity` counts that. `None`: taken as unloaded, which is
-        /// also what a stored calibration (store file, capture sidecar) without the field was.
-        #[serde(default)]
+        /// them, and `SplCal::sensitivity` counts that. `None`: taken as unloaded.
         loading: Option<MicLoading>,
         /// Stated uncertainty of the sensitivity, ± dB.
         uncertainty: Db,

@@ -90,8 +90,8 @@ pub enum Command {
         output_device: DeviceId,
         /// Output to play the burst on (zero-based).
         output: u16,
-        /// RMS level of the burst; refused when absent (there is no default level).
-        level: Option<Dbfs>,
+        /// RMS level of the burst, always typed by the operator: there is no default level.
+        level: Dbfs,
     },
     /// Open the audio I/O (new epoch).
     #[serde(rename = "stream.open")]

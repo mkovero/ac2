@@ -104,7 +104,7 @@ fn rig(name: &str) -> Rig {
 
 fn sim_event(e: &Event) -> Option<&SimState> {
     match &e.change {
-        Change::Sim(s) => Some(s),
+        Change::Sim(s) | Change::SimMap(Some(s)) => Some(s),
         _ => None,
     }
 }
@@ -119,7 +119,13 @@ fn wait(sub: &Sub, id: SimId, pred: impl Fn(&SimState) -> bool) -> SimState {
 
 fn refusal(r: Result<ReplyBody, ac2_proto::ProtoError>) -> SimRefusal {
     let e = r.expect_err("refused");
-    assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
+    let code = match e.detail {
+        Some(ErrorDetail::Sim {
+            reason: SimRefusal::Busy,
+        }) => ErrorCode::Refused,
+        _ => ErrorCode::Invalid,
+    };
+    assert_eq!(e.code, code, "{e:?}");
     match e.detail {
         Some(ErrorDetail::Sim { reason }) => reason,
         other => panic!("{other:?}"),

@@ -223,16 +223,6 @@ pub enum DynamicsLevel {
     CantTell,
 }
 
-/// Which edge of a burst.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DynamicsEdge {
-    /// The burst's first sample.
-    Start,
-    /// The burst's last sample.
-    End,
-}
-
 /// `h2 … h5` and THD over one window, re the fundamental.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -313,20 +303,6 @@ pub struct DynamicsRow {
     pub drift: Db,
 }
 
-/// One point of a step's envelope.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DynamicsPoint {
-    /// The edge `t` counts from.
-    pub edge: DynamicsEdge,
-    /// From the edge, s (negative before the burst).
-    pub t: f32,
-    /// Gain reduction, dB.
-    pub gr_db: f32,
-    /// `h2 … h5` re the fundamental, dB; NaN where blind or not above the floor.
-    pub h_db: [f32; 4],
-}
-
 /// One measured input of a run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -394,7 +370,7 @@ pub struct DynamicsData {
     /// Per measured input.
     pub inputs: Vec<DynamicsInput>,
     /// Per measured input (as `inputs`), one envelope per step.
-    pub envelopes: Vec<Vec<Vec<DynamicsPoint>>>,
+    pub envelopes: Vec<Vec<DynamicsEdges>>,
 }
 
 impl DynamicsData {
@@ -414,7 +390,7 @@ impl DynamicsData {
             .iter()
             .position(|x| x.input == input)
             .ok_or_else(|| format!("input {} is not measured in this run", input + 1))?;
-        let points = self
+        let edges = self
             .envelopes
             .get(i)
             .and_then(|e| e.get(step as usize))
@@ -424,22 +400,11 @@ impl DynamicsData {
                     self.info.steps.len()
                 )
             })?;
-        let edge = |edge| {
-            let mut c = DynamicsEdgeCurve::default();
-            for p in points.iter().filter(|p| p.edge == edge) {
-                c.t.push(p.t);
-                c.gr_db.push(p.gr_db);
-                for (h, v) in c.h_db.iter_mut().zip(p.h_db) {
-                    h.push(v);
-                }
-            }
-            c
-        };
         Ok(DynamicsEnvelope {
             input,
             step,
-            start: edge(DynamicsEdge::Start),
-            end: edge(DynamicsEdge::End),
+            start: edges.start.clone(),
+            end: edges.end.clone(),
         })
     }
 }
@@ -455,6 +420,33 @@ pub struct DynamicsEdgeCurve {
     pub gr_db: Vec<f32>,
     /// `h2 … h5` re the fundamental, dB; NaN where blind or not above the floor.
     pub h_db: [Vec<f32>; 4],
+}
+
+impl DynamicsEdgeCurve {
+    /// Its points: the length every array shares, or `None` when they differ.
+    pub fn points(&self) -> Option<usize> {
+        let n = self.t.len();
+        (self.gr_db.len() == n && self.h_db.iter().all(|h| h.len() == n)).then_some(n)
+    }
+
+    /// Adds a point.
+    pub fn push(&mut self, t: f32, gr_db: f32, h_db: [f32; 4]) {
+        self.t.push(t);
+        self.gr_db.push(gr_db);
+        for (h, v) in self.h_db.iter_mut().zip(h_db) {
+            h.push(v);
+        }
+    }
+}
+
+/// One step's envelope of one measured input, from both edges of its burst.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DynamicsEdges {
+    /// From the burst's first sample.
+    pub start: DynamicsEdgeCurve,
+    /// From the burst's last sample.
+    pub end: DynamicsEdgeCurve,
 }
 
 /// One step's envelopes of one measured input (`dynamics.envelope`).
