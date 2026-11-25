@@ -191,6 +191,77 @@ pub fn local_daemon_running() -> bool {
     std::thread::spawn(probe).join().unwrap_or(false)
 }
 
+/// How long one background browse runs before it starts over. A new browse asks again on
+/// every interface, so a rig that came back at another address while no announcement of it
+/// reached this computer is found within this time, at a few packets a minute.
+const REBROWSE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The browse that runs while the connect dialog is closed, for as long as a held rig
+/// could follow its advert ([`crate::state::AppState::wants_adverts`]): the dialog's own
+/// browse ends with the dialog.
+#[derive(Debug, Default)]
+pub struct AdvertWatch {
+    /// The browse and when it started; `None` with a start time when it could not start.
+    browse: Option<(Option<Browser>, std::time::Instant)>,
+    table: RigTable,
+}
+
+impl AdvertWatch {
+    /// The adverts seen so far while `wanted`; a watch not wanted stops browsing.
+    pub fn poll(&mut self, wanted: bool) -> Vec<crate::state::AdvertSeen> {
+        if !wanted {
+            self.stop();
+            self.table = RigTable::default();
+            return Vec::new();
+        }
+        let now = std::time::Instant::now();
+        if self
+            .browse
+            .as_ref()
+            .is_none_or(|(_, at)| now.duration_since(*at) >= REBROWSE)
+        {
+            let failing = matches!(self.browse, Some((None, _)));
+            let browser = Browser::start(&Options::default())
+                .inspect_err(|e| {
+                    if !failing {
+                        tracing::warn!("mDNS browse: {e}; a held rig that moves is not followed");
+                    }
+                })
+                .ok();
+            self.stop();
+            self.browse = Some((browser, now));
+            self.table = RigTable::default();
+        }
+        if let Some((Some(b), _)) = &self.browse {
+            for u in b.poll() {
+                self.table.apply(u);
+            }
+        }
+        adverts(&self.table)
+    }
+
+    /// Ends the browse off the UI thread: its responder waits for its shutdown.
+    fn stop(&mut self) {
+        if let Some((Some(b), _)) = self.browse.take() {
+            std::thread::spawn(move || drop(b));
+        }
+    }
+}
+
+/// Where each rig in `table` says it is.
+fn adverts(table: &RigTable) -> Vec<crate::state::AdvertSeen> {
+    table
+        .rigs()
+        .into_iter()
+        .map(|r| crate::state::AdvertSeen {
+            host: r.host.clone(),
+            fingerprint: r.advert.fingerprint.clone(),
+            addresses: r.addresses.clone(),
+            port: r.port,
+        })
+        .collect()
+}
+
 pub struct ConnectDialog {
     key_dir: KeyDir,
     client_name: String,
@@ -291,15 +362,7 @@ impl ConnectDialog {
 
     /// Where each advertised rig says it is.
     pub fn adverts(&self) -> Vec<crate::state::AdvertSeen> {
-        self.table
-            .rigs()
-            .into_iter()
-            .map(|r| crate::state::AdvertSeen {
-                host: r.host.clone(),
-                fingerprint: r.advert.fingerprint.clone(),
-                addresses: r.addresses.iter().map(ToString::to_string).collect(),
-            })
-            .collect()
+        adverts(&self.table)
     }
 
     pub fn entries(&self) -> Vec<Entry> {

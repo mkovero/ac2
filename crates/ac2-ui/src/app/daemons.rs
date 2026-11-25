@@ -284,21 +284,48 @@ impl App {
     /// The rig in `slot` reaches the lock holder at `ep` instead of the default endpoints.
     fn retarget(&mut self, ctx: &egui::Context, slot: u32, ep: Endpoints) {
         let describe = format!("daemon at {}", ep.ctrl);
-        let mut config = ClientConfig::new(ep, self.client_name());
-        config.received_bytes = Arc::clone(&self.health.received);
+        let config = ClientConfig::new(ep, self.client_name());
+        self.relink(ctx, slot, Target { config, describe });
+    }
+
+    /// The rig its advert moved ([`crate::state::AppState::adverts_seen`]) is linked again
+    /// where it answers now, with the key pinned for it: never another key because an
+    /// advert says so. A rig with no link stays without one.
+    pub(super) fn follow_rig(&mut self, ctx: &egui::Context, m: crate::state::RigMoved) {
+        if self
+            .state
+            .rig_in_slot(m.slot)
+            .is_none_or(|r| r.link.is_none())
+        {
+            return;
+        }
+        let Some(setup) = &self.connect_setup else {
+            return;
+        };
+        let key_dir = ac2_client::KeyDir::new(setup.key_dir.clone());
+        match crate::connect::reach(&key_dir, &setup.client_name, &m.addr) {
+            Ok(Choice::Target(t, _)) => {
+                tracing::info!("ac2-ui: {} moved, following its advert", t.describe);
+                self.relink(ctx, m.slot, *t);
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("ac2-ui: a moved rig cannot be followed: {e}"),
+        }
+    }
+
+    /// The rig in `slot` linked to `target` in place of its link.
+    fn relink(&mut self, ctx: &egui::Context, slot: u32, mut target: Target) {
+        target.config.received_bytes = Arc::clone(&self.health.received);
+        let describe = target.describe.clone();
+        let daemon_addr = network_host(&target);
         let wake = crate::pace::link_wake(ctx.clone(), Arc::clone(&self.pacer));
-        let c = match Conn::start(
-            Target {
-                config,
-                describe: describe.clone(),
-            },
-            wake,
-        ) {
+        let c = match Conn::start(target, wake) {
             Ok(c) => c,
             Err(e) => return self.daemon_failed(slot, format!("link thread: {e}")),
         };
         if let Some(r) = self.state.rig_in_slot_mut(slot) {
-            if let Some(old) = r.link.replace(c) {
+            r.daemon_addr = daemon_addr;
+            if let Some(old) = r.relinked(c) {
                 self.closers.push(std::thread::spawn(move || {
                     old.close();
                 }));

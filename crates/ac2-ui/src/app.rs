@@ -234,6 +234,8 @@ pub struct App {
     window_checked: bool,
     /// What the connect dialog is made from.
     connect_setup: Option<ConnectSetup>,
+    /// The browse a held rig whose link is down follows to where it answers now.
+    follow: crate::connect::AdvertWatch,
     /// Paces the frames asked for by data or animation.
     pacer: Arc<crate::pace::Pacer>,
     /// This window's side of the health meter.
@@ -363,6 +365,7 @@ impl App {
             window: None,
             window_checked: false,
             connect_setup: opts.connect,
+            follow: Default::default(),
             pacer,
             health,
             health_measured: true,

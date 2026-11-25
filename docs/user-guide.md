@@ -85,8 +85,16 @@ daemon). The top bar starts with the rig shown, by name, with the dot of its lin
 **pupu ▾**. Click it, or pick *Rigs…* in the palette (**Ctrl+K**), for the drop-down:
 
 - every rig held, the one shown first in its place; a rig whose daemon stopped answering is
-  greyed and reads *unreachable · retrying* (the app keeps reconnecting on its own); one
-  whose daemon refuses this app's key reads *has not authorized this app*: Settings ›
+  greyed and reads *unreachable · retrying* (the app keeps reconnecting on its own). A
+  paired rig reached over the network that comes back at another address (a reboot on a
+  new DHCP lease) is followed there: while its link is down the app browses for its mDNS
+  advert, and an advert with the key pinned for it that no longer lists the address held
+  moves the rig to the first IPv4 address it does list, and the new address is remembered.
+  Only the key names the rig: an advert cannot change which key the app accepts, so a
+  false one only points the link at an address that never answers as that rig, and a
+  connected rig is never moved. With discovery off (`--no-discovery`), or across networks
+  mDNS does not cross, nothing is followed. One whose daemon refuses this app's key reads
+  *has not authorized this app*: Settings ›
   Connection names this app's key fingerprint and the line to add to `authorized_clients`
   on that host (then restart its `ac2d`). This is the only place that lists every rig the
   app holds: choosing one changes the rig shown, and with it the whole measurement list;
@@ -668,7 +676,8 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
     for one reached over the network, and just `remote` when the host is called what the
     rig is (rig *pupu* on host `pupu`: `remote (STIM OFF) · …`). A host reads by its name
     without the mDNS `.local` (`pupu`, never `pupu.local`, which would read as local), or
-    as the address you typed until the rig's advert has been seen in *Connect a rig…*;
+    as the address you typed until the rig's advert has been seen (in *Connect a rig…*, or
+    by the browse for a rig whose link is down);
     the hover has the daemon's version and full address, which Settings › Connection
     also shows. A click opens Settings › Connection.
   - **The stimulus** in brackets: `(STIM OFF)`, or `(ARMED pink −24 dBFS → Main L)`,

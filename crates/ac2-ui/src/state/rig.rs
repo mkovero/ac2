@@ -174,6 +174,13 @@ pub(super) struct Folding {
 }
 
 impl RigState {
+    /// `link` in place of its link, which is handed back to be closed: a new link was asked
+    /// for nothing yet, so every standing request goes out again on it.
+    pub(crate) fn relinked(&mut self, link: crate::conn::Conn) -> Option<crate::conn::Conn> {
+        self.asked = LastAsked::default();
+        self.link.replace(link)
+    }
+
     /// A rig not yet connected, reached through `target`.
     pub fn new(target: String) -> Self {
         Self::in_slot(0, target)

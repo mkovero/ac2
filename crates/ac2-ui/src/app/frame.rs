@@ -168,13 +168,22 @@ impl eframe::App for App {
                 Box::new(crate::conn::ConnEvent::Reply { what, result }),
             ));
         }
-        if let Some(d) = self.connect.as_mut() {
+        // What a browse lists names the rigs held at a typed address, and says where a
+        // rig whose link is down answers now.
+        let discovery = self.connect_setup.as_ref().is_some_and(|c| c.discovery);
+        let mut seen = self
+            .follow
+            .poll(discovery && self.connect.is_none() && self.state.wants_adverts());
+        let choice = self.connect.as_mut().and_then(|d| {
             let choice = d.show(&ctx, &theme::chrome(&t));
-            // What the browse lists names the rigs held at a typed address.
-            self.state.adverts_seen(&d.adverts());
-            if let Some(choice) = choice {
-                self.connect_to(&ctx, choice);
-            }
+            seen.extend(d.adverts());
+            choice
+        });
+        for m in self.state.adverts_seen(&seen) {
+            self.follow_rig(&ctx, m);
+        }
+        if let Some(choice) = choice {
+            self.connect_to(&ctx, choice);
         }
         if self.connect.as_ref().is_some_and(|d| d.closed) {
             self.connect = None;

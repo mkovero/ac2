@@ -86,7 +86,7 @@ pub use leq::strip::{LeqSpan, STRIP_MIN_S, StripMsg};
 pub use panes::pane_export::{PaneExport, pane_export_name};
 use rig::Folding;
 pub use rig::{FoldedAt, NextFrame, RigState, UNKNOWN_RIG};
-pub use rig_host::AdvertSeen;
+pub use rig_host::{AdvertSeen, RigMoved};
 use rigs::OtherRigs;
 mod link;
 use link::Pending;
