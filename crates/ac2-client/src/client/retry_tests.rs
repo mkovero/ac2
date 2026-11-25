@@ -129,3 +129,39 @@ async fn a_silent_daemon_times_out_after_every_retry() {
     );
     assert_eq!(received(&router, Duration::from_millis(50)).len(), 3);
 }
+
+/// Calls sent one after another are on the socket in that order before any reply is
+/// awaited, and each reply reaches its own call whichever is awaited first.
+#[tokio::test(flavor = "multi_thread")]
+async fn calls_are_sent_in_order_before_their_replies_are_awaited() {
+    let retry = Retry {
+        timeout: Duration::from_secs(5),
+        retries: 0,
+    };
+    let (core, router, _ctx) = core(retry);
+    let core = Arc::new(core);
+    let sent: Vec<SentCall> = (0..4)
+        .map(|_| core.send(Command::StreamStatus, retry).unwrap())
+        .collect();
+    let mut got = Vec::new();
+    while got.len() < sent.len() {
+        let m = router
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .expect("sent without being awaited");
+        let f = m.frames();
+        got.push((f[0].clone(), decode_request(&f[f.len() - 1]).unwrap()));
+    }
+    let ids: Vec<u64> = got.iter().map(|(_, r)| r.id.0).collect();
+    assert_eq!(ids, [7, 8, 9, 10]);
+    for (peer, req) in got.iter().rev() {
+        let reply = Reply::new(req.id, Ok(ReplyBody::Ack { rev: Rev(req.id.0) }));
+        router
+            .send(&[peer.clone(), encode_reply(&reply).unwrap()])
+            .unwrap();
+    }
+    for (call, id) in sent.into_iter().rev().zip([10, 9, 8, 7]) {
+        let (body, _) = call.reply().await.unwrap();
+        assert_eq!(body, ReplyBody::Ack { rev: Rev(id) });
+    }
+}

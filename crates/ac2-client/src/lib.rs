@@ -30,7 +30,7 @@ pub mod sessions;
 pub mod spl_log;
 
 pub use body::body_name;
-pub use client::{Client, ClientConfig, DEAD_AFTER, Retry};
+pub use client::{Client, ClientConfig, DEAD_AFTER, Retry, SentCall};
 pub use data::{Arrival, Latest, TopicFrame, frame_age};
 pub use endpoint::{Endpoints, RemoteAddr};
 pub use error::{ClientError, code_name};

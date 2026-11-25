@@ -46,11 +46,20 @@ impl MeasRefusal {
     }
 }
 
-/// Sends `cmd`, an edit of `meas`, and answers with [`ConnEvent::MeasEdited`].
+/// Sends `cmd`, an edit of `meas`, now and answers with [`ConnEvent::MeasEdited`]: sent
+/// before its reply is awaited, as the next edit of the chain is made on this one.
 pub(super) fn send(client: &Client, meas: MeasId, cmd: Command, what: String, out: &Out) {
-    let (c, o) = (client.clone(), out.clone());
+    let sent = match client.send_warned(cmd) {
+        Ok(sent) => sent,
+        Err(e) => {
+            let result = Err(MeasRefusal::of(&e));
+            out.send(ConnEvent::MeasEdited { meas, what, result });
+            return;
+        }
+    };
+    let o = out.clone();
     tokio::spawn(async move {
-        let result = match c.call_warned(cmd).await {
+        let result = match sent.reply().await {
             Ok((body, warnings)) => {
                 if !warnings.is_empty() {
                     o.send(ConnEvent::Warnings(warnings));
