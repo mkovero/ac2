@@ -65,13 +65,31 @@ fn fixed(ui: &mut egui::Ui, text: RichText, hover: Option<&str>) {
     }
 }
 
+/// The stimulus item's parts left to right, each in its colour: the state, who holds it,
+/// the keys; a ` · ` leads every part but the first, and the stop when it follows.
+fn stim_parts(s: &ac2_scene::stim_item::StimItem, ch: &Chrome) -> Vec<egui::WidgetText> {
+    let mut state = RichText::new(&s.state).color(super::segment::tone_color(ch, s.tone));
+    if s.strong {
+        state = state.strong();
+    }
+    let mut v: Vec<egui::WidgetText> = vec![state.into()];
+    if let Some(h) = &s.held {
+        v.push(RichText::new(format!("· {h}")).color(ch.warn).into());
+    }
+    if let Some(k) = &s.keys {
+        v.push(RichText::new(format!("· {k}")).color(ch.dim).into());
+    }
+    v
+}
+
 /// The top bar: the rig shown as the rigs drop-down, with its link's dot, fixed at the
-/// left; the stop (while anything is armed or playing), the key hints and the Settings
-/// gear fixed at the right; between them the line of [`ac2_scene::top_bar`], which scrolls
-/// when it is wider than the room left.
+/// left; the stimulus with the stop (while anything is armed or playing), the key hints and
+/// the Settings gear fixed at the right; between them the line of [`ac2_scene::top_bar`],
+/// which scrolls when it is wider than the room left.
 pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let bar = app.top_bar(std::time::Instant::now());
     let stop = app.bar_stop();
+    let stim = app.bar_stim();
     let st = &app.state;
     let line = lay_out_line(ui, ch, &bar);
     let dot_color = match bar.tone {
@@ -119,8 +137,26 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             .sum();
         chips + text_width(ui, &stop_text(&s.label, ch.fault)) + BAR_GAP + sep_w
     });
+    let stim_width = |s: &ac2_scene::stim_item::StimItem| -> f32 {
+        let w: f32 = stim_parts(s, ch)
+            .iter()
+            .map(|t| text_width(ui, t) + BAR_GAP)
+            .sum();
+        // Its own separator unless the stop's stands beside it.
+        w + if stop.is_some() { 0.0 } else { sep_w }
+    };
+    // The stimulus is never scrolled away: on a narrow bar it gives up its keys, then the
+    // holder, then what plays, until the line keeps room to be followed.
+    let fixed_room = ui.available_width() - left_w - stop_w - GEAR_W - 4.0;
+    let stim = stim.map(|s| {
+        (0..ac2_scene::stim_item::StimItem::STEPS)
+            .map(|n| s.narrowed(n))
+            .find(|n| fixed_room - stim_width(n) >= LINE_MIN_W)
+            .unwrap_or_else(|| s.narrowed(ac2_scene::stim_item::StimItem::STEPS - 1))
+    });
+    let stim_w = stim.as_ref().map_or(0.0, stim_width);
     let keys_w = text_width(ui, &keys) + BAR_GAP + sep_w;
-    let room_with_keys = ui.available_width() - left_w - stop_w - GEAR_W - keys_w - 4.0;
+    let room_with_keys = ui.available_width() - left_w - stop_w - stim_w - GEAR_W - keys_w - 4.0;
     let show_keys = room_with_keys >= line.width.min(LINE_MIN_W);
     let settings_tip = format!("Settings ({})", key_hint(app, CommandId::Settings));
     let mut open_settings = false;
@@ -164,11 +200,24 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                     RichText::new(&s.label).strong().color(ch.fault),
                     Some(&s.tip),
                 );
+            }
+            // The stimulus of the rig shown, just before its stop: the two read as one
+            // item, `ARMED pink −20.0 dBFS → out 1 · Enter fires · Space disarms · ■ Stop
+            // stimulus: Shift+Esc`.
+            if let Some(s) = &stim {
+                let parts = stim_parts(s, ch);
+                for t in parts.into_iter().rev() {
+                    ui.label(t).on_hover_text(&s.hover);
+                }
+            }
+            if let Some(s) = &stop {
                 // A chip per rig not shown that is armed or playing, the stop beside them.
                 for (text, firing) in &s.elsewhere {
                     let c = if *firing { ch.fault } else { ch.warn };
                     fixed(ui, RichText::new(text).strong().color(c), None);
                 }
+            }
+            if stim.is_some() || stop.is_some() {
                 ui.separator();
             }
             let room = ui.available_rect_before_wrap();

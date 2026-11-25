@@ -107,8 +107,8 @@ fn sweep_progress_strip() -> R {
     Ok(())
 }
 
-/// With the stimulus armed by another client (said in brackets, with who holds it) and a
-/// session open, at every width from wide to narrow: the rig drop-down and the stop are
+/// With the stimulus armed by another client (with who holds it) and a session open, at
+/// every width from wide to narrow: the rig drop-down, the stimulus item and the stop are
 /// whole and in the window, every label in the bar keeps its own space, and the daemon's
 /// software name is not in the bar. Wide, the whole line is there.
 #[test]
@@ -157,13 +157,13 @@ fn top_bar_never_overlaps() -> R {
             .collect();
         let has = |s: &str| labels.iter().any(|(t, _)| t.contains(s));
         // Fixed at the bar's ends, whatever the line between them does.
-        for s in ["Simulated rig", "■ Stop"] {
+        for s in ["Simulated rig", "ARMED", "■ Stop"] {
             assert!(has(s), "{width} px: no {s:?} in {labels:?}");
         }
         assert!(!has(DESCRIBE), "{width} px: {labels:?}");
         if width >= 2400.0 {
             // Wide: the line in full, and the key hints.
-            for s in ["local", "(ARMED", holder.as_str(), "frames", "commands"] {
+            for s in ["local", holder.as_str(), "frames", "commands"] {
                 assert!(has(s), "{width} px: no {s:?} in {labels:?}");
             }
         }

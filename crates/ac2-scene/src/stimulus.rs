@@ -1,4 +1,5 @@
-//! What the stimulus keys start next, as the top bar says it.
+//! What the stimulus keys start next, as the top bar's stimulus item says it
+//! ([`crate::stim_item`]).
 //!
 //! The focused view decides what Space arms: the sweep view a run of the selected sweep
 //! measurement with its settings (the new-sweep-measurement dialog when there is none),
@@ -457,30 +458,6 @@ fn short_number(v: f64) -> String {
     }
 }
 
-/// [`hint`] with more than one rig: the key line names the rig whose stimulus the key
-/// arms or fires, `arm pupu's stimulus · Space: pink −50 dBFS → out 1`.
-pub fn rig_hint(rig: &str, next: Next, what: &Stimulus, level_key: &str) -> (String, String) {
-    match (next, what) {
-        (
-            Next::Space,
-            Stimulus::SweepDialog
-            | Stimulus::SignalDialog
-            | Stimulus::Generator { level: None, .. },
-        ) => {
-            let (long, short) = hint(next, what, level_key);
-            (format!("{rig}: {long}"), format!("{rig}: {short}"))
-        }
-        (Next::Space, w) => {
-            let short = format!("arm {rig}'s stimulus · Space");
-            (format!("{short}: {}", describe(w)), short)
-        }
-        (Next::Enter, w) => {
-            let short = format!("fire {rig}'s stimulus · Enter");
-            (format!("{short}: {}", describe(w)), short)
-        }
-    }
-}
-
 /// The stimulus of a rig not shown, armed or playing: sound from a system the operator is
 /// not looking at is never silent in the UI.
 #[derive(Clone, Debug, PartialEq)]
@@ -563,10 +540,6 @@ mod tests {
             "Enter fires: sine 999.76 Hz −20 dBFS → out 1"
         );
         assert_eq!(
-            rig_hint("pupu", Next::Space, &what, "L").0,
-            "arm pupu's stimulus · Space: sine 999.76 Hz −20 dBFS → out 1"
-        );
-        assert_eq!(
             signal_name(&on_bin),
             format!("sine {}", format::freq_exact(999.755_859_375))
         );
@@ -591,10 +564,6 @@ mod tests {
                 "Space asks what to play: pink, white or a sine".into(),
                 "Space: signal…".into()
             )
-        );
-        assert_eq!(
-            rig_hint("pupu", Next::Space, &Stimulus::SignalDialog, "L").0,
-            "pupu: Space asks what to play: pink, white or a sine"
         );
     }
 

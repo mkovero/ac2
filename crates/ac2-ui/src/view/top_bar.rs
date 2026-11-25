@@ -6,9 +6,8 @@ use std::time::Instant;
 use ac2_scene::autosave::AutosaveTone;
 use ac2_scene::format;
 use ac2_scene::recording::RecordingTone;
-use ac2_scene::top_bar::{
-    Bar, BarAudio, BarInputs, BarLink, BarSession, BarStimulus, Note, Place, StimulusPhase, Tone,
-};
+use ac2_scene::stim_item::{StimInputs, StimItem, StimState};
+use ac2_scene::top_bar::{Bar, BarAudio, BarInputs, BarLink, BarSession, Note, Place, Tone};
 
 use crate::app::App;
 use crate::keys::{CommandId, STOP_ANYWHERE, Scope};
@@ -32,42 +31,28 @@ pub struct BarStop {
     pub elsewhere: Vec<(String, bool)>,
 }
 
-/// The generator of the rig shown as the bar says it: the badge, how loud it reads, what
-/// plays and where, and who else holds it.
-struct Stimulus {
-    badge: &'static str,
-    phase: StimulusPhase,
-    plays: String,
-    tip: String,
-    held_by: Option<String>,
-}
-
 impl App {
-    fn bar_stimulus(&self) -> Stimulus {
+    /// The stimulus of the rig shown, fixed at the bar's right end: what it is doing, what
+    /// plays, what the stimulus keys do next. `None` before the daemon's state is mirrored.
+    pub fn bar_stim(&self) -> Option<StimItem> {
         let st = &self.state;
-        let generator = st.daemon().map(|s| &s.generator);
+        let generator = &st.daemon()?.generator;
         let mine = generator
-            .and_then(|g| g.owner.as_ref())
+            .owner
+            .as_ref()
             .zip(st.my_client_id())
             .is_some_and(|(o, me)| o == me);
-        let held_by = generator
-            .and_then(|g| g.owner.as_ref())
-            .filter(|_| !mine)
-            .map(|o| {
-                let local = generator.is_some_and(|g| g.owner_local);
-                ac2_scene::stimulus::holder(o, local, &st.rig_name(st.active()))
-            });
+        let held_by = generator.owner.as_ref().filter(|_| !mine).map(|o| {
+            ac2_scene::stimulus::holder(o, generator.owner_local, &st.rig_name(st.active()))
+        });
         // The mirrored generator is the truth; the local phase only adds "requested".
-        let (badge, phase) = match (
-            generator.map(|g| (g.armed, g.firing)),
-            st.rig.stimulus.phase,
-        ) {
-            (Some((_, true)), _) => ("FIRING", StimulusPhase::Firing),
-            (Some((true, false)), StimPhase::FireRequested) => ("FIRE…", StimulusPhase::Armed),
-            (Some((true, false)), _) => ("ARMED", StimulusPhase::Armed),
-            (_, StimPhase::Arming) => ("ARMING…", StimulusPhase::Armed),
-            (_, StimPhase::Stopping) => ("STOPPING…", StimulusPhase::Off),
-            _ => ("STIM OFF", StimulusPhase::Off),
+        let state = match ((generator.armed, generator.firing), st.rig.stimulus.phase) {
+            ((_, true), _) => StimState::Firing,
+            ((true, false), StimPhase::FireRequested) => StimState::FirePending,
+            ((true, false), _) => StimState::Armed,
+            (_, StimPhase::Arming) => StimState::Arming,
+            (_, StimPhase::Stopping) => StimState::Stopping,
+            _ => StimState::Off,
         };
         let level = st.rig.stimulus.level.map_or_else(
             || "no level".to_string(),
@@ -84,19 +69,26 @@ impl App {
                 .map(|s| s.outputs.as_slice())
                 .unwrap_or_default(),
         );
-        Stimulus {
-            badge,
-            phase,
-            plays: format!("{prefix}{level} → {outputs}"),
-            tip: ac2_scene::stimulus::level_tip(&key_hint(self, CommandId::StimulusLevel)),
-            held_by,
-        }
+        let plays = format!("{prefix}{level} → {outputs}");
+        let tip = ac2_scene::stimulus::level_tip(&key_hint(self, CommandId::StimulusLevel));
+        let next = self.stimulus_next_hint();
+        let rig = st.many_rigs().then(|| st.rig_name(st.active()));
+        Some(ac2_scene::stim_item::stim_item(&StimInputs {
+            state,
+            plays: &plays,
+            held_by: held_by.as_deref(),
+            off_keys: next.as_ref().map(|(_, short)| short.as_str()),
+            keys: st.overlay == crate::state::Overlay::None,
+            rig: rig.as_deref(),
+            next_long: next.as_ref().map(|(long, _)| long.as_str()),
+            tip: &tip,
+        }))
     }
 
-    /// What the stimulus keys do next, as the focused view decides. With a window open the
-    /// window has Space, Enter and Esc; only the missing level is said then. Nothing while
-    /// a sweep runs: its progress strip says it.
-    fn stimulus_hint(&self) -> Option<String> {
+    /// What Space (or the level key) starts next on the focused view, long and short. With
+    /// a window open the window has Space and Enter; only the missing level is said then.
+    /// Nothing while a sweep runs: its progress strip says it.
+    fn stimulus_next_hint(&self) -> Option<(String, String)> {
         let st = &self.state;
         let running = st
             .daemon()
@@ -116,18 +108,11 @@ impl App {
                     )
             })
             .map(|(next, what)| {
-                let level_key = key_hint(self, CommandId::StimulusLevel);
-                if st.many_rigs() {
-                    let rig = st.rig_name(st.active());
-                    ac2_scene::stimulus::rig_hint(&rig, next, &what, &level_key).0
-                } else {
-                    ac2_scene::stimulus::hint(next, &what, &level_key).0
-                }
+                ac2_scene::stimulus::hint(next, &what, &key_hint(self, CommandId::StimulusLevel))
             })
     }
 
-    /// What the line says after the session: an autosave, a recording, a replay, what the
-    /// stimulus keys do next.
+    /// What the line says after the session: an autosave, a recording, a replay.
     fn bar_notes(&self) -> Vec<Note> {
         let st = &self.state;
         let wall = super::now().wall;
@@ -160,13 +145,6 @@ impl App {
                 hover: Some(ac2_scene::recording::REPLAY_DETAIL.to_owned()),
             });
         }
-        if let Some(text) = self.stimulus_hint() {
-            notes.push(Note {
-                text,
-                tone: Tone::Dim,
-                hover: None,
-            });
-        }
         notes
     }
 
@@ -196,7 +174,6 @@ impl App {
                 },
             ),
         };
-        let stimulus = st.daemon().map(|_| self.bar_stimulus());
         let stopped = crate::scenes::audio_stopped(st, wall);
         let stopped_hover = stopped
             .as_ref()
@@ -238,13 +215,6 @@ impl App {
             target,
             server,
             link,
-            stimulus: stimulus.as_ref().map(|s| BarStimulus {
-                badge: s.badge,
-                phase: s.phase,
-                plays: &s.plays,
-                tip: &s.tip,
-                held_by: s.held_by.as_deref(),
-            }),
             audio,
             banners: &banners,
             health,

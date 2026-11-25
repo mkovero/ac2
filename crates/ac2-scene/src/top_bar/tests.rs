@@ -2,18 +2,6 @@ use super::*;
 use crate::health::{HealthInputs, UiFrames, health_line};
 use ac2_proto::frame::{AudioHealth, DaemonHealth};
 
-const TIP: &str = "L sets the level";
-
-fn off() -> BarStimulus<'static> {
-    BarStimulus {
-        badge: "STIM OFF",
-        phase: StimulusPhase::Off,
-        plays: "−20.0 dBFS → Main L",
-        tip: TIP,
-        held_by: None,
-    }
-}
-
 fn session_line(changed: bool) -> SessionLine {
     SessionLine {
         full: "Fireface USB · 96 kHz · 256 frames".into(),
@@ -74,7 +62,6 @@ fn remote<'a>(line: &'a SessionLine) -> BarInputs<'a> {
             responding: true,
             synced: true,
         },
-        stimulus: Some(off()),
         audio: Some(BarAudio::Open {
             device: "Fireface USB",
             line,
@@ -105,8 +92,7 @@ fn a_host_reads_by_its_mdns_name_without_the_suffix() {
     assert_eq!(host_name(".local", None), ".local");
 }
 
-/// The line of a remote rig in good health: where the daemon runs, the stimulus, the audio
-/// settings, the meter, then the session after a rule. The link's dot is on the rig.
+/// The line of a remote rig in good health: where the daemon runs, the audio settings, the meter, then the session after a rule. The link's dot is on the rig.
 #[test]
 fn a_remote_rig_in_good_health() {
     let l = session_line(false);
@@ -115,7 +101,7 @@ fn a_remote_rig_in_good_health() {
     assert_eq!(b.tone, LinkTone::Ok);
     assert_eq!(
         b.text(),
-        "remote: ac2pi-0ab1c6 (STIM OFF) · 96 kHz · 256 frames · CPU 43 % · DSP 0 % · \
+        "remote: ac2pi-0ab1c6 · 96 kHz · 256 frames · CPU 43 % · DSP 0 % · \
          0 xruns · 85 fps | untitled · unsaved changes"
     );
     // The daemon's software and the numeric address are a hover away, never in the line.
@@ -133,8 +119,8 @@ fn a_remote_rig_in_good_health() {
     assert_eq!((session.lead, session.tone), (Lead::Rule, Tone::Warn));
     assert_eq!(session.click, Some(Click::Sessions));
     // The audio part carries the device and the meter its spans.
-    assert_eq!(b.line[2].hover.as_deref(), Some("Fireface USB"));
-    assert!(b.line[3].figures.is_some());
+    assert_eq!(b.line[1].hover.as_deref(), Some("Fireface USB"));
+    assert!(b.line[2].figures.is_some());
 }
 
 /// A host named as the rig is not said twice.
@@ -145,12 +131,9 @@ fn a_host_called_as_its_rig_is_only_remote() {
     i.place = Place::Remote { host: "Pupu" };
     i.health = None;
     i.session = None;
-    assert_eq!(bar(&i).text(), "remote (STIM OFF) · 96 kHz · 256 frames");
+    assert_eq!(bar(&i).text(), "remote · 96 kHz · 256 frames");
     i.place = Place::Remote { host: "pupu-2" };
-    assert_eq!(
-        bar(&i).text(),
-        "remote: pupu-2 (STIM OFF) · 96 kHz · 256 frames"
-    );
+    assert_eq!(bar(&i).text(), "remote: pupu-2 · 96 kHz · 256 frames");
 }
 
 /// The daemon the app started beside itself is `local`, with one CPU figure.
@@ -170,52 +153,17 @@ fn a_local_daemon() {
     let b = bar(&i);
     assert_eq!(
         b.text(),
-        "local (STIM OFF) · 96 kHz · 256 frames · CPU 43 % · DSP 0 % · 0 xruns · 85 fps | friday"
+        "local · 96 kHz · 256 frames · CPU 43 % · DSP 0 % · 0 xruns · 85 fps | friday"
     );
     assert_eq!(b.line.last().map(|p| p.tone), Some(Tone::Plain));
 }
 
-/// Armed or playing, the brackets say what plays and where, strong and in the warning or
-/// fault colour; another client holding the generator is said right after.
+/// The stimulus is never on the scrolling line: it is fixed at the bar's right end.
 #[test]
-fn the_stimulus_armed_and_playing() {
+fn the_stimulus_is_not_on_the_line() {
     let l = session_line(false);
-    let mut i = remote(&l);
-    i.health = None;
-    i.session = None;
-    i.stimulus = Some(BarStimulus {
-        badge: "FIRING",
-        phase: StimulusPhase::Firing,
-        plays: "pink −20.0 dBFS → Main L, Main R",
-        tip: TIP,
-        held_by: None,
-    });
-    let b = bar(&i);
-    assert_eq!(
-        b.text(),
-        "remote: ac2pi-0ab1c6 (FIRING pink −20.0 dBFS → Main L, Main R) · 96 kHz · 256 frames"
-    );
-    assert_eq!((b.line[1].tone, b.line[1].strong), (Tone::Fault, true));
-    assert_eq!(b.line[1].hover.as_deref(), Some(TIP));
-    i.stimulus = Some(BarStimulus {
-        badge: "ARMED",
-        phase: StimulusPhase::Armed,
-        plays: "−30.0 dBFS → out 1",
-        tip: TIP,
-        held_by: Some("alice"),
-    });
-    let b = bar(&i);
-    assert_eq!(
-        b.text(),
-        "remote: ac2pi-0ab1c6 (ARMED −30.0 dBFS → out 1) held by alice · 96 kHz · 256 frames"
-    );
-    assert_eq!((b.line[1].tone, b.line[2].tone), (Tone::Warn, Tone::Warn));
-    // Off, what it would play is in the hover.
-    i.stimulus = Some(off());
-    assert_eq!(
-        bar(&i).line[1].hover.as_deref(),
-        Some("−20.0 dBFS → Main L · L sets the level")
-    );
+    let b = bar(&remote(&l));
+    assert!(!b.text().contains("STIM"), "{}", b.text());
 }
 
 /// Link trouble takes the daemon's segment over, in its tone; the session stays.
@@ -321,9 +269,9 @@ fn the_audio_part_says_what_is_wrong_in_its_tone() {
     let b = bar(&i);
     assert_eq!(
         b.text(),
-        "remote: ac2pi-0ab1c6 (STIM OFF) · no session · Shift+S, then New session"
+        "remote: ac2pi-0ab1c6 · no session · Shift+S, then New session"
     );
-    assert_eq!(b.line[2].tone, Tone::Dim);
+    assert_eq!(b.line[1].tone, Tone::Dim);
 
     i.audio = Some(BarAudio::Stopped {
         text: "audio stopped · reopening (attempt 3, next in 8 s)",
@@ -332,9 +280,9 @@ fn the_audio_part_says_what_is_wrong_in_its_tone() {
     let b = bar(&i);
     assert_eq!(
         b.text(),
-        "remote: ac2pi-0ab1c6 (STIM OFF) · audio stopped · reopening (attempt 3, next in 8 s)"
+        "remote: ac2pi-0ab1c6 · audio stopped · reopening (attempt 3, next in 8 s)"
     );
-    assert_eq!(b.line[2].tone, Tone::Fault);
+    assert_eq!(b.line[1].tone, Tone::Fault);
 
     let changed = session_line(true);
     i.audio = Some(BarAudio::Open {
@@ -346,12 +294,12 @@ fn the_audio_part_says_what_is_wrong_in_its_tone() {
     let b = bar(&i);
     assert_eq!(
         b.text(),
-        "remote: ac2pi-0ab1c6 (STIM OFF) · 96 kHz · 256 frames · driver changed from 48 kHz · \
+        "remote: ac2pi-0ab1c6 · 96 kHz · 256 frames · driver changed from 48 kHz · \
          Mains: STOPPED, clocks not locked"
     );
-    assert_eq!((b.line[2].tone, b.line[3].tone), (Tone::Warn, Tone::Warn));
+    assert_eq!((b.line[1].tone, b.line[2].tone), (Tone::Warn, Tone::Warn));
     assert_eq!(
-        b.line[2].hover.as_deref(),
+        b.line[1].hover.as_deref(),
         Some("Fireface USB · the driver changed the rate to 96 kHz (was 48 kHz)")
     );
 }
@@ -365,16 +313,10 @@ fn a_typed_address_until_an_advert_is_seen() {
     i.session = None;
     let typed = host_name("192.168.9.27", None);
     i.place = Place::Remote { host: &typed };
-    assert_eq!(
-        bar(&i).text(),
-        "remote: 192.168.9.27 (STIM OFF) · 96 kHz · 256 frames"
-    );
+    assert_eq!(bar(&i).text(), "remote: 192.168.9.27 · 96 kHz · 256 frames");
     let seen = host_name("192.168.9.27", Some("ac2pi-0ab1c6.local"));
     i.place = Place::Remote { host: &seen };
-    assert_eq!(
-        bar(&i).text(),
-        "remote: ac2pi-0ab1c6 (STIM OFF) · 96 kHz · 256 frames"
-    );
+    assert_eq!(bar(&i).text(), "remote: ac2pi-0ab1c6 · 96 kHz · 256 frames");
 }
 
 /// What the line says after the session: each note in its tone.
@@ -390,7 +332,7 @@ fn notes_follow_the_session() {
             hover: None,
         },
         Note {
-            text: "Space arms: pink".into(),
+            text: "PLAY replay.wav".into(),
             tone: Tone::Dim,
             hover: None,
         },
@@ -398,7 +340,7 @@ fn notes_follow_the_session() {
     let b = bar(&i);
     assert!(
         b.text()
-            .ends_with(" | untitled · unsaved changes · REC 1:23 · Space arms: pink"),
+            .ends_with(" | untitled · unsaved changes · REC 1:23 · PLAY replay.wav"),
         "{}",
         b.text()
     );

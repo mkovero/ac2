@@ -1,7 +1,7 @@
 //! The window's top bar as one line of parts: the rig shown, where its daemon runs and how
 //! it is doing, then the session.
 //!
-//! `pupu ▾ | remote: ac2pi-0ab1c6 (STIM OFF) · 96 kHz · 256 frames · CPU 43 % · DSP 0 % ·
+//! `pupu ▾ | remote: ac2pi-0ab1c6 · 96 kHz · 256 frames · CPU 43 % · DSP 0 % ·
 //! 0 xruns · 85 fps | untitled · unsaved changes`
 //!
 //! Plain data in, parts out: the view places them (and scrolls the line when it is wider
@@ -51,29 +51,6 @@ pub enum BarLink<'a> {
         responding: bool,
         synced: bool,
     },
-}
-
-/// The generator of the rig shown.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BarStimulus<'a> {
-    /// `STIM OFF`, `ARMED`, `FIRING`, …
-    pub badge: &'a str,
-    pub phase: StimulusPhase,
-    /// What plays and where (`pink −20.0 dBFS → Main L, Main R`): said after the badge
-    /// unless off.
-    pub plays: &'a str,
-    pub tip: &'a str,
-    /// Another client holds the generator.
-    pub held_by: Option<&'a str>,
-}
-
-/// How loud the stimulus part reads.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StimulusPhase {
-    Off,
-    /// Armed, or on its way to armed or to playing: nothing sounds yet.
-    Armed,
-    Firing,
 }
 
 /// The audio I/O of the rig shown.
@@ -138,8 +115,6 @@ pub struct Part {
     pub lead: Lead,
     pub text: String,
     pub tone: Tone,
-    /// Strong: the stimulus while it is armed or plays.
-    pub strong: bool,
     pub hover: Option<String>,
     pub click: Option<Click>,
     /// The health meter: `text` in spans, which the view lays out in fixed slots so a
@@ -153,7 +128,6 @@ impl Part {
             lead,
             text: text.into(),
             tone,
-            strong: false,
             hover: None,
             click: None,
             figures: None,
@@ -171,8 +145,7 @@ impl Part {
     }
 }
 
-/// Something more the line says after the session: an autosave, a recording, a replay,
-/// what the stimulus keys do next.
+/// Something more the line says after the session: an autosave, a recording, a replay.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Note {
     pub text: String,
@@ -191,8 +164,6 @@ pub struct BarInputs<'a> {
     /// The daemon's software and version, once it said hello: for the hover.
     pub server: Option<&'a str>,
     pub link: BarLink<'a>,
-    /// `None`: no daemon state mirrored yet.
-    pub stimulus: Option<BarStimulus<'a>>,
     pub audio: Option<BarAudio<'a>>,
     /// Transfer functions across rigs stopped by the clocks: why and what to do.
     pub banners: &'a [String],
@@ -334,27 +305,10 @@ pub fn bar(i: &BarInputs<'_>) -> Bar {
     }
 }
 
-/// What a daemon whose link is fine says after its place: the stimulus, the audio I/O, a
-/// transfer function stopped across rigs, the health meter.
+/// What a daemon whose link is fine says after its place: the audio I/O, a transfer
+/// function stopped across rigs, the health meter. The stimulus is not on the line: it is
+/// fixed at the bar's right end ([`crate::stim_item`]).
 fn daemon_parts(i: &BarInputs<'_>, line: &mut Vec<Part>) {
-    if let Some(s) = i.stimulus {
-        let (tone, text) = match s.phase {
-            StimulusPhase::Off => (Tone::Dim, format!("({})", s.badge)),
-            StimulusPhase::Armed => (Tone::Warn, format!("({} {})", s.badge, s.plays)),
-            StimulusPhase::Firing => (Tone::Fault, format!("({} {})", s.badge, s.plays)),
-        };
-        let mut p = Part::new(Lead::Space, text, tone);
-        p.strong = s.phase != StimulusPhase::Off;
-        // Off, the level and outputs it would play at are a hover away.
-        let hover = match s.phase {
-            StimulusPhase::Off => format!("{} · {}", s.plays, s.tip),
-            _ => s.tip.to_owned(),
-        };
-        line.push(p.hover(hover));
-        if let Some(who) = s.held_by {
-            line.push(Part::new(Lead::Space, format!("held by {who}"), Tone::Warn));
-        }
-    }
     match i.audio {
         Some(BarAudio::Open { device, line: l }) => {
             let tone = if l.changed { Tone::Warn } else { Tone::Dim };

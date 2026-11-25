@@ -43,7 +43,7 @@ pub(super) struct Line {
     pub(super) width: f32,
 }
 
-fn tone_color(ch: &Chrome, t: Tone) -> Color32 {
+pub(super) fn tone_color(ch: &Chrome, t: Tone) -> Color32 {
     match t {
         Tone::Plain => ch.text,
         Tone::Dim => ch.dim,
@@ -98,11 +98,8 @@ pub(super) fn lay_out_line(ui: &egui::Ui, ch: &Chrome, bar: &Bar) -> Line {
                 (pieces, w)
             }
             None => {
-                let mut t = RichText::new(&p.text).color(tone_color(ch, p.tone));
-                if p.strong {
-                    t = t.strong();
-                }
-                let text: egui::WidgetText = t.into();
+                let text: egui::WidgetText =
+                    RichText::new(&p.text).color(tone_color(ch, p.tone)).into();
                 let w = text_width(ui, &text);
                 (vec![Piece { text, x: 0.0 }], w)
             }

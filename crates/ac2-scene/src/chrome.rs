@@ -23,16 +23,18 @@ pub fn keys_hint(help: &str, palette: &str) -> String {
     format!("{help} keys · {palette} commands")
 }
 
-/// The bar's stop while anything is armed or playing: the key that stops from anywhere.
+/// The bar's stop while anything is armed or playing: the key that stops from anywhere,
+/// with what it stops, since the bar's other items are measurements that stop with S.
 pub fn stop_label(stop: &str) -> String {
-    format!("■ Stop: {stop}")
+    format!("■ Stop stimulus: {stop}")
 }
 
 /// The stop's hover with one rig.
 pub fn stop_tip(stop: &str) -> String {
     format!(
-        "{stop} stops and disarms the stimulus from anywhere, also with a window open; with \
-         no window open Esc does too"
+        "{stop} stops and disarms the stimulus (the generator, a sweep or a dynamics run) from \
+         anywhere, also with a window open; with no window open Esc does too, and Space or \
+         Enter while it plays"
     )
 }
 
@@ -150,7 +152,7 @@ mod tests {
     #[test]
     fn keys_and_small_parts() {
         assert_eq!(keys_hint("F1", "P"), "F1 keys · P commands");
-        assert_eq!(stop_label("Shift+Esc"), "■ Stop: Shift+Esc");
+        assert_eq!(stop_label("Shift+Esc"), "■ Stop stimulus: Shift+Esc");
         assert_eq!(
             keys_tip("F1", "P", "K"),
             "F1 shows every key · P finds every command by name · K hides or shows the panes' \
