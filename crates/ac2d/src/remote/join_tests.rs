@@ -373,8 +373,8 @@ fn a_source_at_another_rate_or_replaying_gives_no_audio() {
     assert_eq!(
         inputs[0].audio,
         RemoteAudio::RateMismatch {
-            theirs: 96_000,
-            ours: RATE
+            theirs_hz: 96_000,
+            ours_hz: RATE
         }
     );
     let mut s = source(0);

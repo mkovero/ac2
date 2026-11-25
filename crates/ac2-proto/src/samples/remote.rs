@@ -233,8 +233,8 @@ pub fn remote_state() -> RemoteState {
             input_status(
                 7,
                 RemoteAudio::RateMismatch {
-                    theirs: 48_000,
-                    ours: 96_000,
+                    theirs_hz: 48_000,
+                    ours_hz: 96_000,
                 },
                 None,
             ),

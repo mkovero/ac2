@@ -277,11 +277,11 @@ pub fn audio_text(a: RemoteAudio, rig: &str, channel: u16) -> String {
         RemoteAudio::NoStream => format!("no audio from {rig} (no stream)"),
         RemoteAudio::NotCaptured => format!("{rig} does not capture in {n} (open it there)"),
         RemoteAudio::Replaying => format!("{rig} is replaying a recording"),
-        RemoteAudio::RateMismatch { theirs, ours } => {
+        RemoteAudio::RateMismatch { theirs_hz, ours_hz } => {
             format!(
                 "{rig} runs {}, this rig {}",
-                rate_text(theirs),
-                rate_text(ours)
+                rate_text(theirs_hz),
+                rate_text(ours_hz)
             )
         }
         RemoteAudio::Starting => "starting".into(),
@@ -574,8 +574,8 @@ mod tests {
                 },
             },
             RemoteAudio::RateMismatch {
-                theirs: 48_000,
-                ours: 96_000,
+                theirs_hz: 48_000,
+                ours_hz: 96_000,
             },
         );
         assert_eq!(

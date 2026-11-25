@@ -398,8 +398,8 @@ fn a_rigs_heading_says_the_relation_and_warns_in_words() {
     assert_eq!(says(&r, &inputs), "no audio from ketunkolo (no stream)");
     // No audio because the rates differ: both rates.
     r.inputs[0].audio = RemoteAudio::RateMismatch {
-        theirs: 48_000,
-        ours: 96_000,
+        theirs_hz: 48_000,
+        ours_hz: 96_000,
     };
     assert_eq!(says(&r, &inputs), "ketunkolo runs 48 kHz, this rig 96 kHz");
 }

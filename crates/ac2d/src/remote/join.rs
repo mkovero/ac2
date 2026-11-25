@@ -384,8 +384,8 @@ impl Joiner {
         {
             if h.sample_rate_hz != ours {
                 i.audio = RemoteAudio::RateMismatch {
-                    theirs: h.sample_rate_hz,
-                    ours,
+                    theirs_hz: h.sample_rate_hz,
+                    ours_hz: ours,
                 };
                 i.restart();
                 continue;
@@ -665,8 +665,8 @@ fn source_fault(source: Option<&SourceState>, channel: u16, ours: u32) -> Option
     }
     if s.sample_rate_hz != ours {
         return Some(RemoteAudio::RateMismatch {
-            theirs: s.sample_rate_hz,
-            ours,
+            theirs_hz: s.sample_rate_hz,
+            ours_hz: ours,
         });
     }
     if !s.inputs.iter().any(|i| i.channel == channel) {

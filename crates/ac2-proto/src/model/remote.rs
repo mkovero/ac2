@@ -332,9 +332,9 @@ pub enum RemoteAudio {
     /// Its rig runs another rate.
     RateMismatch {
         /// That rig's rate, Hz.
-        theirs: u32,
+        theirs_hz: u32,
         /// This rig's rate, Hz.
-        ours: u32,
+        ours_hz: u32,
     },
     /// Subscribed; no frame yet.
     Starting,

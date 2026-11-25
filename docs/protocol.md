@@ -2462,7 +2462,7 @@ not_steady{low, high, line} | marks_keep_breaking}}, `ppm`, `span`, `last_change
 `bytes_per_s`, `window` (bytes of frames the link may have in flight)}], one per rig the
 stream's remote inputs are on),
 `inputs` ([`RemoteInputStatus` {`slot`, `audio` {waiting | on_this_rig | no_stream |
-not_captured | replaying | rate_mismatch{theirs, ours} | starting | streaming}, `anchor`
+not_captured | replaying | rate_mismatch{theirs_hz, ours_hz} | starting | streaming}, `anchor`
 (nil | system_time | arrival{reason: system_clock | no_capture_stamps | no_stamp_map |
 clocks_disagree{by}}: how remote samples are placed against this rig's), `late_frames`,
 `late_frames_hour`, `slips`, `last_slip` (samples, signed), `arrival_margin` (s),
