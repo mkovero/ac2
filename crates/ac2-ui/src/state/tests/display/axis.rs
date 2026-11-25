@@ -365,3 +365,37 @@ fn level_gestures_leave_a_range_that_is_not_drawn() {
     // ±30 dB about 0 at twice the zoom, then 5 dB up.
     assert_eq!(t.st.level_range(p), Some(Range::new(-10.0, 20.0)));
 }
+
+/// A spectrum made from its dialog opens on a screen of its own, and that pane frames the
+/// measurement's first frame as Shift+Home does.
+#[test]
+fn a_new_spectrum_fits_its_first_frame() {
+    for shown_first in [PaneKind::Transfer, PaneKind::Spectrum] {
+        let mut t = T::new();
+        t.go(shown_first);
+        // The operator zoomed the pane that was there: no business of the new one.
+        if shown_first == PaneKind::Spectrum {
+            spec_frame(&mut t, 2, vec![0.0, -20.0, -20.0, -20.0, 0.0]);
+            t.key("Ctrl+I");
+        }
+        let new = meas(9, "Spectrum 2", spectrum());
+        t.st.rig.due.pane_on_create = Some(new.config.name.clone());
+        t.conn(ConnEvent::MeasCreated(Box::new(new.clone())));
+        let mut s = daemon_state();
+        s.measurements.push(new);
+        t.conn(mirror(s));
+        let first = vec![0.0, -138.0, -120.0, -95.0, 0.0];
+        spec_frame(&mut t, 9, first.clone());
+        let pane = t.st.layout.focus;
+        assert_eq!(
+            t.st.layout.kind(pane),
+            PaneKind::Spectrum,
+            "{shown_first:?}"
+        );
+        assert_eq!(
+            t.st.level_range(pane),
+            Some(fit_of(&first)),
+            "from {shown_first:?}"
+        );
+    }
+}
