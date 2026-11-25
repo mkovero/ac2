@@ -11,8 +11,8 @@ use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_proto::flow::{DATA_WINDOW_DEFAULT, FLOW_TOPIC, frame_charge, outside_window};
 use ac2_proto::frame::{Frame, FrameData};
 use ac2_proto::model::{
-    DeviceSelector, LoopbackRoute, MeasConfig, MeasKind, Resolution, SessionConfig, SplConfig,
-    TfAveraging, TransferConfig,
+    DeviceSelector, LoopbackRoute, MeasConfig, MeasKind, Resolution, SessionConfig, SpectrumConfig,
+    SplConfig, TfAveraging, TransferConfig,
 };
 use ac2_proto::units::{MeasId, RequestId, Rev};
 use ac2_proto::{
@@ -920,6 +920,27 @@ pub fn taken(d: &FakeDriver) {
 /// One past the last sample the driver has produced.
 pub fn end_sample(d: &FakeDriver) -> u64 {
     d.blocks() * u64::from(BLOCK)
+}
+
+/// The stamp (`audio_sample`) of the newest spectrum a fixed-length (`fft_len`) spectrum
+/// job has formed from the audio so far, its frames carrying `applied_at` as the sample
+/// their configuration applied from. The job starts its analysis at the first point of the
+/// device's frame grid ([`SpectrumConfig::frame_hop`] samples apart) at or after that
+/// sample and forms a spectrum every display hop from there once its window has filled,
+/// stamped at the spectrum's last sample. Spectra a hop apart are of different audio, so a
+/// live frame compared with a capture (which holds the newest) is selected by this exact
+/// stamp: a frame merely within a hop of the newest audio may be the one before it.
+pub fn newest_spectrum_stamp(d: &FakeDriver, applied_at: u64, fft_len: u32) -> u64 {
+    let grid = u64::from(SpectrumConfig::frame_hop(FS, BLOCK));
+    let hop = u64::from(SpectrumConfig::display_hop(fft_len, FS, BLOCK));
+    let origin = applied_at.div_ceil(grid) * grid;
+    let end = end_sample(d);
+    let newest = origin + end.saturating_sub(origin) / hop * hop;
+    assert!(
+        newest - origin >= u64::from(fft_len),
+        "no {fft_len}-point spectrum between samples {origin} and {end}"
+    );
+    newest - 1
 }
 
 /// Waits until the daemon's keepalive reports audio up to `end` taken in (any epoch).

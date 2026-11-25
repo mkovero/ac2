@@ -93,13 +93,15 @@ fn spectrum_smoothing_live_and_captured() {
         run(&mut r.d, 0.3);
         r.c.ok(Command::GenRefresh { lease_token: r.tok });
     }
-    // A spectrum is stamped where its frame ended: one hop or less before the newest audio.
-    let end = end_sample(&r.d) - u64::from(SpectrumConfig::display_hop(4096, FS, BLOCK));
+    // The frame of the spectrum the capture below stores: the newest. Without averaging the
+    // one a hop before it is of other audio. The hop here is the frame-grid step itself, so
+    // the later origin a smoothing change gives `config_applied_at` lands on the same points.
     let f = sub
         .frame(T, |f| {
             matches!(f.data, FrameData::Spec(_))
                 && f.stamp.config_rev.0 >= m.config_rev.0
-                && f.stamp.audio_sample.0 + 1 >= end
+                && f.stamp.audio_sample.0
+                    == newest_spectrum_stamp(&r.d, f.stamp.config_applied_at.0, 4096)
         })
         .expect("smoothed spec frame");
     let FrameData::Spec(live) = f.data else {
@@ -315,14 +317,15 @@ fn spectrum_live_columns_are_the_captured_bins_maxima() {
         run(&mut r.d, 0.5);
         r.c.ok(Command::GenRefresh { lease_token: r.tok });
     }
-    // No more audio: the last frame published is the one a capture stores.
-    let mut last = None;
-    while let Some(f) = sub.frame(Duration::from_millis(500), |f| {
-        matches!(f.data, FrameData::Spec(_))
-    }) {
-        last = Some(f);
-    }
-    let f = last.expect("spec frame");
+    // The frame of the spectrum a capture stores: the newest, selected by its stamp rather
+    // than by a pause in the frames, which a stalled daemon would make early.
+    let f = sub
+        .frame(T, |f| {
+            matches!(f.data, FrameData::Spec(_))
+                && f.stamp.audio_sample.0
+                    == newest_spectrum_stamp(&r.d, f.stamp.config_applied_at.0, 65_536)
+        })
+        .expect("spec frame");
     let FrameData::Spec(live) = f.data else {
         unreachable!()
     };
