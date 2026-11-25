@@ -2,7 +2,7 @@
 //! noise and Gauss–Markov wander, and a delay tracker that measures the servo's own output
 //! against the truth plus a path delay.
 
-use ac2_resampler::servo::{AudioUse, MediaTime, Servo, ServoConfig, Status};
+use ac2_resampler::servo::{AudioUse, MediaTime, Servo, ServoConfig, StampUse, Status};
 use ac2_resampler::{Pos, Step};
 
 pub const FS: u32 = 96_000;
@@ -29,7 +29,7 @@ impl Rng {
         z ^ (z >> 31)
     }
 
-    fn uniform(&mut self) -> f64 {
+    pub fn uniform(&mut self) -> f64 {
         ((self.next_u64() >> 11) as f64 + 0.5) / (1u64 << 53) as f64
     }
 
@@ -50,7 +50,21 @@ pub struct Sim {
     pub wander_tau_s: f64,
     /// White stamp noise as the sd of a one-second mean.
     pub white_s: f64,
+    /// One block in this many is stamped, its stamp carrying the white noise of a mean over
+    /// those blocks (a caller feeding means).
+    pub stamp_every: usize,
+    /// While `.0 ≤ t < .0 + .1` no stamps arrive; the device keeps running.
+    pub stamp_gaps: Vec<(f64, f64)>,
+    /// Each stamp with probability `.0` errs by a further normal error of sd `.1` seconds.
+    pub stamp_tail: Option<(f64, f64)>,
+    /// The first stamp at or after `.0` seconds errs by a further `.1` seconds.
+    pub stamp_spike: Option<(f64, f64)>,
+    /// The device's first sample index: above 2³² so no 32-bit shortcut survives.
+    pub start_input: u64,
+    /// The delay tracker's own sd, passed to the servo as `sigma_s`.
     pub audio_sigma_s: f64,
+    /// The path's own white jitter per observation, seconds (not passed to the servo).
+    pub path_jitter_s: f64,
     /// Path delay at time t (s), seconds; `None` while no audio is measured.
     pub path: Box<dyn Fn(f64) -> Option<f64>>,
     /// At these times the input has a gap of `.1` seconds and the device renumbers its
@@ -74,7 +88,13 @@ impl Sim {
             wander_sd_s: 15.5e-6,
             wander_tau_s: 100.0,
             white_s: 5e-6,
+            stamp_every: 1,
+            stamp_gaps: Vec::new(),
+            stamp_tail: None,
+            stamp_spike: None,
+            start_input: (1 << 33) + 12_345,
             audio_sigma_s: 0.3e-6,
+            path_jitter_s: 0.0,
             path: Box::new(|_| None),
             gaps: Vec::new(),
             stamp_step: None,
@@ -95,6 +115,7 @@ pub struct Rec {
     pub true_ppm: f64,
     pub status: Status,
     pub audio: Option<AudioUse>,
+    pub stamp: Option<StampUse>,
 }
 
 pub struct Run {
@@ -134,17 +155,21 @@ pub struct Truth {
 
 pub fn run(sim: &Sim, servo: &mut Servo) -> (Run, Truth) {
     let mut rng = Rng::new(sim.seed);
+    // The tail draws from its own stream, so a run with it differs from one without only
+    // by the tail.
+    let mut tail_rng = Rng::new(sim.seed ^ 0x7A11);
     let fs = f64::from(FS);
     let n = (sim.secs / BLOCK_S).round() as usize;
     let a = (-BLOCK_S / sim.wander_tau_s).exp();
     let mut wander = sim.wander_sd_s * rng.normal();
     let mut walk = 0.0;
     let walk_step = sim.rate_walk_ppm_per_h * 1e-6 * (BLOCK_S / 3600.0).sqrt();
-    let white = sim.white_s / BLOCK_S.sqrt();
+    let white = sim.white_s / (BLOCK_S * sim.stamp_every as f64).sqrt();
     let mut x = DevPos {
-        whole: 12_345,
+        whole: sim.start_input,
         frac: 0.678,
     };
+    let mut spike = sim.stamp_spike;
     let mut offset = 0u64;
     let mut gaps = sim.gaps.iter().copied().peekable();
     let mut gap_until = f64::NEG_INFINITY;
@@ -168,7 +193,12 @@ pub fn run(sim: &Sim, servo: &mut Servo) -> (Run, Truth) {
         }
         truth.x.push(x);
         truth.offset.push(offset);
-        if t >= gap_until {
+        let withheld = sim
+            .stamp_gaps
+            .iter()
+            .any(|&(at, len)| (at..at + len).contains(&t));
+        let mut stamp_use = None;
+        if t >= gap_until && !withheld && k % sim.stamp_every == 0 {
             // The block's first whole sample, captured `frac` samples after the block start.
             let n_true = x.whole + 1;
             let lead = (1.0 - x.frac) / (fs * (1.0 + rate));
@@ -176,9 +206,20 @@ pub fn run(sim: &Sim, servo: &mut Servo) -> (Run, Truth) {
                 .stamp_step
                 .filter(|&(at, _)| t >= at)
                 .map_or(0.0, |s| s.1);
-            let err = wander + white * rng.normal() + late;
+            let mut err = wander + white * rng.normal() + late;
+            if let Some((p, sd)) = sim.stamp_tail {
+                let extra = sd * tail_rng.normal();
+                if tail_rng.uniform() < p {
+                    err += extra;
+                }
+            }
+            if let Some((_, e)) = spike.filter(|&(at, _)| t >= at) {
+                err += e;
+                spike = None;
+            }
             let stamp = ns as i64 + ((lead + err) * 1e9).round() as i64;
-            servo.observe_stamp(n_true - offset, MediaTime::from_nanos(stamp as u64));
+            stamp_use =
+                Some(servo.observe_stamp(n_true - offset, MediaTime::from_nanos(stamp as u64)));
         }
         let mut audio = None;
         if k >= 5 && k % 10 == 0 {
@@ -193,7 +234,10 @@ pub fn run(sim: &Sim, servo: &mut Servo) -> (Run, Truth) {
                     frac: xb.frac,
                 };
                 let behind = -real.to(*h);
-                let delay = path + behind / fs + sim.audio_sigma_s * rng.normal();
+                let delay = path
+                    + behind / fs
+                    + sim.audio_sigma_s * rng.normal()
+                    + sim.path_jitter_s * rng.normal();
                 let at = MediaTime::from_nanos(START_NS + back as u64 * 100_000_000);
                 let restart = restart_at.is_some_and(|r| tb >= r);
                 if restart {
@@ -222,6 +266,7 @@ pub fn run(sim: &Sim, servo: &mut Servo) -> (Run, Truth) {
             true_ppm: rate * 1e6,
             status: servo.status(MediaTime::from_nanos(ns)),
             audio,
+            stamp: stamp_use,
         });
         x = x.add(BLOCK as f64 * (1.0 + rate));
         wander = a * wander + sim.wander_sd_s * (1.0 - a * a).sqrt() * rng.normal();
@@ -288,6 +333,17 @@ impl Run {
         s.windows(per + 1)
             .map(|w| (w[per] - w[0]).abs())
             .fold(0.0, f64::max)
+    }
+
+    /// Peak-to-peak of the errors from `from` on, seconds.
+    pub fn peak_to_peak(&self, from: f64) -> f64 {
+        let e = self.errors(from);
+        let (lo, hi) = e
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &v| {
+                (l.min(v), h.max(v))
+            });
+        hi - lo
     }
 
     /// Time (s) of the first block handed at or after `from`.

@@ -303,15 +303,25 @@ is on the same clock as a locked rig's.
   changes carry clock information: it includes the path, which drifts by itself (0.16 ms per
   °C over 30 m).
 
-**Stamps alone** track the rate to 0.04 ppm and the phase to about ±15 µs sd. Magnitude and
-coherence are unaffected; the phase is off by about 0.5° at 100 Hz, 5° at 1 kHz and 54° at
-10 kHz, and the UI says so.
+**Stamps alone** remove the stamp wander faster than about three minutes and pass most of
+the slower wander through as phase: nothing in the stamps tells slow wander from the device's
+own phase. Measured on the rigs' hour-long stamp logs: on the locked host with software PTP
+(all of its wander is error) the phase errs by 15.9 µs sd, 60 µs peak-to-peak, and the rate
+by 0.031 ppm sd; the free-running USB mic with hardware PTP, against a smooth fit of its own
+stamps, by 7.9 µs sd, 40 µs peak-to-peak, rate 0.021 ppm sd. On the simulated rig, five seeds
+at each host's wander: 6.5–13.0 µs sd (peak-to-peak up to 52 µs) at 15.5 µs of wander,
+11.5–18.1 µs (up to 76 µs) at 27.8. Magnitude and coherence are unaffected; the phase is off
+by about 0.3–0.6° at 100 Hz, 3–6° at 1 kHz and 28–57° at 10 kHz (8–16 µs), and the UI says
+so. A stamp beyond 4 sd of its prediction counts as one at 4 sd, so a single wild stamp moves
+little; a genuine step in the stamps is followed to 63 % in about three minutes.
 
 **Audio trim** is automatic while a transfer function runs: no operator step. The servo
 combines both, stamps for the long term and the delay for the short term, crossing over at a
-few minutes: the phase then holds within about 2 µs over minutes. A path change faster than
-that partly reads as clock (a 160 µs change over 20 minutes puts 35 µs into the phase, over
-one minute 107 µs); a jump (re-anchored tracker, moved mic) does not move the phase at all.
+few minutes: the phase faster than three minutes then holds within 0.9–2.0 µs sd (simulated,
+both wanders, a path jittering 5 µs per observation). A path change faster than that partly
+reads as clock (a 160 µs change over 20 minutes puts 31 µs into the phase, over one minute
+58 µs); a jump (re-anchored tracker, moved mic) does not move the phase at all, and repeated
+jumps show as refused audio rather than as contributing.
 
 The constant offset between rigs (path delay and interface latencies) stays unmeasured: the
 delay readout keeps saying it includes it, and measuring it is a later stage.

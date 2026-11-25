@@ -382,9 +382,13 @@ What it says:
   all of its 27.8 µs is stamp path (software PTP); the CM4's 15.5 µs is with hardware time
   stamping.
 - **The wander lives at tens of seconds to minutes**: the rate from 300 s windows is three to
-  five times steadier than from 60 s. A servo on stamps alone needs a time constant of about
-  a minute or more and holds the phase to about ±15 µs sd; the audio from a running transfer
-  function carries the short term (`remote-inputs.md` §3.5, `ac2-resampler`'s servo).
+  five times steadier than from 60 s. A servo on stamps alone needs a time constant of a few
+  minutes, and passes most of the wander slower than that through. `ac2-resampler`'s servo
+  on these two logs, stamps alone: pupu (locked, so its phase error is all stamp wander)
+  15.9 µs sd / 60 µs peak-to-peak, rate 0.031 ppm sd, the step changing at most 0.08 ppm in
+  a second; the CM4 against a smooth fit of its stamps 7.9 µs sd / 40 µs peak-to-peak, rate
+  0.021 ppm sd. 2 µs or less of either is faster than three minutes. The audio from a running
+  transfer function carries the short term (`remote-inputs.md` §3.5).
 
 ## 8. Operator decisions
 

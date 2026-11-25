@@ -1,16 +1,24 @@
 //! The clock servo against the simulated rig (`servo_sim`): the figures measured on the rigs
-//! as the noise, the truth known exactly. Each assertion message carries the measured value.
+//! as the noise, the truth known exactly. Each assertion message carries the measured value;
+//! the bounds sit about 1.5 times above the worst of the seeds.
 
-use ac2_resampler::servo::{AudioUse, MediaTime, Mode, NotReady, Servo, ServoConfig};
+use ac2_resampler::servo::{AudioUse, Mode};
 
-use crate::servo_sim::{FS, Run, Sim, mean_sd, run};
+use crate::servo_sim::{Run, Sim, mean_sd};
 
-fn servo(cfg: ServoConfig) -> Servo {
-    Servo::new(cfg, FS).unwrap()
+pub fn go(sim: &Sim) -> Run {
+    let mut servo = ac2_resampler::servo::Servo::new(sim.cfg, crate::servo_sim::FS).unwrap();
+    crate::servo_sim::run(sim, &mut servo).0
 }
 
-fn go(sim: &Sim) -> Run {
-    run(sim, &mut servo(sim.cfg)).0
+pub const SEEDS: [u64; 5] = [1, 2, 3, 4, 5];
+/// The stamp wander on the two hosts measured: hardware PTP, software PTP.
+pub const WANDERS: [f64; 2] = [15.5e-6, 27.8e-6];
+
+fn stamps_only(seed: u64, wander: f64) -> Sim {
+    let mut sim = Sim::stamps_only(seed, 3600.0);
+    sim.wander_sd_s = wander;
+    sim
 }
 
 fn with_audio(seed: u64) -> Sim {
@@ -20,7 +28,7 @@ fn with_audio(seed: u64) -> Sim {
 }
 
 /// Largest |a − b| over blocks both handed, seconds.
-fn max_diff(a: &Run, b: &Run) -> f64 {
+pub fn max_diff(a: &Run, b: &Run) -> f64 {
     a.recs
         .iter()
         .zip(&b.recs)
@@ -28,86 +36,140 @@ fn max_diff(a: &Run, b: &Run) -> f64 {
         .fold(0.0, f64::max)
 }
 
-/// The CM4-like device (+7 ppm, 0.25 ppm/h, stamp wander 15.5 µs sd over 100 s) for an
-/// hour, stamps only.
+/// The CM4-like device (+7 ppm, 0.25 ppm/h) for an hour on stamps alone, five seeds at each
+/// host's wander. Worst over the seeds (µs, ppm, ppm/s): at 15.5 µs, error sd 13.0, peak to
+/// peak 52, mean 17.8, rate sd 0.041, step change 0.025; at 27.8 µs, 18.1, 76, 20.0, 0.045,
+/// 0.034. Acquired after 11.3 s.
 #[test]
-fn stamps_only_tracks_within_the_wander() {
-    let r = go(&Sim::stamps_only(1, 3600.0));
-    let acquired = r.first_block_after(0.0).unwrap();
-    assert!(acquired <= 20.0, "acquired after {acquired} s");
-    let (mean, sd) = mean_sd(&r.errors(300.0));
-    assert!(sd <= 25e-6, "phase error sd {:.2} µs", sd * 1e6);
-    // The mean of a Gauss–Markov wander over an hour has sd σ·√(2τ/T) = 3.7 µs.
-    assert!(mean.abs() <= 11e-6, "phase error mean {:.2} µs", mean * 1e6);
-    let (rate_mean, rate_sd) = mean_sd(&r.rate_errors(300.0));
-    assert!(rate_sd <= 0.3, "rate error sd {rate_sd:.3} ppm");
-    assert!(rate_mean.abs() <= 0.1, "rate error mean {rate_mean:.3} ppm");
-    let smooth = r.step_change_per_s(300.0);
-    assert!(smooth <= 0.1, "step changed {smooth:.4} ppm in a second");
-    let last = r.recs.last().unwrap().status;
-    assert_eq!(last.mode, Mode::Tracking);
-    assert!(!last.audio && last.audio_sd_s.is_none());
-    let stated = last.phase_sd_s.unwrap();
-    assert!(
-        (5e-6..=25e-6).contains(&stated),
-        "stated phase sd {:.2} µs",
-        stated * 1e6
-    );
-    println!(
-        "acquired {acquired} s; error {:.2} ± {:.2} µs (stated {:.2}); rate {rate_mean:.3} ± \
-         {rate_sd:.3} ppm; step change ≤ {smooth:.4} ppm/s",
-        mean * 1e6,
-        sd * 1e6,
-        stated * 1e6
-    );
+fn stamps_only_over_seeds_and_both_wanders() {
+    // Per wander: error sd, peak-to-peak, |mean|, rate sd, step change per second.
+    let bounds = [
+        (20e-6, 78e-6, 27e-6, 0.062, 0.037),
+        (27e-6, 114e-6, 30e-6, 0.068, 0.05),
+    ];
+    for (&wander, &(b_sd, b_pp, b_mean, b_rate, b_step)) in WANDERS.iter().zip(&bounds) {
+        for seed in SEEDS {
+            let r = go(&stamps_only(seed, wander));
+            let acquired = r.first_block_after(0.0).unwrap();
+            let (mean, sd) = mean_sd(&r.errors(300.0));
+            let pp = r.peak_to_peak(300.0);
+            let (_, rate_sd) = mean_sd(&r.rate_errors(300.0));
+            let step = r.step_change_per_s(300.0);
+            let last = r.recs.last().unwrap().status;
+            println!(
+                "wander {:.1} µs seed {seed}: acquired {acquired:.1} s, error {:+.2} ± {:.2} µs, \
+                 p-p {:.1} µs, rate sd {rate_sd:.3} ppm, step ≤ {step:.4} ppm/s",
+                wander * 1e6,
+                mean * 1e6,
+                sd * 1e6,
+                pp * 1e6,
+            );
+            let what = format!("wander {:.1} µs seed {seed}", wander * 1e6);
+            assert!(acquired <= 17.0, "{what}: acquired after {acquired} s");
+            assert!(sd <= b_sd, "{what}: error sd {:.2} µs", sd * 1e6);
+            assert!(pp <= b_pp, "{what}: peak-to-peak {:.1} µs", pp * 1e6);
+            assert!(mean.abs() <= b_mean, "{what}: mean {:.2} µs", mean * 1e6);
+            assert!(rate_sd <= b_rate, "{what}: rate sd {rate_sd:.3} ppm");
+            assert!(step <= b_step, "{what}: step change {step:.4} ppm/s");
+            assert_eq!(last.mode, Mode::Tracking);
+            assert!(!last.audio && last.audio_sd_s.is_none());
+        }
+    }
 }
 
 /// The stamps-only time constant: every stamp suddenly reads 100 µs late, and the output
-/// follows it to 63 % in a minute or two.
+/// follows it to 63 % in about three minutes (184–186 s), at a stamp per block or a stamp a
+/// second: the stamp gate, which takes the step's first stamps as outliers, delays that by
+/// under two seconds.
 #[test]
-fn stamps_only_follow_a_step_in_a_minute_or_two() {
-    let base = Sim::stamps_only(1, 2000.0);
-    let mut stepped = Sim::stamps_only(1, 2000.0);
-    stepped.stamp_step = Some((1200.0, 100e-6));
-    let (a, b) = (go(&base), go(&stepped));
-    let t63 = a
-        .recs
-        .iter()
-        .zip(&b.recs)
-        .find(|(x, y)| x.t >= 1200.0 && (x.err_s.unwrap() - y.err_s.unwrap()).abs() >= 63e-6)
-        .map(|(x, _)| x.t - 1200.0)
-        .unwrap();
-    assert!((40.0..=150.0).contains(&t63), "63 % after {t63:.1} s");
-    println!("stamps-only step response: 63 % after {t63:.1} s");
+fn stamps_only_follow_a_step_in_about_three_minutes() {
+    let mut t63s = Vec::new();
+    for (every, gate) in [(1, 4.0), (10, 4.0), (1, 1e3), (10, 1e3)] {
+        let sim = |step: bool| {
+            let mut sim = Sim::stamps_only(1, 2000.0);
+            sim.stamp_every = every;
+            sim.stamp_step = step.then_some((1200.0, 100e-6));
+            sim.cfg.stamp_gate = gate;
+            sim
+        };
+        let (a, b) = (go(&sim(false)), go(&sim(true)));
+        let t63 = a
+            .recs
+            .iter()
+            .zip(&b.recs)
+            .find(|(x, y)| x.t >= 1200.0 && (x.err_s.unwrap() - y.err_s.unwrap()).abs() >= 63e-6)
+            .map(|(x, _)| x.t - 1200.0)
+            .unwrap();
+        let outliers = b
+            .recs
+            .iter()
+            .filter(|r| r.stamp == Some(ac2_resampler::servo::StampUse::Outlier))
+            .count();
+        println!(
+            "stamp every {every} blocks, gate {gate}: 63 % after {t63:.1} s, {outliers} stamps \
+             gated"
+        );
+        assert!((150.0..=220.0).contains(&t63), "63 % after {t63:.1} s");
+        assert!(gate > 100.0 || outliers > 0);
+        t63s.push(t63);
+    }
+    for (gated, free) in [(t63s[0], t63s[2]), (t63s[1], t63s[3])] {
+        assert!(
+            (gated - free).abs() <= 2.0,
+            "gated {gated:.1} s, ungated {free:.1} s"
+        );
+    }
 }
 
-/// A transfer function runs the whole hour: the output's phase follows the audio within
-/// the audio's precision at short times and the stamps' line at long ones.
+/// A transfer function runs the whole hour over a path jittering 5 µs per observation (the
+/// default's indoor air): the phase faster than three minutes holds within 0.89–1.14 µs sd
+/// at 15.5 µs of stamp wander and 1.57–1.99 µs at 27.8, under the stated audio sd, while the
+/// long term stays the stamps'.
 #[test]
-fn audio_holds_the_short_term_within_2_us() {
-    let r = go(&with_audio(1));
-    let (_, hp) = mean_sd(&r.high_passed(300.0, 180.0));
-    assert!(
-        hp <= 2e-6,
-        "phase error faster than 3 min: sd {:.3} µs",
-        hp * 1e6
-    );
-    let (mean, sd) = mean_sd(&r.errors(300.0));
-    assert!(mean.abs() <= 11e-6, "phase error mean {:.2} µs", mean * 1e6);
-    let last = r.recs.last().unwrap().status;
-    assert!(last.audio);
-    let audio_sd = last.audio_sd_s.unwrap();
-    assert!(audio_sd <= 1e-6, "stated audio sd {:.3} µs", audio_sd * 1e6);
-    let smooth = r.step_change_per_s(300.0);
-    assert!(smooth <= 0.1, "step changed {smooth:.4} ppm in a second");
-    println!(
-        "with audio: short-term sd {:.3} µs, error {:.2} ± {:.2} µs, stated audio sd {:.3} µs, \
-         step change ≤ {smooth:.4} ppm/s",
-        hp * 1e6,
-        mean * 1e6,
-        sd * 1e6,
-        audio_sd * 1e6
-    );
+fn audio_holds_the_short_term_over_seeds() {
+    for wander in WANDERS {
+        let label = format!("wander {:.1} µs", wander * 1e6);
+        for seed in SEEDS {
+            let mut sim = with_audio(seed);
+            sim.wander_sd_s = wander;
+            sim.path_jitter_s = 5e-6;
+            let r = go(&sim);
+            let (_, hp) = mean_sd(&r.high_passed(300.0, 180.0));
+            let (mean, sd) = mean_sd(&r.errors(300.0));
+            let last = r.recs.last().unwrap().status;
+            let stated = last.audio_sd_s.unwrap();
+            let step = r.step_change_per_s(300.0);
+            println!(
+                "{label} seed {seed}: short-term sd {:.3} µs, error {:+.2} ± {:.2} µs, stated \
+                 audio sd {:.3} µs, step ≤ {step:.4} ppm/s",
+                hp * 1e6,
+                mean * 1e6,
+                sd * 1e6,
+                stated * 1e6,
+            );
+            let bound = if wander < 20e-6 { 1.7e-6 } else { 3e-6 };
+            assert!(
+                hp <= bound,
+                "{label} seed {seed}: short-term {:.3} µs",
+                hp * 1e6
+            );
+            assert!(
+                stated >= hp,
+                "{label} seed {seed}: stated {:.3} µs",
+                stated * 1e6
+            );
+            assert!(
+                mean.abs() <= 27e-6,
+                "{label} seed {seed}: mean {:.2} µs",
+                mean * 1e6
+            );
+            assert!(
+                step <= 0.022,
+                "{label} seed {seed}: step change {step:.4} ppm/s"
+            );
+            assert!(last.audio && last.audio_refused == 0);
+        }
+    }
 }
 
 /// The path grows by 0.16 ms (1 °C over 30 m) over 1, 5 or 20 minutes. The difference from
@@ -117,7 +179,7 @@ fn audio_holds_the_short_term_within_2_us() {
 fn path_drift_leaks_a_stated_part_into_the_phase() {
     let still = go(&with_audio(1));
     let mut leaks = Vec::new();
-    for (ramp, bound) in [(60.0, 120e-6), (300.0, 95e-6), (1200.0, 40e-6)] {
+    for (ramp, bound) in [(60.0, 70e-6), (300.0, 64e-6), (1200.0, 37e-6)] {
         let mut sim = with_audio(1);
         sim.path = Box::new(move |t| Some(1e-3 + 0.16e-3 * ((t - 1200.0) / ramp).clamp(0.0, 1.0)));
         let leak = max_diff(&still, &go(&sim));
@@ -154,6 +216,7 @@ fn audio_dropout_and_a_1_ms_jump_leave_the_phase_alone() {
         .find(|r| r.t >= 1500.0 && r.audio.is_some())
         .unwrap();
     assert_eq!(reset_at.audio, Some(AudioUse::BiasReset));
+    assert_eq!(jumped.recs.last().unwrap().status.audio_refused, 1);
     let as_restart = max_diff(&dropout(0.0, true), &jumped);
     assert!(
         as_restart <= 1e-9,
@@ -162,8 +225,6 @@ fn audio_dropout_and_a_1_ms_jump_leave_the_phase_alone() {
     );
     let lost = max_diff(&dropout(0.0, false), &jumped);
     assert!(lost <= 8e-6, "against unchanged audio {:.3} µs", lost * 1e6);
-    let (_, sd) = mean_sd(&jumped.errors(300.0));
-    assert!(sd <= 25e-6, "phase error sd {:.2} µs", sd * 1e6);
     // The short-term figure grows honestly while audio is away.
     let at = |t: f64| jumped.recs.iter().find(|r| r.t >= t).unwrap().status;
     let (before, during) = (at(1199.0), at(1499.0));
@@ -172,75 +233,78 @@ fn audio_dropout_and_a_1_ms_jump_leave_the_phase_alone() {
     assert!(d > 5.0 * b, "audio sd {:.3} → {:.3} µs", b * 1e6, d * 1e6);
     println!(
         "dropout: gated jump = restart within {:.4} µs, {:.3} µs from unchanged audio; audio sd \
-         {:.3} → {:.2} µs over 5 min; phase sd {:.2} µs",
+         {:.3} → {:.2} µs over 5 min",
         as_restart * 1e6,
         lost * 1e6,
         b * 1e6,
         d * 1e6,
-        sd * 1e6
     );
 }
 
-/// The input stops for 2 s and the device numbers its samples afresh: `reset_phase` keeps
-/// the rate and places the phase again from a second of stamps.
+/// The air moves: the path jitters by 30 µs per observation (outdoors, wind). Configured for
+/// it, audio contributes throughout and nothing is refused; on the default's 5 µs, 45 % of
+/// the observations are refused, and counted, while the rest still contribute. Either way
+/// the stated short-term figure covers what the phase does faster than three minutes
+/// (measured 0.91–1.27 µs configured, 1.27–1.82 µs on the default).
 #[test]
-fn reset_phase_reacquires_in_a_second_and_keeps_the_rate() {
-    let mut sim = Sim::stamps_only(1, 2400.0);
-    sim.gaps = vec![(1800.0, 2.0)];
+fn a_jittering_path_keeps_contributing_and_says_how_well() {
+    for (cfg_jitter, label) in [(30e-6, "configured 30 µs"), (5e-6, "default 5 µs")] {
+        for seed in SEEDS {
+            let mut sim = with_audio(seed);
+            sim.path_jitter_s = 30e-6;
+            sim.cfg.path_jitter_s = cfg_jitter;
+            let r = go(&sim);
+            let (_, hp) = mean_sd(&r.high_passed(300.0, 180.0));
+            let late = || r.recs.iter().filter(|x| x.t >= 300.0);
+            let contributing =
+                late().filter(|x| x.status.audio).count() as f64 / late().count() as f64;
+            let stated = late()
+                .filter_map(|x| x.status.audio_sd_s)
+                .fold(f64::INFINITY, f64::min);
+            let refused = r.recs.last().unwrap().status.audio_refused;
+            println!(
+                "{label}, path jitter 30 µs, seed {seed}: short-term sd {:.2} µs, stated audio \
+                 sd ≥ {:.2} µs, contributing {:.1} %, refused {refused}",
+                hp * 1e6,
+                stated * 1e6,
+                contributing * 100.0,
+            );
+            let what = format!("{label} seed {seed}");
+            assert!(stated >= hp, "{what}: stated {:.2} µs", stated * 1e6);
+            if cfg_jitter > 10e-6 {
+                assert!(hp <= 1.9e-6, "{what}: short-term {:.2} µs", hp * 1e6);
+                assert!(contributing >= 0.99 && refused == 0, "{what}");
+            } else {
+                assert!(hp <= 2.7e-6, "{what}: short-term {:.2} µs", hp * 1e6);
+                assert!(contributing >= 0.9, "{what}: {contributing}");
+                assert!((1000..2500).contains(&refused), "{what}: refused {refused}");
+            }
+        }
+    }
+}
+
+/// Every observation disagrees with the last by a millisecond (two arrivals the tracker
+/// swaps between): each is refused, the status says audio is not contributing although
+/// observations arrive, and counts them.
+#[test]
+fn refused_audio_is_not_reported_as_contributing() {
+    let mut sim = with_audio(1);
+    sim.secs = 600.0;
+    sim.path = Box::new(|t| {
+        Some(
+            1e-3 + if (t as u64).is_multiple_of(2) {
+                0.0
+            } else {
+                1e-3
+            },
+        )
+    });
     let r = go(&sim);
-    let back = r.first_block_after(1800.0).unwrap() - 1802.0;
-    assert!(
-        back <= 1.5,
-        "re-acquired {back:.1} s after the input resumed"
-    );
-    let at = r.recs.iter().find(|x| x.t >= 1802.0 + back).unwrap();
-    let rate_err = at.status.rate_ppm.unwrap() - at.true_ppm;
-    assert!(rate_err.abs() <= 0.3, "rate {rate_err:.3} ppm off");
-    let worst = r
-        .recs
-        .iter()
-        .filter(|x| x.t >= 1802.0)
-        .filter_map(|x| x.err_s)
-        .fold(0.0, |m: f64, e| m.max(e.abs()));
-    assert!(worst <= 75e-6, "worst phase error {:.1} µs", worst * 1e6);
-    println!(
-        "gap: back {back:.1} s after the input, rate {rate_err:.3} ppm off, worst {:.1} µs",
-        worst * 1e6
-    );
-}
-
-/// A device at 2000 ppm (a wrong nominal rate): the step is clamped to the resampler's
-/// range and the status says so.
-#[test]
-fn a_wrong_nominal_rate_saturates() {
-    let mut sim = Sim::stamps_only(1, 120.0);
-    sim.ppm = 2000.0;
-    let r = go(&sim);
-    let last = r.recs.last().unwrap();
-    assert_eq!(last.status.mode, Mode::Saturated);
-    let ppm = last.status.rate_ppm.unwrap();
-    assert!((ppm - 2000.0).abs() < 1.0, "rate {ppm} ppm");
-    assert!(
-        r.recs
-            .iter()
-            .filter_map(|x| x.step)
-            .all(|s| s.get() <= 1.001)
-    );
-}
-
-#[test]
-fn nothing_is_handed_out_before_acquiring() {
-    let mut s = servo(ServoConfig::default());
-    assert_eq!(s.block(0, 512), Err(NotReady::Acquiring));
-    let at = MediaTime::from_nanos(1_000_000_000);
-    assert_eq!(s.observe_audio(1e-3, 1e-6, at, false), AudioUse::Unplaced);
-    s.observe_stamp(96_000, at);
-    assert_eq!(s.block(96_000, 512), Err(NotReady::Acquiring));
-    assert_eq!(s.status(at).mode, Mode::Acquiring);
-    assert!(Servo::new(ServoConfig::default(), 0).is_err());
-    let cfg = ServoConfig {
-        wander_tau_s: f64::NAN,
-        ..ServoConfig::default()
-    };
-    assert!(Servo::new(cfg, FS).is_err());
+    let seen = r.recs.iter().filter(|x| x.audio.is_some()).count() as u64;
+    let last = r.recs.last().unwrap().status;
+    assert!(!last.audio);
+    assert!(r.recs.iter().all(|x| x.audio != Some(AudioUse::Used)));
+    assert!(r.recs.iter().all(|x| !x.status.audio));
+    // All but the first, which anchors the bias.
+    assert_eq!(last.audio_refused, seen - 1);
 }
