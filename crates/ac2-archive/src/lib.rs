@@ -16,6 +16,10 @@
 //! a session of another format version packs and unpacks the same (and can then be
 //! refused by version, or its traces salvaged).
 //!
+//! An archive streams both ways ([`pack_dir_to`], [`unpack_from`]): a daemon spools one on
+//! disk and never holds it in memory. [`pack_dir`] and [`unpack`] are the in-memory forms
+//! for a client that has the bytes anyway.
+//!
 //! No DSP and no I/O beyond the paths given: the app (which links no DSP) packs and
 //! checks archives with it as the daemon does.
 
@@ -33,10 +37,11 @@ use thiserror::Error;
 
 /// File name extension of an archive.
 pub const EXTENSION: &str = "ac2session";
-/// Largest archive accepted, bytes (compressed).
-pub const MAX_ARCHIVE_BYTES: u64 = 64 << 20;
+/// Largest archive accepted, bytes (compressed): one limit for uploads and downloads, so
+/// a session a daemon hands out always goes back in.
+pub const MAX_ARCHIVE_BYTES: u64 = 1 << 30;
 /// Largest total of the files an archive unpacks to, bytes.
-pub const MAX_UNPACKED_BYTES: u64 = 512 << 20;
+pub const MAX_UNPACKED_BYTES: u64 = 4 << 30;
 /// Most entries an archive may hold.
 pub const MAX_ENTRIES: usize = 20_000;
 /// The manifest every session directory has.
@@ -70,6 +75,17 @@ pub enum ArchiveError {
     /// Not a gzip-compressed tar, or cut short.
     #[error("not a readable session archive: {0}")]
     Corrupt(String),
+    /// The files it unpacks to would not leave the file system the room it must keep.
+    #[error(
+        "the session archive unpacks to more than the {room} bytes the disk can spare \
+         (at least {needed} bytes)"
+    )]
+    NoRoom {
+        /// Bytes the entries declared so far.
+        needed: u64,
+        /// Bytes the caller allowed.
+        room: u64,
+    },
     /// The content does not match its SHA-256.
     #[error("the session archive does not match its checksum (damaged in transfer)")]
     Checksum,
@@ -96,6 +112,57 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+/// A SHA-256 computed piece by piece, for a file that arrives or is written in parts.
+#[derive(Clone, Default)]
+pub struct Hasher(Sha256);
+
+impl Hasher {
+    /// Adds `bytes`.
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+
+    /// The digest of everything added, lowercase hex.
+    pub fn hex(self) -> String {
+        self.0
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+}
+
+impl std::fmt::Debug for Hasher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Hasher")
+    }
+}
+
+/// A writer that hashes and counts what goes through, and refuses past `max` bytes so an
+/// archive never grows past its limit on disk.
+struct Counted<W> {
+    inner: W,
+    hasher: Hasher,
+    written: u64,
+    max: u64,
+}
+
+impl<W: Write> Write for Counted<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.written + buf.len() as u64 > self.max {
+            return Err(io::Error::other(LIMIT));
+        }
+        let n = self.inner.write(buf)?;
+        self.hasher.update(&buf[..n]);
+        self.written += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 /// Checks `bytes` against the SHA-256 `hex` (case-insensitive).
@@ -156,9 +223,41 @@ fn session_files(dir: &Path) -> Result<Vec<(String, PathBuf)>, ArchiveError> {
     Ok(out)
 }
 
-/// Packs the session directory `dir` into an archive. Refused when it has no
-/// `session.json` or packs larger than [`MAX_ARCHIVE_BYTES`].
+/// Bytes of the files [`pack_dir_to`] would pack from `dir`: what packing it may take on
+/// disk at most (compression only shrinks session files).
+pub fn session_bytes(dir: &Path) -> Result<u64, ArchiveError> {
+    let mut total = 0u64;
+    for (_, path) in session_files(dir)? {
+        total += fs::metadata(&path).map_err(io_err(&path))?.len();
+    }
+    Ok(total)
+}
+
+/// Packs the session directory `dir` into an archive in memory. Refused as
+/// [`pack_dir_to`] is.
 pub fn pack_dir(dir: &Path) -> Result<Vec<u8>, ArchiveError> {
+    let mut out = Vec::new();
+    pack_dir_to(dir, &mut out)?;
+    Ok(out)
+}
+
+/// What [`pack_dir_to`] wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Packed {
+    /// Size, bytes.
+    pub bytes: u64,
+    /// SHA-256, lowercase hex.
+    pub sha256: String,
+}
+
+/// Packs the session directory `dir` into `out`, one file at a time (nothing is held whole
+/// in memory). Refused when it has no `session.json` or packs larger than
+/// [`MAX_ARCHIVE_BYTES`]; on an error, whatever was written stays for the caller to remove.
+pub fn pack_dir_to(dir: &Path, out: impl Write) -> Result<Packed, ArchiveError> {
+    pack_within(dir, out, MAX_ARCHIVE_BYTES)
+}
+
+fn pack_within(dir: &Path, out: impl Write, max: u64) -> Result<Packed, ArchiveError> {
     if !is_session_dir(dir) {
         return Err(ArchiveError::NotASession(dir.to_owned()));
     }
@@ -166,11 +265,28 @@ pub fn pack_dir(dir: &Path) -> Result<Vec<u8>, ArchiveError> {
     if files.len() > MAX_ENTRIES {
         return Err(ArchiveError::TooManyEntries);
     }
-    let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+    let counted = Counted {
+        inner: out,
+        hasher: Hasher::default(),
+        written: 0,
+        max,
+    };
+    let too_large = |e: io::Error, path: &Path| {
+        if e.get_ref().is_some_and(|i| i.to_string() == LIMIT) {
+            ArchiveError::TooLarge {
+                bytes: max + 1,
+                max,
+            }
+        } else {
+            io_err(path)(e)
+        }
+    };
+    let mut tar = tar::Builder::new(GzEncoder::new(counted, Compression::default()));
     let mut total = 0u64;
     for (name, path) in &files {
-        let data = fs::read(path).map_err(io_err(path))?;
-        total += data.len() as u64;
+        let f = fs::File::open(path).map_err(io_err(path))?;
+        let len = f.metadata().map_err(io_err(path))?.len();
+        total += len;
         if total > MAX_UNPACKED_BYTES {
             return Err(ArchiveError::TooLarge {
                 bytes: total,
@@ -178,22 +294,22 @@ pub fn pack_dir(dir: &Path) -> Result<Vec<u8>, ArchiveError> {
             });
         }
         let mut h = tar::Header::new_ustar();
-        h.set_size(data.len() as u64);
+        h.set_size(len);
         h.set_mode(0o644);
         h.set_mtime(0);
         h.set_entry_type(tar::EntryType::Regular);
-        tar.append_data(&mut h, name, data.as_slice())
-            .map_err(io_err(path))?;
+        // Exactly the length in the header: a file that grows while it is packed must not
+        // shift the entries after it.
+        tar.append_data(&mut h, name, f.take(len))
+            .map_err(|e| too_large(e, path))?;
     }
-    let gz = tar.into_inner().map_err(io_err(dir))?;
-    let bytes = gz.finish().map_err(io_err(dir))?;
-    if bytes.len() as u64 > MAX_ARCHIVE_BYTES {
-        return Err(ArchiveError::TooLarge {
-            bytes: bytes.len() as u64,
-            max: MAX_ARCHIVE_BYTES,
-        });
-    }
-    Ok(bytes)
+    let gz = tar.into_inner().map_err(|e| too_large(e, dir))?;
+    let mut counted = gz.finish().map_err(|e| too_large(e, dir))?;
+    counted.flush().map_err(io_err(dir))?;
+    Ok(Packed {
+        bytes: counted.written,
+        sha256: counted.hasher.hex(),
+    })
 }
 
 /// Where an entry goes inside the session directory, or why it has no place there.
@@ -238,12 +354,9 @@ impl<R: Read> Read for Limited<R> {
 const LIMIT: &str = "unpacked size limit";
 
 /// A read error: the size limit stopping the stream, or a damaged archive.
-fn read_err(e: io::Error) -> ArchiveError {
+fn read_err(e: io::Error, max: u64) -> ArchiveError {
     if e.get_ref().is_some_and(|i| i.to_string() == LIMIT) {
-        ArchiveError::TooLarge {
-            bytes: MAX_UNPACKED_BYTES,
-            max: MAX_UNPACKED_BYTES,
-        }
+        ArchiveError::TooLarge { bytes: max, max }
     } else {
         ArchiveError::Corrupt(e.to_string())
     }
@@ -258,13 +371,31 @@ pub fn unpack(bytes: &[u8], into: &Path) -> Result<(), ArchiveError> {
             max: MAX_ARCHIVE_BYTES,
         });
     }
+    unpack_from(bytes, into, u64::MAX)
+}
+
+/// Unpacks the archive read from `archive` into `into`, as [`unpack`], writing at most
+/// `room` bytes of files: the entries' declared sizes are counted before each is written,
+/// so an archive that would fill the disk stops at the entry that would pass it
+/// ([`ArchiveError::NoRoom`]). The caller bounds the archive's own size.
+pub fn unpack_from(archive: impl Read, into: &Path, room: u64) -> Result<(), ArchiveError> {
+    unpack_within(archive, into, room, MAX_UNPACKED_BYTES)
+}
+
+fn unpack_within(
+    archive: impl Read,
+    into: &Path,
+    room: u64,
+    max_unpacked: u64,
+) -> Result<(), ArchiveError> {
     fs::create_dir(into).map_err(io_err(into))?;
     // The tar framing is counted with the content: a few KiB over the files' total.
     let limited = Limited {
-        inner: GzDecoder::new(bytes),
+        inner: GzDecoder::new(archive),
         read: 0,
-        max: MAX_UNPACKED_BYTES + (MAX_ENTRIES as u64) * 1024,
+        max: max_unpacked + (MAX_ENTRIES as u64) * 1024,
     };
+    let read_err = |e: io::Error| read_err(e, max_unpacked);
     let mut ar = tar::Archive::new(limited);
     let mut entries = 0usize;
     let mut total = 0u64;
@@ -292,10 +423,16 @@ pub fn unpack(bytes: &[u8], into: &Path) -> Result<(), ArchiveError> {
             continue;
         };
         total += entry.header().size().unwrap_or(0);
-        if total > MAX_UNPACKED_BYTES {
+        if total > max_unpacked {
             return Err(ArchiveError::TooLarge {
                 bytes: total,
-                max: MAX_UNPACKED_BYTES,
+                max: max_unpacked,
+            });
+        }
+        if total > room {
+            return Err(ArchiveError::NoRoom {
+                needed: total,
+                room,
             });
         }
         if let Some(parent) = rel.parent().filter(|p| !p.as_os_str().is_empty())
@@ -422,17 +559,48 @@ mod tests {
     }
 
     #[test]
-    fn garbage_and_oversize_are_refused() {
+    fn garbage_is_refused() {
         let tmp = tempfile::tempdir().expect("tmp");
         assert!(matches!(
             unpack(b"not an archive", &tmp.path().join("a")),
             Err(ArchiveError::Corrupt(_))
         ));
-        let big = vec![0u8; MAX_ARCHIVE_BYTES as usize + 1];
+    }
+
+    #[test]
+    fn packing_streams_and_stops_at_its_limit() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let src = tmp.path().join("show");
+        session(&src);
+        let mut out = Vec::new();
+        let p = pack_dir_to(&src, &mut out).expect("pack");
+        assert_eq!(p.bytes, out.len() as u64);
+        assert_eq!(p.sha256, sha256_hex(&out));
+        assert_eq!(out, pack_dir(&src).expect("in memory"));
+        let mut h = Hasher::default();
+        let (a, b) = out.split_at(out.len() / 2);
+        h.update(a);
+        h.update(b);
+        assert_eq!(h.hex(), p.sha256);
+        assert!(session_bytes(&src).expect("size") >= 40);
         assert!(matches!(
-            unpack(&big, &tmp.path().join("b")),
-            Err(ArchiveError::TooLarge { .. })
+            pack_within(&src, &mut Vec::new(), 16),
+            Err(ArchiveError::TooLarge { max: 16, .. })
         ));
+    }
+
+    #[test]
+    fn an_archive_larger_than_its_room_stops_before_the_entry_that_passes_it() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let src = tmp.path().join("show");
+        session(&src);
+        let a = pack_dir(&src).expect("pack");
+        let r = unpack_from(a.as_slice(), &tmp.path().join("o"), 20);
+        assert!(
+            matches!(r, Err(ArchiveError::NoRoom { room: 20, .. })),
+            "{r:?}"
+        );
+        unpack_from(a.as_slice(), &tmp.path().join("p"), 1 << 20).expect("room enough");
     }
 
     #[test]
@@ -452,7 +620,8 @@ mod tests {
         h.set_size(2);
         h.set_mode(0o644);
         t.append_data(&mut h, MANIFEST, &b"{}"[..]).expect("m");
-        let size = MAX_UNPACKED_BYTES + 1;
+        let max = 1 << 20;
+        let size = max + 1;
         let mut h = tar::Header::new_ustar();
         h.set_size(size);
         h.set_mode(0o644);
@@ -462,7 +631,7 @@ mod tests {
         assert!((a.len() as u64) < MAX_ARCHIVE_BYTES);
         let tmp = tempfile::tempdir().expect("tmp");
         assert!(matches!(
-            unpack(&a, &tmp.path().join("o")),
+            unpack_within(a.as_slice(), &tmp.path().join("o"), u64::MAX, max),
             Err(ArchiveError::TooLarge { .. })
         ));
     }
