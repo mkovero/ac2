@@ -144,6 +144,9 @@ pub enum GenAction {
     CeilingLowered,
     /// The system maximum level (`ceiling`) was raised (an explicit confirmation).
     CeilingRaised,
+    /// A loopback detection (`stream.detect_loopback`) is playing its burst: `firing` for
+    /// the burst's length, with the burst as the settings.
+    LoopbackBurst,
 }
 
 /// Last audited action.

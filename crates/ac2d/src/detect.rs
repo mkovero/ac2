@@ -21,8 +21,11 @@ use ac2_core::generator::{
 };
 use ac2_core::loopback::{LOOPBACK_MIN_CORRELATION, rank_inputs};
 use ac2_proto::ProtoError;
-use ac2_proto::model::{BackendKind, DeviceId, LoopbackCandidate, LoopbackDetection};
-use ac2_proto::units::{Db, Dbfs, Samples, Seconds};
+use ac2_proto::model::{
+    BackendKind, BandLimit as WireBand, DeviceId, FilterOrder as WireOrder, GeneratorSettings,
+    LoopbackCandidate, LoopbackDetection, Signal as WireSignal,
+};
+use ac2_proto::units::{Db, Dbfs, Hz, Samples, Seconds};
 
 use crate::conv;
 use crate::fanout::pop_block;
@@ -49,8 +52,9 @@ const TIMEOUT: Duration = Duration::from_secs(6);
 const MAX_INPUTS: u16 = 64;
 const STOP_TIMEOUT: Duration = Duration::from_millis(300);
 
-/// Set to stop a detection under way: its requester may no longer make sound. The burst
-/// is cut with the output's fade, as a lease taken away cuts the stimulus.
+/// Set to stop a detection under way: the stimulus was stopped (`gen.stop`), or its
+/// requester may no longer make sound. The burst is cut with the output's fade, as a lease
+/// taken away cuts the stimulus.
 #[derive(Clone, Default)]
 pub(crate) struct Cut(Arc<AtomicBool>);
 
@@ -75,6 +79,23 @@ pub(crate) struct DetectRequest {
     pub(crate) level_dbfs: f64,
     pub(crate) ceiling_dbfs: f64,
     pub(crate) max_level: MaxLevel,
+    /// Told `true` as the burst starts and `false` once it has played out (or the detection
+    /// ends before), once each: the rig's generator shows the burst while it sounds.
+    pub(crate) sounding: Box<dyn Fn(bool) + Send>,
+}
+
+/// Tells [`DetectRequest::sounding`] each change, once.
+struct Sounding<'a> {
+    tell: &'a (dyn Fn(bool) + Send),
+    on: std::cell::Cell<bool>,
+}
+
+impl Sounding<'_> {
+    fn set(&self, on: bool) {
+        if self.on.replace(on) != on {
+            (self.tell)(on);
+        }
+    }
 }
 
 /// Plays a fixed buffer once, then zeros. Allocation-free.
@@ -125,6 +146,21 @@ fn burst(
     g.level_control().fade_out();
     g.fill(&mut out[on..]);
     Ok(out)
+}
+
+/// The burst as generator settings, for the rig's generator to show while it sounds (the
+/// low-pass as at 48 kHz and above; [`burst`] lowers it below 0.45 fs).
+pub(crate) fn burst_settings(level: Dbfs, output: u16) -> GeneratorSettings {
+    GeneratorSettings {
+        signal: WireSignal::Pink,
+        level,
+        band: Some(WireBand {
+            highpass: Some(Hz(BURST_HP_HZ)),
+            lowpass: Some(Hz(BURST_LP_HZ)),
+            order: WireOrder::Fourth,
+        }),
+        outputs: vec![output],
+    }
 }
 
 /// Captured channels from capture index `start`, gaps zero-filled.
@@ -213,6 +249,10 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
         .history()
         .cloned()
         .ok_or_else(|| internal("no generator history"))?;
+    let sounding = Sounding {
+        tell: &*r.sounding,
+        on: std::cell::Cell::new(false),
+    };
     let result = (|| {
         let samples = burst(fs, r.level_dbfs, r.ceiling_dbfs, r.max_level)?;
         let len = samples.len() as u64;
@@ -228,7 +268,8 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
         let mut pump = |cap: &mut Capture| -> Result<(), ProtoError> {
             if r.cut.is_set() {
                 return Err(refused(
-                    "the detection was cut: this client may no longer make sound on this rig",
+                    "the detection was cut: the stimulus was stopped (gen.stop), or this \
+                     client may no longer make sound on this rig",
                 ));
             }
             if t0.elapsed() > TIMEOUT {
@@ -256,6 +297,7 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
             .map_err(|e| internal(e.to_string()))?;
         handle.set_gain(Gain::UNITY);
         handle.start();
+        sounding.set(true);
         tracing::info!(
             target: crate::AUDIT_TARGET,
             "loopback burst {:.1} dBFS on output {} of {:?} {:?}",
@@ -278,6 +320,10 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
                     first = buf.iter().position(|v| *v != 0.0).map(|i| from + i as u64);
                     scanned = end;
                 }
+            }
+            if first.is_some_and(|f| end >= f + len) {
+                // Every burst sample has been rendered: the rest is listening.
+                sounding.set(false);
             }
             if let Some(f) = first
                 && end >= f + len
@@ -330,6 +376,7 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
     })();
     handle.stop();
     let outcome = stream.stop(STOP_TIMEOUT);
+    sounding.set(false);
     tracing::info!("loopback detection stream stopped: {outcome:?}");
     result
 }

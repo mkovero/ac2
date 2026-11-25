@@ -533,6 +533,12 @@ impl Control {
             level_dbfs: level.0,
             ceiling_dbfs: self.s.ceiling_dbfs,
             max_level: self.s.max_level,
+            sounding: {
+                let to = self.s.to_self.clone();
+                Box::new(move |sounding| {
+                    let _ = to.send(ControlMsg::LoopbackBurst { token, sounding });
+                })
+            },
         };
         tracing::info!(
             target: crate::AUDIT_TARGET,
@@ -552,6 +558,35 @@ impl Control {
             })
             .map_err(|e| internal(format!("cannot start detection: {e}")))?;
         Ok((token, cut))
+    }
+
+    /// The burst of detection `token` started or played out: the generator shows it firing
+    /// meanwhile, so every client sees that the rig makes sound and who made it. A stop
+    /// meanwhile (`gen.stop`, a role taken down) has already set the generator silent.
+    pub(super) fn loopback_burst(&mut self, token: u64, sounding: bool) {
+        let Some(d) = self.pending.detecting.as_mut().filter(|d| d.token == token) else {
+            return;
+        };
+        if d.sounding == sounding {
+            return;
+        }
+        d.sounding = sounding;
+        let (level, output, client) = (d.level, d.output, d.reply.client.clone());
+        let mut g = self.store.state().generator.clone();
+        if sounding {
+            g.firing = true;
+            g.settings = Some(crate::detect::burst_settings(level, output));
+            self.audit(&mut g, GenAction::LoopbackBurst, Some(&client));
+        } else if g.firing
+            && g.last_action
+                .as_ref()
+                .is_some_and(|a| a.action == GenAction::LoopbackBurst)
+        {
+            g.firing = false;
+        } else {
+            return;
+        }
+        self.commit(Change::Generator(g));
     }
 
     /// Opens `device`'s driver control panel on a thread of its own, and answers once the

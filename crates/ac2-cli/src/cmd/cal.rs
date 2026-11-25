@@ -180,12 +180,13 @@ async fn cal_electrical(cli: &Cli, a: &CalElectrical, out: &mut Out<'_>) -> Resu
 /// tone's level and stores the volts at 0 dBFS; the dBu of full scale is printed from them.
 async fn cal_line(cli: &Cli, a: &CalLine, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
-    let r = c
-        .call(Command::CalLine {
+    let (r, warnings) = c
+        .call_warned(Command::CalLine {
             channel: a.channel.0,
             volts: a.volts.0,
         })
         .await?;
+    super::osc::note_warnings(&c, &warnings, out).await;
     let e = expect_body!("cal.line", r, ReplyBody::LineCalibration(e) => e)?;
     out.emit(
         &json!({

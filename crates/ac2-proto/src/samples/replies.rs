@@ -21,6 +21,14 @@ pub fn warnings() -> Vec<Warning> {
         Warning::RigMonitorMoved {
             meas: vec![MeasId(3)],
         },
+        Warning::RecordingEnded {
+            recording: RecordingRef::Name {
+                name: "2026-11-25_soundcheck".into(),
+            },
+        },
+        Warning::LineLevelUnusual {
+            full_scale: Dbu(-12.5),
+        },
     ]
 }
 

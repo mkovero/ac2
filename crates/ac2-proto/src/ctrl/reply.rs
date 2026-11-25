@@ -157,7 +157,8 @@ pub struct Reply {
     /// Outcome.
     #[serde(with = "snake_result")]
     pub result: Result<ReplyBody, ProtoError>,
-    /// What a successful command did that the caller should know about (empty mostly).
+    /// What the command did that the caller should know about (empty mostly; a refused
+    /// `stream.open` may still have ended a recording).
     pub warnings: Vec<Warning>,
 }
 

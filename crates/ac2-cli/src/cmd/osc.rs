@@ -495,5 +495,8 @@ pub(crate) fn warning_text(w: &Warning, st: Option<&State>) -> String {
             "rig SPL meter(s) {} now meter this device's inputs",
             names(meas)
         ),
+        Warning::RecordingEnded { .. } | Warning::LineLevelUnusual { .. } => {
+            ac2_scene::osc::plain_warning(w).unwrap_or_default()
+        }
     }
 }

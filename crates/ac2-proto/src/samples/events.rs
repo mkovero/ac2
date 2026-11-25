@@ -165,5 +165,27 @@ pub fn events() -> Vec<Event> {
         ev(105, Change::Delay(Patch::Deleted(MeasId(3)))),
         ev(106, Change::DelayFinding(Patch::Set(finding()))),
         ev(107, Change::DelayFinding(Patch::Deleted(MeasId(3)))),
+        ev(
+            108,
+            Change::Generator(Generator {
+                firing: true,
+                settings: Some(GeneratorSettings {
+                    signal: Signal::Pink,
+                    level: Dbfs(-30.0),
+                    band: Some(BandLimit {
+                        highpass: Some(Hz(100.0)),
+                        lowpass: Some(Hz(10_000.0)),
+                        order: FilterOrder::Fourth,
+                    }),
+                    outputs: vec![1],
+                }),
+                last_action: Some(GenAudit {
+                    action: GenAction::LoopbackBurst,
+                    client: Some(ClientId("laptop".into())),
+                    at: WallNs(1_790_000_000_000_000_000),
+                }),
+                ..generator()
+            }),
+        ),
     ]
 }

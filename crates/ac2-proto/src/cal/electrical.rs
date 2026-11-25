@@ -38,9 +38,14 @@ pub fn electrical_sensitivity_db(full_scale_volts: f64, mv_per_pa: f64) -> f64 {
 
 /// 0 dBu in volts RMS: 1 mW into 600 Ω, `sqrt(0.001 · 600)`.
 pub const DBU_REF_VOLTS: f64 = 0.774_596_669_241_483_4;
-/// Lowest and highest line full scale accepted, dBu: below +4 dBu a line input could not
-/// take a nominal signal; above +30 dBu no interface exists (the volts would be a unit slip).
-pub const LINE_DBU_FS_RANGE: (f64, f64) = (4.0, 30.0);
+/// Lowest and highest line full scale accepted, dBu: wide enough for a padded input and a
+/// high-voltage amplifier tap. A slip of a thousand (mV typed as V, 60 dB) from a usual
+/// interface lands outside [`LINE_DBU_FS_USUAL`] at least, where it is warned about.
+pub const LINE_DBU_FS_ACCEPTED: (f64, f64) = (-40.0, 50.0);
+/// The line full scales of usual interfaces, dBu: below +4 dBu a line input could not take
+/// a nominal signal, and above +30 dBu few interfaces go. A full scale accepted outside it
+/// is stored with a warning.
+pub const LINE_DBU_FS_USUAL: (f64, f64) = (4.0, 30.0);
 
 /// dBu of 0 dBFS for an input whose full scale is `full_scale_volts`.
 pub fn dbu_fs(full_scale_volts: f64) -> Dbu {

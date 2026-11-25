@@ -5,7 +5,9 @@
 use std::net::SocketAddr;
 
 use ac2_proto::Warning;
-use ac2_proto::model::{CueState, MeasScope, Measurement, OscArg, OscMessage, OscPath, Rig};
+use ac2_proto::model::{
+    CueState, MeasScope, Measurement, OscArg, OscMessage, OscPath, RecordingRef, Rig,
+};
 use ac2_proto::units::MeasId;
 
 use crate::primitives::Color;
@@ -364,6 +366,32 @@ pub fn reply_warning(w: &Warning, names: &[String]) -> String {
             "rig SPL meter(s) {} now meter this device's inputs",
             names.join(", ")
         ),
+        Warning::RecordingEnded { .. } | Warning::LineLevelUnusual { .. } => {
+            plain_warning(w).unwrap_or_default()
+        }
+    }
+}
+
+/// A reply's warning that names no meters in words, the same in the app and the CLI;
+/// `None` for one that lists meters ([`reply_warning`]).
+pub fn plain_warning(w: &Warning) -> Option<String> {
+    match w {
+        Warning::RigMonitorBlind { .. } | Warning::RigMonitorMoved { .. } => None,
+        Warning::RecordingEnded { recording } => Some(format!(
+            "recording {} ended: the audio stream closed or reopened under it (its file is kept)",
+            match recording {
+                RecordingRef::Name { name } => name,
+                RecordingRef::Path { path } => path,
+            }
+        )),
+        Warning::LineLevelUnusual { full_scale } => {
+            let (lo, hi) = ac2_proto::cal::LINE_DBU_FS_USUAL;
+            Some(format!(
+                "line full scale {:+.1} dBu stored, outside the usual {lo:+} … {hi:+} dBu: check \
+                 the volts typed (V, not mV) and the input's gain or pad",
+                full_scale.0
+            ))
+        }
     }
 }
 
@@ -371,6 +399,7 @@ pub fn reply_warning(w: &Warning, names: &[String]) -> String {
 pub fn warning_meas(w: &Warning) -> &[MeasId] {
     match w {
         Warning::RigMonitorBlind { meas } | Warning::RigMonitorMoved { meas } => meas,
+        Warning::RecordingEnded { .. } | Warning::LineLevelUnusual { .. } => &[],
     }
 }
 
@@ -385,6 +414,28 @@ mod tests {
             args,
             append_level: false,
         }
+    }
+
+    #[test]
+    fn plain_warnings_name_the_recording_and_the_level() {
+        let w = Warning::RecordingEnded {
+            recording: RecordingRef::Name {
+                name: "show".into(),
+            },
+        };
+        assert_eq!(
+            reply_warning(&w, &[]),
+            "recording show ended: the audio stream closed or reopened under it (its file is kept)"
+        );
+        assert!(warning_meas(&w).is_empty());
+        let w = Warning::LineLevelUnusual {
+            full_scale: ac2_proto::units::Dbu(-12.04),
+        };
+        assert_eq!(
+            reply_warning(&w, &[]),
+            "line full scale -12.0 dBu stored, outside the usual +4 … +30 dBu: check the volts \
+             typed (V, not mV) and the input's gain or pad"
+        );
     }
 
     #[test]
