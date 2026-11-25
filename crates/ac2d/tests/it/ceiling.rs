@@ -306,3 +306,87 @@ fn a_restart_with_a_higher_bound_never_raises_the_level_by_itself() {
     h.shutdown();
     assert_eq!(stored(), serde_json::json!(-30.0));
 }
+
+/// A torn rig settings file is set aside and its previous copy read: the start writes the
+/// file again with the level in force and the labels, so the next start finds them there,
+/// never a missing file that would take a higher bound.
+#[test]
+fn a_recovered_file_is_written_back_at_start() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("rig.json");
+    let start = |bound: f64| {
+        let mut cfg = config(manual_rig(), inproc("ceiling-recovered"));
+        cfg.max_level_dbfs = bound;
+        cfg.rig_settings = Some(file.clone());
+        Daemon::start(cfg).unwrap()
+    };
+    let h = start(-10.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    ceiling(&mut c, -36.0, false).unwrap();
+    c.outputs(Command::SessionOutputs {
+        outputs: vec![OutputSetup {
+            channel: 0,
+            label: Some("Main L".into()),
+        }],
+    });
+    h.shutdown();
+    // The previous copy holds what is in force; the file itself is torn.
+    std::fs::copy(&file, dir.path().join("rig.json.prev")).unwrap();
+    std::fs::write(&file, b"{\"ceil").unwrap();
+
+    let h = start(-10.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    assert_eq!(c.state().generator.ceiling, Dbfs(-36.0));
+    h.shutdown();
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(v["ceiling_dbfs"], serde_json::json!(-36.0));
+
+    // The next start, with a higher bound, reads it back.
+    let h = start(-6.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    let s = c.state();
+    assert_eq!(s.generator.ceiling, Dbfs(-36.0));
+    assert_eq!(s.outputs.len(), 1);
+    h.shutdown();
+}
+
+/// A start whose level cannot be stored (the settings directory read-only) runs at the
+/// level in force; setting that same level then reports the failure instead of claiming it
+/// stored, and it does once the file can be written.
+#[cfg(unix)]
+#[test]
+fn a_level_not_stored_at_start_is_stored_when_set() {
+    use std::os::unix::fs::PermissionsExt;
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("rig.json");
+    let start = |bound: f64| {
+        let mut cfg = config(manual_rig(), inproc("ceiling-readonly"));
+        cfg.max_level_dbfs = bound;
+        cfg.rig_settings = Some(file.clone());
+        Daemon::start(cfg).unwrap()
+    };
+    let h = start(-20.0);
+    h.shutdown();
+    let mode =
+        |m: u32| std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(m)).unwrap();
+    mode(0o555);
+    // Root writes anyway: nothing to test then.
+    if std::fs::write(dir.path().join("probe"), b"").is_ok() {
+        mode(0o755);
+        return;
+    }
+    // A lower bound caps the level; the cap cannot be stored.
+    let h = start(-40.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    assert_eq!(c.state().generator.ceiling, Dbfs(-40.0));
+    assert!(ceiling(&mut c, -40.0, false).is_err());
+    mode(0o755);
+    ceiling(&mut c, -40.0, false).unwrap();
+    h.shutdown();
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(v["ceiling_dbfs"], serde_json::json!(-40.0));
+}

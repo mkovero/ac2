@@ -177,12 +177,36 @@ impl Control {
     /// does not bring an older, higher level back.
     fn store_start_ceiling(&mut self, stored: Option<f64>) {
         let now = self.s.ceiling_dbfs;
-        if stored == Some(now) {
+        // A file read whole that holds the level in force needs nothing. Anything else
+        // (no file, one set aside or recovered from its previous copy) is written now: after
+        // the start the file always holds what is in force, so the next start cannot find
+        // it missing and take a higher bound.
+        if self.rig.settings.intact() && stored == Some(now) {
             return;
         }
-        self.out.ceiling_set = Some(now);
-        if let Err(e) = self.rig.settings.persist(&self.rig_settings_now()) {
-            tracing::error!("system max level {now:.1} dBFS not stored: {}", e.msg);
+        if self.rig.settings.check().is_err() {
+            // Unreadable: never written, and said so at open.
+            return;
+        }
+        let s = crate::rig::RigSettings {
+            ceiling_dbfs: Some(now),
+            ..self.rig_settings_now()
+        };
+        match self.rig.settings.persist(&s) {
+            Ok(()) => self.out.ceiling_set = Some(now),
+            Err(e) => {
+                let then = match stored {
+                    Some(s) if s > now => format!(
+                        "the rig settings file still holds {s:.1} dBFS, which a later start \
+                         with a higher --max-level takes"
+                    ),
+                    _ => "a later start finds no level and takes its --max-level bound".into(),
+                };
+                tracing::error!(
+                    "system max level {now:.1} dBFS not stored ({}): {then}",
+                    e.msg
+                );
+            }
         }
     }
 }

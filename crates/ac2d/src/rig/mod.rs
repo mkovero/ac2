@@ -107,6 +107,9 @@ pub(crate) struct RigStore {
     unreadable: Option<String>,
     /// The file was damaged at start and set aside.
     damage: Option<crate::damage::Damage>,
+    /// What was loaded is the file on disk, whole: nothing missing, set aside, recovered
+    /// or salvaged. Otherwise the start writes what is in force, so the next start reads it.
+    intact: bool,
 }
 
 impl RigStore {
@@ -116,7 +119,13 @@ impl RigStore {
             path: None,
             unreadable: None,
             damage: None,
+            intact: true,
         }
+    }
+
+    /// Whether the settings were read whole from the file on disk.
+    pub(crate) fn intact(&self) -> bool {
+        self.intact
     }
 
     /// What was found damaged at start, once.
@@ -135,6 +144,7 @@ impl RigStore {
             path: Some(path.to_owned()),
             unreadable: None,
             damage: None,
+            intact: false,
         };
         let text = match std::fs::read(path) {
             Ok(t) => t,
@@ -185,6 +195,7 @@ impl RigStore {
             }
         };
         if lost.is_empty() {
+            store.intact = true;
             return (store, sections.settings());
         }
         let (s, reason) = salvage(path, sections, &lost);
