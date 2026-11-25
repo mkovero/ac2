@@ -40,6 +40,12 @@ pub enum RecCmd {
     Status,
     /// Recordings in the daemon's recording directory.
     List,
+    /// Delete a recording (its audio and sidecar): a name, or locally a path to either of
+    /// its files. Not the one being recorded or replayed.
+    Delete {
+        /// Recording name or path.
+        recording: String,
+    },
     /// Turn a WAV from elsewhere (a recorder's 16-, 24- or 32-bit PCM or float file) into a
     /// recording `stream replay` plays; written on this computer, no daemon needed.
     Import(RecImportArgs),

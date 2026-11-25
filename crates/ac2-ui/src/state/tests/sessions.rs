@@ -555,3 +555,95 @@ fn an_export_is_tied_to_the_working_state_it_made() {
     assert!(press_save(&mut t).is_empty());
     assert!(on_name_page(&t));
 }
+
+fn select(t: &mut T, i: usize) {
+    if let Overlay::Sessions(d) = &mut t.st.overlay {
+        d.selected = i;
+    }
+}
+
+/// A daemon session's row: Delete asks first (Cancel the default) and deletes on Delete;
+/// F2 renames it under a typed name. Done, the dialog stays with its list read again.
+#[test]
+fn a_daemon_session_is_deleted_when_confirmed_and_renamed() {
+    let mut t = with_working(false, named("sat"));
+    dialog(&mut t);
+    let i = row(&t, "friday");
+    select(&mut t, i);
+    assert!(t.key("Delete").is_empty());
+    let (title, answers) = question(&t);
+    assert_eq!(title, "Delete session friday?");
+    assert_eq!(answers, ["Delete", "Cancel"]);
+    assert!(t.key("Enter").is_empty(), "Cancel by default");
+    assert!(!matches!(t.st.overlay, Overlay::Choose(_)));
+
+    dialog(&mut t);
+    select(&mut t, i);
+    t.key("Delete");
+    t.key("Left");
+    let r = t.key("Enter");
+    assert_eq!(
+        job(&r),
+        [SessionStep::Delete {
+            name: "friday".into()
+        }]
+    );
+    let r = t.conn(ConnEvent::Sessions(Box::new(SessionOutcome {
+        done: vec![SessionDone::Deleted {
+            name: "friday".into(),
+        }],
+        failed: None,
+    })));
+    assert!(matches!(r.as_slice(), [Request::SessionList]), "{r:?}");
+    assert!(t.st.sessions_dialog().is_some());
+
+    // Renamed: the name page starts from the old name.
+    t.key("Escape");
+    dialog(&mut t);
+    select(&mut t, i);
+    assert!(t.key("F2").is_empty());
+    let Some(SPage::Name(n)) = t.st.sessions_dialog().map(|d| &d.page) else {
+        panic!("{:?}", t.st.overlay)
+    };
+    assert_eq!(n.text, "friday");
+    assert_eq!(n.title(), "Rename session friday: new name");
+    t.type_key("Space", " ");
+    t.type_key("2", "2");
+    let r = t.key("Enter");
+    assert_eq!(
+        job(&r),
+        [SessionStep::Rename {
+            name: "friday".into(),
+            to: "friday 2".into()
+        }]
+    );
+    // Refused (the name is taken): said on the name page.
+    t.conn(ConnEvent::Sessions(Box::new(SessionOutcome {
+        done: Vec::new(),
+        failed: Some(SessionFailure {
+            step: SessionStep::Rename {
+                name: "friday".into(),
+                to: "friday 2".into(),
+            },
+            rest: Vec::new(),
+            error: "\"friday 2\" is taken".into(),
+            code: Some(ErrorCode::Conflict),
+            detail: None,
+        }),
+    })));
+    let Some(SPage::Name(n)) = t.st.sessions_dialog().map(|d| &d.page) else {
+        panic!("{:?}", t.st.overlay)
+    };
+    assert_eq!(n.error.as_deref(), Some("\"friday 2\" is taken"));
+
+    // Not a daemon session: nothing to rename or delete.
+    assert!(t.key("Escape").is_empty());
+    let i = row(&t, "New session");
+    select(&mut t, i);
+    assert!(t.key("Delete").is_empty());
+    assert!(t.key("F2").is_empty());
+    assert!(
+        t.st.sessions_dialog()
+            .is_some_and(|d| d.page == SPage::Main)
+    );
+}

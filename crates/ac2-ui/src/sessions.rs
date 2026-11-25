@@ -1,6 +1,7 @@
 //! The Sessions dialog (`docs/design/sessions.md`, Alt+S): New, Open…, Save, Save as…,
 //! Export…, Recover previous, and the recent sessions — the daemon's named sessions merged
-//! with the files and folders this app opened or exported, most recent first. Open… and
+//! with the files and folders this app opened or exported, most recent first. A daemon
+//! session's row renames (F2) and deletes (Delete, asked first). Open… and
 //! Export… use an in-app file browser with big rows (the Pi kiosk has no native dialog)
 //! that starts at the places: home and removable media.
 //!
@@ -61,6 +62,10 @@ pub enum SessionStep {
     Recover,
     /// `file.salvage` (a file here uploaded first).
     Salvage { from: Source },
+    /// `file.delete` of a saved session.
+    Delete { name: String },
+    /// `file.rename` of a saved session.
+    Rename { name: String, to: String },
     /// The app quits (after the steps before it succeeded).
     Quit,
 }
@@ -105,6 +110,13 @@ pub enum SessionDone {
     Salvaged {
         name: String,
         salvage: Salvage,
+    },
+    Deleted {
+        name: String,
+    },
+    Renamed {
+        from: String,
+        file: SessionFile,
     },
     Quit,
 }
@@ -189,6 +201,8 @@ pub enum NamePurpose {
     SaveAs { then: Vec<SessionStep> },
     /// A file in `dir` on this machine.
     ExportAs { dir: PathBuf },
+    /// The daemon session `from`'s new name.
+    Rename { from: String },
 }
 
 /// A name being typed.
@@ -204,6 +218,7 @@ impl NameEntry {
         match &self.purpose {
             NamePurpose::SaveAs { .. } => "Save as: session name on the daemon".to_owned(),
             NamePurpose::ExportAs { dir } => format!("Export to {}: file name", dir.display()),
+            NamePurpose::Rename { from } => format!("Rename session {from}: new name"),
         }
     }
 }
@@ -222,8 +237,10 @@ impl Page {
         match self {
             Page::Main => text::DialogPage::Main,
             Page::Browse(_) => text::DialogPage::Browse,
-            Page::Name(n) => text::DialogPage::Name {
-                export: matches!(n.purpose, NamePurpose::ExportAs { .. }),
+            Page::Name(n) => match n.purpose {
+                NamePurpose::Rename { .. } => text::DialogPage::Rename,
+                NamePurpose::SaveAs { .. } => text::DialogPage::Name { export: false },
+                NamePurpose::ExportAs { .. } => text::DialogPage::Name { export: true },
             },
         }
     }

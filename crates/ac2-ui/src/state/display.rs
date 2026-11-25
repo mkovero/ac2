@@ -56,6 +56,8 @@ pub enum ChoicePurpose {
     },
     /// A session of another format version: import its traces.
     Salvage { from: crate::sessions::Source },
+    /// Deleting the daemon's saved session `name`: Delete / Cancel.
+    DeleteSession { name: String },
     /// The Spatial walk window: the first answer is *New walk…*, then `walks` in order,
     /// each opening its pane.
     Walks {
@@ -410,7 +412,8 @@ impl AppState {
             }
             p @ (ChoicePurpose::Unsaved { .. }
             | ChoicePurpose::Replace { .. }
-            | ChoicePurpose::Salvage { .. }) => self.session_answer(p, i, out),
+            | ChoicePurpose::Salvage { .. }
+            | ChoicePurpose::DeleteSession { .. }) => self.session_answer(p, i, out),
             ChoicePurpose::DeleteOwned { meas } => {
                 let traces = match i {
                     ac2_scene::meas_list::KEEP => OwnedTraces::Keep,
