@@ -49,8 +49,8 @@ pub struct CueArgs {
     /// OSC message in the fault state.
     #[arg(long, value_name = "MSG", allow_hyphen_values = true)]
     pub fault: Option<CueMsgArg>,
-    /// Art-Net levels held in the ok state: `"12=0 13=255"` (channel 1–512 = level 0–255),
-    /// or `off` for none.
+    /// Art-Net levels held in the ok state: `"12=0 13=255"` (channel 1–512 = level 0–255;
+    /// `12=255!` jumps past the fade), or `off` for none.
     #[arg(long, value_name = "LEVELS")]
     pub ok_dmx: Option<DmxListArg>,
     /// Art-Net levels held in the near state.
@@ -128,8 +128,9 @@ or `off` for no message in that state. Arguments: i:<int>, f:<float>, s:<text> (
 a bare number (integer without a decimal point, else float) or a bare word (string).
 
 LEVELS: Art-Net channel=value pairs held while the state is current, as one quoted argument:
-\"12=255 13=0\" (channel 1-512, value 0-255), or `off` for none. Each channel of the universe
-is the highest level any cue's current state gives it, 0 where none does (`ac2 artnet`).
+\"12=255 13=0\" (channel 1-512, value 0-255), or `off` for none. A level ending in ! (\"12=255!\")
+jumps there past the rig's fade, for a strobe, a relay or a warning lamp. Each channel of the
+universe is the highest level any cue's current state gives it, 0 where none does (`ac2 artnet`).
 
 Example: ac2 cue Stage window:15min --near \"/light/amber i:1\" --over \"/light/red i:1\" \\
            --ok \"/light/off\" --fault \"/light/blink i:1\" --over-dmx \"12=255 13=0\" \\

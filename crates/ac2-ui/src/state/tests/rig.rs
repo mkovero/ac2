@@ -733,6 +733,7 @@ fn a_meter_with_a_cue_opens_its_cues_shown() {
             dmx: vec![DmxSet {
                 channel: DmxChannel::new(12).expect("test value"),
                 value: 255,
+                snap: false,
             }],
         }),
         ..Cue::default()

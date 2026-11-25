@@ -878,7 +878,7 @@ pub fn osc_message(path: &str, args: Vec<OscArg>, append_level: bool) -> OscMess
 }
 
 /// A DMX level list from `channel=value` text.
-pub fn dmx(text: &str) -> Vec<DmxSet> {
+pub fn dmx<T: DmxEntry>(text: &str) -> Vec<T> {
     parse_dmx_list(text).expect("valid sample levels")
 }
 
@@ -903,7 +903,7 @@ pub fn light_cue() -> Cue {
         }),
         fault: Some(CueAction {
             osc: None,
-            dmx: dmx("512=255"),
+            dmx: dmx("512=255!"),
         }),
     }
 }
