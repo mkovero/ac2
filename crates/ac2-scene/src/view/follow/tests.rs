@@ -413,26 +413,34 @@ fn an_ease_is_monotonic_keeps_its_span_and_ends_on_the_grid() {
     assert_eq!(e.shade(10.0 + EASE_S + SHADE_S), 0.0);
 }
 
-/// Fitted on a flat −110 dBFS floor (the fit's narrowest span), then music: up at once onto
-/// the music (on so narrow a span its peaks may come within [`UP_AT`] once more), then one
-/// widen once the slow window holds it; nothing after that in ten minutes, and no move
+/// Fitted on a flat −110 dBFS floor (the fit's narrowest span), then music: one move up
+/// that frames the music floor to peak, not a shift that would show its top alone until
+/// the slow window widens minutes later; nothing after that in ten minutes, and no move
 /// narrows.
 #[test]
-fn a_floor_fitted_pane_moves_up_then_widens_once() {
+fn a_floor_fitted_pane_frames_the_music_in_one_move() {
     let flat = Sample {
         top: -110.0,
         floor: -110.0,
     };
     let mut sim = Sim::fitted(flat);
     let mut rng = Rng(13);
+    let mut floor = f64::INFINITY;
     for _ in 0..6000 {
-        sim.frame(music(&mut rng, -12.0));
+        let s = music(&mut rng, -12.0);
+        floor = floor.min(s.floor);
+        sim.frame(s);
     }
     let whys = sim.whys();
     assert_eq!(whys.first(), Some(&Why::Up), "{:?}", sim.moves);
-    assert_eq!(whys.last(), Some(&Why::Widen), "{:?}", sim.moves);
-    let ups = whys.iter().filter(|w| **w == Why::Up).count();
-    assert!(ups <= 2 && whys.len() == ups + 1, "{:?}", sim.moves);
+    assert!(whys.len() <= 2, "{:?}", sim.moves);
+    let (at, _, first) = sim.moves[0];
+    assert!(at < UP_WINDOW_S + 1.0, "{:?}", sim.moves);
+    // The move's own frame is in view whole; the quietest frame's floor within a step.
+    assert!(
+        first.lo <= floor + nice(first.span() / 8.0),
+        "{first:?} floor {floor}"
+    );
     let mut span = fit([-110.0, -110.0]).expect("fit").span();
     for (_, _, r) in &sim.moves {
         assert!(r.span() >= span, "{:?}", sim.moves);

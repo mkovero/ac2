@@ -1,7 +1,8 @@
 //! A spectrum pane's level axis following what the pane shows, gently: up fast, because a
-//! clipped curve is wrong now; down slowly, because a low one is only less legible and a
-//! song gap or a quiet verse is no new level; wider when the content no longer fits, never
-//! narrower (a fit narrows). Pure: the app feeds each frame's [`Sample`] with its arrival
+//! clipped curve is wrong now, and never at the cost of the floor the pane shows (a frame
+//! whose floor the shift would cut is framed floor to peak); down slowly, because a low one is only less
+//! legible and a song gap or a quiet verse is no new level; wider when the content no longer
+//! fits, never narrower (a fit narrows). Pure: the app feeds each frame's [`Sample`] with its arrival
 //! time and asks [`Follow::decide`] when the pane may move; the move eases ([`Ease`]).
 //!
 //! The constants are provisional (`docs/design/level-autocentre.md`, *Validation*).
@@ -227,10 +228,28 @@ impl Follow {
         if max <= r.hi - UP_AT * r.span() {
             return None;
         }
-        Some(Move {
-            to: shift(r, max, false),
-            why: Why::Up,
-        })
+        let shifted = shift(r, max, false);
+        // A louder peak over the same floor is a wider signal, not a louder one: the shift
+        // would push the floor the pane shows off its bottom and leave the top of the
+        // spectrum alone on the axis. The range widens onto that frame instead. A signal that
+        // rose as a whole (its floor still above the shifted bottom) shifts.
+        // Judged on the loudest frame's own floor: the frames before a level step say
+        // nothing about the signal after it.
+        let floor = self
+            .newest(n)
+            .max_by(|a, b| a.top.total_cmp(&b.top))
+            .map_or(f64::INFINITY, |s| s.floor);
+        let to = if floor < shifted.lo {
+            // Framed on the loud frame itself, floor to peak; the old bottom may be the
+            // floor of a signal long gone and is not kept.
+            widened(floor, max)
+                .map(|w| headroom(w, max))
+                .filter(|w| w.span() > r.span())
+                .unwrap_or(shifted)
+        } else {
+            shifted
+        };
+        Some(Move { to, why: Why::Up })
     }
 
     fn slow(&mut self, now: f64, r: Range) -> Option<Move> {

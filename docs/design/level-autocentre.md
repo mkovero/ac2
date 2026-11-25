@@ -90,6 +90,11 @@ Asymmetric, because a clipped curve is wrong now and a low one is only less legi
   `hi − 0.1·span`: a peak that near the top is about to leave the plot, so the axis moves
   before anything clips (an 80th percentile above `hi`, the first rule, let the highs run
   off the top on the rig). No lockout beyond needing 3 s of frames since the previous move.
+  When the shift would put the loudest frame's own floor under the new bottom (a pane
+  fitted on a quiet first frame or an idle input, then a signal with a wide spectrum), the
+  move frames that frame floor to peak instead, as a widen does (extent at most **0.6** of
+  the span, **0.2·span** headroom), never narrower than the range it leaves: a shift alone
+  showed only the top of the spectrum until the slow window widened, minutes later.
 - **Down, slow:** the maximum of the pane top over the last **240 s** below
   `lo + 0.35·span`, and at least **60 s** since the previous move. A song gap, a speech
   break or a quiet verse never lasts that long; an idle mic does.
