@@ -294,8 +294,8 @@ demoted or revoked, on the network. Settled:
   `ac2d::audit`) go to `ac2d-audit.log` beside the log file, 4 MiB and one `.1`, appended
   across restarts and written under journald too: no client can push them out.
 - *Transfers.* A viewer key holds one transfer, a download still being packed counted;
-  viewers together hold at most half of the 4. Every transfer ends at 15 min whatever its
-  use (64 MiB at about 600 kbit/s), beside the 2 min idle drop.
+  viewers together hold at most half of the 8 (§5). Every transfer ends at 1 h whatever its
+  use (1 GiB at about 2.4 Mbit/s), beside the 2 min idle drop.
 - *File slot.* An operator's file command cuts a viewer's download under way (the viewer is
   refused and told to ask again) instead of being refused; a viewer key starts a download
   at most once per 5 s (`refused`, with the seconds left).
@@ -368,8 +368,9 @@ rev after it) rather than holding an event no client can take. A maximal finishe
   and hashed as it arrives; chunks must arrive in order. A chunk whose `offset` equals the
   bytes received is appended; one whose `offset + len` equals the bytes received and whose
   bytes match the tail already written replies `ack` and changes nothing (a retry past the
-  dedup window); anything else is `invalid`. The last chunk checks `sha256`. Downloads are
-  packed to `.incoming/down-<transfer>.ac2session` the same way, so no transfer is held in
+  dedup window); anything else is `invalid`. The last chunk checks `sha256`. Downloads (a
+  session packed, a trace export) are written to `.incoming/down-<transfer>.part` (a
+  session is packed to a staging file first and moved there), so no transfer is held in
   memory except a snapshot. The staging directory is cleared at start, as today.
 - **Cap.** `ac2_archive::MAX_ARCHIVE_BYTES` becomes 1 GiB and `MAX_UNPACKED_BYTES` 4 GiB, one
   limit for both directions. `file.upload_begin` refuses (`refused`) when the session
@@ -378,11 +379,18 @@ rev after it) rather than holding an event no client can take. A maximal finishe
   and the autosave write to. `file.download_begin` and `trace.export` need only the bytes
   they are about to pack plus 64 MiB, checked before packing: a meter whose card is nearly
   full can still have its working session taken off, the case a download is most needed.
+  The free space `file.upload_begin` compares with is less the bytes still to come of the
+  uploads under way. Each chunk is checked too: one the disk cannot take with 64 MiB left
+  (whatever else wrote meanwhile) is `refused` and drops the upload, spool file and all;
+  `StorageFull` while writing does the same. A transfer ends at 1 h however busy (1 GiB at
+  about 2.4 Mbit/s), beside the 2 min idle drop.
 - **Quota.** At most 2 transfers per peer (name and key, or the local connection, as dedup
   keys them; two connections with one key share them), 1 for a viewer, and 8 per daemon;
-  over either is `refused` with the count in the message.
+  over either is `refused` with the count in the message. Viewers together hold at most 4
+  (half), as §3.
 - **`file.upload_abort {transfer: TransferId}`** replies `ack`, deletes the spool file and
-  frees the slot. A download ends with `file.download_end` as today. A `trace.import`
+  frees the slot (`invalid` for a download, `refused` while a file job reads the upload: it
+  ends with the job). A download ends with `file.download_end` as today. A `trace.import`
   refused with `pick_channel` or `bad_options` keeps its upload; the client retries the
   import on the same `transfer` id, and sends `file.upload_abort` when the operator cancels.
 - **Ending.** A peer's transfers are dropped, spool files deleted, after 2 minutes without a
@@ -392,10 +400,35 @@ rev after it) rather than holding an event no client can take. A maximal finishe
 - **Dynamics tables.** A `trace.import` of a dynamics export is bounded by the upload cap and
   the dynamics reader's own table limits, which follow the largest run `dynamics.run` can
   make; the 65 536-row trace cap applies to curve tables only.
+- **Memory.** `trace.import` still reads its upload whole: every trace reader takes the
+  file as bytes (CSV, analyzer text, IR WAV), and a trace file is small beside the cap.
+  `file.salvage` reads each trace file of the unpacked session whole for the same reason, and
+  a session's JSON is read whole to parse. `ac2-client` holds what it uploads or downloads
+  in memory (an archive file read, a folder packed, a download checked before it is
+  written), up to the 1 GiB cap.
 - **Deleting.** `rec.delete {recording: RecordingRef}` (refused while that recording is
   written or replayed), `file.delete {name: String}` and `file.rename {name: String, to:
-  String}` for saved sessions (by name only; refused for the session a file job is using;
-  renaming the session `working.origin` names updates the origin).
+  String}` for saved sessions (by name only; renaming the session `working.origin` names
+  updates the origin). Decided in `pn-spool`:
+  - `file.delete` and `file.rename` are file jobs: refused while any other file job runs
+    (one at a time, as the rest), which covers the session a load, save, import or
+    download uses.
+  - `file.delete` of the session `working.origin` names is `refused`: the working state
+    would belong to nothing on disk while `working.dirty` says it is clean. Save it under
+    another name or start a new one first.
+  - A name is one component by `session::validate_name`, now the same on every OS: no
+    trailing `.` or space, no Windows device name (`CON`, `nul.txt`, `COM1`…). The target
+    is a real folder holding `session.json` (a recording: regular files), never a link.
+  - A session delete renames the folder into the staging directory (one step, directory
+    synced), then removes it: a power cut leaves it whole or in staging, cleared at start.
+    A recording delete renames its sidecar to a hidden `.<name>.ac2rec.json.deleting`
+    (it leaves `rec.list`), removes the audio, then the marker; the next start finishes a
+    marker left. A rename checks the name is free and renames once; on Unix a folder
+    replaces only an empty one and Windows never replaces, so a session is never
+    overwritten. A rename that only changes case on a file system that ignores it is
+    allowed.
+  - The three are operator commands and audited (`ac2d::audit`, the client named);
+    `file.upload_abort` is an operator command too.
 
 ### 6. Per-frame metadata and per-source arrays
 

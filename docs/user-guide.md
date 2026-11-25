@@ -3415,6 +3415,8 @@ Backspace goes up a folder; Esc goes back or closes.
 | `ac2 session export <file> [--session <name>]` | writes an `.ac2session` file here: the working state or a saved session |
 | `ac2 session import <file> [--name <n>] [--force]` | stores a file or folder from here as a saved session on the daemon, without opening it |
 | `ac2 session list` | the daemon's saved sessions |
+| `ac2 session rename <session> <new name>` | renames a saved session; never replaces one |
+| `ac2 session delete <session>` | deletes a saved session from the daemon (not the open one) |
 
 `<session>` is a name, a folder on the daemon's machine, or an `.ac2session` file here (sent
 in checked chunks). `new` and `load` with unsaved changes are refused (exit code 4) unless
@@ -3447,7 +3449,14 @@ A session holds the measurements and traces (slots, display edits, sweep distort
 IRs) and each SPL meter's per-second log (a running meter is not an unsaved change). Not
 **calibrations**: they describe the machine's hardware and stay in its calibration store.
 An `.ac2session` is a compressed archive of a session folder with a checksum; the daemon
-refuses one that is damaged, larger than 64 MiB, or unpacks to more than 512 MiB.
+refuses one that is damaged, larger than 1 GiB, or unpacks to more than 4 GiB, and one the
+daemon's disk cannot take while keeping 1 GiB free.
+
+A session on the daemon is renamed or deleted from its row in the Sessions dialog: **F2**
+renames (type the new name, **Enter**; a name in use is refused, never replaced), **Delete**
+(or **Backspace**) asks *Delete session …?* with **Cancel** the default. The open session
+is not deleted (save it under another name or start a new one first); renamed, it stays
+the open one under the new name.
 
 ### Autosave
 
@@ -3548,7 +3557,8 @@ compression, no outputs ([raw-capture.md](design/raw-capture.md)).
   23.0 MB` (audio time in the file), then `recorded show · 1:23 · 23.0 MB (time limit)` or
   the failure.
 - **CLI:** `ac2 rec start --max 10min [--in 1,2] [--max-size 2GB] [--name show]` (`--max`
-  required), `ac2 rec stop`, `ac2 rec status`, `ac2 rec list`.
+  required), `ac2 rec stop`, `ac2 rec status`, `ac2 rec list`, `ac2 rec delete <name|path>`
+  (not the one being recorded or replayed).
 
 One recording at a time. It ends and is kept on stop, at its time or size limit, on a write
 error (disk full: everything before is kept), when the stream closes or reopens, and when
@@ -4907,7 +4917,7 @@ documents each command.
 | `ac2 stream open / close / status / inputs / replay` | the audio I/O (`open --out-device` plays on another device than the capture one), each input's mic and active curve; replaying a recording as the audio input |
 | `ac2 stream inputs [--kind IN=mic\|line\|digital] [--mic IN=NAME] [--curve IN=LABEL\|off] [--pair L,R[=NAME]] [--no-pairs]` | what each input carries, its mic and curve, the stereo pairs; alone, lists them |
 | `ac2 stream panel [--backend B] [--device D]` | opens the device's driver settings on the daemon's host (an ASIO driver's control panel, Audio MIDI Setup for Core Audio) |
-| `ac2 session new / save / save-as / load / recover / salvage / export / import / list / status` | the working state and saved sessions ([Sessions](#sessions)) |
+| `ac2 session new / save / save-as / load / recover / salvage / export / import / list / rename / delete / status` | the working state and saved sessions ([Sessions](#sessions)) |
 | `ac2 meas new / list / set / start / stop / rm`, `ac2 meas layout clear` | transfer (`tf`), `spectrum`, `rta`, `spl` and `sweep` measurements (math traces are listed too); `rm` of one that owns traces needs `--keep-traces` (moved to Imported) or `--delete-traces`; `layout clear` removes a measurement's own panes |
 | `ac2 math new / set` | math traces: `"A / B"`, `--op div\|mul\|add\|sub --a A --b B`, `--op avg --of A,B,C` |
 | `ac2 gen pink / white / periodic-pink / sine`, `ac2 gen stop` | the generator in the foreground (Enter fires, Esc stops); `stop` from any client; `sine --lock MEAS` moves the frequency to the nearest FFT bin of that spectrum measurement and prints it |

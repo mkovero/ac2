@@ -130,7 +130,7 @@ Warning { type: "<name>", … }
   client forgets its stored replies and running ids.
 - `stream.control_panel`, `delay.find`, `stream.detect_loopback` and the file jobs
   (`file.list`, `file.save`, `file.load`, `file.new`, `file.recover`, `file.salvage`,
-  `file.import`, `file.download_begin`) run beside the ctrl loop: other requests are
+  `file.import`, `file.download_begin`, `file.delete`, `file.rename`) run beside the ctrl loop: other requests are
   answered while they run.
 - Commits are serial. A request carries no guard of its own: the edits that must not
   overwrite another client's carry a `base` (`meas.update`: the measurement's `edit_rev`;
@@ -253,13 +253,17 @@ from the store.
 | `file.list` | — | `sessions` | read |
 | `file.upload_begin` | `file` (its path on the client), `bytes: u64`, `sha256: string` | `transfer` | acts |
 | `file.upload_chunk` | `transfer`, `offset: u64`, `data: bin` | `ack` | acts |
+| `file.upload_abort` | `transfer` (an upload) | `ack`; the upload and its spool file gone | acts |
 | `file.import` | `transfer`, `name`, `overwrite: bool` | `session_file` | acts (writes a file, commits no state) |
 | `file.download_begin` | `session: SessionRef \| nil` (nil: the working state) | `transfer` | acts |
 | `file.download_chunk` | `transfer` (a download or a snapshot transfer), `offset: u64` | `chunk` (bin) | read |
 | `file.download_end` | `transfer`, `saved_as: string \| nil` (nil for a snapshot transfer, else `invalid`) | `ack` | |
+| `file.delete` | `name` (a saved session) | `ack`; the session removed from the session directory | acts (writes a file, commits no state) |
+| `file.rename` | `name`, `to` | `session_file` (under its new name) | acts (writes a file; the working state's origin follows) |
 | `rec.start` | `request: RecordRequest` | `recording` (the run as started) | |
 | `rec.stop` | — | `recording` (the run, finished) | |
 | `rec.list` | — | `recordings` | read |
+| `rec.delete` | `recording: RecordingRef` | `ack`; its audio and sidecar removed | |
 | `stream.replay` | `recording: RecordingRef`, `pace: realtime \| fast` | `stream` | |
 | `server.info` | — | `server` | read |
 | `server.network` | `enabled: bool`, `bind: NetBind \| nil`, `port: u16 \| nil` | `server` | local clients only |
@@ -1877,12 +1881,23 @@ with the autosave (§7.3).
   trace's trace becomes an imported trace), file by file. Reply `salvage` {`version`:
   the manifest's version | nil, `imported`: [TraceMeta], `refused`: [{file, reason}]}.
 - `file.list`: the sessions in the session directory, by name.
+- `file.delete` / `file.rename`: a saved session by name only, `name` and `to` one plain
+  component (letters, digits, ` `, `-`, `_`, `.`; not starting with `.`, not ending in `.`
+  or a space, not a Windows device name such as `CON` or `nul.txt`, on every OS), else
+  `invalid`; `not_found` when there is none; `invalid` for a folder that is not a session
+  or is a link. `file.delete` of the session `working.origin` names is `refused` (save it
+  under another name or start a new one first). `file.rename` never replaces: a name in use
+  is `conflict` (`session_exists` when it is a session); renaming the session
+  `working.origin` names moves the origin with it. Each is whole or not done after a power
+  cut: a delete moves the folder into the staging directory in one step (cleared at
+  start), a rename is one rename. Audited (`ac2d.audit`).
 - Disk and archive work (`file.save`, `file.load`, `file.new`, `file.recover`,
-  `file.salvage`, `file.import`, `file.download_begin`, `file.list`) runs beside the other commands: lease refreshes,
+  `file.salvage`, `file.import`, `file.download_begin`, `file.delete`, `file.rename`,
+  `file.list`) runs beside the other commands: lease refreshes,
   `gen.stop` and other clients are answered while it waits on the disk, and its reply
   follows when it is done. One such operation at a time: while one is under way, another
   `file.save` / `file.load` / `file.new` / `file.recover` / `file.salvage` / `file.import` /
-  `file.download_begin` is `refused` (nothing changed; ask again once it is answered),
+  `file.download_begin` / `file.delete` / `file.rename` is `refused` (nothing changed; ask again once it is answered),
   except that an operator's command cuts a viewer's `file.download_begin` under way: the
   viewer is `refused` (ask again) and the operator's command runs. `file.list` is never
   refused for it: one reading of the directory at a time, and a `file.list` sent while one
@@ -1890,25 +1905,42 @@ with the autosave (§7.3).
   (edits made meanwhile stay unsaved). A load, new or recover whose working state changed
   (content or saved standing) while it read is refused with `conflict`, nothing changed.
   A salvage imports onto the working state as it is when its read is done.
-- Archives and trace files travel in chunks of at most `chunk_bytes` (1 MiB). Upload: `file.upload_begin`
-  (at most 64 MiB, else `invalid`) → `transfer` {`transfer`, `file_name`, `bytes`, `sha256`,
-  `chunk_bytes`}; `file.upload_chunk` in order (`offset` = bytes so far, else `invalid`);
-  after the last byte the SHA-256 is checked (`invalid` on a mismatch, the upload dropped).
-  Then `file.load` / `file.salvage` with `{type: upload}` or `file.import` (stores it as a
-  named session; `session_exists` unless `overwrite`), or `trace.import` (reads it as a
-  trace file, named after the last component of the upload's `file` when the file names
-  no trace; the upload is used up whether the import succeeds or not). Download: `file.download_begin`
-  packs (`file_name` `<name>.ac2session`; an archive over 64 MiB packed is `invalid`, as an
-  upload is), `file.download_chunk` reads, and
+- Archives and trace files travel in chunks of at most `chunk_bytes` (1 MiB), spooled to
+  files in the staging directory `<sessions>/.incoming/` (`up-<transfer>.part`,
+  `down-<transfer>.part`): no transfer but a snapshot transfer is held in memory. Upload:
+  `file.upload_begin` (at most 1 GiB, else `invalid`; `refused` when the session
+  directory's disk has less free than `bytes` plus 1 GiB beside the uploads under way)
+  → `transfer` {`transfer`, `file_name`, `bytes`, `sha256`, `chunk_bytes`};
+  `file.upload_chunk` in order (`offset` = bytes so far, else `invalid`); a chunk sent again
+  whose `offset + len` is the bytes so far and whose bytes are the ones received there is
+  `ack` and changes nothing (a retry past the dedup window), a different one `invalid`.
+  After the last byte the SHA-256 is checked (`invalid` on a mismatch, the upload dropped).
+  A chunk the disk cannot take with 64 MiB left is `refused` and drops the upload.
+  `file.upload_abort` ends an upload (`invalid` for a download, `refused` while a file
+  operation reads it). Then `file.load` / `file.salvage` with `{type: upload}` or
+  `file.import` (stores it as a named session; `session_exists` unless `overwrite`), or
+  `trace.import` (reads it as a trace file, named after the last component of the upload's
+  `file` when the file names no trace; the upload is used up whether the import succeeds or
+  not, except a refusal with `import` problem `pick_channel` or `bad_options`: the client
+  sends `trace.import` again on the same `transfer` with other options, or
+  `file.upload_abort` when it gives up). Download: `file.download_begin`
+  packs (`file_name` `<name>.ac2session`; `refused` when the disk has less free than the
+  session's size plus 64 MiB; an archive over 1 GiB packed is `invalid`, as an upload is),
+  `file.download_chunk` reads, and
   `file.download_end` drops it; with `saved_as` after a working-state download, the
   working state's origin becomes `client` {the last component of `saved_as`}, clean if it
   has not changed since the download began. `trace.export` offers its file as such a
   download (no `saved_as`).
   Unpacking accepts regular files at `session.json`,
-  `session.prev.json`, `traces/<file>`, `spl/<file>` only, at most 512 MiB and 20 000
-  entries. At most 4 transfers per daemon (snapshot transfers, §4.2, apart); one idle for 2 min, or 15 min after it began
-  however busy (64 MiB fits at about 600 kbit/s), is dropped (`not_found` after). A
-  transfer belongs to the client that began it.
+  `session.prev.json`, `traces/<file>`, `spl/<file>` only, at most 4 GiB and 20 000
+  entries, and stops (`refused`) before an entry that would leave the disk less than
+  1 GiB. At most 2 transfers per client (a network key, however many connections it
+  has, or a local connection), 1 for a viewer and 4 for all viewers, and 8 per daemon
+  (snapshot transfers, §4.2, apart), else `refused` with the count. One idle for 2 min,
+  or 1 h after it began however busy (1 GiB fits at about 2.4 Mbit/s), is dropped with
+  its spool file (`not_found` after); the daemon sees no connection end, so this is what
+  frees a vanished client's transfers. A transfer belongs to the client that began it.
+  The staging directory is cleared at start.
 - To a network client every host path in a reply or event is its last component: a
   session's origin, `file.list`'s `path`, a recording's or replay's `path`, a damaged
   file's `path` and `set_aside_as`, a calibration store error's `path`. The local pair reads
@@ -1955,6 +1987,11 @@ file channel order; a remote input is recorded from the joined feed, its gaps ma
   `started_at`, `discontinuities`, `remote_gaps`, `end` (`RecordingEnd` \| nil while being
   written),
   oldest first.
+- `rec.delete`: removes a recording's audio and sidecar; `refused` while it is being
+  recorded or replayed (close the audio I/O first), `not_found` when there is none,
+  `invalid` when either file is not a regular file (a link is never followed). The sidecar
+  is set aside as a hidden `.<name>.ac2rec.json.deleting` first, so the recording leaves
+  `rec.list` in one step; a delete cut short is finished at the next start. Audited.
 - Every committed change of a measurement, the generator, the input setup or a calibration
   while recording goes into the sidecar's timeline at the newest captured sample. Every
   block that does not follow the previous one (xrun, device gap, capture overflow,
@@ -2271,7 +2308,7 @@ the key's data connections (§5.8 `rejoin`), so the client says `hello` again an
   `file.download_end` with a nil `saved_as`. Snapshot transfers (§4.2) count against none of
   the transfer limits below. A viewer holds one transfer at a time, a
   download still being packed counted (`refused` for a second `trace.export` or
-  `file.download_begin` while one is open), viewers together at most 2 of the 4, and a
+  `file.download_begin` while one is open), viewers together at most 4 of the 8, and a
   viewer key begins a `file.download_begin` at most once per 5 s (`refused`, with the
   seconds left). An operator's file operation cuts a viewer's download being packed.
   Everything else is `refused` with detail `view_only` before it runs, so it stores and
@@ -2483,7 +2520,7 @@ would have carried (to a network client with its host paths cut, as in a reply).
 fetches it with `file.download_chunk`, checks `sha256`, ends it with `file.download_end`
 (nil `saved_as`) and takes the decoded snapshot as it would an inline one; the events it
 buffered meanwhile apply after it as usual. A snapshot transfer is outside every transfer
-limit (the 4 transfers of §3.2, a viewer's one and the viewers' share of §3.5): it is what
+limit (the 8 transfers of §3.2, a viewer's one and the viewers' share of §3.5): it is what
 every client, a viewer too, must be able to take. The bytes of one rev are shared by the clients that asked at it; a client
 holds at most two (a third `state.snapshot` replaces its older one, so a retry run across a
 rev change leaves the first reply's transfer valid), and each is dropped 30 s after its last

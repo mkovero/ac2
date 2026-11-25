@@ -66,8 +66,9 @@ or `file.import {transfer, name}` (store as a named session without opening it).
 read with `file.download_chunk`, and `file.download_end {transfer, saved_as}` tells the
 daemon the client wrote it, which makes that file the working state's origin and clean.
 
-Limits: archive ≤ 64 MiB, unpacked ≤ 512 MiB and ≤ 20 000 entries, at most 4 transfers in
-flight per daemon, a transfer idle for 2 min is dropped. Unpacking accepts only regular
+Limits: archive ≤ 1 GiB, spooled to the staging directory as it arrives, unpacked ≤ 4 GiB
+and ≤ 20 000 entries, 1 GiB of the disk kept free, at most 2 transfers per client and 8 per
+daemon, a transfer idle for 2 min or 1 h old is dropped (`docs/protocol.md` §3.2). Unpacking accepts only regular
 files at `session.json`, `session.prev.json`, `traces/<file>`, `spl/<file>` — no links, no
 absolute or `..` paths — so an archive cannot write outside its staging directory.
 
