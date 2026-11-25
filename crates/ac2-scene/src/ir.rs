@@ -112,13 +112,30 @@ fn finite_max(v: impl Iterator<Item = f64>) -> f64 {
         .fold(f64::NEG_INFINITY, f64::max)
 }
 
+/// The level `mode`'s dB are relative to for `frame`: its peak amplitude (log view) or its
+/// ETC peak in dB (ETC view); `None` in the linear view or with no such peak.
+pub fn peak_ref(frame: &IrFrame, mode: IrMode) -> Option<f64> {
+    let p = match mode {
+        IrMode::Linear => return None,
+        IrMode::Log => finite_max(frame.linear.iter().map(|x| f64::from(x.abs()))),
+        IrMode::Etc => finite_max(frame.etc.as_ref()?.iter().map(|x| f64::from(*x))),
+    };
+    (p.is_finite() && (mode == IrMode::Etc || p > 0.0)).then_some(p)
+}
+
 /// Values drawn for `mode`: amplitude (FS) or dB re the peak; `None` when the mode has no
 /// data. A zero sample has no level: NaN in the log view.
 pub fn ir_values(frame: &IrFrame, mode: IrMode) -> Option<Vec<f64>> {
+    ir_values_re(frame, mode, peak_ref(frame, mode))
+}
+
+/// [`ir_values`] with the dB relative to `re` ([`peak_ref`] of another curve): curves over
+/// one another in dB are drawn re one peak, so their levels compare.
+pub fn ir_values_re(frame: &IrFrame, mode: IrMode, re: Option<f64>) -> Option<Vec<f64>> {
     match mode {
         IrMode::Linear => Some(frame.linear.iter().map(|x| f64::from(*x)).collect()),
         IrMode::Log => {
-            let peak = finite_max(frame.linear.iter().map(|x| f64::from(x.abs())));
+            let peak = re?;
             if peak.is_nan() || peak <= 0.0 {
                 return None;
             }
@@ -138,7 +155,7 @@ pub fn ir_values(frame: &IrFrame, mode: IrMode) -> Option<Vec<f64>> {
         }
         IrMode::Etc => {
             let etc = frame.etc.as_ref()?;
-            let peak = finite_max(etc.iter().map(|x| f64::from(*x)));
+            let peak = re?;
             if !peak.is_finite() {
                 return None;
             }
@@ -409,13 +426,20 @@ fn draw(
         None => Some("no impulse energy".to_string()),
         Some(_) => None,
     };
-    // Another curve's samples on the same time axis (ms re its own inserted delay), under
-    // the lead's line, in its own colour.
+    // Another curve's samples on the lead's time axis: shifted by how much later its own
+    // inserted delay is, so arrivals keep their real difference; in dB re the lead's peak,
+    // so levels compare; under the lead's line, in its own colour.
+    let re = peak_ref(frame, mode);
+    let lead_delay = frame.meta.inserted_delay.0;
     for (f, col, stale) in &extra.lines {
-        let Some(v) = ir_values(f, mode) else {
+        let Some(v) = ir_values_re(f, mode, re) else {
             continue;
         };
-        let xs: Vec<f32> = times_ms(f).iter().map(|x| xm.to_px(*x)).collect();
+        let shift_ms = (f.meta.inserted_delay.0 - lead_delay) * 1000.0;
+        let xs: Vec<f32> = times_ms(f)
+            .iter()
+            .map(|x| xm.to_px(*x + shift_ms))
+            .collect();
         let ys: Vec<f32> = v
             .iter()
             .map(|y| match mode {

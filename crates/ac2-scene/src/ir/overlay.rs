@@ -2,8 +2,9 @@
 //! and the IR of every stored trace the pane shows, each in its own colour, with a legend
 //! of the same rows and order as the magnitude view's. A shown trace captured without an
 //! IR keeps its row, tagged `no IR`, so nothing the magnitude view lists goes missing here
-//! unsaid. Every curve is on one time axis, ms re its own inserted delay, whatever its
-//! sample rate.
+//! unsaid. Every curve is on the lead curve's time axis (ms re the lead's inserted delay,
+//! whatever its sample rate): another curve inserted later is drawn that much later, and
+//! its row says by how much (`Δt +0.50 ms`). In dB, every curve is re the lead's peak.
 
 use ac2_proto::frame::IrFrame;
 
@@ -32,10 +33,20 @@ pub struct IrCurve<'a> {
 }
 
 impl IrCurve<'_> {
-    fn entry(&self) -> LegendEntry {
+    /// Its legend row; `lead_delay`: the lead curve's inserted delay, against which a
+    /// later or earlier time base is said as the magnitude view says one (`Δt +0.50 ms`).
+    fn entry(&self, lead_delay: Option<f64>) -> LegendEntry {
         let mut tags = self.tags.clone();
-        if self.frame.is_none() {
-            tags.push(NO_IR.to_owned());
+        match (self.frame, lead_delay) {
+            (None, _) => tags.push(NO_IR.to_owned()),
+            (Some(f), Some(lead)) => {
+                let d = f.meta.inserted_delay.0 - lead;
+                // Below a tenth of a sample at 192 kHz, the same time base.
+                if d.abs() > 5e-7 {
+                    tags.push(format!("Δt {}", crate::tf::signed_ms(d)));
+                }
+            }
+            (Some(_), None) => {}
         }
         tags.extend(self.freshness.and_then(|f| f.tag()));
         let mut text = self.name.clone();
@@ -83,7 +94,14 @@ pub fn ir_overlay_scene(
                     Some((c.frame?, c.color, stale))
                 })
                 .collect(),
-            legend: curves.iter().map(|c| (c.entry(), c.color)).collect(),
+            legend: curves
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    let lead_delay = (i != lead).then_some(frame.meta.inserted_delay.0);
+                    (c.entry(lead_delay), c.color)
+                })
+                .collect(),
         }
     } else {
         Extra::default()
@@ -95,6 +113,7 @@ pub fn ir_overlay_scene(
 mod tests {
     use super::*;
     use crate::banner::Status;
+    use crate::ir::{ir_values_re, peak_ref};
     use crate::primitives::{Color, Viewport};
     use crate::theme::Theme;
     use crate::view::{IrAxes, IrMode, IrView, PlotChrome, Style, ViewState};
@@ -107,6 +126,11 @@ mod tests {
 
     /// An impulse of `peak` at t = 0 between −0.5 and +1.5 ms at `rate`.
     fn frame(rate: f64, peak: f32) -> IrFrame {
+        frame_at(rate, peak, 0.01)
+    }
+
+    /// [`frame`] with `delay` s inserted.
+    fn frame_at(rate: f64, peak: f32, delay: f64) -> IrFrame {
         let dt = 1.0 / rate;
         let n = (0.002 / dt).round() as usize + 1;
         let at = (0.0005 / dt).round() as usize;
@@ -118,7 +142,7 @@ mod tests {
                 sample_rate: Hz(rate),
                 t0: Seconds(-(at as f64) * dt),
                 dt: Seconds(dt),
-                inserted_delay: Seconds(0.01),
+                inserted_delay: Seconds(delay),
             },
             linear,
             etc: None,
@@ -200,6 +224,35 @@ mod tests {
             top[0]
         };
         assert!((peak_x(RED) - peak_x(BLUE)).abs() < 0.5);
+    }
+
+    /// Two time bases: a capture at 12.50 ms drawn with the live IR at 13.00 ms (another
+    /// rate) peaks 0.5 ms before it, and its row says so; dB are re the lead's peak.
+    #[test]
+    fn another_inserted_delay_keeps_its_arrival_difference() {
+        let live = frame_at(48_000.0, 0.5, 0.013);
+        let kept = frame_at(96_000.0, 0.25, 0.0125);
+        let l = curve(TraceKey::Live(MeasId(1)), "TF 1", Some(&live), RED);
+        let s1 = curve(TraceKey::Stored(TraceId(4)), "TF 1 S1", Some(&kept), BLUE);
+        let s = scene(&[l, s1], None).expect("drawn");
+        let texts: Vec<&str> = s.legend.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts, ["TF 1", "TF 1 S1 · Δt −0.50 ms"]);
+        let lines = &s.scene.layers[1].polylines;
+        let peak_x = |c: Color| {
+            let p = lines.iter().find(|p| p.stroke.color == c).expect("present");
+            p.points
+                .iter()
+                .min_by(|a, b| a[1].total_cmp(&b[1]))
+                .expect("present")[0]
+        };
+        let px_per_ms = (s.x_axis.mapping.to_px(1.0) - s.x_axis.mapping.to_px(0.0)) as f64;
+        let gap_ms = f64::from(peak_x(RED) - peak_x(BLUE)) / px_per_ms;
+        assert!((gap_ms - 0.5).abs() < 0.03, "{gap_ms}");
+
+        // The log view: the capture's peak is 6 dB under the live one's.
+        let v = ir_values_re(&kept, IrMode::Log, peak_ref(&live, IrMode::Log)).expect("values");
+        let top = v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        assert!((top + 6.02).abs() < 0.01, "{top}");
     }
 
     /// The cursor reads the selected curve; time zero and the tag are that curve's.

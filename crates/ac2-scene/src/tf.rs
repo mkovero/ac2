@@ -292,7 +292,7 @@ fn group_delay_span_text(shown: &[DisplayTrace]) -> String {
     }
 }
 
-fn signed_ms(s: f64) -> String {
+pub(crate) fn signed_ms(s: f64) -> String {
     format!("{} ms", format::signed(s * 1000.0, 2))
 }
 
