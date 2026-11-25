@@ -33,7 +33,7 @@ fn start(
 ) -> Handle {
     init_log();
     let mut cfg = config(manual_rig(), inproc(&unique(name)));
-    cfg.session_dir = dir.join("sessions");
+    cfg.session_dir = Some(dir.join("sessions"));
     let f = Arc::clone(free);
     cfg.transfers.free_space = FreeSpace::with(move |_| Ok(f.load(Ordering::Relaxed)));
     cfg.transfers.reserve = 1000;

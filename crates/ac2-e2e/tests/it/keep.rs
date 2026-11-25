@@ -32,7 +32,7 @@ fn daemon(dir: &Path, ep: &Endpoints, restore: bool) -> R<(ac2d::Handle, Endpoin
     };
     let audio = ac2d::backend(ac2d::BackendChoice::Fake)?;
     let mut config = ac2d::DaemonConfig::new(audio, listen, -10.0);
-    config.session_dir = dir.join("sessions");
+    config.session_dir = Some(dir.join("sessions"));
     config.autosave = Some(ac2d::AutosaveConfig {
         dir: dir.join("autosave"),
         restore,

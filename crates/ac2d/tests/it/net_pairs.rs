@@ -68,7 +68,7 @@ fn a_path_is_taken_on_the_local_pair_and_refused_on_the_network_one() {
     let dir = tempfile::tempdir().unwrap();
     let laptop = KeyPair::generate().unwrap();
     let mut cfg = net_config(manual_rig(), security(dir.path(), &laptop));
-    cfg.session_dir = dir.path().join("sessions");
+    cfg.session_dir = Some(dir.path().join("sessions"));
     let h = Daemon::start(cfg).unwrap();
     let ctx = Context::new().unwrap();
     let path = SessionRef::Path {

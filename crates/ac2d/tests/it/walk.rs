@@ -35,7 +35,7 @@ fn rig(name: &str, backend: FakeBackend) -> Rig {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let mut cfg = steady_config(backend.clone(), inproc(name));
-    cfg.session_dir = dir.path().join("sessions");
+    cfg.session_dir = Some(dir.path().join("sessions"));
     cfg.plan_dir = Some(dir.path().join("plans"));
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/tf"]);

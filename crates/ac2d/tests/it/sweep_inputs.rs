@@ -82,7 +82,7 @@ fn two_mic_setup(
     init_log();
     let backend = two_mic_rig();
     let mut cfg = config(backend.clone(), inproc(name));
-    cfg.session_dir = dir.join("sessions");
+    cfg.session_dir = Some(dir.join("sessions"));
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"evt"]);
     let ka = Sub::connect(h.context(), h.data_endpoint(), &[b"ka"]);

@@ -132,7 +132,7 @@ fn sessions_dialog_save_as() -> R {
     // A session directory of the test's own: a save never lands in the operator's sessions.
     let dir = tempfile::tempdir()?;
     let daemon = ac2_e2e::sim_daemon_with(ac2_e2e::Setup::Empty, |c| {
-        c.session_dir = dir.path().join("sessions");
+        c.session_dir = Some(dir.path().join("sessions"));
     })?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;

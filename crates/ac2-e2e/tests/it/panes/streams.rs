@@ -351,7 +351,7 @@ fn record_and_replay_from_the_app() -> R {
     let listen = ac2d::Listen::apart();
     let audio = ac2d::backend(ac2d::BackendChoice::Fake)?;
     let mut config = ac2d::DaemonConfig::new(audio, listen, -10.0);
-    config.session_dir = dir.path().join("sessions");
+    config.session_dir = Some(dir.path().join("sessions"));
     config.recording_dir = Some(dir.path().join("recordings"));
     let handle = ac2d::Daemon::start(config)?;
     let ep = Endpoints {

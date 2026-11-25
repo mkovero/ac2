@@ -19,7 +19,7 @@ use common::*;
 pub(crate) fn start(name: &str, dir: &Path, autosave: bool) -> Handle {
     init_log();
     let mut cfg = config(manual_rig(), inproc(&unique(name)));
-    cfg.session_dir = dir.join("sessions");
+    cfg.session_dir = Some(dir.join("sessions"));
     cfg.autosave = autosave.then(|| AutosaveConfig {
         dir: dir.join("autosave"),
         restore: true,
@@ -570,7 +570,7 @@ fn remote_clients_never_name_daemon_paths() {
         authorized_clients_file: authorized,
     };
     let mut cfg = net_config(manual_rig(), security);
-    cfg.session_dir = dir.path().join("sessions");
+    cfg.session_dir = Some(dir.path().join("sessions"));
     let h = Daemon::start(cfg).unwrap();
     let ctx = Context::new().unwrap();
     let curve = CurveClient {

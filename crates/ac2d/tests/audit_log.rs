@@ -38,7 +38,7 @@ fn audit_lines_outlive_floods_and_forged_lines() {
     };
     keys.save(&security.authorized_clients_file).unwrap();
     let mut cfg = net_config(manual_rig(), security);
-    cfg.session_dir = dir.path().join("sessions");
+    cfg.session_dir = Some(dir.path().join("sessions"));
     let h = Daemon::start(cfg).unwrap();
 
     let mut host = Client::connect(h.context(), h.ctrl_endpoint());

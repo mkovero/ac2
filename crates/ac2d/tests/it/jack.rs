@@ -18,7 +18,7 @@ fn jack_lists_port_names_or_says_why_not() {
     init_log();
     let backends = ac2d::backends(BackendChoice::Jack).expect("backends");
     let mut cfg = DaemonConfig::new(backends[0].clone(), inproc("jack"), -10.0);
-    cfg.session_dir = crate::common::test_sessions();
+    cfg.session_dir = Some(crate::common::test_sessions());
     cfg.backends = backends;
     let h = Daemon::start(cfg).expect("daemon");
     let (mut c, _s) = connect(&h, &[]);
@@ -131,7 +131,7 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
     init_log();
     let backends = ac2d::backends(BackendChoice::Jack).expect("backends");
     let mut cfg = DaemonConfig::new(backends[0].clone(), inproc("jack-out"), -10.0);
-    cfg.session_dir = crate::common::test_sessions();
+    cfg.session_dir = Some(crate::common::test_sessions());
     cfg.backends = backends;
     let h = Daemon::start(cfg).expect("daemon");
     let (mut c, _s) = connect(&h, &[]);
@@ -233,7 +233,7 @@ fn spare_input_sources_survive_a_reopen() {
     init_log();
     let backends = ac2d::backends(BackendChoice::Jack).expect("backends");
     let mut cfg = DaemonConfig::new(backends[0].clone(), inproc("jack-spare"), -10.0);
-    cfg.session_dir = crate::common::test_sessions();
+    cfg.session_dir = Some(crate::common::test_sessions());
     cfg.backends = backends;
     let h = Daemon::start(cfg).expect("daemon");
     let (mut c, _s) = connect(&h, &[]);

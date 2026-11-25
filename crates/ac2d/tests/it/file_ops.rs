@@ -22,7 +22,7 @@ const T: Duration = Duration::from_secs(20);
 fn start(name: &str, dir: &Path) -> Handle {
     init_log();
     let mut cfg = config(manual_rig(), inproc(&unique(name)));
-    cfg.session_dir = dir.join("sessions");
+    cfg.session_dir = Some(dir.join("sessions"));
     Daemon::start(cfg).unwrap()
 }
 
@@ -237,7 +237,7 @@ fn a_recording_is_deleted_unless_written_or_replayed() {
     let rec_dir = dir.path().join("recordings");
     let backend = manual_rig();
     let mut cfg = config(backend.clone(), inproc(&unique("rec-delete")));
-    cfg.session_dir = dir.path().join("sessions");
+    cfg.session_dir = Some(dir.path().join("sessions"));
     cfg.recording_dir = Some(rec_dir.clone());
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"evt"]);
@@ -328,7 +328,7 @@ fn a_half_done_recording_delete_is_finished_at_start() {
     let marker = rec_dir.join(".cut.ac2rec.json.deleting");
     std::fs::write(&marker, b"{}").unwrap();
     let mut cfg = config(manual_rig(), inproc(&unique("rec-cut")));
-    cfg.session_dir = dir.path().join("sessions");
+    cfg.session_dir = Some(dir.path().join("sessions"));
     cfg.recording_dir = Some(rec_dir.clone());
     let h = Daemon::start(cfg).unwrap();
     let (mut c, _sub) = connect(&h, &[]);

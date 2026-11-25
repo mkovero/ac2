@@ -36,7 +36,7 @@ fn start(name: &str, backend: FakeBackend) -> Rig {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let mut cfg = steady_config(backend.clone(), inproc(name));
-    cfg.session_dir = dir.path().join("sessions");
+    cfg.session_dir = Some(dir.path().join("sessions"));
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/spec", b"d/2/spec", b"d/3/spec"]);
     c.ok(Command::StreamOpen {

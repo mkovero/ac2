@@ -51,7 +51,7 @@ impl Rig {
         let dir = tempfile::tempdir()?;
         let sessions = dir.path().join("sessions");
         let (h, ep) = rig_on(Arc::new(backend.clone()), |cfg| {
-            cfg.session_dir = sessions;
+            cfg.session_dir = Some(sessions);
             // A tone's lease is held across CLI runs by a client of the test; a stalled
             // refresher on a loaded machine must not fade it out mid-test.
             cfg.lease_expiry = Duration::from_secs(60);

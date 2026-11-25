@@ -57,7 +57,7 @@ async fn rig(open_inputs: Option<Vec<u16>>) -> Rig {
         cfg.cal_store = Some(dir.path().join("calibrations.json"));
         // Each daemon its own: a salvage uploads its traces, spooled by transfer number
         // in the session folder, which daemons of other tests would share otherwise.
-        cfg.session_dir = dir.path().join("sessions");
+        cfg.session_dir = Some(dir.path().join("sessions"));
     });
     let c = client(&ep, "salvage-rig-test").await;
     if let Some(inputs) = open_inputs {

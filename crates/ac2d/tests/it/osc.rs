@@ -359,7 +359,7 @@ async fn slow_a_tone_over_the_limit_lights_over_and_back_ok() {
 /// A daemon keeping its rig settings, sessions, rig logs and autosave in `dir`.
 fn rig_config(dir: &std::path::Path) -> DaemonConfig {
     let mut cfg = steady_config(realtime_rig(), local_ipc());
-    cfg.session_dir = dir.join("sessions");
+    cfg.session_dir = Some(dir.join("sessions"));
     cfg.rig_settings = Some(dir.join("rig.json"));
     cfg.rig_logs = Some(dir.join("rig-logs"));
     cfg.autosave = Some(AutosaveConfig {

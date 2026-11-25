@@ -93,7 +93,7 @@ pub fn sim_daemon_with(
     let mut config = ac2d::DaemonConfig::new(std::sync::Arc::clone(&audio[0]), listen, -10.0);
     config.backends = audio;
     config.name = "Simulated rig".into();
-    config.session_dir = sessions.path().to_owned();
+    config.session_dir = Some(sessions.path().to_owned());
     edit(&mut config);
     let handle = ac2d::Daemon::start(config)?;
     let d = SimDaemon {

@@ -63,6 +63,7 @@ pub mod network;
 mod network_store;
 mod osc;
 mod outbox;
+mod own_sessions;
 mod peers;
 mod preview;
 mod refusals;
@@ -202,6 +203,9 @@ pub struct Handle {
     /// Held for the daemon's lifetime: frame hand-offs, publish gaps and job timers are all
     /// timed waits, which Windows otherwise ends only on its 15.6 ms tick.
     _timer: ac2_audio::timer::FineResolution,
+    /// The session directory made for a daemon given none: removed once the threads that
+    /// write it have ended (fields drop after [`Handle`]'s own drop joins them).
+    _own_sessions: Option<own_sessions::OwnSessions>,
 }
 
 impl fmt::Debug for Handle {
@@ -410,6 +414,13 @@ impl Daemon {
                 "the global maximum must be at or below 0 dBFS".into(),
             ));
         }
+        let (session_dir, own_sessions) = match &config.session_dir {
+            Some(d) => (d.clone(), None),
+            None => {
+                let o = own_sessions::OwnSessions::make().map_err(StartError::Io)?;
+                (o.path().to_owned(), Some(o))
+            }
+        };
         let incarnation = DaemonIncarnation(util::random_u64());
         let (rig_id, rig_id_damage) = rig_id::load(&config.rig_id);
 
@@ -517,7 +528,7 @@ impl Daemon {
             frames,
             outbox,
             to_self: tx.clone(),
-            session_dir: config.session_dir.clone(),
+            session_dir,
             cal_store: config.cal_store.clone(),
             autosave: config.autosave.clone(),
             recording_dir: config.recording_dir.clone(),
@@ -556,6 +567,7 @@ impl Daemon {
             control: Some(control),
             io: Some(io),
             _timer: timer,
+            _own_sessions: own_sessions,
         })
     }
 }
@@ -586,6 +598,18 @@ mod tests {
         h.tx.send(ControlMsg::Fatal("the io thread failed".into()))
             .unwrap();
         assert_eq!(h.wait(), Ended::Fatal("the io thread failed".into()));
+    }
+
+    /// A daemon given no session directory (a simulated rig, a test) saves into one of its
+    /// own, never the user's, and removes it as it stops.
+    #[test]
+    fn a_daemon_given_no_session_dir_owns_one_until_it_stops() {
+        let h = start("own-sessions");
+        let dir = h._own_sessions.as_ref().unwrap().path().to_owned();
+        assert!(dir.starts_with(std::env::temp_dir()), "{}", dir.display());
+        assert!(dir.is_dir());
+        h.shutdown();
+        assert!(!dir.exists());
     }
 
     #[test]

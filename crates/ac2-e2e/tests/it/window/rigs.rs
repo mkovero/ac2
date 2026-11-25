@@ -259,7 +259,7 @@ fn a_session_with_its_own_panes_loads_on_either_rig() -> R {
         Rig::start_with(move |c| {
             c.name = name.into();
             c.rig_id = ac2d::RigIdSource::File(id_file);
-            c.session_dir = sessions;
+            c.session_dir = Some(sessions);
         })
     };
     let pupu = both("pupu")?;

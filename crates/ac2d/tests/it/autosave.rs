@@ -25,7 +25,7 @@ fn start(name: &str, dir: &Path, restore: bool) -> (Handle, ac2_audio::FakeBacke
     let backend = manual_rig();
     let mut cfg = config(backend.clone(), inproc(&unique(name)));
     cfg.lease_expiry = Duration::from_secs(60);
-    cfg.session_dir = dir.join("sessions");
+    cfg.session_dir = Some(dir.join("sessions"));
     cfg.autosave = Some(AutosaveConfig {
         dir: dir.join("autosave"),
         restore,

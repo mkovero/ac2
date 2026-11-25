@@ -32,7 +32,7 @@ fn cfg(name: &str, dir: &Path) -> (ac2d::DaemonConfig, ac2_audio::FakeBackend) {
     let backend = manual_rig();
     let mut cfg = config(backend.clone(), inproc(&unique(name)));
     cfg.lease_expiry = Duration::from_secs(60);
-    cfg.session_dir = dir.join("sessions");
+    cfg.session_dir = Some(dir.join("sessions"));
     cfg.rig_settings = Some(dir.join("rig.json"));
     cfg.rig_logs = Some(dir.join("rig-logs"));
     cfg.cal_store = Some(dir.join("calibrations.json"));

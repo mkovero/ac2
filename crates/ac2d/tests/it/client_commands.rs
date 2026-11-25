@@ -87,7 +87,7 @@ async fn traces_and_sessions() {
     let dir = tempfile::tempdir().unwrap();
     let backend = manual_rig();
     let mut cfg = steady_config(backend.clone(), local_ipc());
-    cfg.session_dir = dir.path().join("sessions");
+    cfg.session_dir = Some(dir.path().join("sessions"));
     let h = Daemon::start(cfg).unwrap();
     let c = mirror(&h, "ac2-client-test").await;
     c.call(Command::StreamOpen {

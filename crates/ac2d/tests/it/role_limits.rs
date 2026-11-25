@@ -63,7 +63,7 @@ fn start_with(
     };
     keys.save(&security.authorized_clients_file).unwrap();
     let mut cfg = net_config(backend, security);
-    cfg.session_dir = dir.join("sessions");
+    cfg.session_dir = Some(dir.join("sessions"));
     tweak(&mut cfg);
     let h = ac2d::Daemon::start(cfg).unwrap();
     Rig {

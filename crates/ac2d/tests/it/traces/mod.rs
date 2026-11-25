@@ -173,7 +173,7 @@ fn rig(name: &str) -> Rig {
     let backend = manual_rig();
     let mut cfg = config(backend.clone(), inproc(name));
     cfg.lease_expiry = Duration::from_secs(60);
-    cfg.session_dir = dir.path().join("sessions");
+    cfg.session_dir = Some(dir.path().join("sessions"));
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
     c.ok(Command::StreamOpen {

@@ -277,7 +277,7 @@ fn fixtures_match_the_daemon() -> R {
 fn scene(name: &str, build: fn(&Cli) -> R) -> R {
     let sessions = tempfile::tempdir()?;
     let d = ac2_e2e::sim_daemon_with(Setup::Empty, |c| {
-        c.session_dir = sessions.path().to_owned();
+        c.session_dir = Some(sessions.path().to_owned());
     })?;
     let cli = Cli::connect(d.endpoints())?;
     build(&cli)?;

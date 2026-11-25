@@ -55,8 +55,10 @@ pub struct DaemonConfig {
     pub publish_fps: u32,
     /// Keepalive period (Q2: 250 ms).
     pub keepalive: Duration,
-    /// Where `file.save` / `file.load` put sessions given by name.
-    pub session_dir: PathBuf,
+    /// Where `file.save` / `file.load` put sessions given by name, and where uploads are
+    /// staged. `None`: a directory of the daemon's own under the system temp dir, removed
+    /// when it stops.
+    pub session_dir: Option<PathBuf>,
     /// Calibration store file (`docs/design/q7-calibration.md` §7); `None` keeps
     /// calibrations in memory only.
     pub cal_store: Option<PathBuf>,
@@ -254,7 +256,7 @@ impl DaemonConfig {
             dedup: DedupLimits::default(),
             publish_fps: Self::PUBLISH_FPS,
             keepalive: Duration::from_millis(250),
-            session_dir: ac2_paths::session_dir(),
+            session_dir: None,
             cal_store: None,
             autosave: None,
             recording_dir: None,

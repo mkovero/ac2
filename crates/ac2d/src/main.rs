@@ -304,9 +304,11 @@ fn config(
         advertise: !args.no_mdns,
     });
     if args.ephemeral {
-        // `DaemonConfig::new` keeps nothing: an ephemeral id and every store off.
+        // `DaemonConfig::new` keeps nothing: an ephemeral id, every store off and a session
+        // directory of its own that goes with it.
         return config;
     }
+    config.session_dir = Some(ac2_paths::session_dir());
     config.keys = Some(NetworkSecurity {
         server_key_file: args.key_file.clone().unwrap_or_else(ac2_paths::server_key),
         authorized_clients_file: args

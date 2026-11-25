@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 fn start(name: &str, dir: &Path) -> Handle {
     init_log();
     let mut cfg = config(manual_rig(), inproc(&unique(name)));
-    cfg.session_dir = dir.join("sessions");
+    cfg.session_dir = Some(dir.join("sessions"));
     cfg.rig_settings = Some(dir.join("rig.json"));
     cfg.rig_logs = Some(dir.join("rig-logs"));
     Daemon::start(cfg).unwrap()

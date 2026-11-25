@@ -86,7 +86,7 @@ fn named_rig(drive: FakeDrive, noise: f32) -> FakeBackend {
 fn start(backend: Arc<dyn Backend>) -> ac2d::Handle {
     init_log();
     let mut cfg = DaemonConfig::new(backend, inproc("devices"), -10.0);
-    cfg.session_dir = crate::common::test_sessions();
+    cfg.session_dir = Some(crate::common::test_sessions());
     Daemon::start(cfg).unwrap()
 }
 
@@ -512,7 +512,7 @@ fn slow_preview_follows_the_device_through_every_round() {
     let jack: Arc<dyn Backend> =
         Arc::new(AsJack(named_rig(FakeDrive::Thread(Pace::Realtime), 1e-3)));
     let mut cfg = DaemonConfig::new(Arc::clone(&fake), inproc("cycle"), -10.0);
-    cfg.session_dir = crate::common::test_sessions();
+    cfg.session_dir = Some(crate::common::test_sessions());
     cfg.backends = vec![fake, jack];
     let h = Daemon::start(cfg).unwrap();
     let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);

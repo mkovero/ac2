@@ -130,7 +130,7 @@ fn rig() -> Rig {
     let backend = backend();
     let mut cfg = config(backend.clone(), inproc("eq"));
     cfg.lease_expiry = Duration::from_secs(60);
-    cfg.session_dir = dir.path().join("sessions");
+    cfg.session_dir = Some(dir.path().join("sessions"));
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[]);
     sub_tf(&sub, MeasId(1));

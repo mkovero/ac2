@@ -24,7 +24,7 @@ const T: Duration = Duration::from_secs(5);
 fn start_with_file(dir: &Path) -> Handle {
     init_log();
     let mut cfg = config(manual_rig(), inproc(&unique("levels")));
-    cfg.session_dir = dir.join("sessions");
+    cfg.session_dir = Some(dir.join("sessions"));
     cfg.rig_settings = Some(dir.join("rig.json"));
     cfg.rig_logs = Some(dir.join("rig-logs"));
     Daemon::start(cfg).unwrap()

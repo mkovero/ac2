@@ -515,7 +515,7 @@ fn a_session_load_gives_back_its_remote_inputs() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let mut cfg = config(manual_rig(), inproc(&unique("remote-load")));
-    cfg.session_dir = dir.path().join("sessions");
+    cfg.session_dir = Some(dir.path().join("sessions"));
     let h = Daemon::start(cfg).unwrap();
     let (mut c, _) = connect(&h, &[]);
     let save = |c: &mut Client, name: &str| {

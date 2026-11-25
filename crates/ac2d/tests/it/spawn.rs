@@ -446,12 +446,17 @@ fn an_early_stdin_eof_is_logged_as_an_error() {
     assert!(line.contains("ERROR"), "{line}");
 }
 
-/// `--ephemeral` keeps nothing: after an edit, a wait past the autosave's debounce and an
-/// orderly stop, the only files in the whole home are its logs, `ac2d-sim.log` and the audit
-/// trail `ac2d-sim-audit.log`.
+/// `--ephemeral` keeps nothing: after an edit, a session saved by name, a wait past the
+/// autosave's debounce and an orderly stop, the only files in the whole home are its logs,
+/// `ac2d-sim.log` and the audit trail `ac2d-sim-audit.log`, and what the user's daemon had
+/// staged in the user's session directory, untouched. The session went to a directory of
+/// the daemon's own, gone once it stopped.
 #[test]
 fn ephemeral_writes_nothing_but_its_log() {
     let home = Home::new();
+    let staged = home.path("data/sessions/.incoming/upload-1/part");
+    std::fs::create_dir_all(staged.parent().unwrap()).unwrap();
+    std::fs::write(&staged, b"the user's daemon is unpacking this").unwrap();
     let mut p = home.ac2d();
     p.arg("--ephemeral")
         .args(home.pair("pair"))
@@ -461,12 +466,30 @@ fn ephemeral_writes_nothing_but_its_log() {
     let stdin = d.stdin();
     let mut c = Client::connect(&Context::new().unwrap(), &ctrl);
     import(&mut c, "forgotten");
+    let ReplyBody::SessionFile(saved) = c.ok(Command::FileSave {
+        session: ac2_proto::model::SessionRef::Name {
+            name: "scratch".into(),
+        },
+        overwrite: false,
+    }) else {
+        panic!("file.save answers with the session")
+    };
+    let saved = PathBuf::from(saved.path);
+    assert!(
+        saved.starts_with(std::env::temp_dir()),
+        "{}",
+        saved.display()
+    );
+    assert!(!saved.starts_with(home.root.path()), "{}", saved.display());
+    assert!(saved.is_dir());
     std::thread::sleep(DEBOUNCE + Duration::from_millis(500));
     drop(stdin);
     assert!(d.wait(T).success());
+    assert!(!saved.parent().unwrap().exists(), "{}", saved.display());
     assert_eq!(
         home.files(),
         vec![
+            PathBuf::from("data/sessions/.incoming/upload-1/part"),
             PathBuf::from("logs/ac2d-sim-audit.log"),
             PathBuf::from("logs/ac2d-sim.log")
         ]

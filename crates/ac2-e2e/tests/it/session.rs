@@ -17,7 +17,7 @@ fn empty_local_daemon_measures_from_the_app() -> R {
     let listen = local_pair(dir.path());
     let audio = ac2d::backend(ac2d::BackendChoice::Fake)?;
     let mut config = ac2d::DaemonConfig::new(audio, listen, -10.0);
-    config.session_dir = dir.path().join("sessions");
+    config.session_dir = Some(dir.path().join("sessions"));
     let handle = ac2d::Daemon::start(config)?;
     let ep = Endpoints {
         ctrl: handle.ctrl_endpoint().to_owned(),
@@ -41,7 +41,7 @@ fn a_stream_plays_on_another_device_than_it_captures_from() -> R {
     let listen = local_pair(dir.path());
     let audio = std::sync::Arc::new(ac2d::fake_rig_endpoints()?);
     let mut config = ac2d::DaemonConfig::new(audio, listen, -10.0);
-    config.session_dir = dir.path().join("sessions");
+    config.session_dir = Some(dir.path().join("sessions"));
     let handle = ac2d::Daemon::start(config)?;
     let ep = Endpoints {
         ctrl: handle.ctrl_endpoint().to_owned(),
@@ -70,7 +70,7 @@ fn autosaving_daemon(dir: &std::path::Path) -> R<(ac2d::Handle, Endpoints)> {
     let listen = local_pair(dir);
     let audio = ac2d::backend(ac2d::BackendChoice::Fake)?;
     let mut config = ac2d::DaemonConfig::new(audio, listen, -10.0);
-    config.session_dir = dir.join("sessions");
+    config.session_dir = Some(dir.join("sessions"));
     config.autosave = Some(ac2d::AutosaveConfig {
         dir: dir.join("autosave"),
         restore: true,

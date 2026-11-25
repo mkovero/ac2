@@ -22,7 +22,7 @@ use common::*;
 fn start(name: &str, dir: &Path) -> Handle {
     init_log();
     let mut cfg = config(manual_rig(), inproc(&unique(name)));
-    cfg.session_dir = dir.join("sessions");
+    cfg.session_dir = Some(dir.join("sessions"));
     Daemon::start(cfg).unwrap()
 }
 
@@ -30,7 +30,7 @@ fn start(name: &str, dir: &Path) -> Handle {
 fn start_autosaved(name: &str, dir: &Path) -> Handle {
     init_log();
     let mut cfg = config(manual_rig(), inproc(&unique(name)));
-    cfg.session_dir = dir.join("sessions");
+    cfg.session_dir = Some(dir.join("sessions"));
     cfg.autosave = Some(AutosaveConfig {
         dir: dir.join("autosave"),
         restore: true,

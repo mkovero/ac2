@@ -90,7 +90,7 @@ pub fn test_sessions() -> std::path::PathBuf {
 
 pub fn config(backend: FakeBackend, listen: Listen) -> DaemonConfig {
     let mut cfg = DaemonConfig::new(Arc::new(backend), listen, -10.0);
-    cfg.session_dir = test_sessions();
+    cfg.session_dir = Some(test_sessions());
     cfg
 }
 
