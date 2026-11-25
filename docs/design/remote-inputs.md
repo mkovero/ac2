@@ -22,7 +22,7 @@ rigs that cannot make one transfer function. With stage 3:
    A remote input may also be the reference (a console feed on the other rig).
 3. The transfer function runs, its delay found as usual. The delay readout says it includes
    an offset between the two rigs' clocks that is not measured (§4).
-4. The clocks are visible all the way: the top bar, the pane, the Connection page, the
+4. The clocks are visible all the way: the pane, the Connection page, the
    input row and the measurement list say whether the two rigs run on one clock, and say it
    loudly when they don't (§5).
 
@@ -406,10 +406,12 @@ words; a problem is never only a colour.
   chip *ketunkolo · CLOCKS NOT LOCKED +5.6 ppm*, *ketunkolo · CLOCKS: CAN'T TELL*,
 
   *ketunkolo · LINK OFFSET TOO SMALL*, *ketunkolo · NO AUDIO*. The chip opens the Connection
-  page's *Between rigs* section. While a cross-rig transfer function is stopped, the top-bar
-  banner says why and what to do: *TF 3 stopped: pupu and ketunkolo are not on one clock
-  (+5.6 ppm). Lock both interfaces to one reference.* / *…can't tell whether pupu and
-  ketunkolo share a clock: ketunkolo's system clock is not synced.*
+  page's *Between rigs* section. While a cross-rig transfer function is stopped, why and
+  what to do (*TF 3 stopped: pupu and ketunkolo are not on one clock (+5.6 ppm). Lock both
+  interfaces to one reference.* / *…can't tell whether pupu and ketunkolo share a clock:
+  ketunkolo's system clock is not synced.*) is the detail of the pane's banner, and the
+  measurement list's cue *clocks* says it with the pane closed; the top bar does not say it
+  (operator 2026-11-25: too long, and not the bar's).
 - **Delay drifting** (§3.2) is a measurement's, not the rig's: it shows on that pane and as
   the measurement's cue in the list (*TF 3 · delay drifting 0.3 ms/min*), not as a rig chip.
 - **The pane.** A cross-rig transfer function's title names the remote side (*TF 3 · meas
@@ -458,7 +460,7 @@ No new keys: everything is reached through existing pages, the chip and the pale
   Measuring; two fake crystals 1.5 ppm apart (*Agree* plus the delay-drift cue, 0.09 ms/min);
   two fake hosts whose system clocks disagree by 10 ms (arrival anchor, refusal words); a long
   Not locked (k slips, the SPL meter on the input keeps running). All asserted
-  as scene text, including the delay basis words, the top-bar banners and `ac2 status`.
+  as scene text, including the delay basis words, the pane banners and `ac2 status`.
 - **Stream:** audio topics not replaced under a credit stall (queue, oldest dropped, counted);
   dropped frames marked, MTW restarted, finder kept; B reopens (re-anchor); B reopens at
   another rate (fault); persistently late (raise the link offset); link offset changed

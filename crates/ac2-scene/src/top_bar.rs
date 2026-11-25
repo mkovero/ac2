@@ -165,8 +165,6 @@ pub struct BarInputs<'a> {
     pub server: Option<&'a str>,
     pub link: BarLink<'a>,
     pub audio: Option<BarAudio<'a>>,
-    /// Transfer functions across rigs stopped by the clocks: why and what to do.
-    pub banners: &'a [String],
     pub health: Option<HealthLine>,
     pub session: Option<BarSession<'a>>,
     pub notes: Vec<Note>,
@@ -305,8 +303,8 @@ pub fn bar(i: &BarInputs<'_>) -> Bar {
     }
 }
 
-/// What a daemon whose link is fine says after its place: the audio I/O, a transfer
-/// function stopped across rigs, the health meter. The stimulus is not on the line: it is
+/// What a daemon whose link is fine says after its place: the audio I/O and the health
+/// meter. The stimulus is not on the line: it is
 /// fixed at the bar's right end ([`crate::stim_item`]).
 fn daemon_parts(i: &BarInputs<'_>, line: &mut Vec<Part>) {
     match i.audio {
@@ -327,10 +325,6 @@ fn daemon_parts(i: &BarInputs<'_>, line: &mut Vec<Part>) {
         }
         Some(BarAudio::None { text }) => line.push(Part::new(Lead::Dot, text, Tone::Dim)),
         None => {}
-    }
-    if !i.banners.is_empty() {
-        let text = i.banners.join(" · ");
-        line.push(Part::new(Lead::Dot, text.clone(), Tone::Warn).hover(text));
     }
     if let Some(h) = &i.health {
         let mut p = Part::new(Lead::Dot, h.text(), Tone::Dim).hover(h.detail.clone());

@@ -176,23 +176,6 @@ impl AppState {
             .unwrap_or_else(|| self.keys.palette_entry(CommandId::InsertDelay.title()))
     }
 
-    /// The top bar's banner while a transfer function across two rigs is stopped by the
-    /// clocks: why and what to do, one per stopped measurement.
-    pub fn cross_rig_banners(&self) -> Vec<String> {
-        let Some(st) = self.daemon() else {
-            return Vec::new();
-        };
-        let ours = self.rig_label(&self.rig);
-        st.remote
-            .transfers
-            .iter()
-            .filter_map(|x| {
-                let m = st.measurements.iter().find(|m| m.id == x.meas)?;
-                ac2_scene::cross_rig::banner(&m.config.name, x, &st.remote, &ours)
-            })
-            .collect()
-    }
-
     /// This rig's key for another rig, or why it has none to give.
     fn own_key(&self) -> Result<String, String> {
         let name = self.rig_label(&self.rig);

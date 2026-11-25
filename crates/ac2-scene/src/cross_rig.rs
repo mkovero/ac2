@@ -1,6 +1,6 @@
 //! The words of a transfer function between two rigs (`docs/design/remote-inputs.md` §5):
 //! its pane title naming the remote side, its status lines, the faint-phase verdict of a
-//! held result, the top-bar banner while it is stopped, its cue in the measurement list,
+//! held result, its pane banner and why while it is stopped, its cue in the measurement list,
 //! the basis of its delay readout, and `ac2 status`'s lines. Wherever a cross-rig result
 //! appears its clock relation is said next to it, in words.
 
@@ -147,9 +147,10 @@ fn late_text(r: &RemoteState) -> String {
     format!("link offset too small: raise Wait for remote inputs{now}")
 }
 
-/// The top-bar banner while it is stopped by the clocks: why and what to do. `ours`: this
-/// rig's name. `None` while it averages or only waits for the clocks to be measured.
-pub fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) -> Option<String> {
+/// Why the clocks stop it and what to do: the detail of its pane banner and a line of
+/// `ac2 status`. `ours`: this rig's name. `None` while it averages or only waits for the
+/// clocks to be measured.
+fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) -> Option<String> {
     let rig = r.rigs.iter().find(|g| g.rig == x.rig)?;
     let theirs = &rig.name;
     let CrossTfState::Stopped { why, .. } = x.state else {

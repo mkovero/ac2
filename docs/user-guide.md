@@ -270,19 +270,18 @@ is never only a colour):
   headings' rates say it, and the tooltip *ketunkolo runs 48 kHz, this rig 96 kHz* (a
   remote input needs both rigs at one rate). Settings › Connection's *Paired rigs* row
   says the clocks from levels in its hover, in the same words.
-- **Top bar:** while a cross-rig transfer function is
-  stopped, the bar's status line carries why and what to do (*Main L stopped: pupu and
-  ketunkolo are not on one clock (+5.6 ppm). Lock both interfaces to one reference.*).
 - **The pane:** its title names the remote side (*Transfer · TF 3 · meas from ketunkolo*,
   *· ref from ketunkolo*), its caption starts *clocks agree · ketunkolo*
   while it averages and the clocks agree. Stopped, its banner strip says *Clocks not locked: averaging stopped*
-  (with **T** too: banners are not plot chrome) and the held curve's phase is faint; the
+  (with **T** too: banners are not plot chrome), the banner's detail why and what to do
+  (*Main L stopped: pupu and ketunkolo are not on one clock (+5.6 ppm). Lock both
+  interfaces to one reference.*), and the held curve's phase is faint; the
   relock, slip, drift and *link offset too small* lines show there as well. The legend's
   delay and the IR's time zero say *includes the clock offset between pupu and ketunkolo
   (not measured)* instead of a distance.
 - **Measurement list:** the row's cue (*clocks*, *measuring clocks…*, *delay may have
   moved*, *delay drifting 0.30 ms/min*, *link offset too small*), so it shows with the pane
-  closed.
+  closed. The top bar does not say it.
 - An ambiguous relock is answered as any ambiguous delay: **X** finds and opens the
   candidates to pick from.
 

@@ -170,7 +170,6 @@ impl App {
             _ if st.daemon().is_some() => Some(BarAudio::None { text: &no_audio }),
             _ => None,
         };
-        let banners = st.cross_rig_banners();
         // A daemon that stopped answering has no current figures.
         let daemon = st
             .rig
@@ -193,7 +192,6 @@ impl App {
             server,
             link,
             audio,
-            banners: &banners,
             health,
             session: working.as_ref().map(|l| BarSession {
                 text: &l.text,

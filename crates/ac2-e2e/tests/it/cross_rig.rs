@@ -130,8 +130,8 @@ pub(crate) fn session(inputs: Vec<u16>, remote: Vec<RemoteInput>) -> SessionConf
 /// Pupu (its interface 1.6 ppm slow) takes kettu's in 2 (kettu's 1.6 ppm fast) as the
 /// measurement input of `Main L`, its own in 1 the reference. Once the rigs have streamed
 /// long enough to tell, pupu's daemon finds the interfaces 3.2 ppm apart and stops Main L:
-/// the top bar's chip says the clocks are not locked, the banner why Main L stopped, the
-/// pane's title names the remote side.
+/// kettu's heading in the measurement list says the clocks are not locked, the pane's banner
+/// why Main L stopped, its list row *clocks*, the pane's title names the remote side.
 #[test]
 fn slow_clocks_not_locked_across_rigs() -> R {
     use ac2_ui::state::PaneKind;
@@ -249,14 +249,32 @@ fn slow_clocks_not_locked_across_rigs() -> R {
         .and_then(|t| t.split(" ppm").next())
         .ok_or("the heading's figure")?
         .to_owned();
+    // Why and what to do is the detail of the pane's banner; the list row's cue says
+    // *clocks* with the pane closed.
+    let tf = crate::common::pane(&d.st, PaneKind::Transfer);
+    let details = |s: &ac2_ui::state::AppState| {
+        let now = ac2_ui::scenes::Now {
+            instant: Instant::now(),
+            wall: ac2_proto::units::WallNs(0),
+        };
+        let size = ac2_scene::primitives::Viewport::new(1100.0, 600.0);
+        let theme = ac2_scene::theme::Theme::dark();
+        ac2_ui::scenes::transfer(s, tf, &theme, size, now)
+            .banners
+            .into_iter()
+            .filter_map(|b| b.detail)
+            .collect::<Vec<_>>()
+    };
     d.until("Main L stopped by the clocks", |s| {
-        s.cross_rig_banners().iter().any(|b| {
+        details(s).iter().any(|b| {
             b.starts_with(&format!(
                 "Main L stopped: pupu and kettu are not on one clock ({ppm} ppm)"
             ))
         })
     })?;
-    let tf = crate::common::pane(&d.st, PaneKind::Transfer);
+    let row = d.st.meas_rows().into_iter().find(|r| r.id == m.id);
+    let cue = row.ok_or("Main L's row")?.text;
+    assert!(cue.contains("clocks"), "{cue}");
     assert_eq!(d.st.pane_meas(tf).map(|m| m.id), Some(m.id));
     let heading = d.st.pane_heading(tf);
     assert!(heading.ends_with("Main L · meas from kettu"), "{heading}");

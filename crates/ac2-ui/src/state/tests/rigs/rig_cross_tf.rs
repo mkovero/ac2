@@ -1,7 +1,7 @@
 //! Multi-rig stage 3c (`docs/design/remote-inputs.md` §5): a transfer function with one
-//! channel on another rig says its clock relation wherever it appears — the top bar's chip
-//! and banner, the pane's title, caption, banner strip and faint phase, its cue in the
-//! measurement list — and the Connection page sets the link offset as `ac2 session
+//! channel on another rig says its clock relation wherever it appears — the rig's heading
+//! in the measurement list, the pane's title, caption, banner strip and faint phase, its
+//! cue in the measurement list; never the top bar — and the Connection page sets the link offset as `ac2 session
 //! link-offset` does.
 
 use super::rig_remote::with_remote;
@@ -95,6 +95,17 @@ fn pane_banners(t: &T) -> Vec<(BannerKind, String)> {
         .collect()
 }
 
+/// The details of the between-rigs banners of the pane showing Main L: why and what to do.
+fn pane_details(t: &T) -> Vec<String> {
+    let m = t.st.meas(MeasId(1));
+    let s = crate::scenes::status(&t.st, &[], m, now());
+    banners(&s)
+        .into_iter()
+        .filter(|b| b.kind == BannerKind::BetweenRigs)
+        .filter_map(|b| b.detail)
+        .collect()
+}
+
 /// What pupu's heading in the measurement list says of its pairing.
 fn pupu_pairing(t: &T) -> String {
     let rows = t.st.list_rows();
@@ -129,7 +140,7 @@ fn agreeing_clocks_are_said_quietly() {
         "{}",
         head.describe
     );
-    assert!(t.st.cross_rig_banners().is_empty());
+    assert!(pane_details(&t).is_empty());
     let p = t.pane(PaneKind::Transfer);
     assert!(
         t.st.pane_heading(p).ends_with("Main L · meas from pupu"),
@@ -154,9 +165,9 @@ fn agreeing_clocks_are_said_quietly() {
     );
 }
 
-/// Not locked: the rig's heading says it first and in capitals, the top-bar banner says why and what to do, the
-/// pane's verdict is a banner (it stays with the plot chrome hidden), the list row says
-/// *clocks* with the pane closed.
+/// Not locked: the rig's heading says it first and in capitals, the pane's verdict is a
+/// banner whose detail says why and what to do (it stays with the plot chrome hidden), the
+/// list row says *clocks* with the pane closed.
 #[test]
 fn clocks_not_locked_stop_it_and_say_so_everywhere() {
     let mut t = two_mirrored();
@@ -167,10 +178,10 @@ fn clocks_not_locked_stop_it_and_say_so_everywhere() {
     );
     let ours = t.st.rig_name(t.st.active());
     assert_eq!(
-        t.st.cross_rig_banners(),
+        pane_details(&t),
         vec![format!(
             "Main L stopped: {ours} and pupu are not on one clock (+5.6 ppm). Lock both \
-             interfaces to one reference."
+             interfaces to one reference. The result from before stands; its phase is faint."
         )]
     );
     assert_eq!(

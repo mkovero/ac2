@@ -66,7 +66,6 @@ fn remote<'a>(line: &'a SessionLine) -> BarInputs<'a> {
             device: "Fireface USB",
             line,
         }),
-        banners: &[],
         health: Some(health("ac2pi-0ab1c6")),
         session: Some(SAVED),
         notes: Vec::new(),
@@ -289,15 +288,12 @@ fn the_audio_part_says_what_is_wrong_in_its_tone() {
         device: "Fireface USB",
         line: &changed,
     });
-    let banners = ["Mains: STOPPED, clocks not locked".to_owned()];
-    i.banners = &banners;
     let b = bar(&i);
     assert_eq!(
         b.text(),
-        "remote: ac2pi-0ab1c6 · 96 kHz · 256 frames · driver changed from 48 kHz · \
-         Mains: STOPPED, clocks not locked"
+        "remote: ac2pi-0ab1c6 · 96 kHz · 256 frames · driver changed from 48 kHz"
     );
-    assert_eq!((b.line[1].tone, b.line[2].tone), (Tone::Warn, Tone::Warn));
+    assert_eq!(b.line[1].tone, Tone::Warn);
     assert_eq!(
         b.line[1].hover.as_deref(),
         Some("Fireface USB · the driver changed the rate to 96 kHz (was 48 kHz)")
