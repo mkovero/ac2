@@ -449,7 +449,8 @@ fn a_rig_whose_key_changed_is_named() {
 }
 
 /// A rig whose key the other rig authorized as an app, not as a rig, is told so (its audio
-/// would be refused without a word); admitted as a rig on the same connection, it streams.
+/// would be refused without a word); revoked as an app and admitted as a rig (an app's name
+/// is never taken over by a rig's entry), it streams.
 #[test]
 fn slow_a_rig_admitted_as_an_app_is_told_so_until_admitted_as_a_rig() {
     init_log();
@@ -482,6 +483,9 @@ fn slow_a_rig_admitted_as_an_app_is_told_so_until_admitted_as_a_rig() {
     });
     wait_remote(&mut ca, "not admitted", |r| {
         r.rigs.first().map(|r| &r.link) == Some(&RemoteLink::NotAdmitted)
+    });
+    cb.ok(Command::AuthRevoke {
+        name: "rig-a".into(),
     });
     cb.ok(Command::AuthAdmitRig {
         key: a_keys.public.to_z85(),
