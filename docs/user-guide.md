@@ -524,7 +524,8 @@ same way (`laptop  operator  …`, `rig-pupu  rig <id>  …`).
 
 Every app's key is authorized with a role. An **operator** drives the rig. A **viewer** sees
 everything an operator sees (the measurements, the meters, the SPL logs, the traces, which it
-may also export) and may stop the generator, as anyone who hears it may; every change is
+may also export, and the working state, exported as a copy that does not become the working
+state's file) and may stop the generator, as anyone who hears it may; every change is
 refused. A viewer's app says *view only* after the rig's place in the top bar and refuses an
 edit before sending it, saying why (*not sent: this rig authorized this app as a viewer…*).
 The role is fixed when the app connects: changing it, or revoking the key, drops the

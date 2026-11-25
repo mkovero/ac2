@@ -642,7 +642,7 @@ pub(super) async fn session_step(
             D::Exported {
                 path,
                 bytes,
-                working: session.is_none(),
+                working: session.is_none() && ac2_client::sessions::export_names_working(c.role()),
             }
         }
         S::New { discard } => {

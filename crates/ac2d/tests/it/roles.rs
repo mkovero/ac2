@@ -527,3 +527,28 @@ async fn the_client_learns_its_new_role_and_refuses_what_it_may_not_send() {
     drop(c);
     rig.h.shutdown();
 }
+
+/// A viewer exports the working state as a copy: the archive is written, and the working
+/// state does not become that file's (the daemon records an origin for an operator only).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_viewer_exports_a_copy_of_the_working_state() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let rig = start(dir.path(), manual_rig());
+    let (ctrl, data) = net_endpoints(&rig.h);
+    let mut cc = ac2_client::ClientConfig::new(ac2_client::Endpoints { ctrl, data }, "roles");
+    cc.curve = Some(rig.curve(&rig.phone));
+    let c = ac2_client::Client::connect(cc).await.unwrap();
+    c.wait_synced(T).await.unwrap();
+    assert_eq!(c.role(), ClientRole::Viewer);
+    let to = dir.path().join("copy.ac2session");
+    let (p, bytes) = ac2_client::sessions::export(&c, None, &to, |_, _| {})
+        .await
+        .unwrap();
+    assert_eq!(p, to);
+    assert_eq!(std::fs::metadata(&to).unwrap().len(), bytes);
+    let mut host = rig.local();
+    assert_eq!(host.state().working.origin, None);
+    drop(c);
+    rig.h.shutdown();
+}

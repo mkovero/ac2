@@ -35,9 +35,15 @@ impl Request {
             | Self::Reconnect
             | Self::ServerInfo
             | Self::SessionList => true,
-            // A session job saves, loads, uploads or marks the working state as exported:
-            // only quitting is a viewer's.
-            Self::Sessions(job) => job.steps.iter().all(|s| matches!(s, SessionStep::Quit)),
+            // A session job saves, loads or uploads: only quitting and a copy of the
+            // working state written here are a viewer's (the daemon does not make the
+            // viewer's file the working state's).
+            Self::Sessions(job) => job.steps.iter().all(|s| {
+                matches!(
+                    s,
+                    SessionStep::Quit | SessionStep::Export { session: None, .. }
+                )
+            }),
             Self::StimArm { .. }
             | Self::StimSet(_)
             | Self::Sweep { .. }
@@ -80,5 +86,14 @@ mod tests {
         let job = |steps| Request::Sessions(SessionJob { steps });
         assert!(job(vec![SessionStep::Quit]).viewer_may_send());
         assert!(!job(vec![SessionStep::Recover, SessionStep::Quit]).viewer_may_send());
+        let export = |session| SessionStep::Export {
+            session,
+            path: "/home/foh/show.ac2session".into(),
+        };
+        assert!(job(vec![export(None)]).viewer_may_send());
+        let named = ac2_proto::model::SessionRef::Name {
+            name: "show".into(),
+        };
+        assert!(!job(vec![export(Some(named))]).viewer_may_send());
     }
 }

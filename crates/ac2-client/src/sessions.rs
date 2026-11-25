@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use ac2_archive::{ArchiveError, MAX_ARCHIVE_BYTES};
 use ac2_proto::model::{
-    ExportFormat, ImportFormat, ImportRole, IrImport, RecordingRef, SessionFile, SessionRef,
+    ClientRole, ExportFormat, ImportFormat, ImportRole, IrImport, RecordingRef, SessionFile, SessionRef,
     TraceMeta, TraceOwner, Transfer,
 };
 use ac2_proto::units::{Blob, TraceId, TransferId};
@@ -318,18 +318,30 @@ pub fn export_target(path: &Path, suggested: &str) -> PathBuf {
     }
 }
 
+/// Whether a working-state export by a client of `role` makes the working state that
+/// file's: the daemon records the file as its origin for whoever may change the state, and a
+/// viewer's export is a copy only.
+pub fn export_names_working(role: ClientRole) -> bool {
+    Command::FileDownloadEnd {
+        transfer: TransferId(0),
+        saved_as: Some(String::new()),
+    }
+    .allowed(&role)
+}
+
 /// Downloads `session` (`None`: the working state) to `path`: an `.ac2session` file, a
 /// session folder (replaced whole: the archive is unpacked beside it first), or another
 /// folder (the suggested file name inside it). Nothing there is replaced until the new
-/// content is complete. A working-state export tells the daemon, so the working state then
-/// belongs to that file or folder. Returns where it went and the archive's size.
+/// content is complete. A working-state export tells the daemon when this client may
+/// ([`export_names_working`]), so the working state then belongs to that file or folder.
+/// Returns where it went and the archive's size.
 pub async fn export(
     c: &Client,
     session: Option<SessionRef>,
     path: &Path,
     progress: impl FnMut(u64, u64),
 ) -> Result<(PathBuf, u64), ClientError> {
-    let working = session.is_none();
+    let working = session.is_none() && export_names_working(c.role());
     let (t, data) = download(c, session, progress).await?;
     let (target, written) = if ac2_archive::is_session_dir(path) {
         (path.to_owned(), replace_folder(path, &data))
