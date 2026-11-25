@@ -21,6 +21,7 @@ mod owners;
 mod session;
 mod smoothing;
 mod spectrum;
+mod stopped;
 mod target;
 
 const T: Duration = Duration::from_secs(10);

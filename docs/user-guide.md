@@ -1183,7 +1183,9 @@ The transfer pane's **impulse response** views show the IR of that pane's measur
 linear amplitude, dB re its peak, or energy-time curve (**Shift+G** from magnitude reaches
 the ETC in one step). Coherence is always a view of its own; Settings › Display can also
 draw it over the magnitude. A stopped measurement keeps its last IR, tagged `stopped`, as
-its other views keep the last curve; a selected capture's stored IR shows instead.
+its other views keep the last curve: the daemon sends a transfer's final curve and IR as it
+stops, so an IR view opened after the stop (or an app connected later) shows them too; a
+selected capture's stored IR shows instead.
 The keys that act on the measurement work in these views as in the others: **S**, **R**,
 **X** / **Shift+X** (find the delay), **D**, **Y**, **,** / **.** and their Ctrl / Alt forms.
 The keys that read or dress the frequency plot do nothing here (smoothing **K**, peaks

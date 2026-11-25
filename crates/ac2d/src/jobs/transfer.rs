@@ -896,7 +896,7 @@ impl Analysis for Transfer {
     }
 
     fn final_frames(&mut self, e: &Emitter) {
-        let Some(end) = self.end.filter(|_| self.bins.is_some()) else {
+        let Some(end) = self.end else {
             return;
         };
         let stamp = self.stamp(end, self.last_prot);
@@ -908,6 +908,13 @@ impl Analysis for Transfer {
         let shared = self.shared();
         if let Some(b) = &mut self.bins {
             b.final_frames(e, &self.mtw, stamp, &shared);
+        }
+        if let Some(ir) = self.capture_ir() {
+            let stamp = StampArgs {
+                grid_id: None,
+                ..stamp
+            };
+            send_final(e, stamp, FrameData::Ir(ir));
         }
     }
 

@@ -304,9 +304,10 @@ pub(crate) trait Analysis: Send {
     /// to form and publish a new result only when an operand has one. `None` for analyses
     /// a math trace cannot use as an operand.
     fn result_generation(&self) -> Option<u64>;
-    /// On stop, the frames that outlive the job: a transfer at the `bins` resolution sends
-    /// its `tf` and every stage's bins from the same averages under one stamp, past its
-    /// publish schedule, so a stage subscribed after the stop matches the curve.
+    /// On stop, the frames that outlive the job: a transfer sends its `tf`, its impulse
+    /// response and (at the `bins` resolution) every stage's bins from the same averages
+    /// under one stamp, past its publish schedule and whether or not anyone subscribes, so
+    /// a view opened or a client connected after the stop gets the final result.
     fn final_frames(&mut self, _e: &Emitter) {}
 }
 
