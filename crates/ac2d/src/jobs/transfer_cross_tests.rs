@@ -46,14 +46,15 @@ fn noise(n: usize, mut x: u64) -> Vec<f32> {
 
 fn rig(delay: usize, tracking: bool, cross: bool) -> Rig {
     let (tx, rx) = channel();
-    let d = DelayState {
+    let d = Delay {
+        meas: MeasId(3),
+        rev: Rev(1),
         applied: Seconds(delay as f64 / f64::from(FS)),
         applied_samples: delay as f64,
         nudged: Seconds(0.0),
         nudged_samples: 0.0,
         tracking,
         awaiting_pick: false,
-        last_finding: None,
     };
     let job = Transfer::new(
         JobCtx {
@@ -351,14 +352,15 @@ fn a_slip_moves_the_delay_by_exactly_the_slip() {
 
     // On the reference side the arrival moves against the slip.
     let (tx, _rx) = channel();
-    let d = DelayState {
+    let d = Delay {
+        meas: MeasId(3),
+        rev: Rev(1),
         applied: Seconds(0.01),
         applied_samples: 480.0,
         nudged: Seconds(0.0),
         nudged_samples: 0.0,
         tracking: false,
         awaiting_pick: false,
-        last_finding: None,
     };
     let mut job = Transfer::new(
         JobCtx {
@@ -573,14 +575,15 @@ fn a_stopped_cross_rig_job_shows_no_stage_bins() {
         },
         FS,
         (0, 1),
-        &DelayState {
+        &Delay {
+            meas: MeasId(3),
+            rev: Rev(1),
             applied: Seconds(480.0 / f64::from(FS)),
             applied_samples: 480.0,
             nudged: Seconds(0.0),
             nudged_samples: 0.0,
             tracking: false,
             awaiting_pick: false,
-            last_finding: None,
         },
         tx,
         None,

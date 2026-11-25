@@ -203,10 +203,8 @@ fn g_steps_the_transfer_views() {
 fn transfer_stack_lays_out_magnitude_phase_coherence() {
     let mut t = empty();
     // Delay tower without a delay: its NO DELAY ESTIMATE banner is up.
-    let mut s = four();
-    for m in s.measurements.iter_mut().filter(|m| m.id == MeasId(3)) {
-        m.delay = None;
-    }
+    let mut s = with_delays(four());
+    s.delays.retain(|d| d.meas != MeasId(3));
     t.conn(mirror(s));
     super::tf_group::tf_frames(&mut t, &[1, 3]);
     t.drop_meas(t.st.layout.focus, MeasId(3));

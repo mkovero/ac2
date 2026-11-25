@@ -425,23 +425,45 @@ impl Client {
         self.snapshot(Command::StateSnapshot).state
     }
 
+    /// The store rev now: the rev of the last commit.
+    pub fn state_rev(&mut self) -> Rev {
+        self.snapshot(Command::StateSnapshot).rev
+    }
+
     /// The stimulus lease, taken without force.
     #[track_caller]
     pub fn acquire(&mut self) -> ac2_proto::units::LeaseToken {
         self.lease(Command::GenAcquire { force: false }).lease_token
     }
 
-    /// The measurement's current `config_rev`: the `base` of an edit of it.
-    pub fn config_rev(&mut self, meas: MeasId) -> Rev {
+    /// The measurement as the state holds it now.
+    pub fn meas(&mut self, meas: MeasId) -> ac2_proto::model::Measurement {
         let state = self.state();
-        let m = state.measurements.iter().find(|m| m.id == meas);
+        let m = state.measurements.into_iter().find(|m| m.id == meas);
         m.unwrap_or_else(|| panic!("no measurement {meas}"))
-            .config_rev
     }
 
-    /// `meas.update` on the measurement's current configuration.
+    /// The measurement's current `config_rev`: what its frames are stamped at least with.
+    pub fn config_rev(&mut self, meas: MeasId) -> Rev {
+        self.meas(meas).config_rev
+    }
+
+    /// The measurement's current `edit_rev`: the `base` of an edit of it.
+    pub fn edit_rev(&mut self, meas: MeasId) -> Rev {
+        self.meas(meas).edit_rev
+    }
+
+    /// The delay of transfer measurement `meas` as the state holds it now.
+    pub fn delay_now(&mut self, meas: MeasId) -> ac2_proto::model::Delay {
+        self.state()
+            .delay(meas)
+            .cloned()
+            .unwrap_or_else(|| panic!("no delay of {meas}"))
+    }
+
+    /// `meas.update` on the measurement as it is now.
     pub fn update(&mut self, meas: MeasId, config: MeasConfig) -> Result<ReplyBody, ProtoError> {
-        let base = self.config_rev(meas);
+        let base = self.edit_rev(meas);
         self.call(Command::MeasUpdate { meas, base, config })
     }
 
@@ -486,6 +508,7 @@ reply_kinds! {
     generator: ReplyBody::Generator(v) => v, ac2_proto::model::Generator;
     measurement: ReplyBody::Measurement(v) => v, ac2_proto::model::Measurement;
     delay_finding: ReplyBody::DelayFinding(v) => v, ac2_proto::model::DelayFinding;
+    delay: ReplyBody::Delay(v) => v, ac2_proto::model::Delay;
     trace: ReplyBody::Trace(v) => v, ac2_proto::model::TraceMeta;
     sweep: ReplyBody::Sweep(v) => v, ac2_proto::model::SweepRun;
     dynamics: ReplyBody::Dynamics(v) => v, ac2_proto::model::DynamicsRun;
@@ -632,7 +655,7 @@ pub async fn meas_update(
     let m = s.state.measurements.iter().find(|m| m.id == meas);
     let base = m
         .unwrap_or_else(|| panic!("no measurement {meas}"))
-        .config_rev;
+        .edit_rev;
     c.call(Command::MeasUpdate { meas, base, config }).await
 }
 

@@ -134,7 +134,7 @@ fn session_save_load_round_trip() {
         );
     }
     let m0 = &after.measurements[0];
-    assert_eq!(m0.delay.as_ref().unwrap().applied, Seconds(0.0025));
+    assert_eq!(after.delay(m0.id).unwrap().applied, Seconds(0.0025));
     assert_eq!(after.traces, saved.traces);
     for (t, d) in saved.traces.iter().zip(&saved_data) {
         let back = data(c, t.id);

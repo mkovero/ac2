@@ -139,6 +139,8 @@ pub struct RigState {
     pub input_pick: Option<u16>,
     /// `meas.layout` calls in flight and the edits waiting for them.
     pub(super) layout_queue: LayoutQueue,
+    /// Measurement edits in flight and the ones waiting for them.
+    pub(super) meas_edits: super::meas_edits::MeasEdits,
     /// The file on this machine this app last opened the working state from or exported
     /// it to ([`OwnFile`]).
     pub(super) own_file: Option<OwnFile>,
@@ -219,6 +221,7 @@ impl RigState {
             dynamics: super::dynamics::DynamicsUi::default(),
             input_pick: None,
             layout_queue: LayoutQueue::default(),
+            meas_edits: Default::default(),
             own_file: None,
         }
     }
@@ -279,6 +282,16 @@ impl RigState {
 
     pub fn meas(&self, id: MeasId) -> Option<&Measurement> {
         self.daemon()?.measurements.iter().find(|m| m.id == id)
+    }
+
+    /// Transfer measurement `id`'s delay.
+    pub fn delay(&self, id: MeasId) -> Option<&ac2_proto::model::Delay> {
+        self.daemon()?.delay(id)
+    }
+
+    /// Transfer measurement `id`'s standing delay finding.
+    pub fn delay_finding(&self, id: MeasId) -> Option<&ac2_proto::model::DelayFinding> {
+        self.daemon()?.delay_finding(id)
     }
 
     /// How measurement `m`'s curves draw: its own display, a math trace its owner's (as it

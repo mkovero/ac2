@@ -115,14 +115,13 @@ fn refusal_inserts_nothing_and_says_why() {
     assert_eq!(t.last_toast(), "Main L: no delay estimate (no clear peak)");
     // The banner over the transfer pane carries the reason too.
     let mut s = daemon_state();
-    if let Some(d) = s.measurements[1].delay.as_mut() {
-        d.last_finding = Some(*finding(DelayOutcome::NoEstimate {
-            reasons: vec![NoEstimateReason::LowPsr, NoEstimateReason::LowBandSnr],
-        }));
-    }
+    s.delay_findings = vec![*finding(DelayOutcome::NoEstimate {
+        reasons: vec![NoEstimateReason::LowPsr, NoEstimateReason::LowBandSnr],
+    })];
     t.conn(mirror(s));
     let m = t.st.meas(MeasId(1)).cloned().expect("meas");
-    let why = ac2_scene::banner::no_delay_estimate(&m);
+    let why =
+        ac2_scene::banner::no_delay_estimate(&m, t.st.delay(m.id), t.st.rig.delay_finding(m.id));
     let b = ac2_scene::banner::banners(&ac2_scene::banner::Status {
         no_delay_estimate: why,
         ..Default::default()

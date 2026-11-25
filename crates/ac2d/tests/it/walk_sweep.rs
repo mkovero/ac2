@@ -124,7 +124,7 @@ fn slow_a_two_mic_sweep_walk_captures_each_step_with_one_run() {
     let e = c
         .call(Command::MeasUpdate {
             meas,
-            base: m.config_rev,
+            base: m.edit_rev,
             config: MeasConfig {
                 kind: MeasKind::Sweep {
                     config: SweepConfig {

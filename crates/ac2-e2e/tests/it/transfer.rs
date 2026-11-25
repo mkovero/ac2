@@ -304,7 +304,7 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
     d.tf_frames(m.id, 336)?;
     let applied = |s: &AppState| {
         s.selected_meas()
-            .and_then(|m| m.delay.as_ref())
+            .and_then(|m| s.delay(m.id))
             .map(|d| (d.applied.0, d.applied_samples))
     };
     let (_, before) = applied(&d.st).ok_or("delay")?;
@@ -490,12 +490,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
             .map_or(String::new(), |x| x.2.clone())
     };
     assert!(legend(&before, live).contains("· ref"), "{before:?}");
-    let applied = |s: &AppState| {
-        s.daemon()
-            .and_then(|x| x.measurements.iter().find(|y| y.id == m.id))
-            .and_then(|m| m.delay.as_ref())
-            .map(|d| d.applied_samples)
-    };
+    let applied = |s: &AppState| s.delay(m.id).map(|d| d.applied_samples);
     let a0 = applied(&d.st).ok_or("delay")?;
     for _ in 0..10 {
         d.key("Ctrl+.");
@@ -723,11 +718,7 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
             .ok_or("capture")?;
     d.until("the capture's data", |s| s.rig.traces.contains_key(&cap))?;
     let live = TraceKey::Live(m.id);
-    let delay = |s: &AppState| {
-        s.daemon()
-            .and_then(|x| x.measurements.iter().find(|y| y.id == m.id))
-            .and_then(|m| m.delay.clone())
-    };
+    let delay = |s: &AppState| s.delay(m.id).cloned();
     let d0 = delay(&d.st).ok_or("delay")?;
     let arrival = d0.applied_samples - d0.nudged_samples;
     let rate = f64::from(d.st.open_stream().ok_or("stream")?.sample_rate_hz);
@@ -935,8 +926,7 @@ fn ambiguous_delay_candidate_list() -> R {
     }
     d.until("the candidate list, tracking waiting", |s| {
         matches!(s.overlay, Overlay::DelayPick(_))
-            && s.meas(MAIN_L)
-                .is_some_and(|m| m.delay.as_ref().is_some_and(|x| x.awaiting_pick))
+            && s.delay(MAIN_L).is_some_and(|x| x.awaiting_pick)
     })?;
     let Overlay::DelayPick(c) = &d.st.overlay else {
         return Err("no list".into());
@@ -955,10 +945,7 @@ fn ambiguous_delay_candidate_list() -> R {
     d.key("2");
     d.until("the second candidate applied", |s| {
         s.overlay == Overlay::None
-            && s.meas(MAIN_L).is_some_and(|m| {
-                m.delay
-                    .as_ref()
-                    .is_some_and(|x| !x.awaiting_pick && (x.applied.0 - second.0).abs() < 1e-6)
-            })
+            && s.delay(MAIN_L)
+                .is_some_and(|x| !x.awaiting_pick && (x.applied.0 - second.0).abs() < 1e-6)
     })
 }

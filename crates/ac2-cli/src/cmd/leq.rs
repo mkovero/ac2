@@ -316,7 +316,7 @@ async fn set(cli: &Cli, s: &LeqSet, out: &mut Out<'_>) -> Result<(), CliError> {
     let r = c
         .call(Command::MeasUpdate {
             meas: m.id,
-            base: m.config_rev,
+            base: m.edit_rev,
             config: MeasConfig {
                 scope: m.config.scope,
                 name: m.config.name.clone(),
@@ -380,7 +380,7 @@ pub(crate) async fn set_weightings(
     let r = c
         .call(Command::MeasUpdate {
             meas: m.id,
-            base: m.config_rev,
+            base: m.edit_rev,
             config: MeasConfig {
                 scope: m.config.scope,
                 name: m.config.name.clone(),

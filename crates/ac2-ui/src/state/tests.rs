@@ -19,16 +19,32 @@ use crate::stream_dialog::{RoleKey, Row, StreamDialog};
 mod recorded;
 use recorded::empty_state;
 
-fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
-    let delay = matches!(kind, MeasKind::Transfer { .. }).then(|| DelayState {
+/// The delay a transfer measurement of these tests has: 12.5 ms, at the arrival.
+fn tf_delay(id: MeasId) -> Delay {
+    Delay {
+        meas: id,
+        rev: Rev(1),
         applied: Seconds(0.0125),
         applied_samples: 600.0,
         nudged: Seconds(0.0),
         nudged_samples: 0.0,
         tracking: false,
         awaiting_pick: false,
-        last_finding: None,
-    });
+    }
+}
+
+/// `s` with [`tf_delay`] for each transfer measurement that has no delay.
+fn with_delays(mut s: State) -> State {
+    for m in &s.measurements {
+        if matches!(m.config.kind, MeasKind::Transfer { .. }) && s.delay(m.id).is_none() {
+            let i = s.delays.partition_point(|d| d.meas < m.id);
+            s.delays.insert(i, tf_delay(m.id));
+        }
+    }
+    s
+}
+
+fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
     Measurement {
         id: MeasId(id),
         config: MeasConfig {
@@ -37,8 +53,8 @@ fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
             kind,
         },
         config_rev: Rev(1),
+        edit_rev: Rev(1),
         running: true,
-        delay,
         grid_id: None,
         colour: None,
         layout: None,
@@ -116,7 +132,14 @@ fn mirror(state: State) -> ConnEvent {
     mirror_of(state, 1, Some("c1"))
 }
 
+/// The mirror holding `state`, its transfer measurements given [`tf_delay`] when it holds
+/// no delay at all.
 fn mirror_of(state: State, incarnation: u64, me: Option<&str>) -> ConnEvent {
+    let state = if state.delays.is_empty() {
+        with_delays(state)
+    } else {
+        state
+    };
     ConnEvent::Mirror(Arc::new(MirrorView {
         client_id: me.map(|m| ClientId(m.into())),
         phase: Phase::Live,
@@ -462,10 +485,40 @@ impl T {
                 }),
                 _ => continue,
             }
-            self.conn(ConnEvent::Reply {
-                what,
-                result: Ok(()),
-            });
+            // As the connection answers an edit of a measurement: with it as committed.
+            let event = match crate::conn::meas_edit_target(cmd) {
+                Some(meas) => ConnEvent::MeasEdited {
+                    meas,
+                    what,
+                    result: Ok(self.st.meas(meas).cloned().map(Box::new)),
+                },
+                None => ConnEvent::Reply {
+                    what,
+                    result: Ok(()),
+                },
+            };
+            self.conn(event);
+        }
+    }
+
+    /// A key, and the connection's answer to each measurement edit it sent, with the
+    /// mirror left as it is: the next edit of the measurement then goes at once.
+    fn key_acked(&mut self, s: &str) -> Vec<Request> {
+        let r = self.key(s);
+        self.ack(&r);
+        r
+    }
+
+    /// The connection's answer to each measurement edit in `r`, the mirror left as it is.
+    fn ack(&mut self, r: &[Request]) {
+        for (cmd, what) in calls(r) {
+            if let Some(meas) = crate::conn::meas_edit_target(cmd) {
+                self.conn(ConnEvent::MeasEdited {
+                    meas,
+                    what: what.to_owned(),
+                    result: Ok(None),
+                });
+            }
         }
     }
 
@@ -652,6 +705,7 @@ fn arrival(ms: f64, level: f64) -> DelayArrival {
 
 fn finding(outcome: DelayOutcome) -> Box<DelayFinding> {
     Box::new(DelayFinding {
+        meas: MeasId(1),
         outcome,
         confidence: DelayConfidence {
             psr_db: Some(Db(20.0)),
@@ -732,6 +786,8 @@ mod cam3d;
 mod settings;
 
 mod eq_edits;
+
+mod meas_chain;
 
 /// The measurement tree as the operator sees it: Main L with two captures and a math
 /// trace made on it, the spectrum, an import; captures stay under Main L.

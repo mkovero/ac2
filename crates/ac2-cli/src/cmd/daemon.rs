@@ -127,7 +127,7 @@ fn status_text(
         s.push('\n');
         s.push_str(&l);
     }
-    for l in ac2_scene::cross_rig::status_cli(&st.remote, &st.measurements, &w.name) {
+    for l in ac2_scene::cross_rig::status_cli(&st.remote, &st.measurements, &st.delays, &w.name) {
         s.push('\n');
         s.push_str(&l);
     }

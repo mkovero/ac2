@@ -24,7 +24,7 @@ pub struct TfMeta {
     /// to.
     pub delay: Seconds,
     /// The part of `delay` that `delay.nudge` steps added to the arrival
-    /// ([`crate::model::DelayState::nudged`]) when this frame was made; 0 for a math trace.
+    /// ([`crate::model::Delay::nudged`]) when this frame was made; 0 for a math trace.
     /// A view's shared time base refers the curve to `delay − nudged`.
     pub nudged: Seconds,
     /// Live smoothing applied.
@@ -808,7 +808,10 @@ pub struct FrameHeader {
     pub stream_epoch: StreamEpoch,
     /// Daemon incarnation.
     pub daemon_incarnation: DaemonIncarnation,
-    /// Rev of the config the DSP actually used.
+    /// What the DSP actually used: the newer of its measurement's `config_rev` and its
+    /// delay's `rev` (transfer measurements), both store revs. A frame shows a
+    /// measurement's configuration when this is ≥ its `config_rev`, and its delay when this
+    /// is ≥ the delay's `rev`.
     pub config_rev: Rev,
     /// Sample index from which that config took effect.
     pub config_applied_at: SampleIndex,

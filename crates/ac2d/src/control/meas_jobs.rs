@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::grid::GridDef;
-use ac2_proto::model::{DelayOutcome, DelayState, FinderBand, MeasKind, Measurement};
+use ac2_proto::model::{DelayOutcome, FinderBand, MeasKind, Measurement};
 use ac2_proto::units::{MeasId, Rev, Seconds, StreamEpoch, WallNs};
 use ac2_proto::{ProtoError, ReplyBody};
 
@@ -103,6 +103,7 @@ impl Control {
             return Ok(None);
         };
         let fs = rt.sample_rate;
+        let stamp = self.job_stamp(m);
         let joined = self.job_map(
             rt,
             &super::remote::kind_inputs(&m.config.kind),
@@ -116,17 +117,11 @@ impl Control {
         };
         let (analysis, grid): (Box<dyn Analysis>, Option<GridDef>) = match &m.config.kind {
             MeasKind::Transfer { config } => {
-                let d = m.delay.clone().unwrap_or(DelayState {
-                    applied: Seconds(0.0),
-                    applied_samples: 0.0,
-                    nudged: Seconds(0.0),
-                    nudged_samples: 0.0,
-                    tracking: false,
-                    awaiting_pick: false,
-                    last_finding: None,
-                });
+                let d = self
+                    .job_delay(m)
+                    .ok_or_else(|| internal("transfer measurement without its delay"))?;
                 let a = jobs::transfer::Transfer::new(
-                    job_ctx(m, rt.epoch, config.clone()),
+                    job_ctx(m, stamp, rt.epoch, config.clone()),
                     fs,
                     (idx(config.reference_input)?, idx(config.measurement_input)?),
                     &d,
@@ -148,7 +143,7 @@ impl Control {
                     rt.open.buffer_frames,
                     idx(config.input)?,
                     self.input_cal(rt, config.input),
-                    m.config_rev,
+                    stamp,
                 )
                 .map_err(invalid)?;
                 // A job made while a sine fires reads it from its first frame.
@@ -164,7 +159,7 @@ impl Control {
                     fs,
                     idx(config.input)?,
                     self.input_cal(rt, config.input),
-                    m.config_rev,
+                    stamp,
                 )
                 .map_err(invalid)?;
                 (Box::new(a), Some(g))
@@ -177,8 +172,9 @@ impl Control {
                 let leq = leq
                     .take()
                     .ok_or_else(|| internal("SPL meter without its log"))?;
-                let a = jobs::spl::Spl::new(job_ctx(m, rt.epoch, config), fs, input, cal, leq)
-                    .map_err(invalid)?;
+                let a =
+                    jobs::spl::Spl::new(job_ctx(m, stamp, rt.epoch, config), fs, input, cal, leq)
+                        .map_err(invalid)?;
                 (Box::new(a), None)
             }
             MeasKind::Sweep { .. } | MeasKind::Dynamics { .. } => return Ok(None),
@@ -189,7 +185,7 @@ impl Control {
                     .as_ref()
                     .map_or_else(|| grids.grid.clone(), |(g, _)| g.clone());
                 let a = jobs::math::MathJob::new(
-                    job_ctx(m, rt.epoch, config.clone()),
+                    job_ctx(m, stamp, rt.epoch, config.clone()),
                     grids,
                     stored,
                     Arc::clone(&self.probes),
@@ -351,37 +347,33 @@ impl Control {
             ));
         };
         let samples = delay_samples(delay.0, fs);
-        let mut m = self.meas(meas)?.clone();
-        let nudged = match (&m.delay, source) {
-            (_, DelaySource::Insert) | (None, _) => 0.0,
-            (Some(d), DelaySource::Nudge | DelaySource::Typed) => {
+        let mut d = self.transfer_delay(meas)?.clone();
+        let nudged = match source {
+            DelaySource::Insert => 0.0,
+            DelaySource::Nudge | DelaySource::Typed => {
                 delay_samples((d.nudged_samples + samples - d.applied_samples) / fs, fs)
             }
-            (Some(d), DelaySource::Tracking) => d.nudged_samples,
+            DelaySource::Tracking => d.nudged_samples,
         };
         if (nudged / fs).abs() > MAX_DELAY_S {
             return Err(invalid(format!(
                 "the delay may be nudged by at most ±{MAX_DELAY_S} s from the arrival"
             )));
         }
+        // The value the delay takes moves its rev: this commit's.
         let rev = Rev(self.store.rev().0 + 1);
         let operator = source != DelaySource::Tracking;
-        if let Some(d) = &mut m.delay {
-            d.applied = Seconds(samples / fs);
-            d.applied_samples = samples;
-            d.nudged = Seconds(nudged / fs);
-            d.nudged_samples = nudged;
-            if source == DelaySource::Typed {
-                d.last_finding = None;
-            }
-            if operator {
-                d.awaiting_pick = false;
-            }
+        d.rev = rev;
+        d.applied = Seconds(samples / fs);
+        d.applied_samples = samples;
+        d.nudged = Seconds(nudged / fs);
+        d.nudged_samples = nudged;
+        if operator {
+            d.awaiting_pick = false;
         }
         if matches!(source, DelaySource::Insert | DelaySource::Typed) {
             self.cross_resolved(meas);
         }
-        m.config_rev = rev;
         if let Some(j) = self.jobs.get(&meas) {
             j.send(JobCmd::SetDelay {
                 samples,
@@ -391,7 +383,12 @@ impl Control {
                 resume: operator,
             });
         }
-        Ok(self.reply_meas(m))
+        let reply = self.reply_delay(d);
+        // A typed value is no finding's arrival: the finding no longer describes the delay.
+        if source == DelaySource::Typed {
+            self.drop_finding(meas);
+        }
+        Ok(reply)
     }
 
     pub(super) fn start_find(
@@ -437,22 +434,22 @@ impl Control {
                 }),
                 Some(_),
             ) => Ok(ReplyBody::DelayFinding(conv::generator_stopped(
+                p.meas,
                 band,
                 observation_s,
                 WallNs(wall_ns()),
             ))),
             (Ok(Found::Ran(r)), Some(fs)) => {
-                let f = conv::delay_finding(&r, fs, WallNs(wall_ns()));
-                match self.meas(p.meas).cloned() {
+                let f = conv::delay_finding(p.meas, &r, fs, WallNs(wall_ns()));
+                match self.transfer_delay(p.meas).cloned() {
                     Err(e) => Err(e),
-                    Ok(mut m) => {
-                        if let Some(d) = &mut m.delay {
-                            // The job paused tracking on an ambiguous result (1c).
-                            d.awaiting_pick = matches!(f.outcome, DelayOutcome::Ambiguous { .. });
-                            d.last_finding = Some(f.clone());
-                        }
+                    Ok(mut d) => {
+                        // The job paused tracking on an ambiguous result (1c): the delay
+                        // says so first, then the finding the pick is made from.
+                        d.awaiting_pick = matches!(f.outcome, DelayOutcome::Ambiguous { .. });
                         self.cross_found(p.meas, &f.outcome);
-                        self.commit(Change::Measurement(Patch::Set(m)));
+                        self.commit(Change::Delay(Patch::Set(d)));
+                        self.commit_finding(f.clone());
                         Ok(ReplyBody::DelayFinding(f))
                     }
                 }
@@ -470,10 +467,7 @@ impl Control {
         else {
             return;
         };
-        let Ok(m) = self.meas(meas) else {
-            return;
-        };
-        let Some(d) = &m.delay else {
+        let Some(d) = self.delay_of(meas) else {
             return;
         };
         // `samples` is the arrival; the operator's nudge from it stays on top. A move smaller
@@ -492,12 +486,13 @@ impl Control {
     }
 }
 
-/// The measurement `m` as its job starts with it, in stream `epoch`.
-fn job_ctx<C>(m: &Measurement, epoch: StreamEpoch, cfg: C) -> jobs::JobCtx<C> {
+/// The measurement `m` as its job starts with it under `stamp` ([`Control::job_stamp`]), in
+/// stream `epoch`.
+fn job_ctx<C>(m: &Measurement, stamp: Rev, epoch: StreamEpoch, cfg: C) -> jobs::JobCtx<C> {
     jobs::JobCtx {
         meas: m.id,
         cfg,
-        config_rev: m.config_rev,
+        config_rev: stamp,
         epoch,
     }
 }

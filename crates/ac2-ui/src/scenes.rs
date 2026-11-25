@@ -165,7 +165,8 @@ pub fn status(
             .filter(|d| d.warning)
             .map(|d| d.ppm),
         audio_stopped: audio_stopped(st, now.wall),
-        no_delay_estimate: tf_meas.and_then(no_delay_estimate),
+        no_delay_estimate: tf_meas
+            .and_then(|m| no_delay_estimate(m, st.rig.delay(m.id), st.rig.delay_finding(m.id))),
         math: None,
         log_not_saved: log_not_saved(st, now.wall),
         file_damaged: st

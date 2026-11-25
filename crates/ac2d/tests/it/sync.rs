@@ -1,5 +1,5 @@
 //! Ctrl protocol and state sync (Q5): hello and version refusal, snapshot + events, a missed
-//! final patch, expired replay, daemon restart, request dedup and `expect_rev`.
+//! final patch, expired replay, daemon restart, request dedup.
 #![allow(clippy::unwrap_used)]
 
 use crate::common;
@@ -47,6 +47,15 @@ fn apply(state: &mut State, e: &Event) {
         }
         Change::SplLog(ac2_proto::Patch::Deleted(id)) => {
             state.spl_logs.retain(|x| x.meas != *id);
+        }
+        Change::Delay(ac2_proto::Patch::Set(d)) => {
+            match state.delays.binary_search_by_key(&d.meas, |x| x.meas) {
+                Ok(i) => state.delays[i] = d.clone(),
+                Err(i) => state.delays.insert(i, d.clone()),
+            }
+        }
+        Change::Delay(ac2_proto::Patch::Deleted(id)) => {
+            state.delays.retain(|x| x.meas != *id);
         }
         other => panic!("unexpected change in this test: {other:?}"),
     }
@@ -140,19 +149,20 @@ fn snapshot_events_missed_final_patch_and_expired_replay() {
         traces: ac2_proto::model::OwnedTraces::Keep,
     });
     let target = snapshot(&mut b);
-    // Three creates (the first also makes the working state unsaved: `working`), the
-    // update (the meter's `spl_log` entity, then the measurement), the delete.
-    assert_eq!(target.1, Rev(r0.0 + 7));
+    // Three creates, each the measurement then its delay (the first also makes the working
+    // state unsaved: `working`); the update (the delay's delete, the meter's `spl_log`
+    // entity, then the measurement); the delete (the delay, then the measurement).
+    assert_eq!(target.1, Rev(r0.0 + 12));
 
     // Apply live events, but lose the final one.
     let mut last = r0;
     let mut events = Vec::new();
-    while events.len() < 7 {
+    while events.len() < 12 {
         if let Some(DataMessage::Event(e)) = sub.next(T) {
             events.push(e);
         }
     }
-    for e in &events[..6] {
+    for e in &events[..11] {
         assert_eq!(e.rev, Rev(last.0 + 1), "events arrive in rev order");
         apply(&mut mirror, e);
         last = e.rev;
@@ -196,7 +206,7 @@ fn snapshot_events_missed_final_patch_and_expired_replay() {
 }
 
 #[test]
-fn request_dedup_and_expect_rev() {
+fn request_dedup() {
     init_log();
     let h = Daemon::start(config(manual_rig(), inproc("dedup"))).unwrap();
     let (mut c, _s) = connect(&h, &[]);
@@ -216,82 +226,26 @@ fn request_dedup_and_expect_rev() {
     assert_eq!(first, second);
     let (s, rev, _) = snapshot(&mut c);
     assert_eq!(s.measurements.len(), 1);
-    // The create, then the working state unsaved.
-    assert_eq!(rev, Rev(2));
+    // The create, its delay, then the working state unsaved.
+    assert_eq!(rev, Rev(3));
 
-    // expect_rev: stale → conflict with the current rev; current → executes.
-    let mut stale = Request::new(c.next_id(), Command::MeasStart { meas: MeasId(1) });
-    stale.expect_rev = Some(Rev(0));
-    let e = c.call_req(stale).result.unwrap_err();
-    assert_eq!(e.code, ErrorCode::Conflict);
-    assert_eq!(e.detail, Some(ErrorDetail::Conflict { rev: Rev(2) }));
-    let mut fresh = Request::new(c.next_id(), Command::MeasStop { meas: MeasId(1) });
-    fresh.expect_rev = Some(Rev(2));
-    assert!(c.call_req(fresh).result.is_ok());
-    // A conflict is an answer like any other: retried once the rev it expected is
-    // current, the id returns the stored conflict and does not execute.
-    let (_, now_rev, _) = snapshot(&mut c);
-    let mut early = Request::new(
+    // A refusal is an answer like any other: retried after the state it was refused on
+    // has gone, the id returns the stored refusal and does not execute.
+    let m = s.measurements[0].clone();
+    let stale = Request::new(
         c.next_id(),
-        Command::MeasDelete {
-            meas: MeasId(1),
-            traces: ac2_proto::model::OwnedTraces::Delete,
+        Command::MeasUpdate {
+            meas: m.id,
+            base: Rev(m.edit_rev.0 - 1),
+            config: transfer("renamed"),
         },
     );
-    early.expect_rev = Some(Rev(now_rev.0 + 1));
-    c.send(&early);
+    c.send(&stale);
     let conflict = c.recv_raw(T).unwrap();
-    c.ok(Command::MeasStart { meas: MeasId(1) });
-    assert_eq!(snapshot(&mut c).1, early.expect_rev.unwrap());
-    c.send(&early);
+    c.send(&stale);
     assert_eq!(c.recv_raw(T).unwrap(), conflict);
-    assert_eq!(snapshot(&mut c).0.measurements.len(), 1, "not deleted");
-    // Reads ignore expect_rev.
-    let mut read = Request::new(c.next_id(), Command::StreamStatus);
-    read.expect_rev = Some(Rev(0));
-    assert!(c.call_req(read).result.is_ok());
+    assert_eq!(snapshot(&mut c).0.measurements[0].config.name, "once");
     h.shutdown();
-}
-
-/// Two clients edit the same measurement: the second edit, made on the config the first
-/// replaced, is refused with the current `config_rev` instead of silently undoing it.
-#[test]
-fn a_stale_meas_update_is_a_conflict() {
-    init_log();
-    let h = Daemon::start(config(manual_rig(), inproc("stale-edit"))).unwrap();
-    let (mut a, _s) = connect(&h, &[]);
-    let mut b = Client::connect(h.context(), h.ctrl_endpoint());
-    let m = a.measurement(Command::MeasCreate {
-        config: spl("FOH", 1),
-    });
-    let after_a = a.measurement(Command::MeasUpdate {
-        meas: m.id,
-        base: m.config_rev,
-        config: spl("FOH by A", 1),
-    });
-    assert!(after_a.config_rev > m.config_rev);
-    let e = b
-        .call(Command::MeasUpdate {
-            meas: m.id,
-            base: m.config_rev,
-            config: spl("FOH by B", 1),
-        })
-        .unwrap_err();
-    assert_eq!(e.code, ErrorCode::Conflict, "{e:?}");
-    assert_eq!(
-        e.detail,
-        Some(ErrorDetail::Conflict {
-            rev: after_a.config_rev
-        })
-    );
-    let (s, _, _) = snapshot(&mut b);
-    assert_eq!(s.measurements[0].config.name, "FOH by A");
-    // Re-read, then the edit goes through.
-    b.ok(Command::MeasUpdate {
-        meas: m.id,
-        base: after_a.config_rev,
-        config: spl("FOH by B", 1),
-    });
 }
 
 #[test]
@@ -468,7 +422,7 @@ fn a_measurement_needs_a_readable_bounded_name() {
         let e = a
             .call(Command::MeasUpdate {
                 meas: m.id,
-                base: m.config_rev,
+                base: m.edit_rev,
                 config: spl(bad, 1),
             })
             .unwrap_err();

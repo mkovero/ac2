@@ -15,6 +15,7 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::Generator(_) => "generator",
         ReplyBody::Measurement(_) => "measurement",
         ReplyBody::DelayFinding(_) => "delay_finding",
+        ReplyBody::Delay(_) => "delay",
         ReplyBody::Trace(_) => "trace",
         ReplyBody::Traces(_) => "traces",
         ReplyBody::TraceData(_) => "trace_data",

@@ -5,7 +5,6 @@ use ac2_proto::model::*;
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
 
-use super::meas::meas_call;
 use super::{connect, find_meas, rate, state};
 use crate::CliError;
 use crate::args::*;
@@ -121,6 +120,13 @@ fn finding_text(f: &DelayFinding, rate: Option<u32>) -> String {
     out
 }
 
+/// A delay command that must answer with the delay it committed.
+async fn delay_call(c: &ac2_client::Client, cmd: Command) -> Result<Delay, CliError> {
+    let op = cmd.name();
+    let r = c.call(cmd).await?;
+    Ok(expect_body!(op, r, ReplyBody::Delay(d) => d)?)
+}
+
 pub(crate) async fn delay(cli: &Cli, cmd: &DelayCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
     let s = state(&c).await?;
@@ -131,7 +137,8 @@ pub(crate) async fn delay(cli: &Cli, cmd: &DelayCmd, out: &mut Out<'_>) -> Resul
             observation,
             insert,
         } => {
-            let id = transfer(&s, meas)?.id;
+            let m = transfer(&s, meas)?;
+            let id = m.id;
             let r = c
                 .call(Command::DelayFind {
                     meas: id,
@@ -143,7 +150,7 @@ pub(crate) async fn delay(cli: &Cli, cmd: &DelayCmd, out: &mut Out<'_>) -> Resul
             // A refusal inserts nothing; the finding (with its reasons) is still printed.
             let inserted = match insert.filter(|_| f.no_estimate().is_none()) {
                 Some(p) => Some(
-                    meas_call(
+                    delay_call(
                         &c,
                         Command::DelayInsert {
                             meas: id,
@@ -157,15 +164,16 @@ pub(crate) async fn delay(cli: &Cli, cmd: &DelayCmd, out: &mut Out<'_>) -> Resul
             let rate = rate(&s);
             out.emit(&json!({ "finding": f, "inserted": inserted }), || {
                 let mut t = finding_text(&f, rate);
-                if let Some(m) = &inserted {
-                    t.push_str(&format!("\ninserted: {}", output::measurement(m)));
+                if let Some(d) = &inserted {
+                    t.push_str(&format!("\ninserted: {}", output::measurement(m, Some(d))));
                 }
                 t
             })?;
         }
         DelayCmd::Insert { meas, pick: p } => {
-            let id = transfer(&s, meas)?.id;
-            let m = meas_call(
+            let m = transfer(&s, meas)?;
+            let id = m.id;
+            let d = delay_call(
                 &c,
                 Command::DelayInsert {
                     meas: id,
@@ -173,27 +181,30 @@ pub(crate) async fn delay(cli: &Cli, cmd: &DelayCmd, out: &mut Out<'_>) -> Resul
                 },
             )
             .await?;
-            out.emit(&m, || output::measurement(&m))?;
+            out.emit(&d, || output::measurement(m, Some(&d)))?;
         }
         DelayCmd::Set { meas, delay, temp } => {
-            let id = transfer(&s, meas)?.id;
+            let m = transfer(&s, meas)?;
+            let id = m.id;
             let d = delay
                 .seconds(rate(&s), *temp)
                 .map_err(|e| CliError::Usage(e.0))?;
-            let m = meas_call(&c, Command::DelaySet { meas: id, delay: d }).await?;
-            out.emit(&m, || output::measurement(&m))?;
+            let d = delay_call(&c, Command::DelaySet { meas: id, delay: d }).await?;
+            out.emit(&d, || output::measurement(m, Some(&d)))?;
         }
         DelayCmd::Nudge { meas, by, temp } => {
-            let id = transfer(&s, meas)?.id;
+            let m = transfer(&s, meas)?;
+            let id = m.id;
             let by = by
                 .seconds(rate(&s), *temp)
                 .map_err(|e| CliError::Usage(e.0))?;
-            let m = meas_call(&c, Command::DelayNudge { meas: id, by }).await?;
-            out.emit(&m, || output::measurement(&m))?;
+            let d = delay_call(&c, Command::DelayNudge { meas: id, by }).await?;
+            out.emit(&d, || output::measurement(m, Some(&d)))?;
         }
         DelayCmd::Track { meas, state: on } => {
-            let id = transfer(&s, meas)?.id;
-            let m = meas_call(
+            let m = transfer(&s, meas)?;
+            let id = m.id;
+            let d = delay_call(
                 &c,
                 Command::DelayTrack {
                     meas: id,
@@ -201,7 +212,7 @@ pub(crate) async fn delay(cli: &Cli, cmd: &DelayCmd, out: &mut Out<'_>) -> Resul
                 },
             )
             .await?;
-            out.emit(&m, || output::measurement(&m))?;
+            out.emit(&d, || output::measurement(m, Some(&d)))?;
         }
     }
     Ok(())
@@ -225,6 +236,7 @@ mod tests {
             refined: true,
         };
         let f = DelayFinding {
+            meas: ac2_proto::units::MeasId(1),
             outcome: DelayOutcome::Ambiguous {
                 reasons: vec![AmbiguityReason::MergedLobe],
                 ranked: vec![peak],

@@ -229,7 +229,7 @@ fn power_average_of_three_positions() {
     assert_eq!(audience.id, MeasId(4));
     // Its grid is its operands', known before it runs.
     assert!(audience.grid_id.is_some());
-    assert!(audience.delay.is_none());
+    assert!(c.state().delay(audience.id).is_none());
     c.ok(Command::MeasStart { meas: MeasId(4) });
     play(&mut r.d, c, r.tok, 3.5);
     let [f] = newest(&r.sub, &r.d, [4]);

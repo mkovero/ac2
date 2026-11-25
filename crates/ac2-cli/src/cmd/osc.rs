@@ -428,7 +428,7 @@ pub(super) async fn rig_edit(c: &Client, cmd: impl Fn(Rev) -> Command) -> Result
 }
 
 /// `meas.update` of the measurement `meas` names, with the config `edit` makes of it, on
-/// its current `config_rev`; on `conflict` (edited meanwhile) re-read and made once more.
+/// its current `edit_rev`; on `conflict` (committed meanwhile) re-read and made once more.
 async fn meas_edit(
     c: &Client,
     meas: &MeasRef,
@@ -442,7 +442,7 @@ async fn meas_edit(
         let r = c
             .call(Command::MeasUpdate {
                 meas: m.id,
-                base: m.config_rev,
+                base: m.edit_rev,
                 config,
             })
             .await;

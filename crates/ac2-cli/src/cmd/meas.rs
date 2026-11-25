@@ -54,11 +54,13 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
                     }
                 }
             }
-            out.emit(&m, || output::measurement(&m))?;
+            out.emit(&m, || output::measurement(&m, None))?;
         }
         MeasCmd::List { .. } => {
             let s = state(&c).await?;
-            out.emit(&s.measurements, || output::measurements(&s.measurements))?;
+            out.emit(&s.measurements, || {
+                output::measurements(&s.measurements, &s.delays)
+            })?;
         }
         MeasCmd::Set {
             meas,
@@ -95,7 +97,7 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
                     &c,
                     Command::MeasUpdate {
                         meas: m.id,
-                        base: m.config_rev,
+                        base: m.edit_rev,
                         config,
                     },
                 )
@@ -121,7 +123,7 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
                 )
                 .await?;
             }
-            out.emit(&m, || output::measurement(&m))?;
+            out.emit(&m, || output::measurement(&m, None))?;
         }
         MeasCmd::Layout {
             cmd: MeasLayoutCmd::Clear { meas },
@@ -136,7 +138,7 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
                 },
             )
             .await?;
-            out.emit(&m, || output::measurement(&m))?;
+            out.emit(&m, || output::measurement(&m, None))?;
         }
         MeasCmd::Eq { cmd } => super::eq::meas_eq(&c, cmd, out).await?,
         MeasCmd::Scope { meas, scope } => super::osc::meas_scope(&c, meas, *scope, out).await?,
@@ -149,7 +151,7 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
                 Command::MeasStop { meas: id }
             };
             let m = meas_call(&c, cmd).await?;
-            out.emit(&m, || output::measurement(&m))?;
+            out.emit(&m, || output::measurement(&m, None))?;
         }
         MeasCmd::Rm {
             meas,
@@ -184,16 +186,13 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
                     )));
                 }
             };
-            // Guarded by the rev the name was resolved at: if the measurements changed in
-            // between, the daemon refuses instead of deleting the wrong one.
+            // By the id the name was resolved to: ids are never reused, so a measurement
+            // deleted or renamed in between is refused or still the one named, never another.
             let r = c
-                .call_expect(
-                    Command::MeasDelete {
-                        meas: m.id,
-                        traces: what,
-                    },
-                    snap.rev,
-                )
+                .call(Command::MeasDelete {
+                    meas: m.id,
+                    traces: what,
+                })
                 .await?;
             let rev = expect_body!("meas.delete", r, ReplyBody::Ack { rev } => rev)?;
             let name = m.config.name.clone();

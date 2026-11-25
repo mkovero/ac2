@@ -52,10 +52,26 @@ for a band transfer; in the CLI `cmd/leq.rs`, `cmd/osc.rs`, `cmd/bands.rs`, `cmd
 
 Because every commit of the measurement moves `edit_rev`, a second edit built from the mirror
 before the first one's event arrives (a key repeat, an offset drag followed by a configuration
-key) would be refused. The app keeps one edit in flight per measurement: the next edit waits
-for the reply of the one before and takes its `base` from the `edit_rev` that reply carries,
-not from the mirror. A `stale_meas` refusal then means another client or the daemon committed
-the measurement in between; the app shows it and drops that measurement's queued edits.
+key) would be refused. The app chains the edits of each measurement (`meas.update`,
+`meas.colour`, `meas.offset`, `meas.layout`, `meas.eq`, `meas.start`, `meas.stop`; each
+answers with the measurement as committed). An edit that carries a base (`meas.update`,
+`meas.eq put`) waits for the replies of the edits of that measurement in flight and takes
+its `base` from the measurement the last reply carries, not from the mirror; the edits
+without a base are last write wins and go at once unless a based edit waits ahead of them,
+since the daemon runs one client's requests in the order sent. A queued `meas.update` was
+made on the configuration the mirror held then, so it is rebased field by field: what the
+edit changed (compared with that configuration) is laid over the configuration the reply
+carries, and a changed enum variant is taken whole, so an earlier edit's change still in
+flight is not undone. A `stale_meas` refusal then means another client or the daemon
+committed the measurement in between: the app shows the conflict toast (`<what>: changed
+elsewhere — reloaded`, as for any refused base), drops that measurement's queued edits and
+warns how many were not sent (`<name>: n later edits not sent — it changed elsewhere, shown
+as it is now`). A page held open over time (the SPL / Leq page) is made on the `edit_rev` it opened on;
+while the meter's name, scope and SPL configuration stay what the page was made on, it takes
+each newer `edit_rev` the mirror shows (a pane laid out, a start, a job restart), so only a
+change of what Apply writes refuses it. The one `meas.update` the connection sends on its own (a sweep's stimulus
+settings, `conn/stimulus.rs`) is outside the chain and takes the mirror's `edit_rev`; a
+refusal there is reported like any failed call.
 
 **`config_rev`** keeps exactly one meaning: the rev of the last commit that changed what the
 measurement's job computes from its configuration. It no longer moves for a delay change.
@@ -84,8 +100,10 @@ tracking commits two events at consecutive revs: `delay` (`awaiting_pick`) then
 `delay_finding`.
 
 `delay.insert`, `delay.set`, `delay.nudge` and `delay.track` reply with the new `delay` body
-(`ReplyBody::Delay`); `delay.find` keeps its `delay_finding` reply. A transfer measurement
-coming into being commits `measurement` then `delay`; one going away (or ceasing to be a
+(`ReplyBody::Delay`); `delay.find` keeps its `delay_finding` reply. A typed `delay.set`
+commits `delay`, then the `delay_finding` delete. A transfer measurement coming into being
+commits `measurement` then `delay` (the first saved change of a clean session commits
+`working` between them, so the two are in order but not always at consecutive revs); one going away (or ceasing to be a
 transfer) commits deletes of `delay_finding`, `delay` and `measurement` (or the measurement's
 new set) in that order. That covers `meas.create`, `meas.delete`, `meas.update` changing
 kind to or from transfer, and `file.new` / `file.load`, which commit each measurement's
@@ -98,7 +116,8 @@ A delay created with its measurement (`meas.create`, a kind change to transfer, 
 and after the `delay` commit, and a job started ahead of both commits (as `meas.update` starts
 a running measurement's job before it commits) stamps a value that settles. `rev` moves only
 when `applied` or `nudged` move; `tracking` and `awaiting_pick` commit `delay` without moving
-it.
+it. A stream reopen at another rate rescales each delay to whole samples at the new rate;
+one whose value moved commits under a new `rev` before the jobs start.
 
 **Saved changes and recordings.** `delay` is a saved change as `measurement` is: it marks the
 working session changed (the unsaved-changes `conflict` on `file.new` / `file.load`) and
@@ -106,7 +125,9 @@ reaches the autosave. `delay_finding` is not: a finding is never saved and a loa
 without one. The raw-capture timeline gains `TimelineChange::Delay(Patch<Delay, MeasId>)`
 beside `Measurement`, whose value no longer holds the delay; findings are not in the timeline.
 The timeline is a record, never read back as tokens: the measurement in it carries `edit_rev`
-as committed and nothing compares it.
+as committed and nothing compares it. The capture sidecar's initial state gains `delays`
+beside `measurements`; it is a shape change under the raw format version this bump already
+set, so no converter step.
 
 **Frames.** The header field stays `config_rev`; its value is the newer of the measurement's
 `config_rev` and its delay's `rev` that the frame was computed under. Both are store revs, so
@@ -136,6 +157,8 @@ every mutation and of the reads that act, `retry` in `control/request.rs` (built
 `dynamics.envelope`, `cal.list`, `spl.log_get`, `spl.history_get`, `spl.band_log_get`,
 `file.list`, `rec.list`, `plan.list`, `server.info`, `source.state`,
 `file.download_chunk`. Their replies are not stored and a retry executes them again.
+`docs/protocol.md` marks each command `read` or `acts` in that one sense (it had marked
+the acting reads as reads).
 Everything else keeps its stored reply, including the reads that act: `stream.devices`
 (drivers load), `stream.preview`, `stream.preview_stop`, `stream.control_panel`,
 `stream.detect_loopback`, `delay.find`, `trace.export`, `file.upload_begin`,
@@ -587,7 +610,7 @@ Every serde writer of the workspace was walked; stored formats that change shape
 | session format (`ac2-traces::session::VERSION`) | 49 → 50 | stream names, tag keys, `lo_hz` / `hi_hz`, `sample_rate_hz`, `next_run`, string integers, log versions and marks | autosave of 49 set aside at start (its logs stay plain CSV); save or export first; old saved sessions reach 105 by `file.salvage` |
 | `working.json` (autosave folder) | unversioned | `saved_at`, `replaced_at` as strings | set aside with its autosave |
 | rig meter logs (`rig_logs`) | session format 49 → 50 | as the session | not read back; the meters start new logs, old CSV stays on disk |
-| raw capture sidecar | 3 → 4 | stream names, `sample_rate_hz`, string integers, measurement without `delay` and `TimelineChange::Delay` (§1) | old captures not replayed; keep the WAV |
+| raw capture sidecar | 3 → 4 | stream names, `sample_rate_hz`, string integers, measurement without `delay`, initial `delays`, `TimelineChange::Delay` (§1) | old captures not replayed; keep the WAV |
 | SPL log | v2 → v3 | §7 | none (inside sessions) |
 | band log | v1 → v2 | §7 | none (inside sessions) |
 | calibration store | 4 → 5 | `InputKind` tag, string `calibrated_at` and `imported_at`, required `loading` | converter (adds `loading` where missing, writes the times as strings) |

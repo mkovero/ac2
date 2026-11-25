@@ -184,6 +184,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::DelayFinding(finding())),
         Ok(ReplyBody::DelayFinding(accepted_finding())),
         Ok(ReplyBody::DelayFinding(refused_finding())),
+        Ok(ReplyBody::Delay(delay())),
         Ok(ReplyBody::Trace(trace_meta())),
         Ok(ReplyBody::Traces(vec![
             trace_meta(),
@@ -301,6 +302,22 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             code: ErrorCode::Conflict,
             msg: "state moved".into(),
             detail: Some(ErrorDetail::Conflict { rev: Rev(50) }),
+        }),
+        Err(ProtoError {
+            code: ErrorCode::Conflict,
+            msg: "measurement 1 changed since".into(),
+            detail: Some(ErrorDetail::StaleMeas {
+                meas: MeasId(1),
+                edit_rev: Rev(51),
+            }),
+        }),
+        Err(ProtoError {
+            code: ErrorCode::Conflict,
+            msg: "EQ 1 changed since".into(),
+            detail: Some(ErrorDetail::EqConflict {
+                set: EqSetId(1),
+                rev: 4,
+            }),
         }),
         Err(ProtoError {
             code: ErrorCode::LeaseHeld,

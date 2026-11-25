@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ac2_proto::model::State;
-use ac2_proto::units::{ClientId, RequestId, Rev};
+use ac2_proto::units::{ClientId, RequestId};
 use ac2_proto::{
     Command, ErrorCode, GridDef, GridId, ReplyBody, Request, StateSnapshot, Subscription, Warning,
     Welcome, encode_request,
@@ -201,27 +201,18 @@ impl CallCore {
         })
     }
 
-    pub(crate) async fn call(
-        &self,
-        cmd: Command,
-        expect_rev: Option<Rev>,
-        retry: Retry,
-    ) -> Result<ReplyBody, ClientError> {
-        self.call_warned(cmd, expect_rev, retry)
-            .await
-            .map(|(body, _)| body)
+    pub(crate) async fn call(&self, cmd: Command, retry: Retry) -> Result<ReplyBody, ClientError> {
+        self.call_warned(cmd, retry).await.map(|(body, _)| body)
     }
 
     /// [`Self::call`], with the reply's warnings.
     pub(crate) async fn call_warned(
         &self,
         cmd: Command,
-        expect_rev: Option<Rev>,
         retry: Retry,
     ) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
         let op = cmd.name();
-        let mut req = Request::new(self.next_id(), cmd);
-        req.expect_rev = expect_rev;
+        let req = Request::new(self.next_id(), cmd);
         let bytes = encode_request(&req).map_err(ClientError::Encode)?;
         if bytes.len() > ac2_proto::MAX_CTRL_BYTES {
             return Err(ClientError::TooLarge {
@@ -489,7 +480,7 @@ impl Client {
     /// Sends `cmd` with the default retry policy.
     pub async fn call(&self, cmd: Command) -> Result<ReplyBody, ClientError> {
         let r = self.inner.core.retry;
-        self.inner.core.call(cmd, None, r).await
+        self.inner.core.call(cmd, r).await
     }
 
     /// Sends `cmd` with the default retry policy; the reply body with the warnings the
@@ -500,28 +491,12 @@ impl Client {
         cmd: Command,
     ) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
         let r = self.inner.core.retry;
-        self.inner.core.call_warned(cmd, None, r).await
+        self.inner.core.call_warned(cmd, r).await
     }
 
-    /// Sends a mutation guarded by `expect_rev`: refused with `conflict` if the daemon state
-    /// has moved past it.
-    pub async fn call_expect(
-        &self,
-        cmd: Command,
-        expect_rev: Rev,
-    ) -> Result<ReplyBody, ClientError> {
-        let r = self.inner.core.retry;
-        self.inner.core.call(cmd, Some(expect_rev), r).await
-    }
-
-    /// Sends `cmd` with an explicit retry policy and optional `expect_rev`.
-    pub async fn call_with(
-        &self,
-        cmd: Command,
-        expect_rev: Option<Rev>,
-        retry: Retry,
-    ) -> Result<ReplyBody, ClientError> {
-        self.inner.core.call(cmd, expect_rev, retry).await
+    /// Sends `cmd` with an explicit retry policy.
+    pub async fn call_with(&self, cmd: Command, retry: Retry) -> Result<ReplyBody, ClientError> {
+        self.inner.core.call(cmd, retry).await
     }
 
     /// `state.snapshot`.
@@ -793,7 +768,6 @@ async fn hello(core: &CallCore, name: &str) -> Result<Welcome, ClientError> {
             Command::Hello {
                 client: name.to_owned(),
             },
-            None,
             core.retry,
         )
         .await?;
@@ -843,7 +817,7 @@ async fn run_sync(
                         None
                     }
                 },
-                Need::Snapshot => match core.call(Command::StateSnapshot, None, core.retry).await {
+                Need::Snapshot => match core.call(Command::StateSnapshot, core.retry).await {
                     Ok(ReplyBody::Snapshot(s)) => mirror.on_snapshot(*s, Instant::now()),
                     _ => {
                         mirror.on_request_failed(Instant::now());
@@ -851,10 +825,7 @@ async fn run_sync(
                     }
                 },
                 Need::Since(rev) => {
-                    match core
-                        .call(Command::StateSince { rev }, None, core.retry)
-                        .await
-                    {
+                    match core.call(Command::StateSince { rev }, core.retry).await {
                         Ok(ReplyBody::Events(evs)) => mirror.on_since(evs, Instant::now()),
                         Err(e) if e.code() == Some(ErrorCode::ResyncRequired) => {
                             mirror.on_resync_required(Instant::now())

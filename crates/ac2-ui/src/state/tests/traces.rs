@@ -104,7 +104,7 @@ fn smoothing_set(r: &[Request]) -> (String, Option<Smoothing>) {
 fn traces_are_selected_from_the_keyboard() {
     let mut t = T::new();
     // No shown trace: V says so.
-    assert!(t.key("V").is_empty());
+    assert!(t.key_acked("V").is_empty());
     assert!(t.last_toast().contains("no shown stored traces"));
     let mut hidden = stored(11, Some(2), 2);
     hidden.edit.visible = false;
@@ -122,62 +122,62 @@ fn traces_are_selected_from_the_keyboard() {
     assert_eq!(order, [10, 11, 12, 13, 14]);
     // V steps through the shown traces in that order, slotted or not (hidden skipped), then
     // back to the live measurement; it sends nothing.
-    assert!(t.key("V").is_empty());
+    assert!(t.key_acked("V").is_empty());
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
     assert!(t.last_toast().contains("slot 1 (t10) selected"));
-    t.key("V");
+    t.key_acked("V");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(12)));
-    t.key("V");
+    t.key_acked("V");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(13)));
     assert_eq!(t.last_toast(), "t13 selected");
-    t.key("V");
+    t.key_acked("V");
     assert_eq!(t.st.rig.selected_trace, None);
     assert!(t.last_toast().contains("live measurement"));
     // Shift+V goes the other way, from live to the last shown trace.
-    t.key("Shift+V");
+    t.key_acked("Shift+V");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(13)));
     // An imported trace is on no pane: selected, it leaves K with the pane's measurement.
-    assert_eq!(smoothing_set(&t.key("K")).0, "m1");
-    t.key("Shift+V");
+    assert_eq!(smoothing_set(&t.key_acked("K")).0, "m1");
+    t.key_acked("Shift+V");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(12)));
     // Alt+V reaches the hidden ones too.
-    t.key("Alt+V");
+    t.key_acked("Alt+V");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(13)));
-    t.key("Alt+V");
+    t.key_acked("Alt+V");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(14)));
     assert_eq!(t.last_toast(), "t14 (hidden) selected");
-    t.key("Alt+Shift+V");
-    t.key("Alt+Shift+V");
-    t.key("Alt+Shift+V");
+    t.key_acked("Alt+Shift+V");
+    t.key_acked("Alt+Shift+V");
+    t.key_acked("Alt+Shift+V");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(11)));
     // From a hidden trace, V and Shift+V go to the shown ones beside it.
-    t.key("V");
+    t.key_acked("V");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(12)));
     t.st.apply(Msg::SelectTrace(TraceId(11)), &t.keys);
-    t.key("Shift+V");
+    t.key_acked("Shift+V");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
     // The palette entry deselects.
     t.st.apply(Msg::Command(CommandId::SelectLive), &t.keys);
     assert_eq!(t.st.rig.selected_trace, None);
     // Esc with a dialog open only closes it; with nothing open it only stops: End hands
     // the keys back to the live measurement.
-    t.key("V");
-    t.key("H");
-    assert!(t.key("Esc").is_empty());
+    t.key_acked("V");
+    t.key_acked("H");
+    assert!(t.key_acked("Esc").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
-    t.key("Esc");
+    t.key_acked("Esc");
     assert_eq!(
         t.st.rig.selected_trace,
         Some(TraceId(10)),
         "Esc keeps the selection"
     );
-    t.key("End");
+    t.key_acked("End");
     assert_eq!(t.st.rig.selected_trace, None);
-    assert_eq!(smoothing_set(&t.key("K")).0, "m1");
+    assert_eq!(smoothing_set(&t.key_acked("K")).0, "m1");
     // Tab steps to the next row of the list, a hidden trace's too (a click selects it).
-    t.key("V");
-    t.key("Tab");
+    t.key_acked("V");
+    t.key_acked("Tab");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(11)));
 }
 

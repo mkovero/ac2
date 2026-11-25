@@ -237,6 +237,19 @@ impl Rig {
         })
     }
 
+    /// Set `set` of measurement 1's rev now: the `base` of a `put` on it.
+    fn set_rev(&mut self, set: EqSetId) -> u32 {
+        let s = self.state();
+        let m = s.measurements.iter().find(|m| m.id == MeasId(1)).unwrap();
+        m.eq.iter().find(|e| e.id == set).unwrap().rev
+    }
+
+    /// A `put` of `body` into `set`, made on the set as it is now.
+    fn put(&mut self, set: EqSetId, body: EqBody) -> Measurement {
+        let base = self.set_rev(set);
+        self.eq(EqEdit::Put { set, base, body })
+    }
+
     fn eq_err(&mut self, edit: EqEdit) -> ac2_proto::ProtoError {
         self.c
             .call(Command::MeasEq {
@@ -347,20 +360,17 @@ fn slow_eq_predicts_without_applying_twice() {
     // Section bypass, then set bypass: the curve as it is.
     let mut body = set.body.clone();
     body.sections[0].enabled = false;
-    r.eq(EqEdit::Put { set: set.id, body });
+    r.put(set.id, body);
     r.play(0.5);
     let [curve, pred] = r.newest([main, live]);
     diff_is(&pred, &curve, 1000.0, 0.0, 0.2, "section bypassed");
     let mut body = set.body.clone();
     body.enabled = false;
-    r.eq(EqEdit::Put { set: set.id, body });
+    r.put(set.id, body);
     r.play(0.5);
     let [curve, pred] = r.newest([main, live]);
     diff_is(&pred, &curve, 1000.0, 0.0, 0.2, "set bypassed");
-    r.eq(EqEdit::Put {
-        set: set.id,
-        body: set.body.clone(),
-    });
+    r.put(set.id, set.body.clone());
 
     // A capture before the EQ is in: it recorded none of it, so it gets the whole set.
     let before = r.capture(main, "before");
@@ -417,7 +427,7 @@ fn slow_eq_predicts_without_applying_twice() {
     // Edit to −8 dB: −2 dB more on the curves that have −6 dB in, −8 on the one without.
     let mut body = set.body.clone();
     body.sections[0] = peaking(-8.0);
-    r.eq(EqEdit::Put { set: set.id, body });
+    r.put(set.id, body);
     r.play(0.5);
     let [curve, pred, bpred, apred] = r.newest([main, live, before_pred, after_pred]);
     diff_is(
@@ -446,8 +456,10 @@ fn slow_eq_predicts_without_applying_twice() {
         bw: Bandwidth::Q { value: 1.0 },
         q_measured: None,
     };
+    let base = r.set_rev(set.id);
     let e = r.eq_err(EqEdit::Put {
         set: set.id,
+        base,
         body: bad,
     });
     assert_eq!(e.code, ErrorCode::Invalid);
@@ -461,8 +473,10 @@ fn slow_eq_predicts_without_applying_twice() {
             order: 3,
         },
     });
+    let base = r.set_rev(set.id);
     let e = r.eq_err(EqEdit::Put {
         set: set.id,
+        base,
         body: bad,
     });
     assert_eq!(e.code, ErrorCode::Invalid);

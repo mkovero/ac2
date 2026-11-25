@@ -30,14 +30,14 @@ pub(crate) async fn run(cli: &Cli, cmd: &MathCmd, out: &mut Out<'_>) -> Result<(
                 &c,
                 Command::MeasUpdate {
                     meas: existing.id,
-                    base: existing.config_rev,
+                    base: existing.edit_rev,
                     config,
                 },
             )
             .await?
         }
     };
-    out.emit(&m, || output::measurement(&m))?;
+    out.emit(&m, || output::measurement(&m, None))?;
     Ok(())
 }
 

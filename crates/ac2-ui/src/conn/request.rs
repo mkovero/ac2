@@ -62,6 +62,9 @@ fn send_warnings(o: &Out, warnings: Vec<ac2_proto::Warning>) {
 
 pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out: &Out) {
     match r {
+        Request::Call { cmd, what } if let Some(meas) = super::meas_edit_target(&cmd) => {
+            super::meas_edit::send(client, meas, cmd, what, out);
+        }
         Request::Call { cmd, what } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {

@@ -362,10 +362,7 @@ impl Inner {
         let mut f = tf_frame(&self.tf_grid, meas, gain, tau, bump_hz);
         f.meta.delay = self
             .state
-            .measurements
-            .iter()
-            .find(|m| m.id.0 == meas)
-            .and_then(|m| m.delay.as_ref())
+            .delay(ac2_proto::units::MeasId(meas))
             .map_or(Seconds(0.0), |d| d.applied);
         f
     }

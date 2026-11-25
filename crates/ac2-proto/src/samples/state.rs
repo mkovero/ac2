@@ -437,8 +437,8 @@ pub fn spl_measurement() -> Measurement {
             },
         },
         config_rev: Rev(40),
+        edit_rev: Rev(40),
         running: true,
-        delay: None,
         grid_id: None,
         colour: None,
         layout: None,
@@ -613,6 +613,8 @@ pub fn state() -> State {
     State {
         stream: stream(),
         measurements: vec![measurement(), spectrum_measurement()],
+        delays: vec![delay()],
+        delay_findings: vec![finding()],
         traces: vec![trace_meta(), spectrum_trace_meta()],
         generator: generator(),
         calibrations: vec![cal_entry(), electrical_cal_entry()],

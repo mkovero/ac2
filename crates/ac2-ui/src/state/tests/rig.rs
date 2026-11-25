@@ -168,7 +168,10 @@ fn a_conflict_on_apply_keeps_the_leq_page_and_its_edits() {
     assert!(t.st.overlay.leq().expect("test value").on_rig);
     // Elsewhere: the meter's configuration moves on.
     let mut s = with_spl();
-    s.measurements[2].config_rev = Rev(opened.0 + 5);
+    s.measurements[2].edit_rev = Rev(opened.0 + 5);
+    if let MeasKind::Spl { config } = &mut s.measurements[2].config.kind {
+        config.time_weighting = ac2_proto::model::TimeWeighting::Slow;
+    }
     t.conn(mirror(s.clone()));
     let r = t.key("Enter");
     let Some((Command::MeasUpdate { base, .. }, what)) = call(&r) else {
@@ -177,9 +180,12 @@ fn a_conflict_on_apply_keeps_the_leq_page_and_its_edits() {
     assert_eq!(*base, opened);
     let what = what.to_owned();
     assert!(t.st.overlay.leq().is_none(), "applied: the page closes");
-    t.conn(ConnEvent::Conflict {
+    t.conn(ConnEvent::MeasEdited {
+        meas: MeasId(4),
         what: what.clone(),
-        error: "conflict: stale base".into(),
+        result: Err(crate::conn::MeasRefusal::Stale(
+            "conflict: stale base".into(),
+        )),
     });
     assert_eq!(
         t.last_toast(),
@@ -193,7 +199,7 @@ fn a_conflict_on_apply_keeps_the_leq_page_and_its_edits() {
         Some("changed elsewhere: Apply again overwrites with your edits")
     );
     // A later change elsewhere: the kept page follows its rev.
-    s.measurements[2].config_rev = Rev(opened.0 + 6);
+    s.measurements[2].edit_rev = Rev(opened.0 + 6);
     t.conn(mirror(s));
     let r = t.key("Enter");
     let Some((Command::MeasUpdate { base, config, .. }, _)) = call(&r) else {
@@ -202,6 +208,32 @@ fn a_conflict_on_apply_keeps_the_leq_page_and_its_edits() {
     assert_eq!(*base, Rev(opened.0 + 6));
     assert_eq!(config.scope, MeasScope::Rig);
     assert!(t.st.overlay.leq().is_none());
+}
+
+/// The open page follows a commit that leaves the meter's configuration as it was (its
+/// panes laid out meanwhile, by this app or another): Enter names the newer token. A
+/// configuration changed elsewhere it does not follow, so Enter is refused for it.
+#[test]
+fn the_leq_page_follows_a_commit_that_leaves_its_configuration() {
+    let mut t = T::new();
+    t.conn(mirror(with_spl()));
+    t.type_key("Shift+L", "L");
+    let opened = t.st.overlay.leq().expect("open").base_rev;
+    let mut s = with_spl();
+    s.measurements[2].edit_rev = Rev(opened.0 + 1);
+    s.measurements[2].colour = Some(ac2_proto::model::ColourFamily::Neutral);
+    t.conn(mirror(s.clone()));
+    assert_eq!(
+        t.st.overlay.leq().expect("open").base_rev,
+        Rev(opened.0 + 1)
+    );
+    s.measurements[2].edit_rev = Rev(opened.0 + 2);
+    s.measurements[2].config.name = "Renamed".into();
+    t.conn(mirror(s));
+    assert_eq!(
+        t.st.overlay.leq().expect("open").base_rev,
+        Rev(opened.0 + 1)
+    );
 }
 
 /// A reply's warnings toast with the rig meters' names, even with the warning toasts off.

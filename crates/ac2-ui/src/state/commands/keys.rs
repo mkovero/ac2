@@ -562,9 +562,8 @@ impl AppState {
                         let delay = delay.0;
                         // A typed delay keeps the arrival: the daemon moves the offset from it.
                         let (name, offset) = self.meas(id).map_or((String::new(), 0.0), |m| {
-                            let offset = m
-                                .delay
-                                .as_ref()
+                            let offset = self
+                                .delay(id)
                                 .map_or(0.0, |d| d.nudged.0 + delay - d.applied.0);
                             (m.config.name.clone(), offset)
                         });

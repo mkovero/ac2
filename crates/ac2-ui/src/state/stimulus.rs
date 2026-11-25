@@ -526,7 +526,7 @@ impl AppState {
         }
         let base = self
             .meas(plan.meas)
-            .map_or(ac2_proto::units::Rev(0), |m| m.config_rev);
+            .map_or(ac2_proto::units::Rev(0), |m| m.edit_rev);
         let update = (c != plan.config).then(|| {
             (
                 base,

@@ -12,7 +12,6 @@ use std::time::Duration;
 use ac2_audio::{AudioError, Backend, BackendKind as AudioKind, DeviceCaps, DuplexRequest};
 use ac2_audio::{DuplexStream, FakeBackend};
 use ac2_proto::model::{BackendKind, DeviceId};
-use ac2_proto::units::Rev;
 use ac2_proto::{Command, ReplyBody, Request};
 use ac2d::{Daemon, DaemonConfig};
 
@@ -89,9 +88,9 @@ fn barrier(c: &mut Client) {
 fn a_retry_of_a_running_panel_request_attaches_to_it() {
     let (h, opened, close) = held_panel();
     let (mut c, _s) = connect(&h, &[]);
-    let mut req = Request::new(c.next_id(), panel());
-    // A command that ignores expect_rev is deduplicated all the same, even with a stale one.
-    req.expect_rev = Some(Rev(0));
+    // A command that commits nothing but acts (a driver's panel) is deduplicated all the
+    // same.
+    let req = Request::new(c.next_id(), panel());
     c.send(&req);
     c.send(&req);
     barrier(&mut c);

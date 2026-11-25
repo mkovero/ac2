@@ -90,7 +90,7 @@ fn seed(dir: &Path) {
     c.ok(Command::MeasUpdate {
         meas: rig.id,
         config: rig_meter("stage left"),
-        base: rig.config_rev,
+        base: rig.edit_rev,
     });
     for m in c.state().measurements {
         c.ok(Command::MeasStart { meas: m.id });
@@ -449,7 +449,7 @@ fn damaged_small_stores_never_stop_the_start() {
         c.ok(Command::MeasUpdate {
             meas: m.id,
             config: rig_meter("stage right"),
-            base: m.config_rev,
+            base: m.edit_rev,
         });
         drop(c);
         h.shutdown();

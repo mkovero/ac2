@@ -132,11 +132,17 @@ impl AppState {
         if let Some(e) = self.eq_editor() {
             e.pending += 1;
         }
+        // Made on the set as the mirror holds it; queued behind an unanswered edit of the
+        // measurement, on the set as that edit's reply holds it.
+        let base = self
+            .meas(meas)
+            .and_then(|m| m.eq.iter().find(|s| s.id == set))
+            .map_or(0, |s| s.rev);
         self.call(
             out,
             Command::MeasEq {
                 meas,
-                edit: EqEdit::Put { set, body },
+                edit: EqEdit::Put { set, base, body },
             },
             EQ_EDIT.to_owned(),
         );

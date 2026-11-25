@@ -30,6 +30,7 @@ use ac2_proto::units::{ClientId, MeasId, RigId, Seconds, TraceId};
 use ac2_proto::{Command, GridDef, GridId, ReplyBody, Subscription};
 use tokio::sync::mpsc;
 
+mod meas_edit;
 mod pacing;
 mod request;
 mod stimulus;
@@ -38,6 +39,7 @@ use pacing::*;
 use request::*;
 use stimulus::*;
 
+pub use meas_edit::{Edited, MeasRefusal, target as meas_edit_target};
 pub use pacing::{mirror_differs, same_picture};
 pub use request::{export_format, write_new_file};
 
@@ -105,6 +107,13 @@ pub enum ConnEvent {
     Reply {
         what: String,
         result: Result<(), String>,
+    },
+    /// An edit of measurement `meas` (a [`Request::Call`] of a command
+    /// [`meas_edit_target`] names) finished, with the measurement as committed.
+    MeasEdited {
+        meas: MeasId,
+        what: String,
+        result: Edited,
     },
     /// A command was refused as made on a configuration (or the rig settings) another
     /// client changed first: the daemon's `conflict`.
@@ -233,7 +242,7 @@ pub enum Request {
         meas: MeasId,
         /// The measurement's name, for messages.
         label: String,
-        /// With the `config_rev` it was made on.
+        /// With the `edit_rev` it was made on.
         update: Option<(ac2_proto::units::Rev, Box<ac2_proto::model::MeasConfig>)>,
     },
     /// `dynamics.run` of dynamics measurement `meas` under the held lease (the generator
@@ -799,6 +808,9 @@ async fn wait_retry(
                     what: failed,
                     result: Err("not connected".into()),
                 }),
+                Some(Ctl::Req(Request::Call { cmd, what })) if let Some(meas) = meas_edit_target(&cmd) => {
+                    out.send(meas_edit::not_connected(meas, what));
+                }
                 Some(Ctl::Req(r)) => out.send(ConnEvent::Reply {
                     what: request_name(&r),
                     result: Err("not connected".into()),

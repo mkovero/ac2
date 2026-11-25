@@ -164,6 +164,15 @@ impl AppState {
                 s.rig.follow(r);
             }
         }
+        // An open page follows the commits that leave what it writes as it was made on.
+        let open = self
+            .overlay
+            .leq()
+            .filter(|d| d.notice.is_none())
+            .and_then(|d| self.meas(d.meas).cloned());
+        if let (Some(m), Some(d)) = (open, self.overlay.leq_mut()) {
+            d.follow(&m);
+        }
         // A page kept after a conflict follows the meter's configuration until applied.
         let fresh = self
             .overlay

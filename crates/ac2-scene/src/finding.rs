@@ -210,6 +210,7 @@ mod tests {
 
     fn finding(outcome: DelayOutcome) -> DelayFinding {
         DelayFinding {
+            meas: ac2_proto::units::MeasId(1),
             outcome,
             confidence: DelayConfidence {
                 psr_db: Some(Db(24.0)),

@@ -582,7 +582,7 @@ impl Control {
                 .count()
         );
         let mut config = m.config.clone();
-        let base = m.config_rev;
+        let base = m.edit_rev;
         if let MeasKind::Spl { config: c } = &mut config.kind
             && let Some(b) = &mut c.bands
         {

@@ -630,7 +630,7 @@ fn another_rigs_measurement_dropped_into_a_pane() -> R {
         .ok_or("kettu's spectrum")?;
     kettu.call(Command::MeasUpdate {
         meas: MIC_FFT,
-        base: m.config_rev,
+        base: m.edit_rev,
         config: MeasConfig {
             name: "Kettu FFT".into(),
             ..m.config.clone()

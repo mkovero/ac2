@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model::{
-    Autosave, CalEntry, CalKey, Clocks, DynamicsRun, Generator, InputSetups, LineCalEntry,
-    LineCalKey, Measurement, Mic, OutputSetup, PlanSpec, RecordingRun, RemoteState, Rig,
-    ServerSummary, SimFitKept, SimState, SplLog, State, Stream, SweepRun, TimingStatus, TraceMeta,
-    WalkState, WorkingSession,
+    Autosave, CalEntry, CalKey, Clocks, Delay, DelayFinding, DynamicsRun, Generator, InputSetups,
+    LineCalEntry, LineCalKey, Measurement, Mic, OutputSetup, PlanSpec, RecordingRun, RemoteState,
+    Rig, ServerSummary, SimFitKept, SimState, SplLog, State, Stream, SweepRun, TimingStatus,
+    TraceMeta, WalkState, WorkingSession,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, StreamEpoch, TraceId, WalkId};
 
@@ -40,6 +40,10 @@ pub enum Change {
     Stream(Stream),
     /// A measurement.
     Measurement(Patch<Measurement, MeasId>),
+    /// A transfer measurement's delay, keyed by the measurement.
+    Delay(Patch<Delay, MeasId>),
+    /// A transfer measurement's last delay finding, keyed by the measurement.
+    DelayFinding(Patch<DelayFinding, MeasId>),
     /// A trace.
     Trace(Patch<TraceMeta, TraceId>),
     /// Generator, including every audited action.
@@ -118,6 +122,20 @@ pub enum WireEvent {
         rev: Rev,
         /// Payload.
         payload: Patch<Measurement, MeasId>,
+    },
+    /// [`Change::Delay`].
+    Delay {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: Patch<Delay, MeasId>,
+    },
+    /// [`Change::DelayFinding`].
+    DelayFinding {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: Patch<DelayFinding, MeasId>,
     },
     /// [`Change::Trace`].
     Trace {
@@ -295,6 +313,8 @@ impl From<Event> for WireEvent {
         match e.change {
             Change::Stream(payload) => Self::Stream { rev, payload },
             Change::Measurement(payload) => Self::Measurement { rev, payload },
+            Change::Delay(payload) => Self::Delay { rev, payload },
+            Change::DelayFinding(payload) => Self::DelayFinding { rev, payload },
             Change::Trace(payload) => Self::Trace { rev, payload },
             Change::Generator(payload) => Self::Generator { rev, payload },
             Change::Calibration(payload) => Self::Calibration { rev, payload },
@@ -328,6 +348,8 @@ impl From<WireEvent> for Event {
         let (rev, change) = match w {
             WireEvent::Stream { rev, payload } => (rev, Change::Stream(payload)),
             WireEvent::Measurement { rev, payload } => (rev, Change::Measurement(payload)),
+            WireEvent::Delay { rev, payload } => (rev, Change::Delay(payload)),
+            WireEvent::DelayFinding { rev, payload } => (rev, Change::DelayFinding(payload)),
             WireEvent::Trace { rev, payload } => (rev, Change::Trace(payload)),
             WireEvent::Generator { rev, payload } => (rev, Change::Generator(payload)),
             WireEvent::Calibration { rev, payload } => (rev, Change::Calibration(payload)),
@@ -363,6 +385,8 @@ impl Change {
         match self {
             Self::Stream(_) => "stream",
             Self::Measurement(_) => "measurement",
+            Self::Delay(_) => "delay",
+            Self::DelayFinding(_) => "delay_finding",
             Self::Trace(_) => "trace",
             Self::Generator(_) => "generator",
             Self::Calibration(_) => "calibration",

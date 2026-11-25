@@ -355,6 +355,9 @@ impl AppState {
                     Err(e) => self.fault(format!("{what}: {e}")),
                 }
             }
+            ConnEvent::MeasEdited { meas, what, result } => {
+                self.meas_edited(meas, what, result, out);
+            }
             ConnEvent::Conflict { what, error } => {
                 if !self.layout_reply(&what, &Err(error.clone()), out)
                     && !self.eq_reply(&what, &Err(error), out)

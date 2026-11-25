@@ -435,19 +435,18 @@ impl Control {
     /// delay tracking is on.
     fn restart_at_point(&mut self, id: MeasId) {
         self.walk_resume.remove(&id);
-        let Ok(m) = self.meas(id) else {
+        if self.meas(id).is_err() {
             return;
-        };
-        let mut m = m.clone();
+        }
         if let Some(j) = self.jobs.get(&id) {
             j.send(JobCmd::Reset);
             j.send(JobCmd::Track { enabled: true });
         }
-        if let Some(d) = &mut m.delay
+        if let Some(mut d) = self.delay_of(id).cloned()
             && !d.tracking
         {
             d.tracking = true;
-            self.commit(Change::Measurement(Patch::Set(m)));
+            self.commit(Change::Delay(Patch::Set(d)));
         }
     }
 
@@ -574,7 +573,7 @@ impl Control {
                         kind: MeasKind::Math { config },
                         ..m.config.clone()
                     };
-                    self.meas_update(id, m.config_rev, next)?;
+                    self.meas_update(id, m.edit_rev, next)?;
                 }
             }
         }

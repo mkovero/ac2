@@ -4,7 +4,8 @@
 //!   measurement frames), says `hello` and refuses another protocol version.
 //! - [`Client::call`] sends a typed [`ac2_proto::Command`] with a fresh request id, waits with
 //!   a deadline and resends the *same* id on timeout (the daemon deduplicates ids, so a
-//!   retry never executes twice). [`Client::call_expect`] adds an `expect_rev` guard.
+//!   retry of an acting command never executes twice; a read's runs again). An edit names
+//!   the entity's token it was made on in the command itself (`base`).
 //! - The mirror ([`Client::view`], [`Client::watch`]) follows the Q5 sync procedure: see
 //!   [`mirror`].
 //! - [`Client::subscribe`] / [`Client::latest`] give the newest frame per topic by draining the

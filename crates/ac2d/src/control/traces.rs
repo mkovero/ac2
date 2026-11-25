@@ -348,7 +348,7 @@ impl Control {
                 ));
             }
         };
-        let ready = settled(&m, &frame);
+        let ready = settled(&m, self.delay_of(m.id), &frame);
         let (cal, mic) = self.cal_and_mic(input);
         // A transfer function is a ratio of two inputs: no calibration applies to it.
         let cal = if kind == TraceKind::Transfer {
@@ -872,15 +872,17 @@ fn after_capture(
     )
 }
 
-/// Whether `frame` of `m` is a settled average: every stage full, no fault refusing its
-/// blocks, the delay unchanged since the averages restarted (a frame of an older config rev
-/// was averaged at another arrival) and no ambiguous arrival waiting for the operator's pick.
-fn settled(m: &Measurement, frame: &Frame) -> bool {
+/// Whether `frame` of `m` (with its delay `d`) is a settled average: every stage full, no
+/// fault refusing its blocks, computed under the current configuration and delay (a frame
+/// of an older stamp was averaged at another arrival) and no ambiguous arrival waiting for
+/// the operator's pick.
+fn settled(m: &Measurement, d: Option<&ac2_proto::model::Delay>, frame: &Frame) -> bool {
     let FrameData::Tf(f) = &frame.data else {
         return false;
     };
+    let current = d.map_or(m.config_rev, |d| d.rev.max(m.config_rev));
     f.meta.filled >= 1.0
         && frame.stamp.protection.0 & OperandStatus::REFUSING.0 == 0
-        && frame.stamp.config_rev == m.config_rev
-        && !m.delay.as_ref().is_some_and(|d| d.awaiting_pick)
+        && frame.stamp.config_rev == current
+        && !d.is_some_and(|d| d.awaiting_pick)
 }

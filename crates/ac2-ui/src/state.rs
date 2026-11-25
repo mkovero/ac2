@@ -96,6 +96,7 @@ pub(crate) mod dynamics;
 mod dynamics_run;
 mod programme;
 pub use programme::{MAX_METERED, Metered, ProgrammeUi, ballistic};
+mod meas_edits;
 mod meter_form;
 mod new_meas;
 mod panes;
@@ -458,6 +459,7 @@ impl AppState {
             let views = &self.layout.views;
             self.plot_px.retain(|p, _| views.contains_key(p));
         }
+        self.chain_meas_edits(&mut out);
         out
     }
 

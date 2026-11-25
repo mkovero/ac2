@@ -12,7 +12,7 @@ fn smoothing_keys_step_the_pane_measurement() {
     );
     // K coarser: off → 1/48 of magnitude and phase, with the measurement's config
     // otherwise unchanged.
-    let r = t.key("K");
+    let r = t.key_acked("K");
     assert_eq!(
         smoothing_set(&r),
         (
@@ -43,7 +43,7 @@ fn smoothing_keys_step_the_pane_measurement() {
         other => panic!("{other:?}"),
     }
     // Finer than off: nothing sent, said.
-    assert!(t.key("Shift+K").is_empty());
+    assert!(t.key_acked("Shift+K").is_empty());
     assert!(t.last_toast().contains("finest"), "{}", t.last_toast());
 
     // The mirror says 1/6 magnitude only (set by a script): K → 1/3 (mode kept),
@@ -59,35 +59,37 @@ fn smoothing_keys_step_the_pane_measurement() {
         Some("smoothing 1/6 oct mag only")
     );
     assert_eq!(
-        smoothing_set(&t.key("K")).1,
+        smoothing_set(&t.key_acked("K")).1,
         smoothing(SmoothingFraction::Third, SmoothingMode::Magnitude)
     );
     assert_eq!(
-        smoothing_set(&t.key("Shift+K")).1,
+        smoothing_set(&t.key_acked("Shift+K")).1,
         smoothing(SmoothingFraction::Twelfth, SmoothingMode::Magnitude)
     );
     if let MeasKind::Transfer { config } = &mut s.measurements[1].config.kind {
         config.smoothing = smoothing(SmoothingFraction::Third, SmoothingMode::Magnitude);
     }
     t.conn(mirror(s));
-    assert!(t.key("K").is_empty());
+    assert!(t.key_acked("K").is_empty());
     assert!(t.last_toast().contains("widest"), "{}", t.last_toast());
     // Palette entries set a step directly.
     let r = t.st.apply(Msg::Command(CommandId::SmoothOff), &t.keys);
     assert_eq!(smoothing_set(&r).1, None);
+    t.ack(&r);
     let r = t.st.apply(Msg::Command(CommandId::Smooth24), &t.keys);
     assert_eq!(
         smoothing_set(&r).1,
         smoothing(SmoothingFraction::TwentyFourth, SmoothingMode::Magnitude)
     );
+    t.ack(&r);
     // In the spectrum pane K acts on its spectrum: power smoothing, no phase to name.
-    t.key("Alt+2");
+    t.key_acked("Alt+2");
     assert_eq!(
         t.st.smoothing_caption(t.pane(PaneKind::Spectrum))
             .as_deref(),
         Some("smoothing off")
     );
-    let r = t.key("K");
+    let r = t.key_acked("K");
     assert_eq!(
         smoothing_set(&r),
         (
@@ -151,7 +153,7 @@ fn smoothing_keys_change_a_selected_slot() {
             .as_deref(),
         Some("slot 3 (t10): smoothing off")
     );
-    let r = t.key("K");
+    let r = t.key_acked("K");
     assert_eq!(
         smoothing_set(&r),
         (
@@ -191,24 +193,24 @@ fn smoothing_keys_change_a_selected_slot() {
         Some("smoothing off")
     );
     // The transfer pane does not draw it: K there stays with the pane's measurement.
-    assert_eq!(smoothing_set(&t.key("K")).0, "m1");
-    t.key("Alt+2");
+    assert_eq!(smoothing_set(&t.key_acked("K")).0, "m1");
+    t.key_acked("Alt+2");
     assert_eq!(
-        smoothing_set(&t.key("K")),
+        smoothing_set(&t.key_acked("K")),
         (
             "t11".into(),
             smoothing(SmoothingFraction::FortyEighth, SmoothingMode::Magnitude)
         )
     );
-    t.key("Alt+1");
+    t.key_acked("Alt+1");
     // A locked slot says so and sends nothing.
     t.st.apply(Msg::SelectTrace(TraceId(12)), &t.keys);
-    assert!(t.key("K").is_empty());
+    assert!(t.key_acked("K").is_empty());
     assert!(t.last_toast().contains("locked"));
     // A second click deselects; the keys act on the pane's measurement again.
     t.st.apply(Msg::SelectTrace(TraceId(12)), &t.keys);
     assert_eq!(t.st.rig.selected_trace, None);
-    assert_eq!(smoothing_set(&t.key("K")).0, "m1");
+    assert_eq!(smoothing_set(&t.key_acked("K")).0, "m1");
     // A pane click keeps the slot selected; a measurement's row deselects it.
     t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
     t.st.apply(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
@@ -281,8 +283,11 @@ fn resolution_keys_step_the_transfer_measurement() {
     }
     let mut t = T::new();
     // The measurement is at the default, 1/48: one step each way.
-    assert_eq!(sent(&t.key("Alt+K")), Resolution::TwentyFourth.into());
-    assert_eq!(sent(&t.key("Alt+Shift+K")), Resolution::NinetySixth.into());
+    assert_eq!(sent(&t.key_acked("Alt+K")), Resolution::TwentyFourth.into());
+    assert_eq!(
+        sent(&t.key_acked("Alt+Shift+K")),
+        Resolution::NinetySixth.into()
+    );
     // Finer than 1/96: the analysis's own bins, the finest step.
     t.key_answered("Alt+Shift+K");
     assert_eq!(
@@ -293,7 +298,7 @@ fn resolution_keys_step_the_transfer_measurement() {
         t.last_toast(),
         "Main L: resolution bins (averaging starts over)"
     );
-    assert!(t.key("Alt+Shift+K").is_empty());
+    assert!(t.key_acked("Alt+Shift+K").is_empty());
     assert_eq!(t.last_toast(), "Main L: bins is the finest resolution");
     assert_eq!(
         sent(&t.key_answered("Alt+K")),
@@ -302,13 +307,13 @@ fn resolution_keys_step_the_transfer_measurement() {
     for _ in 0..3 {
         t.key_answered("Alt+K");
     }
-    assert!(t.key("Alt+K").is_empty());
+    assert!(t.key_acked("Alt+K").is_empty());
     assert_eq!(
         t.last_toast(),
         "Main L: 1/12 oct is the coarsest resolution"
     );
     // The SPL pane has no transfer measurement.
-    t.key("Alt+4");
+    t.key_acked("Alt+4");
     let r =
         t.st.apply(Msg::Command(CommandId::ResolutionCoarser), &t.keys.clone());
     assert!(r.is_empty(), "{r:?}");

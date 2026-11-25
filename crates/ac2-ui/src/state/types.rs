@@ -128,6 +128,8 @@ pub fn spectrum_smoothing(fraction: SmoothingFraction) -> Smoothing {
 
 /// What the smoothing keys change: the selected stored trace when the focused pane draws
 /// it, else the focused pane's measurement.
+// Made per key press and dropped at once: boxing the larger variant buys nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum SmoothTarget {
     Trace(TraceMeta),

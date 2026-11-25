@@ -109,7 +109,8 @@ pub enum Command {
     /// unchanged) and the pairs among all inputs (the whole list). A chosen curve must be
     /// stored for the row's mic (unless the row is unchanged). Refused by name: a pair of
     /// two kinds, of an input twice, of an input with itself, or of an input the
-    /// open stream does not capture; a row's `pair` side is set from the pair list.
+    /// open stream does not capture; a row's `pair` side is set from the pair list. Last
+    /// write wins.
     #[serde(rename = "stream.inputs")]
     StreamInputs {
         /// Rows to upsert, one per channel.
@@ -265,15 +266,16 @@ pub enum Command {
     MeasUpdate {
         /// Measurement.
         meas: MeasId,
-        /// The `config_rev` the edit was made on; another (someone changed it since) is
-        /// refused with `conflict`, and the client re-reads it.
+        /// The measurement's `edit_rev` the edit was made on; another (it was committed
+        /// since, by anyone, for any field) is refused with `conflict` (`stale_meas`), and
+        /// the client re-reads it.
         base: Rev,
         /// New configuration.
         config: MeasConfig,
     },
     /// Choose the colour family a measurement's curves are drawn in (`None`: the one its
     /// id gives). Its job and config rev go on. Refused for a math trace, which takes its
-    /// owner's.
+    /// owner's. Last write wins; it moves `edit_rev`.
     #[serde(rename = "meas.colour")]
     MeasColour {
         /// Measurement.
@@ -282,7 +284,7 @@ pub enum Command {
         colour: Option<ColourFamily>,
     },
     /// Set the panes a client shows while the measurement is selected, or clear them
-    /// (`None`). Its job and config rev go on.
+    /// (`None`). Its job and config rev go on. Last write wins; it moves `edit_rev`.
     #[serde(rename = "meas.layout")]
     MeasLayout {
         /// Measurement.
@@ -291,7 +293,7 @@ pub enum Command {
         layout: Option<PaneLayout>,
     },
     /// Set the display offset of the measurement's live curves, wherever they are drawn.
-    /// Its job and config rev go on.
+    /// Its job and config rev go on. Last write wins; it moves `edit_rev`.
     #[serde(rename = "meas.offset")]
     MeasOffset {
         /// Measurement.
@@ -310,7 +312,8 @@ pub enum Command {
         traces: OwnedTraces,
     },
     /// Edit a measurement's EQ what-if sets (transfer and sweep measurements). Its job and
-    /// config rev go on; replies with the measurement.
+    /// config rev go on; replies with the measurement. A `put` names the set's rev it was
+    /// made on; every other edit is last write wins. Each moves `edit_rev`.
     #[serde(rename = "meas.eq")]
     MeasEq {
         /// Measurement.
@@ -349,7 +352,7 @@ pub enum Command {
         /// default (decision D2: sub 2, 4 or 8 s, default 4 s).
         observation: Option<Seconds>,
     },
-    /// Apply a finder result.
+    /// Apply a finder result; replies with the delay.
     #[serde(rename = "delay.insert")]
     DelayInsert {
         /// Measurement.
@@ -357,7 +360,7 @@ pub enum Command {
         /// Which result.
         pick: DelayPick,
     },
-    /// Set the delay explicitly.
+    /// Set the delay explicitly; replies with the delay. Last write wins.
     #[serde(rename = "delay.set")]
     DelaySet {
         /// Measurement.
@@ -367,6 +370,7 @@ pub enum Command {
     },
     /// Move the applied delay by `by` (either sign, fractions of a sample allowed). The
     /// transfer function keeps its averages where it can, so the curve moves at once.
+    /// Replies with the delay.
     #[serde(rename = "delay.nudge")]
     DelayNudge {
         /// Measurement.
@@ -374,7 +378,7 @@ pub enum Command {
         /// Step.
         by: Seconds,
     },
-    /// Enable or disable tracking.
+    /// Enable or disable tracking; replies with the delay.
     #[serde(rename = "delay.track")]
     DelayTrack {
         /// Measurement.
@@ -403,7 +407,7 @@ pub enum Command {
         /// Trace.
         trace: TraceId,
     },
-    /// Replace a trace's editable properties.
+    /// Replace a trace's editable properties (the whole value: last write wins).
     #[serde(rename = "trace.update")]
     TraceUpdate {
         /// Trace.
@@ -746,6 +750,7 @@ pub enum Command {
     /// directory), replacing the one of that name. Refused with the reason when the plan
     /// does not validate (*edge 3 crosses edge 6*); the name is a file name (letters,
     /// digits, ` `, `-`, `_`, `.`, not starting with `.`). Walks keep the session's copies.
+    /// Last write wins.
     #[serde(rename = "plan.save")]
     PlanSave {
         /// The plan.
@@ -787,7 +792,8 @@ pub enum Command {
     },
     /// Rename a walk and edit its points, matched by label: a point kept keeps its state,
     /// a new one is pending, and the points are grouped into steps again. A captured point
-    /// keeps its place and its mic and cannot be removed (skip or redo it first).
+    /// keeps its place and its mic and cannot be removed (skip or redo it first). Last
+    /// write wins.
     #[serde(rename = "walk.update")]
     WalkUpdate {
         /// The walk.

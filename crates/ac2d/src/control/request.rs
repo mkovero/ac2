@@ -15,7 +15,7 @@ use crate::dedup::{Admit, Retry};
 use crate::health::StreamState;
 use crate::util::{internal, invalid, perr, refused, wall_ns};
 
-use super::{Control, PendingFind, PendingReply, PreviewKey, mutation_conflict};
+use super::{Control, PendingFind, PendingReply, PreviewKey};
 use crate::route::{Peer, Route};
 
 impl Control {
@@ -198,133 +198,128 @@ impl Control {
                 return;
             }
         }
-        let result = match req.expect_rev {
-            Some(r) if req.cmd.is_mutation() && r != self.store.rev() => {
-                Err(mutation_conflict(self.store.rev()))
-            }
-            _ => match req.cmd {
-                // The finder runs for a while on the job thread; the reply follows its result
-                // and other clients are served meanwhile.
-                // The burst and its capture take about a second on their own thread; the
-                // reply follows the result.
-                Command::StreamDetectLoopback {
+        let result = match req.cmd {
+            // The finder runs for a while on the job thread; the reply follows its result
+            // and other clients are served meanwhile.
+            // The burst and its capture take about a second on their own thread; the
+            // reply follows the result.
+            Command::StreamDetectLoopback {
+                lease_token,
+                backend,
+                input_device,
+                output_device,
+                output,
+                level,
+            } => {
+                match self.start_detect(
+                    &client,
                     lease_token,
                     backend,
-                    input_device,
-                    output_device,
+                    (input_device, output_device),
                     output,
                     level,
-                } => {
-                    match self.start_detect(
-                        &client,
-                        lease_token,
-                        backend,
-                        (input_device, output_device),
-                        output,
-                        level,
-                    ) {
-                        Ok(token) => {
-                            self.pending.detecting = Some((
-                                token,
-                                PendingReply {
-                                    route: route.clone(),
-                                    client,
-                                    id: req.id,
-                                },
-                            ));
-                            return;
-                        }
-                        Err(e) => Err(e),
-                    }
-                }
-                // Asking a driver for its devices, or opening one, can outlast a stimulus
-                // lease's refresh margin: on their own threads, so a running sweep's refreshes
-                // are answered meanwhile.
-                Command::StreamDevices => match self.start_devices(PendingReply {
-                    route: route.clone(),
-                    client: client.clone(),
-                    id: req.id,
-                }) {
-                    Ok(()) => return,
-                    Err(e) => Err(e),
-                },
-                Command::StreamPreview {
-                    backend,
-                    device,
-                    inputs,
-                    pairs,
-                } => {
-                    let waiter = PendingReply {
-                        route: route.clone(),
-                        client: client.clone(),
-                        id: req.id,
-                    };
-                    match self.start_preview(
-                        PreviewKey {
-                            backend,
-                            device,
-                            inputs,
-                            pairs,
-                        },
-                        waiter,
-                    ) {
-                        Ok(None) => return,
-                        Ok(Some(body)) => Ok(body),
-                        Err(e) => Err(e),
-                    }
-                }
-                // A driver's panel may be a modal dialog: the call runs on its own thread.
-                Command::StreamControlPanel { backend, device } => {
-                    match self.start_panel(backend, device) {
-                        Ok(token) => {
-                            self.pending.panels.insert(
-                                token,
-                                PendingReply {
-                                    route: route.clone(),
-                                    client,
-                                    id: req.id,
-                                },
-                            );
-                            return;
-                        }
-                        Err(e) => Err(e),
-                    }
-                }
-                Command::DelayFind {
-                    meas,
-                    band,
-                    observation,
-                } => match self.start_find(meas, band, observation) {
+                ) {
                     Ok(token) => {
-                        self.pending.finds.insert(
+                        self.pending.detecting = Some((
                             token,
-                            PendingFind {
+                            PendingReply {
                                 route: route.clone(),
                                 client,
                                 id: req.id,
-                                meas,
+                            },
+                        ));
+                        return;
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            // Asking a driver for its devices, or opening one, can outlast a stimulus
+            // lease's refresh margin: on their own threads, so a running sweep's refreshes
+            // are answered meanwhile.
+            Command::StreamDevices => match self.start_devices(PendingReply {
+                route: route.clone(),
+                client: client.clone(),
+                id: req.id,
+            }) {
+                Ok(()) => return,
+                Err(e) => Err(e),
+            },
+            Command::StreamPreview {
+                backend,
+                device,
+                inputs,
+                pairs,
+            } => {
+                let waiter = PendingReply {
+                    route: route.clone(),
+                    client: client.clone(),
+                    id: req.id,
+                };
+                match self.start_preview(
+                    PreviewKey {
+                        backend,
+                        device,
+                        inputs,
+                        pairs,
+                    },
+                    waiter,
+                ) {
+                    Ok(None) => return,
+                    Ok(Some(body)) => Ok(body),
+                    Err(e) => Err(e),
+                }
+            }
+            // A driver's panel may be a modal dialog: the call runs on its own thread.
+            Command::StreamControlPanel { backend, device } => {
+                match self.start_panel(backend, device) {
+                    Ok(token) => {
+                        self.pending.panels.insert(
+                            token,
+                            PendingReply {
+                                route: route.clone(),
+                                client,
+                                id: req.id,
                             },
                         );
                         return;
                     }
                     Err(e) => Err(e),
-                },
-                // Session file work runs on a worker; the reply follows its result.
-                cmd @ (Command::FileSave { .. }
-                | Command::FileLoad { .. }
-                | Command::FileNew { .. }
-                | Command::FileRecover
-                | Command::FileSalvage { .. }
-                | Command::FileList
-                | Command::FileImport { .. }
-                | Command::FileDownloadBegin { .. }) => {
-                    match self.start_file_job(route, &client, req.id, cmd) {
-                        Ok(()) => return,
-                        Err(e) => Err(e),
-                    }
                 }
-                cmd => self.execute(&client, cmd),
+            }
+            Command::DelayFind {
+                meas,
+                band,
+                observation,
+            } => match self.start_find(meas, band, observation) {
+                Ok(token) => {
+                    self.pending.finds.insert(
+                        token,
+                        PendingFind {
+                            route: route.clone(),
+                            client,
+                            id: req.id,
+                            meas,
+                        },
+                    );
+                    return;
+                }
+                Err(e) => Err(e),
             },
+            // Session file work runs on a worker; the reply follows its result.
+            cmd @ (Command::FileSave { .. }
+            | Command::FileLoad { .. }
+            | Command::FileNew { .. }
+            | Command::FileRecover
+            | Command::FileSalvage { .. }
+            | Command::FileList
+            | Command::FileImport { .. }
+            | Command::FileDownloadBegin { .. }) => {
+                match self.start_file_job(route, &client, req.id, cmd) {
+                    Ok(()) => return,
+                    Err(e) => Err(e),
+                }
+            }
+            cmd => self.execute(&client, cmd),
         };
         self.answer(route, &client, req.id, result, now);
     }
@@ -359,31 +354,17 @@ impl Control {
     }
 }
 
-/// What a retry of `cmd` gets once it is answered. Every mutation keeps its reply, and so
-/// does every read that acts: asks the drivers for their devices, opens a device or a
-/// driver's panel, sounds a burst, keeps the finder's result, opens or feeds a transfer,
-/// files an upload as a session. The rest only
-/// read (a page of a log, a chunk of a download at its offset, a snapshot), so a retry runs
-/// them again and their replies, megabytes some of them, are not held for the window.
+/// What a retry of `cmd` gets once it is answered ([`Command::is_read`]). Every command that
+/// acts keeps its reply: one that commits, and one that asks the drivers for their devices,
+/// opens a device or a driver's panel, sounds a burst, keeps the finder's result, opens or
+/// feeds a transfer, files an upload as a session. A pure read (a page of a log, a chunk
+/// of a download at its offset, a snapshot) runs again, and its reply, megabytes some of
+/// them, is not held for the window.
 fn retry(cmd: &Command) -> Retry {
-    let acts = matches!(
-        cmd,
-        Command::StreamDevices
-            | Command::StreamPreview { .. }
-            | Command::StreamPreviewStop
-            | Command::StreamControlPanel { .. }
-            | Command::StreamDetectLoopback { .. }
-            | Command::DelayFind { .. }
-            | Command::TraceExport { .. }
-            | Command::FileUploadBegin { .. }
-            | Command::FileUploadChunk { .. }
-            | Command::FileImport { .. }
-            | Command::FileDownloadBegin { .. }
-    );
-    if cmd.is_mutation() || acts {
-        Retry::Stored
-    } else {
+    if cmd.is_read() {
         Retry::Runs
+    } else {
+        Retry::Stored
     }
 }
 

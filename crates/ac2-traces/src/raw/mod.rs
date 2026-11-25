@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use ac2_proto::event::Patch;
 use ac2_proto::model::{
-    BackendKind, CalEntry, CalKey, ClockRelation, DeviceId, DiscontinuityCause, Generator,
+    BackendKind, CalEntry, CalKey, ClockRelation, Delay, DeviceId, DiscontinuityCause, Generator,
     InputSetup, LoopbackRoute, Measurement, RecordingEnd, RecordingFile, RemoteGaps, RemoteInput,
 };
 use ac2_proto::units::{ClientId, MeasId, SampleIndex, Seconds, StreamEpoch, WallNs};
@@ -169,6 +169,8 @@ pub struct Limits {
 pub struct Initial {
     /// Measurements.
     pub measurements: Vec<Measurement>,
+    /// The transfer measurements' delays.
+    pub delays: Vec<Delay>,
     /// Generator.
     pub generator: Generator,
     /// Input setup (mic names, curves).
@@ -181,9 +183,10 @@ pub struct Initial {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum TimelineChange {
-    /// A measurement's new full value (configuration, delay, running), or its
-    /// deletion.
+    /// A measurement's new full value (configuration, running), or its deletion.
     Measurement(Box<Patch<Measurement, MeasId>>),
+    /// A transfer measurement's new delay, or its deletion.
+    Delay(Patch<Delay, MeasId>),
     /// The generator's new state (armed, firing, signal, level).
     Generator(Generator),
     /// The whole input setup.
@@ -635,6 +638,7 @@ pub fn import_wav(src: &Path, dir: &Path, name: &str, now_ns: u64) -> Result<Sid
         started_by: ClientId("import".into()),
         initial: Initial {
             measurements: Vec::new(),
+            delays: Vec::new(),
             generator: Generator {
                 owner: None,
                 owner_local: false,

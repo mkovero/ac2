@@ -253,7 +253,6 @@ proptest! {
         idx in any::<u8>(),
         name in "[ -~]{0,40}",
         token in any::<u128>(),
-        rev in prop::option::of(any::<u64>()),
     ) {
         let m = MeasId(meas);
         let cmds = vec![
@@ -284,8 +283,7 @@ proptest! {
             },
         ];
         for cmd in cmds {
-            let mut req = Request::new(RequestId(u64::from(meas)), cmd);
-            req.expect_rev = rev.map(Rev);
+            let req = Request::new(RequestId(u64::from(meas)), cmd);
             let b = encode_request(&req).expect("sample message");
             prop_assert_eq!(decode_request(&b).expect("sample message"), req);
         }

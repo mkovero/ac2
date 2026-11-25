@@ -37,6 +37,8 @@ impl Store {
                     stopped: None,
                 },
                 measurements: Vec::new(),
+                delays: Vec::new(),
+                delay_findings: Vec::new(),
                 traces: Vec::new(),
                 generator: Generator {
                     owner: None,
@@ -158,10 +160,15 @@ impl Store {
         &self.state
     }
 
-    /// Applies `change`, bumps `rev` and records the event for replay.
-    pub(crate) fn commit(&mut self, change: Change, now: Instant) -> Event {
-        apply(&mut self.state, &change);
+    /// Applies `change`, bumps `rev` and records the event for replay. A measurement is
+    /// stamped with this commit's rev as its `edit_rev` here, before the event and the
+    /// replay copy are made, so no command path can commit one without moving its token.
+    pub(crate) fn commit(&mut self, mut change: Change, now: Instant) -> Event {
         self.rev = Rev(self.rev.0 + 1);
+        if let Change::Measurement(Patch::Set(m)) = &mut change {
+            m.edit_rev = self.rev;
+        }
+        apply(&mut self.state, &change);
         let ev = Event {
             rev: self.rev,
             change,
@@ -228,11 +235,25 @@ fn upsert<T: Clone, K: PartialEq>(v: &mut Vec<T>, patch: &Patch<T, K>, key: impl
     }
 }
 
+/// As [`upsert`], keeping `v` sorted by key: a measurement becomes a transfer after others
+/// were made, so its delay is not always the newest key.
+fn upsert_sorted<T: Clone, K: Ord>(v: &mut Vec<T>, patch: &Patch<T, K>, key: impl Fn(&T) -> K) {
+    match patch {
+        Patch::Set(x) => match v.binary_search_by_key(&key(x), &key) {
+            Ok(i) => v[i] = x.clone(),
+            Err(i) => v.insert(i, x.clone()),
+        },
+        Patch::Deleted(k) => v.retain(|e| key(e) != *k),
+    }
+}
+
 /// Applies one change: plain assignment of the entity's new value.
 pub(crate) fn apply(s: &mut State, c: &Change) {
     match c {
         Change::Stream(x) => s.stream = x.clone(),
         Change::Measurement(p) => upsert(&mut s.measurements, p, |m| m.id),
+        Change::Delay(p) => upsert_sorted(&mut s.delays, p, |d| d.meas),
+        Change::DelayFinding(p) => upsert_sorted(&mut s.delay_findings, p, |f| f.meas),
         Change::Trace(p) => upsert(&mut s.traces, p, |t| t.id),
         Change::Generator(g) => s.generator = g.clone(),
         Change::Calibration(p) => upsert(&mut s.calibrations, p, |c| c.key.clone()),

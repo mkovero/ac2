@@ -189,7 +189,6 @@ pub(super) fn eq_prediction() -> Measurement {
         },
         colour: None,
         layout: None,
-        delay: None,
         ..measurement()
     }
 }
@@ -200,6 +199,7 @@ pub(super) fn eq_commands() -> Vec<Command> {
         meas: MeasId(1),
         edit: EqEdit::Put {
             set: EqSetId(1),
+            base: 3,
             body: eq_body(),
         },
     }]
@@ -216,6 +216,7 @@ pub fn eq_edits() -> Vec<EqEdit> {
         },
         EqEdit::Put {
             set: EqSetId(1),
+            base: 3,
             body: eq_body(),
         },
         EqEdit::Delete { set: EqSetId(2) },

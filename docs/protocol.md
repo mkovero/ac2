@@ -84,7 +84,7 @@ Frame headers carry `v` too; a frame at another version is refused.
 ### 3.1 Request and reply
 
 ```
-Request { v: u16, id: u64, cmd: {op: "<name>", args?: {…}}, expect_rev: u64 | nil }
+Request { v: u16, id: u64, cmd: {op: "<name>", args?: {…}} }
 Reply   { v: u16, id: u64, result: {"ok": {type: "<body>", value?: …}} | {"err": ProtoError},
           warnings: [Warning] }
 ProtoError { code: ErrorCode, msg: string, detail: ErrorDetail | nil }
@@ -103,21 +103,21 @@ Warning { type: "<name>", … }
   across a reconnect executes again. A client starts its ids at a random 63-bit value,
   since processes sharing one key share one window. A copy of an id sent while the request
   still runs (a panel, the delay finder, loopback detection) runs nothing: when the request
-  completes, the reply goes to every copy, on whichever connection each arrived. A mutation
-  or a read that acts (`stream.devices`, `stream.preview`, `stream.preview_stop`,
-  `stream.control_panel`, `stream.detect_loopback`, `delay.find`, `trace.export`,
-  `file.upload_begin`, `file.upload_chunk`, `file.import`, `file.download_begin`) executes
-  once per id, whichever command it carries: its reply is stored, the last 256 stored
-  replies each kept 30 s, and a copy sent after the reply gets the stored reply. Any other
-  read is not stored: a copy of it sent after the reply runs again. Requests refused before
+  completes, the reply goes to every copy, on whichever connection each arrived. Every
+  command but a pure read (§3.2 **read**) executes once per id, whichever command it
+  carries, a refusal included: its reply is stored, the last 256 stored replies each kept
+  30 s, and a copy sent after the reply gets the stored reply. A pure read is not stored: a
+  copy of it sent after the reply runs again. Requests refused before
   execution (protocol version, undecodable, revoked key) are not remembered. Revoking a
   client forgets its stored replies and running ids.
 - `stream.control_panel`, `delay.find`, `stream.detect_loopback` and the file jobs
   (`file.list`, `file.save`, `file.load`, `file.new`, `file.recover`, `file.salvage`,
   `file.import`, `file.download_begin`) run beside the ctrl loop: other requests are
   answered while they run.
-- `expect_rev` applies to mutations: if state has moved past it the reply is `conflict`
-  with `detail: {type: conflict, rev}` (the current rev). Commits are serial.
+- Commits are serial. A request carries no guard of its own: the edits that must not
+  overwrite another client's carry a `base` (`meas.update`: the measurement's `edit_rev`;
+  `meas.eq` `put`: the set's `rev`; the rig commands: `rig.rev`), and the other whole-value
+  writes (`trace.update`, `stream.inputs`, `plan.save`, `walk.update`) are last write wins.
 - Largest ctrl message: 4 MiB, checked before parsing. A reply that would be larger is
   sent as `too_large` instead (a client discards an oversize message unread, so it would
   only time out); a larger request is answered `too_large` to its `id` (read from its
@@ -133,21 +133,23 @@ Warning { type: "<name>", … }
 
 ### 3.2 Commands
 
-Lease column: **L** = `lease_token` required (Q6); **non-mutating** = the command commits no
-state change (`expect_rev` does not apply). Every command not marked non-mutating is a
-mutation.
+Lease column: **L** = `lease_token` required (Q6); **read** = a pure read
+(`Command::is_read`): it commits nothing, its reply is not stored and a copy of its id sent
+after the reply runs it again; **acts** = commits no state but acts (loads drivers, plays,
+moves a file), so like every unmarked command its reply is stored and a retry is answered
+from the store.
 
 | op | args | reply body | lease |
 |---|---|---|---|
-| `hello` | `client` | `welcome` | non-mutating |
-| `stream.devices` | — | `backends` | non-mutating |
-| `stream.preview` | `backend: BackendKind`, `device: DeviceId`, `inputs: [PreviewInput]` ({`channel`, `kind: InputKind`}), `pairs: [Pair]` | `preview` | non-mutating |
-| `stream.preview_stop` | — | `ack` | non-mutating |
-| `stream.control_panel` | `backend: BackendKind`, `device: DeviceId` | `ack` | non-mutating |
-| `stream.detect_loopback` | `lease_token`, `backend`, `input_device`, `output_device`, `output: u16`, `level: Dbfs` | `loopback_detection` | L, non-mutating |
+| `hello` | `client` | `welcome` | read |
+| `stream.devices` | — | `backends` | acts |
+| `stream.preview` | `backend: BackendKind`, `device: DeviceId`, `inputs: [PreviewInput]` ({`channel`, `kind: InputKind`}), `pairs: [Pair]` | `preview` | acts |
+| `stream.preview_stop` | — | `ack` | acts |
+| `stream.control_panel` | `backend: BackendKind`, `device: DeviceId` | `ack` | acts |
+| `stream.detect_loopback` | `lease_token`, `backend`, `input_device`, `output_device`, `output: u16`, `level: Dbfs` | `loopback_detection` | L, acts |
 | `stream.open` | `config: StreamConfig` | `stream` | |
 | `stream.close` | — | `ack` | |
-| `stream.status` | — | `stream` | non-mutating |
+| `stream.status` | — | `stream` | read |
 | `stream.inputs` | `inputs: [InputSetup]` (upserted by channel), `pairs: [Pair]` (the whole list) | `inputs` (`inputs`: the whole setup, `pairs`) | |
 | `stream.outputs` | `outputs: [OutputSetup]` (upserted by channel; `label: nil` clears) | `outputs` (every label) | |
 | `gen.acquire` | `force: bool` | `lease` (`lease_token`, `expires_in_ms`) | |
@@ -165,7 +167,7 @@ mutation.
 | `levels.set` | `base: Rev` (`rig.rev`), `ballistic: Ballistic \| nil`, `correlation_window: CorrelationWindow \| nil`, `over_threshold: Dbtp \| nil`, `correlation_gate: Dbfs \| nil`, `loudness_target: Lufs \| nil` | `ack` (`rig` event) | |
 | `levels.reset` | `channels: [u16]` (empty: every captured input) | `ack` | |
 | `meas.create` | `config: MeasConfig` | `measurement` | |
-| `meas.update` | `meas`, `base: Rev` (the `config_rev` the edit was made on), `config` | `measurement` | |
+| `meas.update` | `meas`, `base: Rev` (the `edit_rev` the edit was made on), `config` | `measurement` | |
 | `meas.colour` | `meas`, `colour: ColourFamily \| nil` | `measurement` | |
 | `meas.layout` | `meas`, `layout: PaneLayout \| nil` | `measurement` | |
 | `meas.offset` | `meas`, `offset: Db` | `measurement` | |
@@ -174,20 +176,20 @@ mutation.
 | `meas.start` | `meas` | `measurement` | |
 | `meas.stop` | `meas` | `measurement` | |
 | `meas.reset` | `meas` | `ack` | |
-| `delay.find` | `meas`, `band: FinderBand`, `observation: Seconds \| nil` | `delay_finding` | non-mutating |
-| `delay.insert` | `meas`, `pick: first_arrival \| strongest \| ranked{index}` | `measurement` | |
-| `delay.set` | `meas`, `delay: Seconds` | `measurement` | |
-| `delay.nudge` | `meas`, `by: Seconds` | `measurement` | |
-| `delay.track` | `meas`, `enabled` | `measurement` | |
+| `delay.find` | `meas`, `band: FinderBand`, `observation: Seconds \| nil` | `delay_finding` | |
+| `delay.insert` | `meas`, `pick: first_arrival \| strongest \| ranked{index}` | `delay` | |
+| `delay.set` | `meas`, `delay: Seconds` | `delay` | |
+| `delay.nudge` | `meas`, `by: Seconds` | `delay` | |
+| `delay.track` | `meas`, `enabled` | `delay` | |
 | `trace.capture` | `meas`, `name`, `slot` (1…9 \| nil) | `trace` | |
-| `trace.list` | — | `traces` | non-mutating |
-| `trace.get` | `trace` | `trace_data` | non-mutating |
+| `trace.list` | — | `traces` | read |
+| `trace.get` | `trace` | `trace_data` | read |
 | `trace.update` | `trace`, `edit: TraceEdit` (full replacement) | `trace` | |
 | `trace.delete` | `trace` | `ack` | |
 | `trace.average` | `traces`, `method`, `reference`, `name` | `trace` | |
 | `trace.import` | `transfer` (a complete upload, used up), `format: ac2_csv \| analyzer_text \| ir_wav \| auto`, `role: trace \| target`, `ir: IrImport \| nil`, `owner: TraceOwner` | `trace` | |
 | `trace.target` | `curve: TargetCurve`, `name`, `owner: TraceOwner` | `trace` | |
-| `trace.export` | `trace`, `format: ac2_csv \| ir_wav` | `transfer` (`file_name` the suggested name, `bytes`, `sha256`): fetch with `file.download_chunk`, close with `file.download_end` | non-mutating |
+| `trace.export` | `trace`, `format: ac2_csv \| ir_wav` | `transfer` (`file_name` the suggested name, `bytes`, `sha256`): fetch with `file.download_chunk`, close with `file.download_end` | acts |
 | `trace.mic_curve` | `trace`, `curve: MicCurveId \| nil` (nil removes) | `trace` | |
 | `cal.spl` | `channel: u16`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
 | `cal.spl_electrical` | `channel: u16`, `mic`, `connection: in_line \| injected`, `volts: Volts`, `freq: Hz`, `mic_sensitivity: MvPerPa \| nil`, `loading: MicLoading \| nil`, `uncertainty: Db \| nil`, `replace_acoustic: bool` | `calibration` | |
@@ -195,10 +197,10 @@ mutation.
 | `cal.curve_rename` | `curve: MicCurveId`, `label` | `mic` | |
 | `cal.curve_delete` | `curve: MicCurveId` | `ack` | |
 | `cal.line` | `channel`, `volts: Volts` | `line_calibration` | |
-| `cal.list` | — | `calibrations` (`calibrations`, `line_calibrations`, `mics`) | non-mutating |
+| `cal.list` | — | `calibrations` (`calibrations`, `line_calibrations`, `mics`) | read |
 | `cal.delete` | `key: CalRef` (`type`: `spl` {device, channel, mic} \| `line` {device, channel}) | `ack` | |
 | `plan.save` | `plan: PlanSpec` | `plan` | |
-| `plan.list` | — | `plans` | non-mutating |
+| `plan.list` | — | `plans` | read |
 | `plan.delete` | `name` | `ack` | |
 | `walk.new` | `name`, `plan` (name), `kind: WalkKind` (`live_transfer` \| `sweep`), `meas: [MeasId]`, `points: [WalkPointSpec]` ({`label`, `at: [x, y, z]`}) | `walk` | |
 | `walk.update` | `walk: WalkId`, `name`, `points: [WalkPointSpec]` | `walk` | |
@@ -212,35 +214,35 @@ mutation.
 | `sim.fit` | `request: SimFitRequest` | `sim` | |
 | `sim.map` | `request: SimMapRequest` | `sim` | |
 | `sim.cancel` | — | `sim` | |
-| `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | non-mutating |
+| `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | read |
 | `spl.log_new` | `meas` | `ack` | |
-| `spl.history_get` | `meas`, `span: HistorySpan` | `spl_history` | non-mutating |
+| `spl.history_get` | `meas`, `span: HistorySpan` | `spl_history` | read |
 | `spl.band_transfer` | `meas`, `foh`, `at_place: BandLevelSource`, `background: BandLevelSource \| nil`, `place: str` | `measurement` (as `meas.update`) | |
-| `spl.band_log_get` | `meas`, `from`, `until: WallNs`, `step: u32 \| nil` | `spl_band_log` | non-mutating |
+| `spl.band_log_get` | `meas`, `from`, `until: WallNs`, `step: u32 \| nil` | `spl_band_log` | read |
 | `sweep.run` | `lease_token`, `meas` (a sweep measurement), `name: string \| nil` | `sweep` (the run as started) | L (held for the run), armed |
 | `dynamics.run` | `lease_token`, `meas` (a dynamics measurement), `name: string \| nil`, `rests_from: TraceId \| nil` | `dynamics` (the run as started) | L (held for the run), armed |
-| `dynamics.table` | `trace` (a dynamics trace, else `invalid`) | `dynamics_table` (`DynamicsTable`: `info`, `inputs`, as in `DynamicsData` without `envelopes`) | non-mutating |
-| `dynamics.envelope` | `trace` (a dynamics trace), `input: u16` (a measured input, zero-based), `step: u32` (zero-based); else `invalid` | `dynamics_envelope` (`DynamicsEnvelope`: `input`, `step`, `start`, `end`, each edge a `DynamicsEdgeCurve` of parallel f32 arrays {`t`, `gr_db`, `h_db`: four arrays, H2…H5, NaN where blind}) | non-mutating |
-| `state.snapshot` | — | `snapshot` | non-mutating |
-| `state.since` | `rev` | `events` or `resync_required` | non-mutating |
-| `grid.get` | `grid_id` | `grid` | non-mutating |
+| `dynamics.table` | `trace` (a dynamics trace, else `invalid`) | `dynamics_table` (`DynamicsTable`: `info`, `inputs`, as in `DynamicsData` without `envelopes`) | read |
+| `dynamics.envelope` | `trace` (a dynamics trace), `input: u16` (a measured input, zero-based), `step: u32` (zero-based); else `invalid` | `dynamics_envelope` (`DynamicsEnvelope`: `input`, `step`, `start`, `end`, each edge a `DynamicsEdgeCurve` of parallel f32 arrays {`t`, `gr_db`, `h_db`: four arrays, H2…H5, NaN where blind}) | read |
+| `state.snapshot` | — | `snapshot` | read |
+| `state.since` | `rev` | `events` or `resync_required` | read |
+| `grid.get` | `grid_id` | `grid` | read |
 | `file.save` | `session: SessionRef`, `overwrite: bool` | `session_file`; the working state belongs to it, clean | |
 | `file.load` | `session: SessionRef`, `discard: bool` | `session_file`; loads disarmed, no owner, new epoch | |
 | `file.new` | `discard: bool` | `ack`; every session measurement and trace deleted (rig measurements stay), untitled | |
 | `file.recover` | — | `ack`; swaps in the replaced working state | |
 | `file.salvage` | `session: SessionRef` | `salvage` | |
-| `file.list` | — | `sessions` | non-mutating |
-| `file.upload_begin` | `file` (its path on the client), `bytes: u64`, `sha256: string` | `transfer` | non-mutating |
-| `file.upload_chunk` | `transfer`, `offset: u64`, `data: bin` | `ack` | non-mutating |
-| `file.import` | `transfer`, `name`, `overwrite: bool` | `session_file` | non-mutating (writes a file, commits no state) |
-| `file.download_begin` | `session: SessionRef \| nil` (nil: the working state) | `transfer` | non-mutating |
-| `file.download_chunk` | `transfer`, `offset: u64` | `chunk` (bin) | non-mutating |
+| `file.list` | — | `sessions` | read |
+| `file.upload_begin` | `file` (its path on the client), `bytes: u64`, `sha256: string` | `transfer` | acts |
+| `file.upload_chunk` | `transfer`, `offset: u64`, `data: bin` | `ack` | acts |
+| `file.import` | `transfer`, `name`, `overwrite: bool` | `session_file` | acts (writes a file, commits no state) |
+| `file.download_begin` | `session: SessionRef \| nil` (nil: the working state) | `transfer` | acts |
+| `file.download_chunk` | `transfer`, `offset: u64` | `chunk` (bin) | read |
 | `file.download_end` | `transfer`, `saved_as: string \| nil` | `ack` | |
 | `rec.start` | `request: RecordRequest` | `recording` (the run as started) | |
 | `rec.stop` | — | `recording` (the run, finished) | |
-| `rec.list` | — | `recordings` | non-mutating |
+| `rec.list` | — | `recordings` | read |
 | `stream.replay` | `recording: RecordingRef`, `pace: realtime \| fast` | `stream` | |
-| `server.info` | — | `server` | non-mutating |
+| `server.info` | — | `server` | read |
 | `server.network` | `enabled: bool`, `bind: NetBind \| nil`, `port: u16 \| nil` | `server` | local clients only |
 | `auth.authorize` | `name`, `key` (Z85) | `server` | |
 | `auth.revoke` | `name` | `server` | |
@@ -248,7 +250,7 @@ mutation.
 | `auth.revoke_rig` | `rig_id: RigId` | `server` | |
 | `rig.pair` | `peer: RigPeer` | `ack` | |
 | `rig.unpair` | `rig_id: RigId` | `ack` | |
-| `source.state` | — | `source_state` | non-mutating; with `hello`, the only command an admitted rig may send |
+| `source.state` | — | `source_state` | read; with `hello`, the only command an admitted rig may send |
 
 `stream.status` returns `state.stream`. `trace.list` returns `state.traces`. `plan.list`
 returns `state.plans`. `gen.refresh` checks the lease, moves its deadline out by the lease
@@ -643,8 +645,9 @@ within ±200 dB; a session file's that is not is 0 on load.
 sweep measurements; `docs/design/eq-overlay.md`); the job and `config_rev` are untouched.
 `EqEdit` (tagged by `type`): `new` {`name` \| nil (the next free `EQ n`), `realisation` \|
 nil (digital at the stream rate), `peak_q` \| nil (`half_gain`), `sections`} — also
-predicts the live curve —, `put` {`set`, `body`: `EqBody`} (replaces what the set holds,
-`rev` + 1), `delete` {`set`} (its filter curve and predictions go with it), `mark` {`set`,
+predicts the live curve —, `put` {`set`, `base`: u32 (the set's `rev` the edit was made
+on; another is `conflict` with `detail: eq_conflict {set, rev}`, the current rev), `body`:
+`EqBody`} (replaces what the set holds, `rev` + 1), `delete` {`set`} (its filter curve and predictions go with it), `mark` {`set`,
 `clear`} (snapshots the set as `in_console`, or clears it), `predict` {`set`, `curve`:
 `Operand` (`meas` = this measurement's live curve, or `trace` = one of its transfer
 traces), `on`} (creates or deletes the math trace `curve × EQ`), `copy` {`set`, `to`}.
@@ -703,9 +706,15 @@ autosave (`ac2d --rig-logs`) and carries on after a restart. Traces are always t
 a stored trace or math trace filed under a rig measurement is saved in a session file without an
 owner (as an import), and a load replaces it like any other.
 
-`meas.update` carries `base`, the measurement's `config_rev` the edit was made on. Another
-`config_rev` (a client changed it since) is `conflict` with `detail: conflict {rev}` (the
-current `config_rev`): the client re-reads the measurement rather than overwrite that edit.
+`meas.update` carries `base`, the measurement's `edit_rev` the edit was made on. Another
+`edit_rev` (a commit of the measurement since, by any client or the daemon) is `conflict`
+with `detail: stale_meas {meas, edit_rev}` (the current `edit_rev`): the client re-reads the
+measurement rather than overwrite that commit. Every commit of the measurement moves
+`edit_rev` (configuration, name, colour, offset, layout, EQ sets, running); `meas.colour`,
+`meas.offset`, `meas.layout` and `meas.eq` other than `put` take no base and are last write
+wins. Every reply that carries a measurement carries it as committed, so a client making
+several edits in a row takes the next `base` from the reply before (the event may come
+later).
 
 `meas.update` replaces the configuration and restarts a running job (averages start over;
 a spectrum's new `resolution` (§3.2 *Spectrum resolution*) or `window` included: frames of
@@ -1255,7 +1264,8 @@ needs live audio: the measurement must be running.
 
 The reply `DelayFinding`:
 
-- `outcome: DelayOutcome`, `confidence: DelayConfidence`, `band: DelayBand`,
+- `meas` (the transfer measurement it is of), `outcome: DelayOutcome`, `confidence:
+  DelayConfidence`, `band: DelayBand`,
   `observation: Seconds` (block analysed), `candidates: [DelayArrival]` (every candidate,
   by delay, ≤ 16), `found_at: WallNs`.
 - `DelayOutcome` (tagged by `type`): `accepted` {`first`, `strongest`} | `ambiguous`
@@ -1275,19 +1285,20 @@ The reply `DelayFinding`:
 `low_precision`, `peak_at_search_edge`, `low_band_snr`, `generator_stopped`. The last comes
 from the daemon, not the finder: the generator stopped within the audio a find would read
 (the observation plus the ±1 s search span), so the finder does not run, and the refusal
-is in the reply only (`delay.last_finding`, an awaited pick and tracking stay as they were).
+is in the reply only (the stored finding, an awaited pick and tracking stay as they were).
 After the generator starts, a find reads only the audio from 0.1 s after the start; too
 little of it yet is `observation_too_short`. A refusal is a successful reply
 with a `no_estimate` outcome, never an error; errors are kept for requests that cannot run
 (not a running transfer measurement, invalid band or observation).
 
-Every finding is stored as the measurement's `delay.last_finding`. `delay.insert` applies
+Every finding is stored as the measurement's `delay_finding` entity (§4.1), replacing the
+one before; it is never saved in a session. `delay.insert` applies
 it: `first_arrival` takes the accepted first arrival or, when ambiguous, the pre-selected
 `ranked[0]`; `strongest` the strongest arrival; `ranked{index}` an entry of the ambiguous
 list. Inserting from a `no_estimate` finding is `refused`. `delay.set` (an explicit operator
-value) clears `last_finding`; a delay tracking moves keeps it. `delay.nudge` moves the
-applied delay by `by` (either sign, fractions of a sample allowed) and keeps
-`last_finding` (it refines that delay); like `delay.insert` and `delay.set` it resolves
+value) deletes the finding; a delay tracking moves keeps it. `delay.nudge` moves the
+applied delay by `by` (either sign, fractions of a sample allowed) and keeps the finding
+(it refines that delay); like `delay.insert` and `delay.set` it resolves
 `awaiting_pick`. A measurement has one delay, `applied`; the daemon keeps its offset from
 the arrival apart as `nudged`: the applied delay is the *arrival* plus `nudged`. `delay.insert` sets a new arrival (`nudged` 0); `delay.set`
 keeps the arrival and sets `nudged` to the value's distance from it, and `delay.nudge` adds
@@ -1304,14 +1315,18 @@ delay does not restart the transfer function: each analysis stage keeps its aver
 turned to the new delay, while the change is small next to its window, and only the other
 stages show `settling` again (`docs/design/delay-no-resettle.md`).
 
-`DelayState` (a transfer measurement's `delay`): `applied: Seconds`, `applied_samples`
-(f64: samples at the stream rate, fraction included), `nudged: Seconds` and
-`nudged_samples` (f64; the offset of `applied` from the arrival, which `delay.nudge` steps
-and `delay.set` move),
-`tracking` (the operator's switch), `awaiting_pick`, `last_finding: DelayFinding | nil`. An
-`ambiguous` finding sets `awaiting_pick` (decision 1c): tracking is paused — it moves nothing
-— until the operator resolves it with `delay.insert` or `delay.set`, or runs `delay.find`
-again (a new finding that is not ambiguous clears it).
+`Delay` (a transfer measurement's `delay` entity, §4.1; the reply of `delay.insert`,
+`delay.set`, `delay.nudge` and `delay.track`): `meas`, `rev` (the rev of the commit that
+last moved `applied` or `nudged`; for a delay made with its measurement, that measurement's
+`config_rev`), `applied: Seconds`, `applied_samples` (f64: samples at the stream rate,
+fraction included), `nudged: Seconds` and `nudged_samples` (f64; the offset of `applied`
+from the arrival, which `delay.nudge` steps and `delay.set` move), `tracking` (the
+operator's switch), `awaiting_pick`. `delay.track` and a pick commit the delay without
+moving `rev`. An `ambiguous` finding sets `awaiting_pick` (decision 1c), committing the
+delay and then the finding at consecutive revs: tracking is paused — it moves nothing —
+until the operator resolves it with `delay.insert` or `delay.set`, or runs `delay.find`
+again (a new finding that is not ambiguous clears it). The delay commands commit no
+measurement: its `config_rev` and `edit_rev` stay.
 
 #### Traces (`trace.*`)
 
@@ -1382,7 +1397,7 @@ display edits and are never applied to the stored data.
   updating into a slot clears it on the trace that held it (a `trace` event for that one
   too).
 - **Last write wins.** `trace.update` replaces the whole `TraceEdit` and carries no
-  `base` (`expect_rev` is the only guard): of two clients' edits, the later one stands whole.
+  `base`: of two clients' edits, the later one stands whole.
 - **Lock.** `trace.update` on a locked trace may change only `visible`, `order`, `slot`,
   `owner` and `locked` (not `smoothing`); `trace.delete` and `trace.mic_curve` of a locked trace are
   `refused`.
@@ -1463,8 +1478,7 @@ one `<name>.json` per plan in its data directory (`plans/`: the plan's fields be
   polygons, zones inside the outline, markers inside the room …) and replaces the one of
   that name; `invalid` with the reason, or for a name that is no file name (letters,
   digits, space, `-`, `_`, `.`, not starting with `.`); `refused` for a name another plan
-  holds in another case. Last write wins: `plan.save` carries no `base` (`expect_rev` is
-  the only guard). `plan.delete` is `not_found` for a name the library lacks; the session's
+  holds in another case. Last write wins: `plan.save` carries no `base`. `plan.delete` is `not_found` for a name the library lacks; the session's
   copies stay.
 - `walk.new` starts a walk (`WalkState`: `id`, `name`, `plan`, `kind` live_transfer \|
   sweep, `mics` [`WalkMic` {`meas`, `input`}], `points` [{`label`, `at`, `step: u16`, `mic:
@@ -1523,8 +1537,7 @@ one `<name>.json` per plan in its data directory (`plans/`: the plan's fields be
   from where it now stands (`refused` for a point not pending at the step). `walk.update`
   renames the walk and edits its points by label, grouping them into steps again: a kept
   point keeps its state (a captured one its position and mic too); a captured point cannot
-  be taken out (`refused`). Last write wins: `walk.update` carries no `base`
-  (`expect_rev` is the only guard).
+  be taken out (`refused`). Last write wins: `walk.update` carries no `base`.
 - The walk's **average** is a power-average math trace of the captured points' traces,
   in point order, owned by the walk's first measurement and named `<walk> · average`: made
   (and started) at the second capture, its `of` updated after every capture, skip and redo
@@ -1969,7 +1982,7 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
   fixes the dB reference; an input with no row is an unnamed `mic`). `CurveChoice` is
   tagged by `type`: `not_chosen` | `off` | `curve` {`label`}. `Pair` = {`left`, `right`,
   `name`: string | nil} (channels). `stream.inputs` upserts its rows and replaces the pair
-  list (last write wins: it carries no `base`, `expect_rev` is the only guard); the daemon sets every row's `pair` side from the list. It refuses (`invalid`, naming
+  list (last write wins: it carries no `base`); the daemon sets every row's `pair` side from the list. It refuses (`invalid`, naming
   the inputs by channel) a mic row whose chosen label is not stored for its mic (unless the
   row is unchanged), a pair of an input with itself, of two kinds, of an input
   in two pairs, or of an input the open stream does not capture. The daemon chooses a
@@ -2146,7 +2159,7 @@ other kinds).
 
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `backends`, `preview`,
 `loopback_detection`, `stream`,
-`lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
+`lease`, `generator`, `measurement`, `delay`, `delay_finding`, `trace`, `traces`, `trace_data`,
 `dynamics_table`, `dynamics_envelope`, `calibration`, `line_calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`, `source_state`,
 `spl_log_page`, `spl_history`, `spl_band_log`,
 `snapshot`, `events`,
@@ -2160,7 +2173,10 @@ other kinds).
 `internal`, `version_mismatch`, `too_large` (the request, or the reply it would have,
 exceeds the 4 MiB ctrl message limit, §3.1).
 
-`detail` (optional, tagged by `type`): `conflict` {rev}, `lease_held` {owner},
+`detail` (optional, tagged by `type`): `conflict` {rev} (a stale `rig.rev` base),
+`stale_meas` {meas, edit_rev} (a stale `meas.update` base: the current `edit_rev`),
+`eq_conflict` {set, rev} (a stale `meas.eq` `put` base: the set's current rev),
+`lease_held` {owner},
 `resync` {oldest}, `import` {line, problem} (§3.2 traces),
 `session_version` {found, supported}, `unsaved_changes` {origin}, `session_exists` {name,
 saved_at} (§3.2 sessions), `mic_curve_file` {line, reason} and
@@ -2172,8 +2188,11 @@ saved_at} (§3.2 sessions), `mic_curve_file` {line, reason} and
 
 The mirrored `State` holds: `stream` (`epoch`, `open: OpenStream | nil`, `stopped:
 AudioStopped | nil`; §4.1.1),
-`measurements` (`id`, `config`, `config_rev`, `running`, `delay`, `grid_id`, `colour`,
-`layout`, `offset`, `eq`),
+`measurements` (`id`, `config`, `config_rev` (the rev of the last commit that changed
+what its job computes), `edit_rev` (the rev of its last commit, whatever changed: the
+`base` of `meas.update`), `running`, `grid_id`, `colour`, `layout`, `offset`, `eq`),
+`delays` (`Delay`, §3.2 delay finder: one per transfer measurement, sorted by `meas`),
+`delay_findings` (`DelayFinding`: a transfer measurement's last finding, sorted by `meas`),
 `traces` (`TraceMeta`: `id`, `edit` {name, colour, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
 math | eq | average | generated | sweep | dynamics}, `grid_id`, `delay`, `depth`, `lf_window`, `cal`, `mic`, `mic_curve`, `created_at`,
@@ -2347,10 +2366,11 @@ samples). Every later recovery reopens the configuration as it then stands.
 
 `state.snapshot` → `{state, rev, daemon_incarnation, stream_epoch}`.
 
-An event is `{rev, kind, payload}`. `kind` is one of `stream`, `measurement`, `trace`,
+An event is `{rev, kind, payload}`. `kind` is one of `stream`, `measurement`, `delay`,
+`delay_finding`, `trace`,
 `generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `remote`, `sweep`, `dynamics`, `autosave`, `recording`, `working`, `rig`, `plan`, `walk`, `walk_plan`, `sim`, `sim_map`, `sim_fit`, `server`. `payload` is the entity's
 full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the whole list;
-`sim`: the `SimState`, which `State.sim` becomes; `sim_map`: the `SimState` of a coverage map or nil, which `State.sim_map` becomes; `sim_fit`: the `SimFitKept` or nil); for keyed entities (`measurement`, `trace`,
+`sim`: the `SimState`, which `State.sim` becomes; `sim_map`: the `SimState` of a coverage map or nil, which `State.sim_map` becomes; `sim_fit`: the `SimFitKept` or nil); for keyed entities (`measurement`, `delay` and `delay_finding` (keyed by `MeasId`), `trace`,
 `calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`, `plan` and `walk_plan` (keyed by name), `walk` (keyed by
 `WalkId`)) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
@@ -2362,7 +2382,11 @@ socket they go outside the byte window, within a bound of their own (§5.8): pas
 connection's events are dropped and it is sent `resync_required`.
 
 Every event takes the next rev. A command changing N entities emits N events with
-consecutive revs, in order; clients may observe the states between them. `ack.rev` is the
+consecutive revs, in order; clients may observe the states between them. A transfer
+measurement comes into being before its delay (`measurement`, then `delay`) and goes after
+it (`delay_finding`, `delay`, then `measurement` deleted, or set as no longer a transfer), so
+between the two a client may hold a transfer measurement without a delay (read as zero and
+not settled) or a delay whose measurement is gone (ignored). `ack.rev` is the
 state's rev after the command: its last event's rev, unchanged if it changed nothing.
 
 Reply bodies are not state: a mirror applies events and snapshots only; a reply gives ids
@@ -2576,7 +2600,7 @@ layout as code.
 | `audio_sample` | u64 | stream sample index (origin = stream open) of the newest sample in the frame |
 | `stream_epoch` | u32 | frames from older epochs are discarded |
 | `daemon_incarnation` | u64 | random per daemon start |
-| `config_rev` | u64 | rev of the config the DSP actually used (`ka`: current state rev) |
+| `config_rev` | u64 | the newer of the measurement's `config_rev` and its delay's `rev` the DSP actually used, so one number says which configuration and which delay a frame shows: the configuration when ≥ `Measurement.config_rev`, the delay when ≥ `Delay.rev` (`ka`: current state rev) |
 | `config_applied_at` | u64 | sample index from which that config took effect |
 | `capture_wall_ns` | u64 | daemon wall clock of the newest sample (Unix ns); frame age = now + offset − this |
 | `grid_id` | u64 \| nil | column grid (`tf`, `rta`, `spec`); nil otherwise |

@@ -259,6 +259,7 @@ impl Control {
             started_by: client.id().clone(),
             initial: Initial {
                 measurements: st.measurements.clone(),
+                delays: st.delays.clone(),
                 generator: st.generator.clone(),
                 inputs: st.inputs.clone(),
                 calibrations: st
@@ -423,12 +424,14 @@ impl Control {
         };
         let note = match change {
             Change::Measurement(p) => TimelineChange::Measurement(Box::new(p.clone())),
+            Change::Delay(p) => TimelineChange::Delay(p.clone()),
             Change::Generator(g) => TimelineChange::Generator(g.clone()),
             Change::Inputs(i) => TimelineChange::Inputs(i.inputs.clone()),
             Change::Calibration(c) => TimelineChange::Calibration(c.clone()),
             // Named one by one: a new kind of change has to say here whether a replay of
             // the recording needs it.
             Change::Stream(_)
+            | Change::DelayFinding(_)
             | Change::Trace(_)
             | Change::LineCalibration(_)
             | Change::Mic(_)

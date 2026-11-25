@@ -270,7 +270,7 @@ fn a_partial_delay_restart_empties_only_the_reset_stages() {
         meas: MeasId(1),
         delay: Seconds(300.0 / f64::from(FS)),
     }) {
-        ReplyBody::Measurement(m) => m.config_rev.0,
+        ReplyBody::Delay(d) => d.rev.0,
         other => panic!("{other:?}"),
     };
     // Less than one full-rate hop: no block after the splice yet.

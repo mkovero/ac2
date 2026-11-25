@@ -12,7 +12,7 @@ pub(super) enum StimOp {
     Detect(crate::stream_dialog::DetectRequest),
     Sweep {
         meas: MeasId,
-        /// With the `config_rev` it was made on.
+        /// With the `edit_rev` it was made on.
         update: Option<(ac2_proto::units::Rev, Box<ac2_proto::model::MeasConfig>)>,
     },
     Dynamics {

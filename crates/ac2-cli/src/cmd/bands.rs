@@ -242,7 +242,7 @@ async fn set(cli: &Cli, s: &BandsSet, out: &mut Out<'_>) -> Result<(), CliError>
     let r = c
         .call(Command::MeasUpdate {
             meas: m.id,
-            base: m.config_rev,
+            base: m.edit_rev,
             config: MeasConfig {
                 scope: m.config.scope,
                 name: m.config.name.clone(),
@@ -526,7 +526,7 @@ async fn estimate(cli: &Cli, e: &BandsEstimate, out: &mut Out<'_>) -> Result<(),
     let r = c
         .call(Command::MeasUpdate {
             meas: m.id,
-            base: m.config_rev,
+            base: m.edit_rev,
             config: MeasConfig {
                 scope: m.config.scope,
                 name: m.config.name.clone(),

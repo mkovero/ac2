@@ -25,11 +25,11 @@ KETUNKOLO_PEER = {
 }
 
 
-def req(idx, op, args=None, mutation=True):
+def req(idx, op, args=None):
     cmd = {"op": op}
     if args is not None:
         cmd["args"] = args
-    return {"v": p.PROTO_VERSION, "id": idx, "cmd": cmd, "expect_rev": 41 if mutation else None}
+    return {"v": p.PROTO_VERSION, "id": idx, "cmd": cmd}
 
 
 def osc_message(path, args, append_level):
@@ -213,8 +213,8 @@ SPL_MEASUREMENT = {
         },
     },
     "config_rev": 40,
+    "edit_rev": 40,
     "running": True,
-    "delay": None,
     "grid_id": None,
     "colour": None,
     "layout": None,
@@ -295,6 +295,7 @@ def arrival(delay_samples, level):
 def finding():
     """samples::finding(): ambiguous, two near-equal arrivals."""
     return {
+        "meas": 1,
         "outcome": {
             "type": "ambiguous",
             "reasons": ["borderline_level", "merged_lobe"],
@@ -419,21 +420,27 @@ PANE_LAYOUT = {
 }
 
 
+def delay():
+    """samples::delay(): the delay of measurement()."""
+    return {
+        "meas": 1,
+        "rev": 42,
+        "applied": 0.0125,
+        "applied_samples": 600.25,
+        "nudged": 0.25 / 48000.0,
+        "nudged_samples": 0.25,
+        "tracking": True,
+        "awaiting_pick": False,
+    }
+
+
 def measurement():
     return {
         "id": 1,
         "config": MEAS_CONFIG,
         "config_rev": 40,
+        "edit_rev": 43,
         "running": True,
-        "delay": {
-            "applied": 0.0125,
-            "applied_samples": 600.25,
-            "nudged": 0.25 / 48000.0,
-            "nudged_samples": 0.25,
-            "tracking": True,
-            "awaiting_pick": False,
-            "last_finding": finding(),
-        },
         "grid_id": p.grid_id(LOG_GRID),
         "colour": {"type": "hue", "index": 5},
         "layout": PANE_LAYOUT,
@@ -467,8 +474,8 @@ MATH_MEASUREMENT = {
         },
     },
     "config_rev": 62,
+    "edit_rev": 62,
     "running": True,
-    "delay": None,
     "grid_id": p.grid_id(LOG_GRID),
     "colour": None,
     "layout": None,
@@ -527,8 +534,8 @@ SWEEP_MEASUREMENT = {
         },
     },
     "config_rev": 66,
+    "edit_rev": 66,
     "running": False,
-    "delay": None,
     "grid_id": None,
     "colour": {"type": "neutral"},
     "layout": None,
@@ -540,7 +547,7 @@ SWEEP_MEASUREMENT = {
 def requests():
     """A subset of samples::commands(); `id` is the index in that list."""
     return [
-        req(0, "hello", {"client": "ac2-cli 0.0.0"}, mutation=False),
+        req(0, "hello", {"client": "ac2-cli 0.0.0"}),
         req(
             2,
             "stream.open",
@@ -583,7 +590,6 @@ def requests():
             16,
             "delay.find",
             {"meas": 1, "band": {"type": "sub"}, "observation": 8.0},
-            mutation=False,
         ),
         req(17, "delay.insert", {"meas": 1, "pick": {"type": "ranked", "index": 1}}),
         req(
@@ -617,7 +623,6 @@ def requests():
             31,
             "spl.log_get",
             {"meas": 4, "log": "previous", "from": 120, "max": 3600},
-            mutation=False,
         ),
         req(
             32,
@@ -639,9 +644,8 @@ def requests():
                 "inputs": PREVIEW_INPUTS,
                 "pairs": PREVIEW_PAIRS,
             },
-            mutation=False,
         ),
-        req(42, "stream.preview_stop", mutation=False),
+        req(42, "stream.preview_stop"),
         req(
             43,
             "stream.detect_loopback",
@@ -653,7 +657,6 @@ def requests():
                 "output": 0,
                 "level": -30.0,
             },
-            mutation=False,
         ),
         req(44, "trace.mic_curve", {"trace": 8, "curve": {"mic": "M30 #1234", "label": "0°"}}),
         req(46, "cal.curve_delete", {"curve": {"mic": "M30 #1234", "label": "0°"}}),
@@ -685,7 +688,6 @@ def requests():
                     "step_s": 30,
                 },
             },
-            mutation=False,
         ),
         req(50, "delay.nudge", {"meas": 1, "by": -0.25 / 48000.0}),
         req(
@@ -700,7 +702,7 @@ def requests():
                 }
             },
         ),
-        req(53, "rec.list", mutation=False),
+        req(53, "rec.list"),
         req(
             54,
             "stream.replay",
@@ -712,7 +714,7 @@ def requests():
             "stream.outputs",
             {"outputs": [{"channel": 0, "label": "Main L"}, {"channel": 1, "label": None}]},
         ),
-        req(57, "server.info", mutation=False),
+        req(57, "server.info"),
         req(59, "auth.revoke", {"name": "laptop"}),
         req(
             60,
@@ -720,7 +722,7 @@ def requests():
             {"key": "D:)Q[IlAW!ahhC2ac:9*A}h:p?([4%wOTJ%JR%cs", "rig_id": 0x70757075, "name": "pupu"},
         ),
         req(61, "rig.pair", {"peer": KETUNKOLO_PEER}),
-        req(62, "source.state", mutation=False),
+        req(62, "source.state"),
         req(
             63,
             "spl.band_transfer",
@@ -749,7 +751,6 @@ def requests():
                 "until": 1789500030000000000,
                 "step": 10,
             },
-            mutation=False,
         ),
         req(65, "meas.colour", {"meas": 3, "colour": {"type": "hue", "index": 2}}),
         req(66, "file.new", {"discard": False}),
@@ -757,7 +758,6 @@ def requests():
             70,
             "file.upload_chunk",
             {"transfer": 3, "offset": 1048576, "data": bytes([0x1F, 0x8B, 0x08, 0x00])},
-            mutation=False,
         ),
         req(
             74,
@@ -768,7 +768,6 @@ def requests():
             76,
             "stream.control_panel",
             {"backend": "asio", "device": "Fireface USB"},
-            mutation=False,
         ),
         req(77, "osc.target", {"base": 38, "addr": "[fe80::1]:9000"}),
         req(
@@ -798,7 +797,7 @@ def requests():
             },
         ),
         req(88, "levels.reset", {"channels": [0, 1]}),
-        req(90, "plan.list", mutation=False),
+        req(90, "plan.list"),
         req(91, "plan.delete", {"name": "Club"}),
         req(
             92,
@@ -880,8 +879,8 @@ def requests():
             "dynamics.run",
             {"lease_token": TOKEN, "meas": 12, "name": None, "rests_from": 14},
         ),
-        req(106, "dynamics.table", {"trace": 14}, mutation=False),
-        req(107, "dynamics.envelope", {"trace": 14, "input": 4, "step": 0}, mutation=False),
+        req(106, "dynamics.table", {"trace": 14}),
+        req(107, "dynamics.envelope", {"trace": 14, "input": 4, "step": 0}),
         req(108, "rig.unpair", {"rig_id": 0x6B657475}),
         req(109, "auth.revoke_rig", {"rig_id": 0x70757075}),
     ]
@@ -922,6 +921,10 @@ def events():
         {"kind": "server", "rev": 99, "payload": {"status": "off", "ctrl": None, "port": None, "fingerprint": None}},
         {"kind": "measurement", "rev": 43, "payload": {"type": "set", "value": measurement()}},
         {"kind": "measurement", "rev": 44, "payload": {"type": "deleted", "value": 3}},
+        {"kind": "delay", "rev": 104, "payload": {"type": "set", "value": delay()}},
+        {"kind": "delay", "rev": 105, "payload": {"type": "deleted", "value": 3}},
+        {"kind": "delay_finding", "rev": 106, "payload": {"type": "set", "value": finding()}},
+        {"kind": "delay_finding", "rev": 107, "payload": {"type": "deleted", "value": 3}},
         {"kind": "plan", "rev": 81, "payload": {"type": "deleted", "value": "Club"}},
         {"kind": "walk", "rev": 83, "payload": {"type": "deleted", "value": 2}},
         {"kind": "walk_plan", "rev": 85, "payload": {"type": "deleted", "value": "Club"}},

@@ -56,89 +56,8 @@
      }
     },
     "config_rev": 40,
+    "edit_rev": 43,
     "running": true,
-    "delay": {
-     "applied": 0.0125,
-     "applied_samples": 600.25,
-     "nudged": 5.208333333333333e-06,
-     "nudged_samples": 0.25,
-     "tracking": true,
-     "awaiting_pick": false,
-     "last_finding": {
-      "outcome": {
-       "type": "ambiguous",
-       "reasons": [
-        "borderline_level",
-        "merged_lobe"
-       ],
-       "ranked": [
-        {
-         "delay": 0.0125,
-         "delay_samples": 600.0,
-         "level": -1.25,
-         "phase": -12.5,
-         "uncertainty_samples": 0.25,
-         "misfit": 0.125,
-         "refined": true
-        },
-        {
-         "delay": 0.01309375,
-         "delay_samples": 628.5,
-         "level": 0.0,
-         "phase": -12.5,
-         "uncertainty_samples": 0.25,
-         "misfit": 0.125,
-         "refined": true
-        }
-       ],
-       "strongest": {
-        "delay": 0.01309375,
-        "delay_samples": 628.5,
-        "level": 0.0,
-        "phase": -12.5,
-        "uncertainty_samples": 0.25,
-        "misfit": 0.125,
-        "refined": true
-       }
-      },
-      "confidence": {
-       "psr_db": 18.5,
-       "psr_acq_db": 14.0,
-       "band_snr_db": 21.25,
-       "excited_fraction": 0.875,
-       "uncertainty_samples": 0.25,
-       "pulse_width_samples": 9.5,
-       "period": null
-      },
-      "band": {
-       "type": "custom",
-       "lo_hz": 80.0,
-       "hi_hz": 800.0
-      },
-      "observation": 0.5,
-      "candidates": [
-       {
-        "delay": 0.0125,
-        "delay_samples": 600.0,
-        "level": -1.25,
-        "phase": -12.5,
-        "uncertainty_samples": 0.25,
-        "misfit": 0.125,
-        "refined": true
-       },
-       {
-        "delay": 0.01309375,
-        "delay_samples": 628.5,
-        "level": 0.0,
-        "phase": -12.5,
-        "uncertainty_samples": 0.25,
-        "misfit": 0.125,
-        "refined": true
-       }
-      ],
-      "found_at": 1790000000000000000
-     }
-    },
     "grid_id": 8785464140711761104,
     "colour": {
      "type": "hue",
@@ -431,6 +350,121 @@
  {
   "kind": "measurement",
   "rev": 44,
+  "payload": {
+   "type": "deleted",
+   "value": 3
+  }
+ },
+ {
+  "kind": "delay",
+  "rev": 104,
+  "payload": {
+   "type": "set",
+   "value": {
+    "meas": 1,
+    "rev": 42,
+    "applied": 0.0125,
+    "applied_samples": 600.25,
+    "nudged": 5.208333333333333e-06,
+    "nudged_samples": 0.25,
+    "tracking": true,
+    "awaiting_pick": false
+   }
+  }
+ },
+ {
+  "kind": "delay",
+  "rev": 105,
+  "payload": {
+   "type": "deleted",
+   "value": 3
+  }
+ },
+ {
+  "kind": "delay_finding",
+  "rev": 106,
+  "payload": {
+   "type": "set",
+   "value": {
+    "meas": 1,
+    "outcome": {
+     "type": "ambiguous",
+     "reasons": [
+      "borderline_level",
+      "merged_lobe"
+     ],
+     "ranked": [
+      {
+       "delay": 0.0125,
+       "delay_samples": 600.0,
+       "level": -1.25,
+       "phase": -12.5,
+       "uncertainty_samples": 0.25,
+       "misfit": 0.125,
+       "refined": true
+      },
+      {
+       "delay": 0.01309375,
+       "delay_samples": 628.5,
+       "level": 0.0,
+       "phase": -12.5,
+       "uncertainty_samples": 0.25,
+       "misfit": 0.125,
+       "refined": true
+      }
+     ],
+     "strongest": {
+      "delay": 0.01309375,
+      "delay_samples": 628.5,
+      "level": 0.0,
+      "phase": -12.5,
+      "uncertainty_samples": 0.25,
+      "misfit": 0.125,
+      "refined": true
+     }
+    },
+    "confidence": {
+     "psr_db": 18.5,
+     "psr_acq_db": 14.0,
+     "band_snr_db": 21.25,
+     "excited_fraction": 0.875,
+     "uncertainty_samples": 0.25,
+     "pulse_width_samples": 9.5,
+     "period": null
+    },
+    "band": {
+     "type": "custom",
+     "lo_hz": 80.0,
+     "hi_hz": 800.0
+    },
+    "observation": 0.5,
+    "candidates": [
+     {
+      "delay": 0.0125,
+      "delay_samples": 600.0,
+      "level": -1.25,
+      "phase": -12.5,
+      "uncertainty_samples": 0.25,
+      "misfit": 0.125,
+      "refined": true
+     },
+     {
+      "delay": 0.01309375,
+      "delay_samples": 628.5,
+      "level": 0.0,
+      "phase": -12.5,
+      "uncertainty_samples": 0.25,
+      "misfit": 0.125,
+      "refined": true
+     }
+    ],
+    "found_at": 1790000000000000000
+   }
+  }
+ },
+ {
+  "kind": "delay_finding",
+  "rev": 107,
   "payload": {
    "type": "deleted",
    "value": 3
@@ -997,8 +1031,8 @@
      }
     },
     "config_rev": 40,
+    "edit_rev": 40,
     "running": true,
-    "delay": null,
     "grid_id": null,
     "colour": null,
     "layout": null,
@@ -1058,8 +1092,8 @@
      }
     },
     "config_rev": 62,
+    "edit_rev": 62,
     "running": true,
-    "delay": null,
     "grid_id": 8785464140711761104,
     "colour": null,
     "layout": null,
@@ -1319,8 +1353,8 @@
      }
     },
     "config_rev": 66,
+    "edit_rev": 66,
     "running": false,
-    "delay": null,
     "grid_id": null,
     "colour": {
      "type": "neutral"
@@ -1485,8 +1519,8 @@
      }
     },
     "config_rev": 62,
+    "edit_rev": 62,
     "running": true,
-    "delay": null,
     "grid_id": 8785464140711761104,
     "colour": null,
     "layout": null,

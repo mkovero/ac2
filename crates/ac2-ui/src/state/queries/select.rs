@@ -208,9 +208,8 @@ impl AppState {
         };
         // The delay and its offset from the arrival after the step, as the row and the
         // legend will show them: the daemon moves both by the step.
-        let (applied, offset) = m
-            .delay
-            .as_ref()
+        let (applied, offset) = self
+            .delay(m.id)
             .map_or((by, by), |d| (d.applied.0 + by, d.nudged.0 + by));
         let what = format::delay_step_toast(&m.config.name, step, applied, offset);
         self.call(

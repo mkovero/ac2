@@ -119,7 +119,9 @@ pub struct ChoicePrompt {
     pub hint: String,
 }
 
-/// What the offset keys change.
+/// What the offset keys change. Made per key press and dropped at once: boxing the larger
+/// variant buys nothing.
+#[allow(clippy::large_enum_variant)]
 enum OffsetTarget {
     Trace(TraceMeta),
     Live(Measurement),

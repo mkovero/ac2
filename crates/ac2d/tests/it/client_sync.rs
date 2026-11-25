@@ -1,5 +1,5 @@
 //! ac2-client's mirror against the real daemon: the snapshot at connect and live events
-//! after it, `expect_rev`, the welcome naming the rig, and a daemon restart read as silence
+//! after it, a stale `base`, the welcome naming the rig, and a daemon restart read as silence
 //! and then as a new incarnation with a new identity. The sync rules for what a working
 //! daemon never does on demand (a lost event, an expired replay, a lagging keepalive) are
 //! the unit tests of `ac2_client::mirror`.
@@ -10,9 +10,8 @@ use crate::common;
 use std::time::{Duration, Instant};
 
 use ac2_client::Client;
-use ac2_proto::model::OwnedTraces;
-use ac2_proto::units::{DaemonIncarnation, MeasId};
-use ac2_proto::{Command, ErrorCode};
+use ac2_proto::units::DaemonIncarnation;
+use ac2_proto::{Command, ErrorCode, ReplyBody};
 use ac2d::{Daemon, Listen, RigIdSource};
 use common::*;
 
@@ -67,27 +66,43 @@ async fn hello_snapshot_and_live_events() {
     stop(h).await;
 }
 
+/// An edit made on a measurement another commit has moved since is refused with its
+/// current `edit_rev`, and goes through once made on that.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn expect_rev_conflict() {
+async fn a_stale_base_is_a_conflict() {
     init_log();
     let h = Daemon::start(config(manual_rig(), local_tcp())).unwrap();
     let c = mirror(&h, "ac2-client-test").await;
-    c.call(Command::MeasCreate {
-        config: spl("x", 0),
-    })
-    .await
-    .unwrap();
-    let rev = c.snapshot().await.unwrap().rev;
-    let delete = || Command::MeasDelete {
-        meas: MeasId(1),
-        traces: OwnedTraces::Keep,
-    };
-    let e = c
-        .call_expect(delete(), ac2_proto::units::Rev(rev.0 - 1))
+    let m = match c
+        .call(Command::MeasCreate {
+            config: spl("x", 0),
+        })
         .await
-        .unwrap_err();
+        .unwrap()
+    {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    let moved = match c
+        .call(Command::MeasOffset {
+            meas: m.id,
+            offset: ac2_proto::units::Db(3.0),
+        })
+        .await
+        .unwrap()
+    {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    assert!(moved.edit_rev > m.edit_rev);
+    let update = |base| Command::MeasUpdate {
+        meas: m.id,
+        base,
+        config: spl("y", 0),
+    };
+    let e = c.call(update(m.edit_rev)).await.unwrap_err();
     assert_eq!(e.code(), Some(ErrorCode::Conflict), "{e}");
-    c.call_expect(delete(), rev).await.unwrap();
+    c.call(update(moved.edit_rev)).await.unwrap();
     drop(c);
     stop(h).await;
 }

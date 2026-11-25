@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
-    DelayState, GenAction, ImportFormat, ImportRole, MeasKind, MeasScope, Measurement, RemoteInput,
+    Delay, GenAction, ImportFormat, ImportRole, MeasKind, MeasScope, Measurement, RemoteInput,
     Salvage, SalvageRefusal, SessionFile, SessionOrigin, SessionRef, Stream, StreamConfig,
     SweepFailure, TraceKind, TraceOwner,
 };
@@ -111,7 +111,8 @@ impl Control {
             .iter()
             .filter(|m| m.config.scope == MeasScope::Session)
             .map(|m| {
-                let mut sm = super::rig_meas::saved_of(m, self.next_run_number(m.id));
+                let mut sm =
+                    super::rig_meas::saved_of(m, self.delay_of(m.id), self.next_run_number(m.id));
                 if let MeasKind::Math { config } = &mut sm.config.kind {
                     config.owner = self.session_owner(config.owner);
                 }
@@ -536,6 +537,7 @@ impl Control {
         for id in old_meas {
             self.stop_job(id);
             self.drop_spl_log(id);
+            self.drop_delay(id);
             self.commit(Change::Measurement(Patch::Deleted(id)));
         }
         self.clear_walks();
@@ -595,14 +597,14 @@ impl Control {
                 });
                 let samples = fs.map_or(0.0, |fs| delay_samples(d.applied.0, fs));
                 let nudged = fs.map_or(0.0, |fs| delay_samples(d.nudged.0, fs));
-                DelayState {
+                // Its rev is the measurement's `config_rev`, set as it is committed.
+                Delay {
                     applied: fs.map_or(d.applied, |fs| Seconds(samples / fs)),
                     applied_samples: samples,
                     nudged: fs.map_or(d.nudged, |fs| Seconds(nudged / fs)),
                     nudged_samples: nudged,
                     tracking: d.tracking,
-                    awaiting_pick: false,
-                    last_finding: None,
+                    ..Delay::zero(sm.id, Rev(0))
                 }
             });
             let grid_id = grids.remove(&sm.id).map(|g| self.register_grid(g));
@@ -617,9 +619,9 @@ impl Control {
                 id: sm.id,
                 config: sm.config,
                 config_rev: Rev(self.store.rev().0 + 1),
+                edit_rev: Rev(self.store.rev().0 + 1),
                 // A sweep measurement never runs on its own: only `sweep.run` plays it.
                 running,
-                delay,
                 grid_id,
                 colour,
                 layout,
@@ -631,8 +633,7 @@ impl Control {
             };
             self.ensure_spl_log(&meas, None);
             meas.config_rev = Rev(self.store.rev().0 + 1);
-            self.commit(Change::Measurement(Patch::Set(meas.clone())));
-            loaded.push(meas);
+            loaded.push(self.commit_meas_with_delay(meas, delay)?);
         }
         // The EQ curves are the daemon's: recomputed from their sets, not trusted from the
         // file.

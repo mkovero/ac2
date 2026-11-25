@@ -718,7 +718,7 @@ fn spl_keys_cycle_the_weightings() {
     assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Leq);
     let mut seen = Vec::new();
     for key in ["Shift+F", "Shift+F", "Shift+F", "Z", "Z", "Z"] {
-        let (cfg, what) = spl_update(&t.key(key)).expect(key);
+        let (cfg, what) = spl_update(&t.key_acked(key)).expect(key);
         assert_eq!(cfg.input, 1);
         assert_eq!(cfg.leq, LeqConfig::default_windows());
         seen.push(what);
@@ -751,7 +751,7 @@ fn spl_keys_cycle_the_weightings() {
     t.key("G");
     t.key("G");
     assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Meter);
-    t.key("Shift+F");
+    t.key_acked("Shift+F");
     assert_eq!(
         t.st.kind_modes(PaneKind::Spl).spl,
         SplMode::Meter,
@@ -768,6 +768,7 @@ fn spl_keys_cycle_the_weightings() {
         t.key("Alt+1");
         let r = t.st.apply(Msg::Command(c), &t.keys);
         assert_eq!(spl_update(&r).map(|x| x.1).as_deref(), Some(want));
+        t.ack(&r);
         assert_eq!(t.focus_kind(), PaneKind::Spl);
     }
 }

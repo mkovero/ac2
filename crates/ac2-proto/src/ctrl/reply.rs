@@ -7,10 +7,10 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, StateSnapshot};
 use crate::grid::GridDef;
 use crate::model::{
-    BackendInfo, CalEntry, DelayFinding, DynamicsRun, Generator, InputSetups, Lease, LineCalEntry,
-    LoopbackDetection, Measurement, Mic, OutputSetup, Preview, RecordingFile, RecordingRun,
-    ServerInfo, SessionFile, SourceState, SplHistory, SplLogPage, Stream, SweepRun, TraceData,
-    TraceMeta,
+    BackendInfo, CalEntry, Delay, DelayFinding, DynamicsRun, Generator, InputSetups, Lease,
+    LineCalEntry, LoopbackDetection, Measurement, Mic, OutputSetup, Preview, RecordingFile,
+    RecordingRun, ServerInfo, SessionFile, SourceState, SplHistory, SplLogPage, Stream, SweepRun,
+    TraceData, TraceMeta,
 };
 use crate::units::{Blob, ClientId, DaemonIncarnation, RequestId, Rev, RigId, StreamEpoch};
 
@@ -66,6 +66,8 @@ pub enum ReplyBody {
     Measurement(Measurement),
     /// `delay.find`.
     DelayFinding(DelayFinding),
+    /// `delay.insert`, `delay.set`, `delay.nudge`, `delay.track`: the delay as committed.
+    Delay(Delay),
     /// `trace.capture/update/average/import`.
     Trace(TraceMeta),
     /// `sweep.run`: the run, as started.

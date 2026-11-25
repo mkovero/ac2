@@ -13,7 +13,7 @@ use ac2_proto::frame::{
     BinsFrame, FrameData, IrFrame, IrMeta, ProtectionFlags, TfFrame, TfMeta, ValidityMask,
 };
 use ac2_proto::grid::GridId;
-use ac2_proto::model::{DelayState, FreqRange, TransferConfig, TransferResolution};
+use ac2_proto::model::{Delay, FreqRange, TransferConfig, TransferResolution};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Hz, MeasId, Rev, Seconds};
 use num_complex::Complex64;
@@ -240,7 +240,7 @@ impl Transfer {
         ctx: JobCtx<TransferConfig>,
         sample_rate: u32,
         (ref_idx, meas_idx): (usize, usize),
-        delay: &DelayState,
+        delay: &Delay,
         to_control: Sender<ControlMsg>,
         correction: Option<&Correction>,
         cross_rig: bool,

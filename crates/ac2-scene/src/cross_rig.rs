@@ -5,8 +5,8 @@
 //! appears its clock relation is said next to it, in words.
 
 use ac2_proto::model::{
-    CrossRigTransfer, CrossTfState, Measurement, NotLockedReason, PeerRelation, RelockOutcome,
-    RemoteRig, RemoteSide, RemoteState, StopWhy,
+    CrossRigTransfer, CrossTfState, Delay, Measurement, NotLockedReason, PeerRelation,
+    RelockOutcome, RemoteRig, RemoteSide, RemoteState, StopWhy,
 };
 
 use crate::between_rigs::{cant_tell_why, name_of};
@@ -236,7 +236,12 @@ pub fn delay_basis(delay_s: f64, ours: &str, theirs: &str) -> String {
 
 /// `ac2 status` lines, one block per cross-rig transfer function of `measurements`: its
 /// title, then its status lines and delay with its basis, indented. `ours`: this rig's name.
-pub fn status_cli(r: &RemoteState, measurements: &[Measurement], ours: &str) -> Vec<String> {
+pub fn status_cli(
+    r: &RemoteState,
+    measurements: &[Measurement],
+    delays: &[Delay],
+    ours: &str,
+) -> Vec<String> {
     let mut out = Vec::new();
     for x in &r.transfers {
         let Some(m) = measurements.iter().find(|m| m.id == x.meas) else {
@@ -249,7 +254,7 @@ pub fn status_cli(r: &RemoteState, measurements: &[Measurement], ours: &str) -> 
         if let Some(b) = banner(&m.config.name, x, r, ours) {
             out.push(format!("  {b}"));
         }
-        if let Some(d) = &m.delay {
+        if let Some(d) = delays.iter().find(|d| d.meas == m.id) {
             out.push(format!(
                 "  delay {}",
                 delay_basis(d.applied.0, ours, &name_of(r, x.rig))
