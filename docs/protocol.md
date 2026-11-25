@@ -109,11 +109,17 @@ ProtoError { code: ErrorCode, msg: string, detail: ErrorDetail | nil }
 Warning { type: "<name>", … }
 ```
 
-- `warnings` lists what a command that succeeded did that the caller should know about;
-  it is empty for almost every reply, and always present. `type` is one of
-  `rig_monitor_blind` {meas: [MeasId]} (`stream.close` while rig measurements run) and
+- `warnings` lists what a command did that the caller should know about (a failed
+  `stream.open` may still have ended a recording); it is empty for almost every reply, and
+  always present. `type` is one of
+  `rig_monitor_blind` {meas: [MeasId]} (`stream.close` while rig measurements run),
   `rig_monitor_moved` {meas: [MeasId]} (`stream.open` of another backend or input device
-  while they run). A client shows them to the operator; they change nothing in `result`.
+  while they run), `recording_ended` {recording: RecordingRef} (the command closed or
+  reopened the stream a recording was recording, which ended it: `stream.open`,
+  `stream.close`, `stream.replay`, `file.load`, `file.new`, `file.recover`; never on
+  `rec.stop`) and `line_level_unusual` {full_scale: Dbu} (`cal.line` stored a full scale
+  outside +4 … +30 dBu). A client shows them to the operator; they change nothing in
+  `result`.
 
 - `args` is absent for commands without arguments.
 - `id` is unique per client within the dedup window. The window is keyed by (authorized
@@ -181,7 +187,7 @@ from the store.
 | `osc.test` | `msg: OscMessage` | `ack` (`rig` event: the sent count) | |
 | `rig.monitor_at_start` | `base: Rev` (`rig.rev`), `on: bool` | `ack` (`rig` event) | |
 | `artnet.target` | `base: Rev` (`rig.rev`), `target: ArtnetTarget \| nil` | `ack` (`rig` event) | |
-| `artnet.test` | `channels: [DmxSet]` | `ack` (`rig` event: the sent count) | |
+| `artnet.test` | `channels: [DmxLevel]` | `ack` (`rig` event: the sent count) | |
 | `artnet.fade` | `base: Rev` (`rig.rev`), `seconds: f64` | `ack` (`rig` event) | |
 | `levels.set` | `base: Rev` (`rig.rev`), `ballistic: Ballistic \| nil`, `correlation_window: CorrelationWindow \| nil`, `over_threshold: Dbtp \| nil`, `correlation_gate: Dbfs \| nil`, `loudness_target: Lufs \| nil` | `ack` (`rig` event) | |
 | `levels.reset` | `channels: [u16]` (empty: every captured input) | `ack` | |
@@ -355,8 +361,8 @@ rig measurements meter with no client connected; the generator stays disarmed), 
 `over_threshold`: Dbtp, `correlation_gate`: Dbfs, `loudness_target`: Lufs}: the programme meters' settings, below), `osc` and
 `artnet` (each an `OutputStatus` {`sent`: packets since the daemon started, u64,
 `last_error`: str \| nil, the latest send error as the operating system said it}), `dmx`
-([`DmxSet`]: the cue universe's channels above 0, in channel order, whether or not a target is
-set), `cues` ([`RigCue`] {`meas`, `subject`:
+([`DmxLevel`] {`channel`, `value`}: the cue universe's channels above 0, in channel order,
+whether or not a target is set), `cues` ([`RigCue`] {`meas`, `subject`:
 `CueSubject`, `state`: `CueState`}: every cued subject's state as last sent) and
 `zone` (`TimeZone` {`name`: str \| nil, the IANA name when the host has one, nil when the OS
 gives only an offset (a POSIX `TZ` rule); `utc_offset_s`: i32, the offset in force now, s
@@ -408,8 +414,9 @@ settings first, and refuses a threshold, gate or target outside its range or not
 and resets every loudness source with an input in `channels` (integrated, range, the maxima,
 `duration` and `since` restart; momentary and short-term are signal state and carry on);
 nothing in the state changes, the next meter frame carries the cleared values.
-`artnet.test` sends one frame holding `channels` (every other channel 0) now, to find a
-fixture's channels; the keepalive repeats it for 5 s, then the cue frame comes back (at once
+`artnet.test` sends one frame now, `channels` merged over the cue frame (each channel at the
+higher of the two), to find a fixture's channels while the cue lights stay; it jumps, past
+the fade. The keepalive repeats it for 5 s, then the cue frame comes back (at once
 when a cue changes state meanwhile); `invalid` without a target or with a channel listed
 twice, `internal` when the send fails.
 Cue rules: a state change is sent at once, and every cued subject's current message is sent
@@ -459,7 +466,10 @@ listing the rig measurements (`meas`).
 A `Cue` = {`ok`, `near`, `over`, `fault`: `CueAction` \| nil} says what each state does;
 `CueAction` = {`osc`: `OscMessage` \| nil (sent on entering the state and repeated), `dmx`:
 [`DmxSet`] (the levels the state holds while it is current)}. `DmxSet` = {`channel`: u16
-1–512, `value`: u8}; a channel outside 1–512 fails to decode. `ArtnetTarget` = {`addr`:
+1–512, `value`: u8, `snap`: bool}; a channel outside 1–512 fails to decode. A changed cue
+frame fades over `artnet_fade`, except a channel whose winning level (the highest; at a tie,
+any of them) is a `snap` set: it jumps there at once (a strobe, a relay, a warning lamp).
+`DmxLevel` = {`channel`, `value`} is a level with nothing to say about fading. `ArtnetTarget` = {`addr`:
 `"ip:port"` (a node's address or a subnet's broadcast address; Art-Net's port is 6454),
 `universe`: u16 0–32767, the 15-bit Port-Address: net (bits 14–8) · sub-net (7–4) ·
 universe (3–0); above 32767 fails to decode}. The cue sits on each limit (`LeqWindow.cue`, `PeakLimit.cue`, `BandWindow.cue`,
@@ -1331,8 +1341,12 @@ input when its |correlation| ≥ 0.8, else nil), `clock`. `LoopbackCandidate`: `
 silent input). `clock` (`ClockRelation`) is `single_callback` (capture and playback in one callback, on
 one clock) or `unknown` (they may drift). Delays are exact on a `single_callback` clock;
 otherwise they share an
-unknown offset (the ranking is unaffected). The burst is audited in the daemon log; it is
-not generator state.
+unknown offset (the ranking is unaffected). The burst is audited in the daemon log and
+shown as generator state: as it starts a `generator` event sets `firing` with the burst as
+`settings` (pink, `level`, 100 Hz – 10 kHz fourth order, `outputs: [output]`) and
+`last_action` `loopback_burst` naming the requester; once it has played out (or the
+detection ends first) another sets `firing` false. `gen.stop` meanwhile cuts the burst with
+the output's fade, and the detection is `refused`.
 
 #### Delay finder (`delay.find`, `delay.insert`)
 
@@ -1993,8 +2007,8 @@ file channel order; a remote input is recorded from the joined feed, its gaps ma
   frame.
 - The recording ends with `rec.stop` (everything captured until the request is kept), at
   its bounds, on a write failure (disk full), when the stream closes or reopens (device
-  or configuration change, `stream.open`, `stream.replay`, `file.load`) and at daemon
-  shutdown; the file and sidecar are always finalised and say why. A daemon that dies while
+  or configuration change, `stream.open`, `stream.replay`, `file.load`; the reply of the
+  command that did it carries `recording_ended`, §3.1) and at daemon shutdown; the file and sidecar are always finalised and say why. A daemon that dies while
   recording leaves a sidecar without an end; the next one to start with that directory
   finishes it (`interrupted`) once its audio file has not been written for 30 s, and
   mirrors it as the `recording` entity.
@@ -2099,8 +2113,9 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
   `line: LineCal` {`v_fs`: Volts (`volts / 10^(L/20)`, the volts at 0 dBFS), `volts`,
   `measured`: Dbfs (`L`), `calibrated_at`}} under the open stream's input device,
   replacing the input's earlier one. dBu of 0 dBFS is `20·lg(v_fs / 0.7746 V)`; `invalid`
-  when it falls outside +4 … +30 dBu (a unit slip) or when the input is a `mic` or
-  `digital` one (named by channel).
+  when it falls outside −40 … +50 dBu (a unit slip) or when the input is a `mic` or
+  `digital` one (named by channel). Stored outside +4 … +30 dBu, where usual line
+  interfaces lie, the reply carries `line_level_unusual` {`full_scale`: Dbu}.
 - `cal.delete` removes the sensitivity (`spl`) or line (`line`) calibration `key` (any
   device; no open stream needed); `not_found` when there is none. The input setup is not
   changed.
@@ -2379,7 +2394,7 @@ and `walk`), `captured_unsettled` (captured before the walk measurement was read
 no name of its own: show it as an app on this rig),
 `armed`, `firing`, `settings`, `ceiling`, `ceiling_bound`, `last_action` {`action`: acquire
 \| force \| arm \| fire \| set \| stop \| release \| expiry \| ceiling_lowered \|
-ceiling_raised, `client`, `at`}), `calibrations` (`CalEntry`:
+ceiling_raised \| loopback_burst, `client`, `at`}), `calibrations` (`CalEntry`:
 `key` {device, channel, mic}, `spl`: SplCal), `line_calibrations` ([LineCalEntry]), `mics`
 (`Mic`: `name`, `curves` [MicCurveRef]), `inputs` ([InputSetup], sorted by channel), `pairs`
 ([Pair], sorted by left channel), `outputs` ([OutputSetup], the

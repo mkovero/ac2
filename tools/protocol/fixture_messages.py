@@ -37,13 +37,19 @@ def osc_message(path, args, append_level):
 
 
 def dmx(pairs):
+    """A frame's levels (`DmxLevel`): what is output, or what a test frame holds."""
     return [{"channel": c, "value": v} for c, v in pairs]
+
+
+def cue_dmx(sets):
+    """A cue state's levels (`DmxSet`): `(channel, value, snap)`."""
+    return [{"channel": c, "value": v, "snap": snap} for c, v, snap in sets]
 
 
 LIGHT_CUE = {
     "ok": {
         "osc": osc_message("/light/red", [{"type": "int", "value": 0}], False),
-        "dmx": dmx([(12, 0), (13, 255)]),
+        "dmx": cue_dmx([(12, 0, False), (13, 255, False)]),
     },
     "near": {
         "osc": osc_message(
@@ -55,9 +61,9 @@ LIGHT_CUE = {
     },
     "over": {
         "osc": osc_message("/light/red", [{"type": "int", "value": 1}], True),
-        "dmx": dmx([(12, 255), (14, 40)]),
+        "dmx": cue_dmx([(12, 255, False), (14, 40, False)]),
     },
-    "fault": {"osc": None, "dmx": dmx([(512, 255)])},
+    "fault": {"osc": None, "dmx": cue_dmx([(512, 255, True)])},
 }
 
 RIG = {

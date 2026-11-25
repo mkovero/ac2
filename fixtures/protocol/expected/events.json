@@ -789,11 +789,13 @@
             "dmx": [
              {
               "channel": 12,
-              "value": 0
+              "value": 0,
+              "snap": false
              },
              {
               "channel": 13,
-              "value": 255
+              "value": 255,
+              "snap": false
              }
             ]
            },
@@ -828,11 +830,13 @@
             "dmx": [
              {
               "channel": 12,
-              "value": 255
+              "value": 255,
+              "snap": false
              },
              {
               "channel": 14,
-              "value": 40
+              "value": 40,
+              "snap": false
              }
             ]
            },
@@ -841,7 +845,8 @@
             "dmx": [
              {
               "channel": 512,
-              "value": 255
+              "value": 255,
+              "snap": true
              }
             ]
            }
@@ -971,11 +976,13 @@
          "dmx": [
           {
            "channel": 12,
-           "value": 0
+           "value": 0,
+           "snap": false
           },
           {
            "channel": 13,
-           "value": 255
+           "value": 255,
+           "snap": false
           }
          ]
         },
@@ -1010,11 +1017,13 @@
          "dmx": [
           {
            "channel": 12,
-           "value": 255
+           "value": 255,
+           "snap": false
           },
           {
            "channel": 14,
-           "value": 40
+           "value": 40,
+           "snap": false
           }
          ]
         },
@@ -1023,7 +1032,8 @@
          "dmx": [
           {
            "channel": 512,
-           "value": 255
+           "value": 255,
+           "snap": true
           }
          ]
         }

@@ -18,7 +18,8 @@ A file already in the new shape is left alone. Covers, per file:
   transfer's bands tagged by `type`, not `status`; a paired rig without `data` (its data
   endpoint is the port after `ctrl`); a pane layout's `levels` and `plates` written out
   where missing (none set, every plate at its default place and size); every rig id (a
-  paired rig's `rig`, a remote input's `rig`, a pane's pinned rig `id`) a decimal string.
+  paired rig's `rig`, a remote input's `rig`, a pane's pinned rig `id`) a decimal string;
+  every cue state's DMX level with `snap: false` (it fades, as every level did).
 - calibration store 4 -> 5: an input's `InputKind` tagged by `type`, not `kind`; an
   electrical calibration's `loading` written out (`null`, unloaded) where missing; every
   `calibrated_at` and `imported_at` a decimal string.
@@ -80,6 +81,21 @@ def layout_fields(node):
     elif isinstance(node, list):
         for v in node:
             layout_fields(v)
+
+
+def dmx_snaps(node):
+    """Every cue state's DMX levels under `node` (a `CueAction`: `osc` and `dmx`) with
+    `snap: false`."""
+    if isinstance(node, dict):
+        if "osc" in node and isinstance(node.get("dmx"), list):
+            for d in node["dmx"]:
+                if isinstance(d, dict):
+                    d.setdefault("snap", False)
+        for v in node.values():
+            dmx_snaps(v)
+    elif isinstance(node, list):
+        for v in node:
+            dmx_snaps(v)
 
 
 def dec(v):
@@ -149,6 +165,7 @@ def convert_rig(doc):
     rig_ids(out.get("peers"))
     rig_ids(out.get("meters"))
     rig_ids(out.get("monitor_stream"))
+    dmx_snaps(out.get("meters"))
     out["version"] = 12
     return out
 

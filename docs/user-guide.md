@@ -647,7 +647,8 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
 - **Detect loopback…** (**D**): asks for a level (no default; your last stimulus level is
   offered), then on **Enter** plays a 0.5 s band-limited noise burst on the stimulus output —
   under the stimulus lease and the ceiling, faded — and marks the input it returns on as the
-  Reference (or says none answered and which came closest).
+  Reference (or says none answered and which came closest). While the burst plays every
+  app on the rig shows the stimulus playing, and the stop key cuts it.
 - **Stimulus signal** (this app's, like the stimulus outputs; between the channels and
   the max level): one row for a noise, three for a sine, each with a line under it saying
   what it does ([Choosing the signal](#choosing-the-signal)):
@@ -3443,7 +3444,9 @@ compression, no outputs ([raw-capture.md](design/raw-capture.md)).
 
 One recording at a time. It ends and is kept on stop, at its time or size limit, on a write
 error (disk full: everything before is kept), when the stream closes or reopens, and when
-the daemon stops. Gaps (an xrun, a slow disk) are never filled: the sidecar says where
+the daemon stops. Closing or reopening the audio I/O, a replay, or a session load, new or
+recover that ends one says so to whoever asked (*recording show ended: the audio stream
+closed or reopened under it (its file is kept)*). Gaps (an xrun, a slow disk) are never filled: the sidecar says where
 samples do not follow each other.
 
 A remote input (another rig's) is recorded as the measurements read it, at this rig's
@@ -3717,7 +3720,10 @@ only), and **Enter** has the daemon measure the tone's level, as the electrical
 calibration does (a missing, clipping or not yet steady tone is refused, with the reason in
 the dialog), and store the full-scale voltage, `volts / 10^(dBFS / 20)`. Take the tone
 off and keep the gain as it is: changing the input gain afterwards makes the calibration
-wrong, calibrate again. The calibration belongs to the device and input, not to what is
+wrong, calibrate again. A full scale from −40 to +50 dBu is stored; outside +4 … +30 dBu,
+where line interfaces usually lie, a warning says so (*line full scale −38.0 dBu stored,
+outside the usual +4 … +30 dBu*): check that you typed volts, not millivolts, and the
+input's gain or pad. Beyond −40 … +50 dBu it is refused as a slip. The calibration belongs to the device and input, not to what is
 plugged into it, and is listed under *Line calibrations*; **Delete** twice removes it, and
 the input reads dBFS again.
 
@@ -4288,7 +4294,8 @@ not sent — it changed elsewhere, shown as it is now"). Make them again on what
 
 A cue state can also hold DMX levels in one Art-Net universe that ac2 owns: a lamp, an LED
 bar or a relay on a DMX node lights straight from the meter, with no OSC receiver in between.
-Each state lists channels and levels (`12=255 13=0 14=40`: channel 1–512 = level 0–255). The
+Each state lists channels and levels (`12=255 13=0 14=40`: channel 1–512 = level 0–255; a
+`!` after the level, `12=255!`, makes the channel jump there past the fade). The
 universe is the highest level any cue's current state gives a channel (HTP, as lighting
 desks merge), and 0 for every channel no current state lists. A cue that goes away stops
 holding its levels; a clean daemon stop sends one last frame of every cue's `ok` levels.
@@ -4298,8 +4305,11 @@ ac2 sends all 512 channels whenever the frame changes, and the same frame again 
 from its level to the new one over the rig's fade time (1 s until you set another, 0–60 s;
 0 jumps), evenly as the eye sees brightness rather than evenly in DMX steps, so a lamp does
 not rush through its dark end. A state change during a fade starts a new fade from where
-the lights are. Test frames, the cue frame coming back after a test and the last frame of
-a clean stop jump. Set the target to a node's address or
+the lights are. A channel whose level ends in `!` jumps instead, for a strobe, a relay or a
+warning lamp that has to switch rather than glide (where two states give a channel the same
+highest level, one `!` is enough). Test frames, the cue frame coming back after a test and
+the last frame of a clean stop jump. A test frame lays its levels over the cue frame (each
+channel at the higher of the two), so the cue lights stay up while you find a fixture. Set the target to a node's address or
 to a broadcast address (`2.255.255.255`, or your LAN's), with the universe as a number
 0–32767 or as net.sub.uni (`0.0.1`). The levels of a channel no cue sets are 0, so keep ac2's
 universe apart from the desk's and merge the two downstream:
@@ -4315,7 +4325,7 @@ ac2 artnet target 2.255.255.255 0.0.1     # broadcast, universe 1; `off`: send n
 ac2 artnet target 192.168.1.40:6454 17    # one node, port given
 ac2 artnet fade 1.5                       # cue changes fade over 1.5 s; 0: they jump
 ac2 artnet test 12=255 13=40              # light these channels for 5 s to find a fixture
-ac2 cue Stage meter --over-dmx "12=255 13=0" --ok-dmx "12=0 13=255" --fault-dmx "14=255"
+ac2 cue Stage meter --over-dmx "12=255 13=0" --ok-dmx "12=0 13=255" --fault-dmx "14=255!"
 ac2 cue Stage window:15min --near-dmx "12=80"
 ac2 cue Stage meter --fault-dmx off       # no levels in that state
 ac2 rig status                            # target, fade, frames sent, the channels above 0
@@ -4330,7 +4340,7 @@ together by Enter on either row; **Fade (s)** (seconds, 0–60; 0 or empty: jump
 applies; **Send DMX test** (`1=255` to start), which Enter sends;
 and a status line with the target, the frames sent, the last error and the channels above 0.
 On the SPL / Leq page each cue row has a DMX line under its OSC line, one field per state
-(`12=255 13=0`); a field that does not read keeps Enter from applying and says which.
+(`12=255 13=0`, `14=255!` to jump); a field that does not read keeps Enter from applying and says which.
 
 ## Keyboard
 
