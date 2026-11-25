@@ -83,6 +83,9 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   word clock / ADAT.
   Designed, not built: `docs/design/remote-auto.md` (paired rigs' inputs offered and streamed
   only while used, levels otherwise, the paired rig's own generator driven from the shown rig).
+  Designed, not built: `docs/design/tracked-clocks.md` (a free-running remote interface, such
+  as a USB mic, resampled on the taking rig by a clock servo: *TRACKED* on stamps, *LOCKED*
+  once a transfer function's delay trims it).
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
   a real PC and the panel/unplug cases pending, `asio.md` §4c–d), keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.

@@ -327,6 +327,7 @@ The constant offset between rigs (path delay and interface latencies) stays unme
 delay readout keeps saying it includes it, and measuring it is a later stage.
 
 Built: `ac2-resampler` (converter, servo). Not built: ac2d integration.
+Designed in `tracked-clocks.md`: the resampler runs on the taking rig, in its joined feed, not at the source (operator, 2026-11-25).
 
 ## 4. Buffering: a fixed link offset
 
