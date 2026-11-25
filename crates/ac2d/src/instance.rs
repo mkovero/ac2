@@ -147,6 +147,23 @@ impl Instance {
     pub fn endpoints_file(&self) -> &Path {
         &self.endpoints_file
     }
+
+    /// Removes the socket files of `endpoints` (its `ipc://` ones) that a daemon killed or
+    /// crashed left. With the lock held no other daemon that keeps stores runs, so a file
+    /// there is a dead one's: a client trying it meets nobody, and binding over a file is
+    /// not what every OS does.
+    pub fn clear_stale_sockets(&self, endpoints: &[&str]) {
+        for e in endpoints {
+            let Some(file) = ac2_paths::socket_dir::socket_file(e) else {
+                continue;
+            };
+            match std::fs::remove_file(file) {
+                Ok(()) => tracing::info!("removed the stale socket {}", file.display()),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => tracing::warn!("cannot remove {}: {err}", file.display()),
+            }
+        }
+    }
 }
 
 impl Drop for Instance {
@@ -158,5 +175,30 @@ impl Drop for Instance {
         if self.endpoints_written {
             let _ = std::fs::remove_file(&self.endpoints_file);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    /// With the lock held, the socket files a dead daemon left at the endpoints are
+    /// removed; another endpoint's file and a non-ipc endpoint are left alone.
+    #[test]
+    fn the_lock_holder_removes_its_endpoints_stale_sockets() {
+        let dir = tempfile::tempdir().unwrap();
+        let i = Instance::lock(dir.path()).unwrap();
+        let file = |n: &str| dir.path().join(n);
+        for n in ["ctrl.sock", "data.sock", "other.sock"] {
+            std::fs::write(file(n), b"").unwrap();
+        }
+        let ep = |n: &str| format!("ipc://{}", file(n).display());
+        i.clear_stale_sockets(&[&ep("ctrl.sock"), &ep("data.sock"), "tcp://127.0.0.1:1"]);
+        assert!(!file("ctrl.sock").exists());
+        assert!(!file("data.sock").exists());
+        assert!(file("other.sock").exists());
+        // Already gone: nothing to do, nothing to report.
+        i.clear_stale_sockets(&[&ep("ctrl.sock")]);
     }
 }

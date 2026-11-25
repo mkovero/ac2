@@ -162,6 +162,8 @@ fn main() -> ExitCode {
         tracing::info!("{NAME}: logging to {}", path.display());
     }
     ac2_paths::log::install_panic_hook("ac2-ui");
+    // A simulated rig killed with its app left its socket files; no later one takes them.
+    ac2_ui::spawn::sweep_gone_sims(&ac2_client::endpoint::runtime_dir());
     let mut notices = Vec::new();
     let prefs_path = ac2_paths::ui_prefs();
     let (prefs, err) = UiPrefs::load(Some(&prefs_path));

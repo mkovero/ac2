@@ -91,6 +91,9 @@ pub struct Spawned {
     stdin: Option<ChildStdin>,
     kind: Kind,
     log: PathBuf,
+    /// Its local pair's socket files when the app named them: a daemon removes them when it
+    /// stops in order, so the app does when it was killed or crashed.
+    sockets: Vec<PathBuf>,
 }
 
 impl Spawned {
@@ -111,7 +114,12 @@ impl Spawned {
     /// Its exit status once it ended; `None` while it runs.
     pub fn exited(&mut self) -> Option<ExitStatus> {
         match self.child.try_wait() {
-            Ok(s) => s,
+            Ok(s) => {
+                if s.is_some() {
+                    remove_all(&self.sockets);
+                }
+                s
+            }
             Err(e) => {
                 tracing::warn!("ac2d (pid {}): cannot wait: {e}", self.child.id());
                 None
@@ -127,7 +135,14 @@ impl Spawned {
             child: self.child,
             owned,
             since: Instant::now(),
+            sockets: self.sockets,
         }
+    }
+}
+
+fn remove_all(files: &[PathBuf]) {
+    for f in files {
+        let _ = std::fs::remove_file(f);
     }
 }
 
@@ -137,6 +152,7 @@ pub struct Stopping {
     child: Child,
     owned: bool,
     since: Instant,
+    sockets: Vec<PathBuf>,
 }
 
 /// How a child given up by the app ended.
@@ -179,6 +195,7 @@ impl Stopping {
         );
         let _ = self.child.kill();
         let _ = self.child.wait();
+        remove_all(&self.sockets);
         Stop::Killed
     }
 
@@ -330,6 +347,7 @@ fn start(mut cmd: Command, exe: &Path, kind: Kind, log: PathBuf) -> Result<Spawn
         stdin,
         kind,
         log,
+        sockets: Vec::new(),
     })
 }
 
@@ -358,10 +376,11 @@ pub fn spawn_local(
 pub fn spawn_simulated(exe: &Path) -> Result<(Spawned, Endpoints), String> {
     // Its local pair is ipc like every daemon's, in the runtime directory (closed to other
     // users) beside the user's own daemon's, named by this app's process so a second app's
-    // simulated rig never binds over this one's. It removes the files when it stops.
+    // simulated rig never binds over this one's. It removes the files when it stops in
+    // order; the app does when it was killed, and at its start those of an app that is gone.
     let dir = ac2_client::endpoint::runtime_dir();
     let sock = |end: &str| {
-        let name = format!("sim-{}-{end}.sock", std::process::id());
+        let name = format!("{SIM_PREFIX}{}-{end}.sock", std::process::id());
         format!("ipc://{}", dir.join(name).display())
     };
     let at = Endpoints {
@@ -389,6 +408,11 @@ pub fn spawn_simulated(exe: &Path) -> Result<(Spawned, Endpoints), String> {
         Kind::Simulated,
         ac2_paths::log_dir().join("ac2d-sim.log"),
     )?;
+    s.sockets = [&at.ctrl, &at.data]
+        .into_iter()
+        .filter_map(|e| ac2_paths::socket_dir::socket_file(e))
+        .map(Path::to_path_buf)
+        .collect();
     let stdout = s.child.stdout.take();
     match stdout.map(read_endpoints) {
         Some(Ok(ep)) => Ok((s, ep)),
@@ -396,9 +420,39 @@ pub fn spawn_simulated(exe: &Path) -> Result<(Spawned, Endpoints), String> {
             let log = s.log.clone();
             let _ = s.child.kill();
             let _ = s.child.wait();
+            remove_all(&s.sockets);
             Err(format!("simulated rig: {e}; its log: {}", log.display()))
         }
         None => Err("simulated rig: no stdout".into()),
+    }
+}
+
+/// The simulated rigs' socket files start with this and the app's pid.
+const SIM_PREFIX: &str = "sim-";
+
+/// Removes the simulated rigs' socket files in `dir` of every app that no longer runs: a
+/// killed rig or app leaves them, and no later rig takes the same name.
+pub fn sweep_gone_sims(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let Some(pid) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix(SIM_PREFIX))
+            .and_then(|n| n.strip_suffix(".sock"))
+            .and_then(|n| n.split_once('-'))
+            .and_then(|(pid, _)| pid.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid != std::process::id() && !ac2_paths::process::alive(pid) {
+            match std::fs::remove_file(e.path()) {
+                Ok(()) => tracing::info!("removed {} (its app is gone)", e.path().display()),
+                Err(err) => tracing::debug!("cannot remove {}: {err}", e.path().display()),
+            }
+        }
     }
 }
 

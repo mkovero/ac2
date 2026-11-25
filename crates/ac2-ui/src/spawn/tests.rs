@@ -148,3 +148,53 @@ fn backend_names_are_ac2ds() {
     assert_eq!(backend_arg(BackendKind::Asio), "asio");
     assert_eq!(backend_arg(BackendKind::Jack), "jack");
 }
+
+/// A killed child's socket files are removed: it cannot, and no later rig takes the names.
+#[test]
+fn a_killed_childs_socket_files_are_removed() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+    let files: Vec<PathBuf> = ["ctrl", "data"]
+        .iter()
+        .map(|e| dir.path().join(format!("sim-1-{e}.sock")))
+        .collect();
+    for f in &files {
+        std::fs::write(f, b"").unwrap_or_else(|e| panic!("{e}"));
+    }
+    let mut s = stub("deaf", true);
+    s.sockets.clone_from(&files);
+    let stop = s
+        .release()
+        .finish(Instant::now() + Duration::from_millis(100));
+    assert_eq!(stop, Stop::Killed);
+    for f in &files {
+        assert!(!f.exists(), "{} left", f.display());
+    }
+}
+
+/// The simulated rigs' socket files of an app that is gone are swept; this app's, a
+/// running app's and any other file stay.
+#[test]
+fn socket_files_of_a_gone_app_are_swept() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+    let mut gone = stub("fatal", true);
+    let gone_pid = gone.child.id();
+    wait_exit(&mut gone);
+    let names = |pid: u32| {
+        [
+            format!("sim-{pid}-ctrl.sock"),
+            format!("sim-{pid}-data.sock"),
+        ]
+    };
+    let mine = names(std::process::id());
+    let dead = names(gone_pid);
+    for n in mine.iter().chain(&dead).chain(&["ctrl.sock".to_string()]) {
+        std::fs::write(dir.path().join(n), b"").unwrap_or_else(|e| panic!("{e}"));
+    }
+    sweep_gone_sims(dir.path());
+    for n in &dead {
+        assert!(!dir.path().join(n).exists(), "{n} left");
+    }
+    for n in mine.iter().chain(&["ctrl.sock".to_string()]) {
+        assert!(dir.path().join(n).exists(), "{n} removed");
+    }
+}

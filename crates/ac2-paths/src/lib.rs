@@ -18,14 +18,15 @@
 //! Logs are neither: they are disposable diagnostics of this machine, so each OS's own log
 //! location ([`log_dir`]). With the `log` feature, [`log`] installs the shared tracing
 //! subscriber (stderr plus a per-program file there).
-// The exceptions ask the OS for this process's user (`socket_dir`, Unix) and for a file
-// system's free space (`free_space`).
+// The exceptions ask the OS for this process's user (`socket_dir`, Unix), for a file
+// system's free space (`free_space`) and whether a process runs (`process`).
 #![deny(unsafe_code)]
 
 mod free_space;
 #[cfg(feature = "log")]
 pub mod log;
 pub mod notify;
+pub mod process;
 pub mod socket_dir;
 
 use std::fs;

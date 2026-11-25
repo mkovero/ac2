@@ -199,6 +199,9 @@ fn main() -> ExitCode {
         tracing::info!("audit trail in {}", path.display());
     }
     ac2_paths::log::install_panic_hook("ac2d");
+    if let (Some(i), Listen::Local { ctrl, data }) = (&instance, &listen) {
+        i.clear_stale_sockets(&[ctrl, data]);
+    }
     let backend = args.backend.unwrap_or_else(BackendChoice::platform);
     let backends = match ac2d::backends(backend) {
         Ok(b) => b,
