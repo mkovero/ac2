@@ -230,15 +230,17 @@ pub(super) fn finish_deletes(dir: &Path) {
 }
 
 impl Control {
-    /// Whether the working state belongs to the saved session `name`.
+    /// Whether the working state belongs to the saved session `name`: by the folder on
+    /// disk, not the spelling, since a file system that ignores case, or a path through a
+    /// link, names one folder in several ways.
     fn is_origin(&self, name: &str) -> bool {
-        match &self.working.origin {
-            Some(SessionOrigin::Name { name: n }) => n == name,
-            Some(SessionOrigin::Path { path }) => {
-                Path::new(path) == self.s.session_dir.join(name).as_path()
-            }
-            Some(SessionOrigin::Client { .. }) | None => false,
-        }
+        let dir = self.s.session_dir.join(name);
+        let origin = match &self.working.origin {
+            Some(SessionOrigin::Name { name: n }) => self.s.session_dir.join(n),
+            Some(SessionOrigin::Path { path }) => PathBuf::from(path),
+            Some(SessionOrigin::Client { .. }) | None => return false,
+        };
+        origin == dir || same_entry(&origin, &dir)
     }
 
     pub(super) fn begin_delete(

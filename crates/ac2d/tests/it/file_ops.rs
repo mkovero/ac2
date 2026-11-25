@@ -155,6 +155,30 @@ fn sessions_are_deleted_and_renamed_by_name_and_never_replaced() {
 
 /// A link in the session directory is never followed: what it points to stays.
 #[cfg(unix)]
+/// The open session is found by its folder, not by how its path was spelt: opened by a
+/// path through a link to the session directory (as a name differing only in case reaches
+/// it on a file system that ignores case), it is still refused for `file.delete`.
+#[cfg(unix)]
+#[test]
+fn the_open_session_reached_another_way_is_not_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("file-ops-alias", dir.path());
+    let (mut c, _s) = connect(&h, &[]);
+    save(&mut c, "show");
+    let alias = dir.path().join("alias");
+    std::os::unix::fs::symlink(dir.path().join("sessions"), &alias).unwrap();
+    c.ok(Command::FileLoad {
+        session: SessionRef::Path {
+            path: alias.join("show").to_string_lossy().into_owned(),
+        },
+        discard: true,
+    });
+    let e = code(delete(&mut c, "show"), ErrorCode::Refused);
+    assert!(e.msg.contains("open session"), "{e:?}");
+    assert_eq!(names(&mut c), ["show"]);
+    h.shutdown();
+}
+
 #[test]
 fn a_link_in_the_session_directory_is_not_followed() {
     let dir = tempfile::tempdir().unwrap();
