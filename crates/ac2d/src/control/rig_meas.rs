@@ -365,6 +365,9 @@ impl Control {
         }
         let taken: BTreeSet<MeasId> = self.rig.meas.saved.iter().map(|m| m.id).collect();
         let map = remap_ids(data, &taken, &mut self.ids);
+        // A file may hold traces of one slot holder in the same slot (rig meters' captures
+        // filed under the imported group as it was written): the first keeps it.
+        ac2_traces::meta::unique_slots(data.traces.iter_mut().map(|t| &mut t.meta));
         for (from, to) in &map {
             tracing::info!(
                 "session load: measurement {from} is numbered {to} (a rig meter holds {from})"

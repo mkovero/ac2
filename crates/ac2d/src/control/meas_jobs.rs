@@ -256,16 +256,76 @@ impl Control {
         }
         self.probes.set(id, None);
         self.cross_stop(id);
-        self.kept.forget(id);
-        if let Some(h) = self.jobs.remove(&id) {
-            if let Some(rt) = &self.session {
-                rt.fanout.detach(h.fanout_id);
+        match self.jobs.remove(&id) {
+            Some(h) => {
+                if let Some(rt) = &self.session {
+                    rt.fanout.detach(h.fanout_id);
+                }
+                if keep {
+                    let kept = h.stop_keeping().and_then(|c| {
+                        let m = self.meas(id).ok()?.clone();
+                        let at = self.at_stop(&m, &c);
+                        Some((c, at))
+                    });
+                    self.kept.keep(id, kept);
+                } else {
+                    self.kept.forget(id);
+                    drop(h);
+                }
             }
-            if keep {
-                self.kept.keep(id, h.stop_keeping());
-            } else {
-                drop(h);
+            // Stopped already: a second `meas.stop` keeps what the first kept.
+            None if keep => {}
+            None => self.kept.forget(id),
+        }
+    }
+
+    /// The kept result of `meas` no longer describes it (a reset, a new delay, a new
+    /// configuration). A stopped measurement's final frames go from the slots with it, so
+    /// no view opened later draws a curve a capture would refuse.
+    pub(super) fn drop_kept(&mut self, meas: MeasId) {
+        self.kept.forget(meas);
+        if !self.jobs.contains_key(&meas) {
+            self.s
+                .outbox
+                .clear(&ac2_proto::Subscription::Meas(meas).prefix());
+            self.s.outbox.clear(format!("bins/{}/", meas.0).as_bytes());
+        }
+    }
+
+    /// A stopped transfer's kept result relabelled (a smoothing change): its final `tf`
+    /// goes out again under the new config rev, display-smoothed as a running job would
+    /// send it, so the views draw what a capture now shows.
+    pub(super) fn republish_kept(&self, meas: MeasId) {
+        if self.jobs.contains_key(&meas) {
+            return;
+        }
+        let Some(c) = self.kept.get(meas) else {
+            return;
+        };
+        let mut f = c.captured.frame.clone();
+        let grid = f.stamp.grid_id.and_then(|g| self.grids.get(&g));
+        if let (ac2_proto::frame::FrameData::Tf(tf), Some(grid)) = (&mut f.data, grid)
+            && let Some(s) = tf.meta.smoothing
+        {
+            let cols = ac2_traces::Columns {
+                mag_db: tf.mag.clone(),
+                phase_deg: Some(tf.phase.clone()),
+                coherence: None,
+            };
+            let out = ac2_traces::smooth::smooth(grid, &cols, s);
+            tf.mag = out.mag_db;
+            if let Some(p) = out.phase_deg {
+                tf.phase = p;
             }
+        }
+        f.stamp.seq = self.seqs.next(f.data.topic());
+        match ac2_proto::CodedFrame::from_frame(&f) {
+            Ok(coded) => {
+                if self.s.frames.send(coded) {
+                    self.s.outbox.wake();
+                }
+            }
+            Err(e) => tracing::error!("measurement {meas}: kept frame not encodable: {e}"),
         }
     }
 
@@ -404,7 +464,7 @@ impl Control {
         m.config_rev = rev;
         // A running transfer's averages start over at a new delay: a stopped one's kept
         // result no longer describes it.
-        self.kept.forget(meas);
+        self.drop_kept(meas);
         if let Some(j) = self.jobs.get(&meas) {
             j.send(JobCmd::SetDelay {
                 samples,

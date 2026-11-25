@@ -597,8 +597,10 @@ fn run(
                     false
                 }
                 JobMsg::Stop(keep) => {
-                    a.final_frames(em);
+                    // Only a `meas.stop` leaves a result: a job ended for a delete, a
+                    // restart or the audio closing leaves nothing for the views to draw.
                     if let Some(reply) = keep {
+                        a.final_frames(em);
                         let _ = reply.send(captured(a, em));
                     }
                     return;

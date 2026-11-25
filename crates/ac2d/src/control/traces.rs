@@ -226,7 +226,7 @@ impl Control {
         for other in meta::take_slot(
             &self.store.state().traces,
             meta.id,
-            meta.edit.owner,
+            meta.slot_holder(),
             meta.edit.slot,
         ) {
             self.commit(Change::Trace(Patch::Set(other)));
@@ -298,16 +298,23 @@ impl Control {
                 m.config.name
             )));
         }
-        let captured = match self.jobs.get(&meas) {
-            Some(j) => j
-                .capture()
-                .ok_or_else(|| invalid(format!("{}: no result to capture yet", m.config.name)))?,
-            None => self.kept.get(meas).cloned().ok_or_else(|| {
-                invalid(format!(
-                    "{}: no result to capture (it has not measured with its current settings)",
-                    m.config.name
-                ))
-            })?,
+        let (captured, at_stop) = match self.jobs.get(&meas) {
+            Some(j) => (
+                j.capture().ok_or_else(|| {
+                    invalid(format!("{}: no result to capture yet", m.config.name))
+                })?,
+                None,
+            ),
+            None => {
+                let k = self.kept.get(meas).cloned().ok_or_else(|| {
+                    invalid(format!(
+                        "{}: no result to capture (it has not measured with its current \
+                         settings)",
+                        m.config.name
+                    ))
+                })?;
+                (k.captured, Some(k.at))
+            }
         };
         let super::Captured { frame, ir } = captured;
         if frame.stamp.session_epoch != self.epoch() {
@@ -324,7 +331,14 @@ impl Control {
             .and_then(|g| self.grids.get(&g).cloned())
             .ok_or_else(|| internal("the frame's grid is not registered"))?;
         if let MeasKind::Math { config } = &m.config.kind {
-            return self.capture_math(&m, config, &frame, kind, grid, columns, name, slot);
+            return self.capture_math(
+                &m,
+                config,
+                &frame,
+                (kind, grid, columns),
+                (name, slot),
+                at_stop.as_ref(),
+            );
         }
         let (delay, nudged, smoothing, depth, input): (
             Seconds,
@@ -358,7 +372,10 @@ impl Control {
             }
         };
         let ready = settled(&m, &frame);
-        let (cal, mic) = self.cal_and_mic(input);
+        let (cal, mic) = match &at_stop {
+            Some(a) => (a.cal.clone(), a.mic.clone()),
+            None => self.cal_and_mic(input),
+        };
         // A transfer function is a ratio of two inputs: no calibration applies to it.
         let cal = if kind == TraceKind::Transfer {
             CalState::Uncalibrated
@@ -394,8 +411,11 @@ impl Control {
             cal,
             mic,
             mic_curve: None,
-            created_at: WallNs(wall_ns()),
-            eq_in: self.eq_in_live(meas),
+            created_at: at_stop.as_ref().map_or(WallNs(wall_ns()), |a| a.wall),
+            eq_in: match &at_stop {
+                Some(a) => a.eq_in.clone(),
+                None => self.eq_in_live(meas),
+            },
             captured_unsettled: position.is_some() && !ready,
             position,
             superseded: false,
@@ -437,11 +457,9 @@ impl Control {
         m: &Measurement,
         config: &MathConfig,
         frame: &Frame,
-        kind: TraceKind,
-        grid: GridDef,
-        columns: Columns,
-        name: String,
-        slot: Option<u8>,
+        (kind, grid, columns): (TraceKind, GridDef, Columns),
+        (name, slot): (String, Option<u8>),
+        at_stop: Option<&super::kept::AtStop>,
     ) -> Result<ReplyBody, ProtoError> {
         let (state, delay, smoothing): (Option<&MathState>, Seconds, Option<Smoothing>) =
             match &frame.data {
@@ -465,7 +483,10 @@ impl Control {
             .filter(|s| s.status == OperandStatus::Included)
             .map(|s| NamedOperand {
                 operand: s.operand,
-                name: self.operand_name(s.operand),
+                // A stopped math trace's operands as they were named when it stopped.
+                name: at_stop
+                    .and_then(|a| a.names.iter().find(|(o, _)| *o == s.operand))
+                    .map_or_else(|| self.operand_name(s.operand), |(_, n)| n.clone()),
             })
             .collect();
         let enough = match &config.expr {
@@ -502,8 +523,11 @@ impl Control {
             cal: CalState::Uncalibrated,
             mic: None,
             mic_curve: None,
-            created_at: WallNs(wall_ns()),
-            eq_in: self.eq_in_math(config),
+            created_at: at_stop.map_or(WallNs(wall_ns()), |a| a.wall),
+            eq_in: match at_stop {
+                Some(a) => a.eq_in.clone(),
+                None => self.eq_in_math(config),
+            },
             position: None,
             captured_unsettled: false,
             superseded: false,
@@ -562,10 +586,10 @@ impl Control {
                 "trace {id} is locked; unlock it to change its curve"
             )));
         }
-        for other in meta::take_slot(&self.store.state().traces, id, edit.owner, edit.slot) {
+        t.edit = edit;
+        for other in meta::take_slot(&self.store.state().traces, id, t.slot_holder(), t.edit.slot) {
             self.commit(Change::Trace(Patch::Set(other)));
         }
-        t.edit = edit;
         self.commit(Change::Trace(Patch::Set(t.clone())));
         Ok(ReplyBody::Trace(t))
     }

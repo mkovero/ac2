@@ -202,6 +202,17 @@ impl Control {
                         .cloned()
                     {
                         t.edit.owner = TraceOwner::Imported;
+                        // The imported group has one set of slots: a slot another of its
+                        // traces holds is not taken from it.
+                        let held = self.store.state().traces.iter().any(|o| {
+                            o.id != t.id
+                                && o.edit.owner == TraceOwner::Imported
+                                && o.edit.slot.is_some()
+                                && o.edit.slot == t.edit.slot
+                        });
+                        if held {
+                            t.edit.slot = None;
+                        }
                         self.commit(Change::Trace(Patch::Set(t)));
                     }
                 }

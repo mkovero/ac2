@@ -472,6 +472,31 @@ pub struct TraceMeta {
     pub superseded: bool,
 }
 
+/// Whose slots 1…9 a trace's slot is one of. A capture's slots are the live curve's it was
+/// taken of (a measurement's or a math trace's), so one key stores every curve a pane draws
+/// into the same slot number and each keeps its own; a trace in the imported group shares
+/// that group's slots; any other trace has its owner's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SlotHolder {
+    /// The live curve (measurement or math trace) a capture was taken of.
+    Curve(MeasId),
+    /// The trace's owner.
+    Owner(TraceOwner),
+}
+
+impl TraceMeta {
+    /// Whose slots this trace's slot is one of.
+    pub fn slot_holder(&self) -> SlotHolder {
+        match (&self.source, self.edit.owner) {
+            (_, TraceOwner::Imported) => SlotHolder::Owner(TraceOwner::Imported),
+            (TraceSource::Captured { meas, .. } | TraceSource::Math { meas, .. }, _) => {
+                SlotHolder::Curve(*meas)
+            }
+            (_, owner) => SlotHolder::Owner(owner),
+        }
+    }
+}
+
 /// A session saved by `file.save` (reply to `file.save` / `file.load`, rows of `file.list`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

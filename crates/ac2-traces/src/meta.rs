@@ -1,7 +1,7 @@
 //! Trace metadata rules the daemon applies: fresh edits, colours, slots and what a lock
 //! protects.
 
-use ac2_proto::model::{Polarity, Rgb, TraceEdit, TraceMeta, TraceOwner};
+use ac2_proto::model::{Polarity, Rgb, SlotHolder, TraceEdit, TraceMeta, TraceOwner};
 use ac2_proto::units::{Db, Seconds, TraceId};
 
 /// Okabe–Ito colours (distinguishable with the common colour-vision deficiencies), without
@@ -109,13 +109,12 @@ pub fn lock_allows(old: &TraceEdit, new: &TraceEdit) -> bool {
             && old.smoothing == new.smoothing)
 }
 
-/// Other traces of `owner` that hold `slot` and must give it up for trace `id`, with the
-/// slot cleared. Slots are per owner: each measurement's captures have slots 1…9 of their
-/// own, so one key captures every measurement a pane draws into the same slot number.
+/// Other traces of `holder` that hold `slot` and must give it up for trace `id`, with the
+/// slot cleared ([`SlotHolder`]: a capture's slots are its source curve's).
 pub fn take_slot(
     traces: &[TraceMeta],
     id: TraceId,
-    owner: TraceOwner,
+    holder: SlotHolder,
     slot: Option<u8>,
 ) -> Vec<TraceMeta> {
     let Some(slot) = slot else {
@@ -123,13 +122,31 @@ pub fn take_slot(
     };
     traces
         .iter()
-        .filter(|t| t.id != id && t.edit.owner == owner && t.edit.slot == Some(slot))
+        .filter(|t| t.id != id && t.slot_holder() == holder && t.edit.slot == Some(slot))
         .map(|t| {
             let mut t = t.clone();
             t.edit.slot = None;
             t
         })
         .collect()
+}
+
+/// Clears the slot of every trace whose slot an earlier one of the same holder already
+/// holds: traces re-filed together (into the imported group, or read from a file) keep
+/// their slot numbers only where they are unique, the first in order keeping it. Whether
+/// anything changed.
+pub fn unique_slots<'a>(traces: impl IntoIterator<Item = &'a mut TraceMeta>) -> bool {
+    let mut held = std::collections::HashSet::new();
+    let mut changed = false;
+    for t in traces {
+        if let Some(s) = t.edit.slot
+            && !held.insert((t.slot_holder(), s))
+        {
+            t.edit.slot = None;
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// A file name for an export of `name`: path separators and control characters replaced.

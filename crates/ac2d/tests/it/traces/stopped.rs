@@ -31,6 +31,29 @@ fn capture(c: &mut Client, name: &str) -> Result<ac2_proto::ReplyBody, ac2_proto
     })
 }
 
+const NOTHING_KEPT: &str =
+    "main: no result to capture (it has not measured with its current settings)";
+
+/// Measurement `meas`'s frames a late subscriber gets from the daemon's slots.
+fn meas_frames(r: &Rig, meas: MeasId) -> Vec<Frame> {
+    let d = format!("d/{}/", meas.0);
+    late_frames(r, &[d.as_bytes()])
+}
+
+/// Measurement 1 run on, then stopped with a result kept.
+fn run_and_stop(r: &mut Rig) {
+    r.c.ok(Command::MeasStart { meas: MeasId(1) });
+    settle(&mut r.d, &mut r.c, &r.sub, r.tok, 0);
+    r.c.ok(Command::MeasStop { meas: MeasId(1) });
+    assert!(!meas_frames(r, MeasId(1)).is_empty());
+}
+
+/// Its kept result gone: a capture is refused and no frame of it is left to draw.
+fn nothing_kept(r: &mut Rig) {
+    assert_eq!(capture(&mut r.c, "gone").unwrap_err().msg, NOTHING_KEPT);
+    assert!(meas_frames(r, MeasId(1)).is_empty());
+}
+
 /// A 1/48 transfer whose IR nobody watched leaves its final `tf` and IR at the stop, under
 /// one stamp; a capture after the stop stores that result, IR included.
 #[test]
@@ -188,5 +211,249 @@ fn each_measurement_has_its_own_slots() {
     assert_eq!(slot_of(a.id), None);
     assert_eq!(slot_of(b.id), Some(1));
     assert_eq!(slot_of(a2.id), Some(1));
+    r.h.shutdown();
+}
+
+/// A second stop keeps the result; a new delay, a configuration that restarts the averages
+/// and the session closing each drop it with its frames; a delete drops the frames.
+#[test]
+fn slow_what_keeps_and_what_drops_the_kept_result() {
+    let mut r = rig("stopped-drops");
+    r.c.ok(Command::MeasStop { meas: MeasId(1) });
+    r.c.ok(Command::MeasStop { meas: MeasId(1) });
+    capture(&mut r.c, "twice stopped").unwrap();
+    assert!(!meas_frames(&r, MeasId(1)).is_empty());
+
+    r.c.ok(Command::DelaySet {
+        meas: MeasId(1),
+        delay: Seconds(0.001),
+    });
+    nothing_kept(&mut r);
+
+    run_and_stop(&mut r);
+    let mut cfg = r.c.state().measurements[0].config.clone();
+    if let MeasKind::Transfer { config } = &mut cfg.kind {
+        config.lf_window = LfWindow::Long;
+    }
+    r.c.update_ok(MeasId(1), cfg);
+    nothing_kept(&mut r);
+
+    // Reset while stopped: a new config rev says the frames held are not its result.
+    run_and_stop(&mut r);
+    let rev = r.c.state().measurements[0].config_rev;
+    r.c.ok(Command::MeasReset { meas: MeasId(1) });
+    assert!(r.c.state().measurements[0].config_rev > rev);
+    nothing_kept(&mut r);
+
+    r.c.ok(Command::MeasCreate {
+        config: transfer("second"),
+    });
+    let second = r.c.state().measurements.last().unwrap().id;
+    r.c.ok(Command::MeasStart { meas: second });
+    for _ in 0..5 {
+        run(&mut r.d, 0.5);
+        r.c.ok(Command::GenRefresh { lease_token: r.tok });
+    }
+    r.c.ok(Command::MeasStop { meas: second });
+    assert!(!meas_frames(&r, second).is_empty());
+    r.c.ok(Command::MeasDelete {
+        meas: second,
+        traces: OwnedTraces::Delete,
+    });
+    assert!(meas_frames(&r, second).is_empty());
+
+    // The audio closing ends every job and what they kept.
+    run_and_stop(&mut r);
+    r.c.ok(Command::SessionClose);
+    assert!(meas_frames(&r, MeasId(1)).is_empty());
+    r.c.ok(Command::SessionOpen {
+        config: session(true),
+    });
+    assert!(r.c.state().measurements.iter().any(|m| m.id == MeasId(1)));
+    nothing_kept(&mut r);
+    r.h.shutdown();
+}
+
+/// A display smoothing change of a stopped transfer: its final `tf` goes out again under the
+/// new config rev, smoothed as a running job would send it, and a capture stores the
+/// unsmoothed columns with the new smoothing as its display edit.
+#[test]
+fn a_smoothing_change_while_stopped_relabels_the_kept_result() {
+    let mut r = rig("stopped-smoothing");
+    r.c.ok(Command::MeasStop { meas: MeasId(1) });
+    let plain = r.c.trace(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "plain".into(),
+        slot: None,
+    });
+    let plain = data(&mut r.c, plain.id);
+    let mut cfg = r.c.state().measurements[0].config.clone();
+    if let MeasKind::Transfer { config } = &mut cfg.kind {
+        config.smoothing = Some(Smoothing {
+            fraction: SmoothingFraction::Third,
+            mode: SmoothingMode::Magnitude,
+        });
+    }
+    r.c.update_ok(MeasId(1), cfg);
+    let rev = r.c.state().measurements[0].config_rev;
+    let got = late_frames(&r, &[b"d/1/tf"]);
+    let tf = got
+        .iter()
+        .rev()
+        .find_map(|f| match &f.data {
+            FrameData::Tf(t) => Some((f, t)),
+            _ => None,
+        })
+        .expect("the tf again");
+    assert_eq!(tf.0.stamp.config_rev, rev);
+    assert_eq!(
+        tf.1.meta.smoothing.map(|s| s.fraction),
+        Some(SmoothingFraction::Third)
+    );
+    let differs = band()
+        .into_iter()
+        .any(|i| (tf.1.mag[i] - plain.mag_db[i]).abs() > 0.05);
+    assert!(differs, "the frame is drawn smoothed");
+
+    let t = r.c.trace(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "smoothed".into(),
+        slot: None,
+    });
+    assert_eq!(
+        t.edit.smoothing.map(|s| s.fraction),
+        Some(SmoothingFraction::Third)
+    );
+    // Shown as the frame draws it; stored unsmoothed, as its smoothing taken off shows.
+    let shown = data(&mut r.c, t.id);
+    let t = set_smoothing(&mut r.c, &t, None);
+    let stored = data(&mut r.c, t.id);
+    for i in band() {
+        assert!(
+            (shown.mag_db[i] - tf.1.mag[i]).abs() < 0.05,
+            "{} Hz: {} shown, {} drawn",
+            grid_freq(i),
+            shown.mag_db[i],
+            tf.1.mag[i]
+        );
+        assert!(
+            (stored.mag_db[i] - plain.mag_db[i]).abs() < 1e-4,
+            "{} Hz: stored unsmoothed",
+            grid_freq(i)
+        );
+    }
+    r.h.shutdown();
+}
+
+/// A spectrum's capture depends on the smoothing its job forms, so a smoothing change while
+/// stopped drops its kept result and its frames.
+#[test]
+fn a_spectrum_smoothing_change_while_stopped_drops_the_kept_result() {
+    let mut r = rig("stopped-spec-smoothing");
+    let spec = r.c.measurement(Command::MeasCreate {
+        config: MeasConfig {
+            scope: MeasScope::Session,
+            name: "spec".into(),
+            kind: MeasKind::Spectrum {
+                config: SpectrumConfig::on_input(1),
+            },
+        },
+    });
+    r.c.ok(Command::MeasStart { meas: spec.id });
+    settle(&mut r.d, &mut r.c, &r.sub, r.tok, 0);
+    r.c.ok(Command::MeasStop { meas: spec.id });
+    let into = |c: &mut Client| {
+        c.call(Command::TraceCapture {
+            meas: spec.id,
+            name: "spec".into(),
+            slot: None,
+        })
+    };
+    into(&mut r.c).unwrap();
+    let mut cfg = spec.config.clone();
+    if let MeasKind::Spectrum { config } = &mut cfg.kind {
+        config.smoothing = Some(SmoothingFraction::Third);
+    }
+    r.c.update_ok(spec.id, cfg);
+    assert!(into(&mut r.c).is_err());
+    assert!(meas_frames(&r, spec.id).is_empty());
+    r.h.shutdown();
+}
+
+/// A capture after the stop is of the result as it stopped: dated at the stop, whenever it
+/// is taken.
+#[test]
+fn a_capture_after_the_stop_is_dated_at_the_stop() {
+    let mut r = rig("stopped-dated");
+    let now = || {
+        let d = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("after 1970");
+        WallNs(u64::try_from(d.as_nanos()).expect("in range"))
+    };
+    let before = now();
+    r.c.ok(Command::MeasStop { meas: MeasId(1) });
+    let stopped = now();
+    std::thread::sleep(Duration::from_millis(50));
+    let a = r.c.trace(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "a".into(),
+        slot: None,
+    });
+    std::thread::sleep(Duration::from_millis(50));
+    let b = r.c.trace(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "b".into(),
+        slot: None,
+    });
+    assert_eq!(a.created_at, b.created_at);
+    assert!(a.created_at >= before && a.created_at <= stopped, "{a:?}");
+    r.h.shutdown();
+}
+
+/// A capture's slot is its source curve's, wherever it is filed: moved under another
+/// measurement, it still gives up slot 1 to the next capture of its own curve. Kept into
+/// the imported group by deleting their measurements, two traces in slot 1 leave it to one.
+#[test]
+fn a_slot_is_the_source_curves() {
+    let mut r = rig("slots-per-source");
+    r.c.ok(Command::MeasCreate {
+        config: transfer("second"),
+    });
+    let second = r.c.state().measurements.last().unwrap().id;
+    r.c.ok(Command::MeasStart { meas: second });
+    settle(&mut r.d, &mut r.c, &r.sub, r.tok, 0);
+    let into_1 = |c: &mut Client, meas: MeasId, name: &str| {
+        c.trace(Command::TraceCapture {
+            meas,
+            name: name.into(),
+            slot: Some(1),
+        })
+    };
+    let a = into_1(&mut r.c, MeasId(1), "main S1");
+    let mut e = a.edit.clone();
+    e.owner = TraceOwner::Meas { meas: second };
+    r.c.ok(Command::TraceUpdate {
+        trace: a.id,
+        edit: e,
+    });
+    let b = into_1(&mut r.c, second, "second S1");
+    let slot_of = |c: &mut Client, id| traces(c).iter().find(|t| t.id == id).unwrap().edit.slot;
+    assert_eq!(slot_of(&mut r.c, a.id), Some(1), "another curve's slot 1");
+    let a2 = into_1(&mut r.c, MeasId(1), "main S1 again");
+    assert_eq!(slot_of(&mut r.c, a.id), None);
+    assert_eq!(slot_of(&mut r.c, a2.id), Some(1));
+
+    for m in [MeasId(1), second] {
+        r.c.ok(Command::MeasDelete {
+            meas: m,
+            traces: OwnedTraces::Keep,
+        });
+    }
+    let all = traces(&mut r.c);
+    let in_1: Vec<_> = all.iter().filter(|t| t.edit.slot == Some(1)).collect();
+    assert_eq!(in_1.len(), 1, "{all:?}");
+    assert!(all.iter().all(|t| t.edit.owner == TraceOwner::Imported));
+    assert!([a2.id, b.id].contains(&in_1[0].id));
     r.h.shutdown();
 }
