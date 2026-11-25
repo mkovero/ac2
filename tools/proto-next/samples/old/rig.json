@@ -1,0 +1,751 @@
+{
+  "artnet_fade": 2.5,
+  "artnet_target": null,
+  "ceiling_dbfs": -30.0,
+  "format": "ac2-rig-settings",
+  "levels": {
+    "ballistic": "true_peak",
+    "correlation_gate": -60.0,
+    "correlation_window": "long",
+    "loudness_target": -23.0,
+    "over_threshold": 0.0
+  },
+  "meters": [
+    {
+      "colour": null,
+      "config": {
+        "kind": {
+          "config": {
+            "bands": {
+              "correction": {
+                "impulse": "plus5",
+                "tonal": "none"
+              },
+              "predicted": {
+                "cue": null,
+                "day": null,
+                "duration": 3600.0,
+                "night": 25.0,
+                "warn_margin": 3.0
+              },
+              "transfer": {
+                "bands": [
+                  {
+                    "attenuation": 20.0,
+                    "status": "unchecked"
+                  },
+                  {
+                    "attenuation": 25.5,
+                    "status": "clean"
+                  },
+                  {
+                    "attenuation": 30.0,
+                    "margin": 5.5,
+                    "status": "corrected"
+                  },
+                  {
+                    "at_least": 35.0,
+                    "status": "unusable"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  },
+                  {
+                    "status": "missing"
+                  }
+                ],
+                "measured_at": 1789500000000000000,
+                "origin": "measured",
+                "place": "flat 4 bedroom"
+              },
+              "windows": [
+                {
+                  "band": 20.0,
+                  "cue": null,
+                  "day_offset": 5.0,
+                  "duration": 3600.0,
+                  "limit": 74.0,
+                  "warn_margin": 3.0,
+                  "weighting": "z"
+                },
+                {
+                  "band": 25.0,
+                  "cue": null,
+                  "day_offset": 5.0,
+                  "duration": 3600.0,
+                  "limit": 64.0,
+                  "warn_margin": 3.0,
+                  "weighting": "z"
+                },
+                {
+                  "band": 31.5,
+                  "cue": null,
+                  "day_offset": 5.0,
+                  "duration": 3600.0,
+                  "limit": 56.0,
+                  "warn_margin": 3.0,
+                  "weighting": "z"
+                },
+                {
+                  "band": 40.0,
+                  "cue": null,
+                  "day_offset": 5.0,
+                  "duration": 3600.0,
+                  "limit": 49.0,
+                  "warn_margin": 3.0,
+                  "weighting": "z"
+                },
+                {
+                  "band": 50.0,
+                  "cue": null,
+                  "day_offset": 5.0,
+                  "duration": 3600.0,
+                  "limit": 44.0,
+                  "warn_margin": 3.0,
+                  "weighting": "z"
+                },
+                {
+                  "band": 63.0,
+                  "cue": null,
+                  "day_offset": 5.0,
+                  "duration": 3600.0,
+                  "limit": 42.0,
+                  "warn_margin": 3.0,
+                  "weighting": "z"
+                },
+                {
+                  "band": 80.0,
+                  "cue": null,
+                  "day_offset": 5.0,
+                  "duration": 3600.0,
+                  "limit": 40.0,
+                  "warn_margin": 3.0,
+                  "weighting": "z"
+                },
+                {
+                  "band": 100.0,
+                  "cue": null,
+                  "day_offset": 5.0,
+                  "duration": 3600.0,
+                  "limit": 38.0,
+                  "warn_margin": 3.0,
+                  "weighting": "z"
+                },
+                {
+                  "band": 125.0,
+                  "cue": null,
+                  "day_offset": 5.0,
+                  "duration": 3600.0,
+                  "limit": 36.0,
+                  "warn_margin": 3.0,
+                  "weighting": "z"
+                },
+                {
+                  "band": 160.0,
+                  "cue": null,
+                  "day_offset": 5.0,
+                  "duration": 3600.0,
+                  "limit": 34.0,
+                  "warn_margin": 3.0,
+                  "weighting": "z"
+                },
+                {
+                  "band": 200.0,
+                  "cue": null,
+                  "day_offset": 5.0,
+                  "duration": 3600.0,
+                  "limit": 32.0,
+                  "warn_margin": 3.0,
+                  "weighting": "z"
+                },
+                {
+                  "band": 1000.0,
+                  "cue": {
+                    "fault": {
+                      "dmx": [
+                        {
+                          "channel": 512,
+                          "value": 255
+                        }
+                      ],
+                      "osc": null
+                    },
+                    "near": {
+                      "dmx": [],
+                      "osc": {
+                        "append_level": false,
+                        "args": [
+                          {
+                            "type": "float",
+                            "value": 0.5
+                          },
+                          {
+                            "type": "str",
+                            "value": "near"
+                          }
+                        ],
+                        "path": "/light/red"
+                      }
+                    },
+                    "ok": {
+                      "dmx": [
+                        {
+                          "channel": 12,
+                          "value": 0
+                        },
+                        {
+                          "channel": 13,
+                          "value": 255
+                        }
+                      ],
+                      "osc": {
+                        "append_level": false,
+                        "args": [
+                          {
+                            "type": "int",
+                            "value": 0
+                          }
+                        ],
+                        "path": "/light/red"
+                      }
+                    },
+                    "over": {
+                      "dmx": [
+                        {
+                          "channel": 12,
+                          "value": 255
+                        },
+                        {
+                          "channel": 14,
+                          "value": 40
+                        }
+                      ],
+                      "osc": {
+                        "append_level": true,
+                        "args": [
+                          {
+                            "type": "int",
+                            "value": 1
+                          }
+                        ],
+                        "path": "/light/red"
+                      }
+                    }
+                  },
+                  "day_offset": null,
+                  "duration": 900.0,
+                  "limit": 30.5,
+                  "warn_margin": 2.0,
+                  "weighting": "a"
+                }
+              ]
+            },
+            "cue": {
+              "fault": {
+                "dmx": [
+                  {
+                    "channel": 512,
+                    "value": 255
+                  }
+                ],
+                "osc": null
+              },
+              "near": {
+                "dmx": [],
+                "osc": {
+                  "append_level": false,
+                  "args": [
+                    {
+                      "type": "float",
+                      "value": 0.5
+                    },
+                    {
+                      "type": "str",
+                      "value": "near"
+                    }
+                  ],
+                  "path": "/light/red"
+                }
+              },
+              "ok": {
+                "dmx": [
+                  {
+                    "channel": 12,
+                    "value": 0
+                  },
+                  {
+                    "channel": 13,
+                    "value": 255
+                  }
+                ],
+                "osc": {
+                  "append_level": false,
+                  "args": [
+                    {
+                      "type": "int",
+                      "value": 0
+                    }
+                  ],
+                  "path": "/light/red"
+                }
+              },
+              "over": {
+                "dmx": [
+                  {
+                    "channel": 12,
+                    "value": 255
+                  },
+                  {
+                    "channel": 14,
+                    "value": 40
+                  }
+                ],
+                "osc": {
+                  "append_level": true,
+                  "args": [
+                    {
+                      "type": "int",
+                      "value": 1
+                    }
+                  ],
+                  "path": "/light/red"
+                }
+              }
+            },
+            "input": 1,
+            "leq": {
+              "horizon": 60.0,
+              "peaks": {
+                "lafmax": null,
+                "lcpeak": {
+                  "cue": null,
+                  "limit": 135.0,
+                  "warn_margin": 3.0
+                }
+              },
+              "windows": [
+                {
+                  "cue": null,
+                  "duration": 60.0,
+                  "limit": null,
+                  "warn_margin": 3.0,
+                  "weighting": "a"
+                },
+                {
+                  "cue": null,
+                  "duration": 1800.0,
+                  "limit": 99.0,
+                  "warn_margin": 3.0,
+                  "weighting": "a"
+                }
+              ]
+            },
+            "peak_weighting": "c",
+            "position": {
+              "level": 2.5,
+              "peak": 1.5
+            },
+            "time_weighting": "fast",
+            "weighting": "a"
+          },
+          "type": "spl"
+        },
+        "name": "FOH SPL",
+        "scope": "rig"
+      },
+      "id": 1,
+      "layout": {
+        "a": {
+          "pane": {
+            "chrome": "full",
+            "content": {
+              "entries": [
+                {
+                  "rig": {
+                    "type": "this_rig"
+                  },
+                  "what": {
+                    "meas": 1,
+                    "type": "group"
+                  }
+                },
+                {
+                  "rig": {
+                    "id": 1147797409030816545,
+                    "name": "ketunkolo",
+                    "type": "rig"
+                  },
+                  "what": {
+                    "trace": 7,
+                    "type": "trace"
+                  }
+                },
+                {
+                  "rig": {
+                    "id": 1147797409030816545,
+                    "name": "ketunkolo",
+                    "type": "rig"
+                  },
+                  "what": {
+                    "meas": 4,
+                    "type": "live"
+                  }
+                }
+              ],
+              "type": "curves"
+            },
+            "dynamics": {
+              "a": {
+                "input": 1,
+                "rig": {
+                  "type": "this_rig"
+                },
+                "trace": 14,
+                "type": "curve"
+              },
+              "all_levels": false,
+              "b": {
+                "type": "off"
+              },
+              "metric": "release_tau",
+              "step": {
+                "burst": 1.0,
+                "level": -8.0
+              },
+              "thd": true,
+              "view": "envelopes"
+            },
+            "kind": "transfer",
+            "levels": {
+              "distortion": null,
+              "spectrum_dbfs": null,
+              "spectrum_spl": null,
+              "transfer": {
+                "hi": 12.0,
+                "lo": -24.0
+              }
+            },
+            "plates": {
+              "harmonics": {
+                "at": null,
+                "scale": 1.0
+              },
+              "legend": {
+                "at": null,
+                "scale": 1.0
+              },
+              "loudness": {
+                "at": null,
+                "scale": 1.0
+              },
+              "mark": {
+                "at": null,
+                "scale": 1.0
+              },
+              "peaks": {
+                "at": null,
+                "scale": 1.0
+              },
+              "readout": {
+                "at": [
+                  0.0,
+                  1.0
+                ],
+                "scale": 2.0
+              }
+            },
+            "programme_view": "meters",
+            "spectrum_camera": {
+              "pitch_deg": 20,
+              "yaw_deg": -30,
+              "zoom_step": 2
+            },
+            "spectrum_view": "spectrograph_3d",
+            "spl_view": "meter_leq",
+            "sweep_view": "response",
+            "transfer_view": "phase"
+          },
+          "type": "pane"
+        },
+        "axis": "row",
+        "b": {
+          "a": {
+            "pane": {
+              "chrome": "no_grid",
+              "content": {
+                "meas": 2,
+                "rig": {
+                  "id": 1147797409030816545,
+                  "name": "ketunkolo",
+                  "type": "rig"
+                },
+                "type": "meter"
+              },
+              "dynamics": {
+                "a": {
+                  "input": 1,
+                  "rig": {
+                    "type": "this_rig"
+                  },
+                  "trace": 14,
+                  "type": "curve"
+                },
+                "all_levels": false,
+                "b": {
+                  "type": "off"
+                },
+                "metric": "release_tau",
+                "step": {
+                  "burst": 1.0,
+                  "level": -8.0
+                },
+                "thd": true,
+                "view": "envelopes"
+              },
+              "kind": "spl",
+              "levels": {
+                "distortion": null,
+                "spectrum_dbfs": null,
+                "spectrum_spl": null,
+                "transfer": null
+              },
+              "plates": {
+                "harmonics": {
+                  "at": null,
+                  "scale": 1.0
+                },
+                "legend": {
+                  "at": null,
+                  "scale": 1.0
+                },
+                "loudness": {
+                  "at": null,
+                  "scale": 1.0
+                },
+                "mark": {
+                  "at": null,
+                  "scale": 1.0
+                },
+                "peaks": {
+                  "at": null,
+                  "scale": 1.0
+                },
+                "readout": {
+                  "at": null,
+                  "scale": 1.0
+                }
+              },
+              "programme_view": "meters",
+              "spectrum_camera": {
+                "pitch_deg": 20,
+                "yaw_deg": -30,
+                "zoom_step": 2
+              },
+              "spectrum_view": "spectrograph_3d",
+              "spl_view": "meter_leq",
+              "sweep_view": "response",
+              "transfer_view": "magnitude"
+            },
+            "type": "pane"
+          },
+          "axis": "column",
+          "b": {
+            "pane": {
+              "chrome": "full",
+              "content": {
+                "left": 2,
+                "rig": {
+                  "type": "this_rig"
+                },
+                "right": 3,
+                "type": "pair"
+              },
+              "dynamics": {
+                "a": {
+                  "input": 1,
+                  "rig": {
+                    "type": "this_rig"
+                  },
+                  "trace": 14,
+                  "type": "curve"
+                },
+                "all_levels": false,
+                "b": {
+                  "type": "off"
+                },
+                "metric": "release_tau",
+                "step": {
+                  "burst": 1.0,
+                  "level": -8.0
+                },
+                "thd": true,
+                "view": "envelopes"
+              },
+              "kind": "programme",
+              "levels": {
+                "distortion": null,
+                "spectrum_dbfs": null,
+                "spectrum_spl": null,
+                "transfer": null
+              },
+              "plates": {
+                "harmonics": {
+                  "at": null,
+                  "scale": 1.0
+                },
+                "legend": {
+                  "at": null,
+                  "scale": 1.0
+                },
+                "loudness": {
+                  "at": null,
+                  "scale": 1.0
+                },
+                "mark": {
+                  "at": null,
+                  "scale": 1.0
+                },
+                "peaks": {
+                  "at": null,
+                  "scale": 1.0
+                },
+                "readout": {
+                  "at": null,
+                  "scale": 1.0
+                }
+              },
+              "programme_view": "goniometer",
+              "spectrum_camera": {
+                "pitch_deg": 20,
+                "yaw_deg": -30,
+                "zoom_step": 2
+              },
+              "spectrum_view": "spectrograph_3d",
+              "spl_view": "meter_leq",
+              "sweep_view": "response",
+              "transfer_view": "magnitude"
+            },
+            "type": "pane"
+          },
+          "ratio": 0.5,
+          "type": "split"
+        },
+        "ratio": 0.625,
+        "type": "split"
+      },
+      "running": true
+    }
+  ],
+  "monitor_at_start": true,
+  "monitor_session": {
+    "backend": null,
+    "buffer_frames": 256,
+    "input_channels": [
+      0,
+      1,
+      32768
+    ],
+    "input_device": {
+      "type": "default"
+    },
+    "link_offset": null,
+    "loopback": null,
+    "output_channels": 2,
+    "output_device": {
+      "type": "default"
+    },
+    "remote_inputs": [
+      {
+        "channel": 2,
+        "rig": 18446744073709551557,
+        "rig_name": "rig-b",
+        "slot": 0
+      }
+    ],
+    "sample_rate_hz": 48000,
+    "spare_inputs": 0
+  },
+  "osc_target": null,
+  "outputs": [
+    {
+      "channel": 0,
+      "label": "Main L"
+    }
+  ],
+  "peers": [
+    {
+      "ctrl": "tcp://192.168.1.21:47820",
+      "data": "tcp://192.168.1.21:47821",
+      "key": "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7",
+      "name": "rig-b",
+      "rig": 18446744073709551557
+    }
+  ],
+  "version": 11
+}

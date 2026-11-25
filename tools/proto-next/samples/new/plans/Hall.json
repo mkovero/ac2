@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "name": "Hall",
+  "outline": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      20.0,
+      0.0
+    ],
+    [
+      20.0,
+      30.0
+    ],
+    [
+      0.0,
+      30.0
+    ]
+  ],
+  "ceiling": 9.5,
+  "zones": [
+    {
+      "name": "Stalls",
+      "outline": [
+        [
+          2.0,
+          8.0
+        ],
+        [
+          18.0,
+          8.0
+        ],
+        [
+          18.0,
+          28.0
+        ],
+        [
+          2.0,
+          28.0
+        ]
+      ],
+      "ear_height": 1.2,
+      "weight": null,
+      "seats": 600
+    }
+  ],
+  "markers": [
+    {
+      "name": "FOH",
+      "kind": "foh",
+      "at": [
+        10.0,
+        20.0,
+        1.5
+      ],
+      "heading_deg": -90.0
+    },
+    {
+      "name": "Main L",
+      "kind": "speaker",
+      "at": [
+        4.0,
+        1.0,
+        6.0
+      ],
+      "heading_deg": 90.0
+    }
+  ],
+  "surfaces": [
+    {
+      "surface": {
+        "type": "wall",
+        "edge": 2
+      },
+      "material": "brick"
+    }
+  ]
+}

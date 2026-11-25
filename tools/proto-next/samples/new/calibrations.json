@@ -1,0 +1,182 @@
+{
+  "format": "ac2-calibrations",
+  "inputs": [
+    {
+      "channel": 1,
+      "kind": {
+        "curve": {
+          "label": "0°",
+          "type": "curve"
+        },
+        "type": "mic",
+        "mic": "M30 #1234"
+      },
+      "pair": null
+    },
+    {
+      "channel": 2,
+      "kind": {
+        "curve": {
+          "type": "not_chosen"
+        },
+        "type": "mic",
+        "mic": null
+      },
+      "pair": null
+    },
+    {
+      "channel": 3,
+      "kind": {
+        "curve": {
+          "type": "off"
+        },
+        "type": "mic",
+        "mic": "ECM"
+      },
+      "pair": null
+    },
+    {
+      "channel": 4,
+      "kind": {
+        "type": "line"
+      },
+      "pair": "left"
+    },
+    {
+      "channel": 5,
+      "kind": {
+        "type": "line"
+      },
+      "pair": "right"
+    },
+    {
+      "channel": 6,
+      "kind": {
+        "type": "digital"
+      },
+      "pair": null
+    }
+  ],
+  "lines": [
+    {
+      "key": {
+        "channel": 4,
+        "device": "hw:UMC1820"
+      },
+      "line": {
+        "calibrated_at": "1789100000000000000",
+        "measured": -9.0,
+        "v_fs": 3.4615,
+        "volts": 1.2277
+      }
+    }
+  ],
+  "mics": [
+    {
+      "curves": [
+        {
+          "points": [
+            [
+              20.0,
+              -1.5
+            ],
+            [
+              20000.0,
+              2.0
+            ]
+          ],
+          "reference": {
+            "content_hash": "af63bd4c8601b7df",
+            "f_hi": 20000.0,
+            "f_lo": 20.0,
+            "file_name": "M30-1234.frd",
+            "imported_at": "1788000000000000000",
+            "label": "0°",
+            "points": 2,
+            "stated_sensitivity": null
+          }
+        },
+        {
+          "points": [
+            [
+              20.0,
+              -1.5
+            ],
+            [
+              20000.0,
+              2.0
+            ]
+          ],
+          "reference": {
+            "content_hash": "0123456789abcdef",
+            "f_hi": 20000.0,
+            "f_lo": 20.0,
+            "file_name": "M30-1234-90.frd",
+            "imported_at": "1788000000000000000",
+            "label": "90°",
+            "points": 2,
+            "stated_sensitivity": 15.0
+          }
+        }
+      ],
+      "name": "M30 #1234"
+    }
+  ],
+  "pairs": [
+    {
+      "left": 4,
+      "name": "Main",
+      "right": 5
+    }
+  ],
+  "sensitivities": [
+    {
+      "key": {
+        "channel": 1,
+        "device": "hw:UMC1820",
+        "mic": "M30 #1234"
+      },
+      "spl": {
+        "calibrated_at": "1789000000000000000",
+        "freq": 1000.0,
+        "measured": -26.5,
+        "method": {
+          "calibrator_level": 94.0,
+          "type": "acoustic"
+        },
+        "sensitivity": 120.5
+      }
+    },
+    {
+      "key": {
+        "channel": 2,
+        "device": "hw:UMC1820",
+        "mic": "M30 #1234"
+      },
+      "spl": {
+        "calibrated_at": "1789000000000000000",
+        "freq": 1000.0,
+        "measured": -40.0,
+        "method": {
+          "connection": "in_line",
+          "full_scale": 1.5,
+          "loading": {
+            "input_impedance": 2000.0,
+            "mic_impedance": 330.0
+          },
+          "mic_sensitivity": 15.0,
+          "mic_sensitivity_from": {
+            "file_name": "449350_34804_0Grad.txt",
+            "label": "0°",
+            "type": "data_sheet"
+          },
+          "type": "electrical",
+          "uncertainty": 1.0,
+          "volts": 0.015
+        },
+        "sensitivity": 135.31
+      }
+    }
+  ],
+  "version": 5
+}

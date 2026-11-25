@@ -439,3 +439,5 @@ jobs:
       - run: pip install -r tools/protocol/requirements.txt
       - name: Python decodes Rust fixtures and matches expectations
         run: python tools/protocol/fixtures.py check
+      - name: The stored-file converter turns 105 samples into what 106 loads
+        run: python -I tools/proto-next/test_convert.py

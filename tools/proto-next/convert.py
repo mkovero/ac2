@@ -11,6 +11,9 @@ A 106 daemon started before that sets an old authorized-clients file aside as
 `authorized_clients.damaged-<time>`: convert that file and put it back as
 `authorized_clients`, the daemon stopped.
 
+Run it as the daemon's user: a file another user owns is refused, since the rewritten
+file would belong to whoever ran this.
+
 Each file is rewritten atomically; the original is kept beside it as `<name>.pre106`
 (`.pre106.1`, … when an earlier run's backup is there: none is ever written over).
 A file already in the new shape is left alone. Covers, per file:
@@ -266,10 +269,23 @@ def keep_original(path, mode):
     return keep
 
 
+def check_owner(st):
+    """Refuses a file another user owns: the new file is created by whoever runs this, and
+    the daemon refuses an authorized-clients file it does not own (every network client
+    locked out) and could not rewrite a settings file it does not own."""
+    if hasattr(os, "geteuid") and st.st_uid != os.geteuid():
+        raise ValueError(
+            f"owned by uid {st.st_uid}, not by this user (uid {os.geteuid()}): "
+            "run the converter as the daemon's user"
+        )
+
+
 def write_beside(path, text, mode=None):
     """Writes `text` over `path` atomically, with `mode` (default: its own); the original
     kept beside it ([`keep_original`]), with the same mode."""
-    mode = os.stat(path).st_mode & 0o777 if mode is None else mode
+    st = os.stat(path)
+    check_owner(st)
+    mode = st.st_mode & 0o777 if mode is None else mode
     keep = keep_original(path, mode)
     d = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".convert-")

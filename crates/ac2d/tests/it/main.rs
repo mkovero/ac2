@@ -17,6 +17,7 @@ mod client_lease;
 mod client_sync;
 mod clocks;
 mod common;
+mod converted;
 mod dedup;
 mod devices;
 mod discovery;
