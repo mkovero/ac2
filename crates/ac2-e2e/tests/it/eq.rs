@@ -116,22 +116,28 @@ fn eq_editor_from_an_empty_daemon() -> R {
     // A capture, then P on its row predicts it too.
     d.key("Escape");
     assert!(!matches!(d.st.overlay, Overlay::Eq(_)));
+    // Ctrl+1 takes every live curve the pane draws: the prediction is captured too.
     d.key("Ctrl+1");
-    d.until("the capture", |s| {
-        s.trace_list().iter().any(|t| {
-            t.edit.owner == ac2_proto::model::TraceOwner::Meas { meas: m.id }
-                && matches!(t.source, ac2_proto::model::TraceSource::Captured { .. })
-        })
-    })?;
+    // The live curve and the two captures, each a curve the editor can predict.
+    let curves = |s: &AppState| {
+        meas(s, m.id).map_or(0, |x| ac2_ui::eq_editor::curves(x, &s.trace_list()).len())
+    };
+    d.until("both captures", |s| curves(s) == 3)?;
+    let plain = format!("{} S1", m.config.name);
     let capture =
         d.st.trace_list()
             .iter()
-            .find(|t| matches!(t.source, ac2_proto::model::TraceSource::Captured { .. }))
+            .find(|t| t.edit.name == plain)
             .map(|t| (t.id, t.edit.name.clone()))
             .ok_or("capture")?;
+    let meas_now = meas(&d.st, m.id).ok_or("the measurement")?.clone();
+    let row = ac2_ui::eq_editor::curves(&meas_now, &d.st.trace_list())
+        .iter()
+        .position(|c| c.operand == Operand::Trace { trace: capture.0 })
+        .ok_or("the capture's row")?;
     d.key("Alt+E");
-    // Header, the section, the live curve, the capture.
-    for _ in 0..3 {
+    // Header, the section, then the curves: the live one, the captures.
+    for _ in 0..2 + row {
         d.key("Down");
     }
     d.key("P");
