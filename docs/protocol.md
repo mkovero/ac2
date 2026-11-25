@@ -358,6 +358,10 @@ rig measurements meter with no client connected; the generator stays disarmed), 
 ([`DmxSet`]: the cue universe's channels above 0, in channel order, whether or not a target is
 set), `cues` ([`RigCue`] {`meas`, `subject`:
 `CueSubject`, `state`: `CueState`}: every cued subject's state as last sent) and
+`zone` (`TimeZone` {`name`: str \| nil, the IANA name when the host has one, nil when the OS
+gives only an offset (a POSIX `TZ` rule); `utc_offset_s`: i32, the offset in force now, s
+east}: read from the OS at start and once a minute, committed when either part changes,
+so a daylight-saving change is an ordinary `rig` event),
 `damaged_files` ([`DamagedFile`] {`kind`: `StateFile`, `path`, `set_aside_as`: str \| nil,
 `reason`, `at`: `WallNs`}: state files found damaged at this start, set aside and replaced
 by their previous copy or a default; empty on a sound start, kept until the daemon restarts).
@@ -944,16 +948,38 @@ and no correction. A configuration outside these bounds is `invalid` at `meas.cr
 Every running SPL meter integrates its input (after the mic curve, when on) into one-second
 blocks of A-, C- and Z-weighted energy on a grid of whole seconds from its first sample;
 lost samples (a capture discontinuity) move the grid on without energy or measured time.
-Each second is a log row, `SplLogRow` = {`start`: WallNs, `measured`: Seconds (< 1 next to
-a gap), `laeq`, `lceq`, `lzeq`: Dbfs over the measured time, `lcpeak`, `lafmax`: Dbfs, the
+Each second is a log row, `SplLogRow` = {`second`: u64, `run`: u32, `start`: WallNs,
+`clock`: `LogClock`, `gap`: `LogGap` \| nil, `measured`: Seconds (< 1 next to a gap), `laeq`, `lceq`, `lzeq`: Dbfs over the measured time, `lcpeak`, `lafmax`: Dbfs, the
 second's highest C-weighted peak and A-weighted Fast level (both kept through a `meas.reset`),
 `sensitivity`: Db \| nil (dB SPL of 0 dBFS in force), `position`:
 `PositionCorrection` \| nil (the correction in force while calibrated; never included in the
-row's levels, which are what was measured)}. The log belongs to the meter: it survives stopping and starting,
+row's levels, which are what was measured)}.
+
+A row is keyed by `second`, a per-log index that only rises, and `run`, the number of the
+stretch of the meter's job it belongs to (one open stream in one daemon process; a new log
+starts at second 0, run 0). Within a run the index advances by the seconds the audio clock
+counted, so a capture gap shows as missing indices and a wall-clock step changes nothing; a
+run's first row carries `gap` (`known`: the index moved on by the time the meter was off,
+counted on a clock that counts suspend, or on trusted wall clocks across a restart;
+`unknown`: that time is not known), the other rows nil. A run ends, and the next starts with
+the gap the boot clock measured, when the host's boot clock (suspend included) runs more
+than 2 s ahead of the audio clock between two blocks. `start` is the wall time as read, an
+annotation: `clock` (`LogClock`) says what it rests on, `synced` (the OS held the clock
+synchronised), `unsynced`, `derived` (logged unsynced, re-stamped from the index distance to
+the second the clock became synchronised within the run) or `not_stated` (the OS says
+nothing: macOS, Windows). A client that holds `unsynced` rows of a run and is served a
+`synced` or `derived` row of it fetches the run again. A daemon restarting after a power
+cut resumes the index from the log's high-water mark (§7.4) so a `(run, second)` once
+served never names another row.
+
+The log belongs to the meter: it survives stopping and starting,
 device reopens, config changes and daemon restarts (session files and the autosave carry
 it, §7.2), keeps the newest 48 h, and is kept after `meas.reset` (a display
-operation). `spl.log_get` returns `SplLogPage` {`meas`, `from`, `total`,
-`rows`}: rows are numbered from the meter's first logged second; `from` says where the
+operation). `spl.log_get` returns `SplLogPage` {`meas`, `started_at`: WallNs, `from`,
+`total`, `rows`}: `started_at` is the log's start, which changes when the log starts anew
+(`spl.log_new`, or a restart that cannot tell what was served before a cut, §7.4), so a
+client paging it that sees it change starts again; rows are numbered from the meter's first
+logged second; `from` says where the
 returned rows start (later than asked when older rows were dropped), `total` is one past
 the newest row, at most 20000 rows per reply. `invalid` for a measurement that is not an
 SPL meter. `log` (`SplLogWhich`: `current` \| `previous`) picks the log the meter is writing
@@ -970,7 +996,9 @@ measurement that is not an SPL meter.
 A window of N seconds covers the newest N seconds of time, measured or not; its Leq is over
 the measured time in it (never extrapolated; `elapsed` < N while it fills after the log's
 first second, `measured` < `elapsed` flags it incomplete). Windows rebuild from the log by
-wall time when the meter's job restarts. A limit is judged only while the meter reads dB SPL
+index when the meter's job restarts: the rows whose `second` lies within the window before
+the current index, never across a gap `unknown` (the windows start over at such a run's
+first second, so a level of unknown age is never shown as recent). A limit is judged only while the meter reads dB SPL
 (a sensitivity calibration applies), at 0.1 dB resolution. A full window (`elapsed` = N) is
 over when the rounded Leq is above the limit, near when within `warn_margin` below it or at
 it. A filling window is judged on its budget, the limit as a mean square `P` times its
@@ -1002,27 +1030,29 @@ limit) carry {`level`: f64, that held value in the frame's `scale` (NaN before a
 measured), `judgement`: `LeqJudgement`}.
 
 `spl.history_get` returns `SplHistory` {`meas`, `windows`: [`LeqWindow`] (the meter's, in
-configuration order), `scale`: `LevelScale`, `step_s`: u32, `log_start`, `log_until`: WallNs
-\| nil, `at`: [WallNs], `leq`: [[f32]], `over`: [[bool]]}: each window over a span of the
-meter's current log, as its `leq` frames carried them. `span` (`HistorySpan`, tagged by
-`type`) is `newest` {`seconds`: u32}, the newest `seconds` (at most
-`SplHistory::MAX_POINTS`, 14 400, 4 h; more is `invalid`) a point a second, or `range` {`from`, `to`: WallNs, `step_s`: u32}, the seconds
-ending after `from` and at or before `to`, anywhere in the log. With `step_s` 1 each second
-is a point; with more, each point is a bucket of `step_s` whole seconds of Unix time (a
-second belongs to the bucket its end falls in; `at` is the bucket's end, a multiple of
-`step_s` s), `leq[w][k]` window `w`'s **highest** Leq in the bucket and `over[w][k]` true
-when it was over in any second of it — a limit is about the worst moment. A range of more
-than 14 400 points (the same cap: `(to − from) / step_s`, rounded up), `step_s`
-0 or `to` ≤ `from` is `invalid`. `step_s` in the reply is 1 for `newest`. `at` is the end of
-each second (bucket), oldest first; a second without a row has no entry, as no frame was
-sent for it, and a bucket without any second neither. `leq[w][k]` is in `scale` (NaN when
-nothing was measured in the window), `over[w][k]` whether the window was over its limit
-then. `log_start` and `log_until` are the start of the log's oldest kept second and the end
-of its newest (nil for an empty log), whatever the span: a client knows the whole extent it
+configuration order), `scale`: `LevelScale`, `step_s`: u32, `first_second`, `last_second`:
+u64 \| nil, `log_start`, `log_until`: WallNs \| nil, `second`: [u64], `at`: [WallNs], `leq`:
+[[f32]], `over`: [[bool]]}: each window over a span of the meter's current log, as its `leq`
+frames carried them. `span` (`HistorySpan`, tagged by `type`) is `newest` {`seconds`: u32},
+the newest `seconds` (at most `SplHistory::MAX_POINTS`, 14 400, 4 h; more is `invalid`) a
+point a second, or `range` {`from`, `to`: u64, `step_s`: u32}, the seconds whose index lies
+in `from ..= to`, anywhere in the log. With `step_s` 1 each second is a point; with more,
+each point is a bucket of the indices with the same `second / step_s`, keyed by the newest
+second in it (`second[k]` its index, `at[k]` the end of its wall time), `leq[w][k]` window
+`w`'s **highest** Leq in the bucket and `over[w][k]` true when it was over in any second of
+it — a limit is about the worst moment. A range of more than 14 400 points (`to / step_s −
+from / step_s + 1`), `step_s` 0 or `to` < `from` is `invalid`. `step_s` in the reply is 1
+for `newest`. `second` and `at` are oldest first; a second without a row has no entry, as no
+frame was sent for it, and a bucket without any second neither. `leq[w][k]` is in `scale`
+(NaN when nothing was measured in the window), `over[w][k]` whether the window was over its
+limit then. `first_second` and `last_second` are the indices of the log's oldest kept and newest
+second, `log_start` and `log_until` the wall time of the start of the first and the end of
+the last (all nil for an empty log), whatever the span: a client knows the whole extent it
 can ask for. The daemon replays the log as the meter's job computed it
 (`docs/design/leq.md`, *The history strip*), from the rows of the span and the longest
 window before it: a second lost while running is a gap in the windows, a stretch without
-rows a restart whose windows were refilled from the rows in their span; each second judged
+rows a restart whose windows were refilled from the rows in their span (never across a gap
+`unknown`, where they start over); each second judged
 with the window's limit, the row's sensitivity and its position correction, a filling
 window on its budget, with the hysteresis above (begun part way through a log, a state held
 from before the first row read can be released up to 10 s early; the seconds before the
@@ -1042,7 +1072,8 @@ reads it with three non-mutating commands, none of which disturbs the meter:
 
 1. **Every second, exactly:** `spl.log_get` with `log: current`, `from: 0`, `max: 20000`,
    then again with `from` = the reply's `from` + its number of rows, until that reaches the
-   reply's `total` (or a page is empty). The first reply's `from` is the oldest row still
+   reply's `total` (or a page is empty). A reply whose `started_at` differs from the first
+   one's means the log started anew: start over. The first reply's `from` is the oldest row still
    kept (rows older than 48 h are dropped, so it is above 0 on a long log). New seconds
    keep arriving while paging: `total` grows, and the last page ends at the newest. These
    rows are the record (§7.4 writes them as CSV, as `ac2 spl leq export` does); the log
@@ -1051,13 +1082,14 @@ reads it with three non-mutating commands, none of which disturbs the meter:
    logged second's 28 band levels, at most 3600 rows a reply: walk the span an hour at a
    time.
 3. **The windows as the meter judged them:** `spl.history_get` with `range` over
-   [`log_start`, `log_until`] (from any first reply) at a `step_s` that keeps it within
+   [`first_second`, `last_second`] (from any first reply) at a `step_s` that keeps it within
    14 400 points, or in slices at `step_s` 1, gives each window's Leq and over-limit state
    without replaying the log client-side.
 
 The meter's `spl_log` entity (§4.1) changes when a window's judgement changes (each window's
 `LeqWindowState` {`duration`, `weighting`, `judgement`, `since`}; `LeqJudgement`: `no_limit`
-\| `not_calibrated` \| `ok` \| `near` \| `over`) or a peak limit's (`peaks`: `PeakStates`
+\| `not_calibrated` \| `ok` \| `near` \| `over` \| `cant_tell` (a band window with day and
+night limits while the time of day is not known, *Band meter* below)) or a peak limit's (`peaks`: `PeakStates`
 {`lcpeak`, `lafmax`: `LeqPeakState` {`judgement`, `since`}}, `no_limit` without that limit),
 when the windows change and when the log starts (`started_at`). Going over and recovering
 append a `LeqAlarm` {`at`, `subject`: `AlarmSubject` (`window` {`duration`, `weighting`} \|
@@ -1113,8 +1145,9 @@ are filled in by the front ends, the daemon sees the values.
 
 A running SPL meter with a band meter filters its input after the mic curve, unweighted,
 through the 1/3-octave bank and integrates each band per second on the meter's own second
-grid (a gap moves it on without energy). The seconds are logged (§7.4, band log) unweighted
-with the period of their local start, the correction and the sensitivity in force; each
+grid (a gap moves it on without energy). The seconds are logged (§7.4, band log) under the
+SPL log's index and run, unweighted, with the period of their local start (in the rig's
+`zone`, its offset logged beside it), the correction and the sensitivity in force; each
 band window holds every second's energy of its own bands with its weighting and
 correction. Without a transfer the limits are judged at the mic as they are; with one each
 band's limit at the mic is the place's limit plus the attenuation (the bound for an
@@ -1125,8 +1158,15 @@ window with a `day_offset` is judged by the night limits while it holds a night 
 day limits; headroom against the set in force once the horizon (the meter's `leq.horizon`)
 has passed. Judging, filling windows, headroom and hysteresis are the Leq windows' (above),
 on dB SPL only (the sensitivity; the position correction is not applied to the band meter).
+While the system clock is `unsynced` on a host without an RTC (`Clocks.rtc` false) the time
+of day is not known: the period is "can't tell" (nil in the rows and in the frame's `period`
+/ `period_after_horizon`), and a window with a `day_offset` (the predicted LAeq with a day
+limit other than its night one) holding such a second, or judged while the clock is so, reads
+`cant_tell` (`LIMIT` with `CANT_TELL` in its flags) and is not judged; the levels are
+logged and shown as ever.
 A band of a window going over or recovering, and the predicted LAeq, append an alarm as a
-window does. The windows rebuild from the band log by wall time when the job restarts and
+window does. The windows rebuild from the band log by index (as the Leq windows, never across
+a gap `unknown`) when the job restarts and
 when the configuration changes (not for a change of the correction or the margins alone);
 `spl.log_new` starts them over.
 
@@ -1150,7 +1190,9 @@ and nothing logged there (the message says to turn it on and calibrate).
 the span), `measured`: Seconds, `uncalibrated`: u32 (seconds without a sensitivity),
 `levels`: [DbSpl \| nil; 28] \| nil (the energy average a `log` source gives the transfer;
 nil unless every second is calibrated and something was measured)}, `rows`: [`BandLogSecond`
-{`start`: WallNs, `measured`: Seconds, `period`, `correction`: Db, `sensitivity`: Db \| nil,
+{`second`: u64, `run`: u32, `start`: WallNs, `clock`: `LogClock`, `gap`: `LogGap` \| nil,
+`measured`: Seconds, `utc_offset_s`: i32 (the zone's offset the period was judged in),
+`period`: `day` \| `night` \| nil (can't tell), `correction`: Db, `sensitivity`: Db \| nil,
 `levels`: [f64 \| nil; 28] (dB SPL with a sensitivity, else dBFS; without the correction)}]}.
 `rows` holds every `step`-th logged second (nil: none, the average only). The reply is
 bounded: more than 3600 rows is `invalid`, naming the step that fits; `step` 0 and a span
@@ -1878,8 +1920,14 @@ with the autosave (§7.3).
   state it replaced, so a second recover undoes the first); `not_found` without one.
 - `file.salvage`: imports each `traces/*.csv` of the session — any format version — into
   the working state as `trace.import` of an ac2 CSV would (role from the file; a math
-  trace's trace becomes an imported trace), file by file. Reply `salvage` {`version`:
-  the manifest's version | nil, `imported`: [TraceMeta], `refused`: [{file, reason}]}.
+  trace's trace becomes an imported trace), file by file; and each `spl/*.csv` SPL log of
+  the version this build reads (§7.4), with its band log (`<name>.bands.csv`) and mark beside
+  it, as a stopped SPL meter of session scope named `<name> (salvaged)` (the log header's
+  `name`), default configuration on the logged input, holding the log as its current log
+  (the header holds no window configuration: limits are set again to judge). A log of
+  another version is refused and stays on disk as plain CSV. Reply `salvage` {`version`:
+  the manifest's version | nil, `imported`: [TraceMeta], `spl_logs`: [MeasId] (the meters
+  made), `refused`: [{file, reason}]}.
 - `file.list`: the sessions in the session directory, by name.
 - `file.delete` / `file.rename`: a saved session by name only, `name` and `to` one plain
   component (letters, digits, ` `, `-`, `_`, `.`; not starting with `.`, not ending in `.`
@@ -2368,7 +2416,9 @@ clocks and nothing inferred from them: `system` {synced{maxerror_us} | unsynced{
 not_stated} — the system clock as the OS states it (Linux: `adjtimex` read with no mode bits,
 `STA_UNSYNC` clear or set; `maxerror_us` the kernel's error bound, which grows by 500 µs a
 second between the discipline daemon's updates, never the clock's offset; macOS and Windows
-state nothing), read every 5 s; `capture` (`DeviceClock` | nil while no audio I/O is open:
+state nothing), read every 5 s; `rtc` (bool, read at start: on Linux whether some
+`/sys/class/rtc/rtc*/hctosys` reads 1, i.e. the kernel set the system clock from a
+battery-backed clock at boot; always true on macOS and Windows); `capture` (`DeviceClock` | nil while no audio I/O is open:
 `device`, `rate` {measuring | measured{ppm, span, against} | synthetic}) — the capture
 device's sample clock, a least-squares fit of the backend's block stamps against their
 sample index over the last 60 s of audio (segments pooled across gaps), `ppm` positive when
@@ -2927,8 +2977,10 @@ the measurement has signal: the inputs look mis-patched).
 
 `leq_flags`: `LIMIT` 1 (the window has a limit), `JUDGED` 2 (and it is judged: dB SPL),
 `NEAR` 4, `OVER` 8, `CANNOT_RECOVER` 16, `INCOMPLETE` 32 (part of the window not
-measured), `ON_COURSE` 64 (filling, with `NEAR`: the Leq so far above the limit). The judgement is `no_limit` without `LIMIT`, `not_calibrated` with `LIMIT` but
-not `JUDGED`, else `over`, `near` or `ok`.
+measured), `ON_COURSE` 64 (filling, with `NEAR`: the Leq so far above the limit),
+`CANT_TELL` 128 (a band window whose day or night limit cannot be told: the time of day is
+not known). The judgement is `no_limit` without `LIMIT`, `cant_tell` with `LIMIT` and
+`CANT_TELL`, `not_calibrated` with `LIMIT` but not `JUDGED`, else `over`, `near` or `ok`.
 
 ### 5.6 Bounds (checked before decoding)
 
@@ -3104,9 +3156,10 @@ What a daemon reads of each artefact; any other version is refused:
 | trace CSV (§7.1) | `v1` … `v7` |
 | session directory (§7.2) | manifest version 50 only |
 | raw capture sidecar (§7.5) | version 4 only; the protocol types it holds must still decode |
-| SPL log (§7.4) | `v2` only |
-| band log | `v1` only |
-| `file.salvage` | `traces/*.csv` of a session only (each as a trace CSV above) |
+| SPL log (§7.4) | `v3` only |
+| band log (§7.4) | `v2` only |
+| log high-water mark (§7.4) | version 1 only; any other is a missing mark |
+| `file.salvage` | `traces/*.csv` of a session (each as a trace CSV above), and `spl/*.csv` with their band logs and marks (each as the log versions above) |
 
 ### 7.1 Trace text (`trace.import` / `trace.export`)
 
@@ -3175,6 +3228,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/traces/<id>-<hash>.csv one ac2 CSV per trace (a sweep's whole data included)
 <dir>/spl/<name>.csv         one SPL log per SPL meter (§7.4)
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
+<dir>/spl/<name>.csv.mark    the SPL log's high-water mark (§7.4)
 ```
 
 `session.json`: `{format: "ac2-session", version: 50, saved_at, measurements:
@@ -3216,8 +3270,11 @@ new rows every 30 s, synced to the disk every 5 min, when the log ends or the me
 and at shutdown. A growing log is not a change to write (`spl.log_new`, a new meter or a
 loaded session is: the manifest names the new log's file). A file is written whole when its
 log starts, after a failed append, and once it holds a day of rows past the 48 h retention
-(then it keeps the retained rows). A power cut loses at most the last 5 min of a log; a
-daemon crash the last 30 s.
+(then it keeps the retained rows; the mark moves with it). A power cut loses at most the
+last 5 min of a log; a daemon crash the last 30 s. A cut append leaves at most a partial
+last line, which a read leaves out (every whole row before it is read) and the next append
+cuts off first. The log's high-water mark (§7.4) is written by the same thread, beside the
+log, as the meter's job asks for it.
 
 At start the daemon loads `<dir>/session.json` (else `session.prev.json`, renaming a
 damaged `session.json` to `session.damaged.json`) exactly as `file.load` does — disarmed,
@@ -3225,6 +3282,11 @@ no owner, a new stream epoch, no audio I/O opened — logs what it restored, and
 on appending to the restored logs' files after their last whole line. An autosave of
 another session format version is renamed to `<dir>.v<N>`, an unreadable one to
 `<dir>.damaged` (a name taken gets the time appended), with a warning; neither is deleted.
+An SPL or band log of another log version (§7.4) in an autosave that reads is not damage
+and is not converted: it is moved whole to `<dir>.old-version-files/` as
+`<file>.v<N>-<time>`, plain CSV of its own version, logged and reported in
+`rig.damaged_files` (kind `spl_log` / `band_log`, the reason naming both versions), and the
+meter starts a new log.
 An autosave that reads but holds items `file.load` would refuse (a check added since they
 were written) costs only those items: each is taken out with what depended on it, kept as a
 session of its own in `<dir>.set-aside-<time>`, and reported in `rig.damaged_files` (kind
@@ -3256,27 +3318,58 @@ the entry goes. An entry also goes with its meter. Each change is an `autosave` 
 ### 7.4 SPL log (CSV)
 
 What sessions store and `ac2 spl leq export` writes: the first line is exactly
-`# ac2 spl log v2`, then `# key: value` lines (`meas`, `name`, `input` (1-based), `mic`), then the
-header
-`start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,lcpeak_1s,lafmax_1s,sensitivity_db,position_db,position_peak_db`
-and one row per logged second: ISO 8601 UTC time of the second's start, the same in Unix
-ns, the measured time, `dB SPL` or `dBFS`, the five levels in that unit as measured (4
-decimals; `-inf` for digital silence), the sensitivity (empty uncalibrated) and the
-measuring-position correction in force, energy and peak (empty without one): a corrected
-level is the row's level plus the correction, which the row records but never applies.
-Reading it back takes `start_ns`, `measured_s`, the levels, the sensitivity and the
-correction.
+`# ac2 spl log v3`, then `# key: value` lines (`meas`, `name`, `input` (1-based), `mic`
+(only with one), `zone` (the rig's zone as the log was written: IANA name, else `±hh:mm`),
+`started` (the log's `started_at`, ISO 8601 UTC)), then the header
+`second,run,start_utc,start_ns,clock,gap,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,lcpeak_1s,lafmax_1s,sensitivity_db,position_db,position_peak_db`
+and one row per logged second: the index and run (§3.2 *SPL log*), ISO 8601 UTC time of the
+second's start and the same in Unix ns (as read: an annotation), the `clock` it rests on
+(`synced`, `unsynced`, `derived`, `not_stated`), `gap` (`known` or `unknown` on a run's
+first row, empty on the others), the measured time, `dB SPL` or `dBFS`, the five levels in
+that unit as measured (4 decimals; `-inf` for digital silence), the sensitivity (empty
+uncalibrated) and the measuring-position correction in force, energy and peak (empty without
+one): a corrected level is the row's level plus the correction, which the row records but
+never applies. Rows are in key order (`second` rising; `run` rising, changing only on a row
+with a `gap`); a file out of that order is damaged. Wall times may step back or repeat
+between rows (a clock set back, a year's end at any offset): nothing is ordered by them.
 
 A meter's band log (`<name>.bands.csv`, kept and appended beside its SPL log by sessions and
-the autosave, same 48 h retention): first line exactly `# ac2 band log v1`, the same `# key:
+the autosave, same 48 h retention): first line exactly `# ac2 band log v2`, the same `# key:
 value` lines, then the header
-`start_utc,start_ns,measured_s,unit,period,correction_db,sensitivity_db,z20hz,z25hz,…,z10000hz`
-(28 band columns, `z<nominal>hz`) and one row per second with anything measured: start
-(UTC and ns), measured time, `dB SPL` or `dBFS`, `day` or `night` (the limit set of the
-second's local start), the §13 correction in force (dB), the sensitivity (empty
-uncalibrated; 4 decimals), and the 28 unweighted band Leq in the row's unit to 0.01 dB
-(`-inf` without energy), **without** the correction: the rating level is the band level plus
-`correction_db`, which the windows apply when they are rebuilt from the log.
+`second,run,start_utc,start_ns,clock,gap,measured_s,unit,utc_offset_s,period,correction_db,sensitivity_db,z20hz,z25hz,…,z10000hz`
+(28 band columns, `z<nominal>hz`) and one row per second with anything measured: the SPL
+log's index, run, start, clock and gap for the same second, measured time, `dB SPL` or
+`dBFS`, the zone's offset from UTC the period was judged in (s east, within ±18 h: a
+daylight-saving change shows as a new offset between rows), `day` or `night` (the limit set
+of the second's local start) or empty (can't tell: the time of day was not known), the §13
+correction in force (dB), the sensitivity (empty uncalibrated; 4 decimals), and the 28
+unweighted band Leq in the row's unit to 0.01 dB (`-inf` without energy), **without** the
+correction: the rating level is the band level plus `correction_db`, which the windows apply
+when they are rebuilt from the log. Re-stamping a row to `derived` changes neither its
+`period` nor its `utc_offset_s`.
+
+Beside the SPL log, `<name>.csv.mark` (JSON, written whole: temporary file, synced, renamed,
+directory synced) is its high-water mark: `{format: "ac2-log-mark", version: 1,
+highest_run, anchor: {boot_id, run, second, boot_ms}}`, the highest run started and where
+second `second` ends on the boot clock (`boot_ms`, ms since boot, suspend included: Linux
+`CLOCK_BOOTTIME`, macOS `CLOCK_MONOTONIC`, Windows the interrupt time; `boot_id` the
+kernel's on Linux, a random id per daemon process elsewhere). It is written as each run
+starts and as the index nears the stored one, reserving 600 s ahead of the last row served,
+and exactly at the last row served on a clean stop; a run's first rows are served only once
+its anchor is written or could not be. The first run of a daemon process starts above the
+mark, at the boot clock's distance from the last row when the boot is the same, else at the
+wall clocks' distance when both are trusted (not `unsynced`), else one past it with gap
+`unknown`. A mark that is missing, unreadable or below the log's last row leaves unknown
+what was served but never written: the log takes a new `started` and the next run's gap is
+`unknown`. A mark that cannot be written stops nothing; the fault is logged once per failing
+stretch.
+
+Reading takes every whole line: a last line without its newline (an append cut by a power
+cut), or zeros or garbage after the last newline, is left out and cut off before the next
+append. An SPL log or band log of another version is refused naming both versions (`a log of
+version N; this build reads version M`); none is converted (`tools/proto-next/convert.py`
+converts no log): a session holding one does not load (`unsupported`), the autosave sets it
+aside (§7.3), and `file.salvage` reports it.
 
 ### 7.5 Raw capture files (`rec.start`)
 

@@ -3443,7 +3443,11 @@ summary, which lists every item as restored or skipped. Not brought back: an SPL
 per-second Leq history (the log stays in the old folder), an after-capture mic curve, a
 delay's offset from the found arrival (the delay itself is applied) and trace provenance.
 Run it once (a second run adds a second copy). With a session name, or a path only on the
-daemon's machine, only traces are imported.
+daemon's machine, the traces are imported, and each SPL log the daemon can read (written by
+a build with the same log version) comes back as a stopped SPL meter named
+"`<name>` (salvaged)" on the logged input, holding the whole log with its band log: limits
+are not in the log, so set them again to judge. A log of an older version is listed as
+refused and stays in the old folder as plain CSV.
 
 A session holds the measurements and traces (slots, display edits, sweep distortion and
 IRs) and each SPL meter's per-second log (a running meter is not an unsaved change). Not
@@ -3506,7 +3510,10 @@ it, and goes on metering. A `rig.json` or `calibrations.json` of another format 
 read from it: the daemon starts as with no file. In `rig.json` a part that cannot be read (one rig meter, the
 outputs, the system max level…) costs only that part: the rest is read, and the copy set
 aside keeps what was lost. An SPL log cut mid-row keeps every whole row and carries on
-after it (nothing is reported). A damaged trace or SPL log costs only itself (moved to
+after it (nothing is reported). An SPL or band log written by a build with another log
+version is not damage and is never converted: it is moved whole to
+`<autosave>.old-version-files/` as `<file>.v<N>-<time>` (plain CSV, readable in any
+spreadsheet), reported like a damaged file, and the meter starts a new log. A damaged trace or SPL log costs only itself (moved to
 `<autosave>.damaged-files/`). So does a measurement (trace, SPL log, plan, walk) the autosave
 holds but this build refuses, say a setting a newer check no longer allows: it is kept as a
 session of its own in `<autosave>.set-aside-<time>/`, the reason names it (id and name), the
@@ -4106,6 +4113,14 @@ Each command takes `--meas` or `--input` when there is more than one meter.
 | `ac2 spl leq export --previous -o soundcheck.csv` | the ended log (until the next new log or daemon restart) |
 | `ac2 spl leq new --yes --export soundcheck.csv` | a new log, the ended one written first; without `--yes` it only says what would end |
 
+Each row of the CSV is one second: its **index** (`second`, rising through the log, never
+reused) and **run** (a new run each time the meter starts again on an open stream), then the
+wall time as the clock read it with what that clock rested on (`synced`, `unsynced`,
+`derived`: corrected once the clock synchronised, `not_stated`), and on a run's first row
+whether the time since the run before is `known` or `unknown`. The levels are measured
+seconds: a wall clock stepped back or a power cut changes the times beside them, never their
+order. The header names the zone the meter's host was in.
+
 The app writes the same CSV on the computer it runs on: palette (Ctrl+K) **Export Leq log…**
 (CSV, on this computer) for the focused (or only) SPL meter, with an editable name such
 as `~/ac2-exports/FOH-SPL-leq-2026-10-17-0012.csv` (local time; the folder is made). The
@@ -4177,6 +4192,12 @@ transfer's summary).
   high, captioned ("LZeq 60 min · night limits (22–07)"). Each bar is the band's Leq at the
   mic with its limit line: green, amber near, red over; with its headroom ("≤ 81.2") or, over,
   the time until back under.
+- A meter whose host has no battery-backed clock and has not yet set its clock from the
+  network (a standalone meter just after a power cut) does not know the time of day: windows
+  with different day and night limits say **"can't tell day or night: clock not set"** and
+  judge nothing until the clock is set; the levels are measured and logged as ever. Each
+  band row logs the zone offset its day or night was judged in, so a daylight-saving change
+  can be checked afterwards.
 - The headline names the worst band window and what to do: **"63 Hz band LZeq 60 min 3.2 dB
   over its limit · cooling down in 6 min 52 s"**, or "… 1.5 dB under its limit · next 1 min:
   stay ≤ 81.2 dB".
