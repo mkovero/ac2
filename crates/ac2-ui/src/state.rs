@@ -96,6 +96,7 @@ use panes::meas_layout::LayoutQueue;
 mod drop_math;
 pub(crate) mod dynamics;
 mod dynamics_run;
+mod form_list;
 mod programme;
 pub use programme::{MAX_METERED, Metered, ProgrammeUi, ballistic};
 mod meter_form;
@@ -697,7 +698,10 @@ fn follow_meta(data: &mut Arc<TraceData>, m: &TraceMeta) {
 /// Renames the input choices of a dialog (the device's channel names arrived).
 fn relabel(f: &mut Form, names: &[(u16, String)]) {
     for field in &mut f.fields {
-        if field.id == crate::forms::FieldId::Output {
+        if matches!(
+            field.id,
+            crate::forms::FieldId::Output | crate::forms::FieldId::MoreOutput(_)
+        ) {
             continue;
         }
         if let crate::forms::Value::Channel {

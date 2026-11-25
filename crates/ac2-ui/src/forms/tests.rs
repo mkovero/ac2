@@ -783,3 +783,193 @@ fn a_sweep_records_several_mics_picked_row_by_row() {
     );
     assert_eq!(swept(&e, &o).expect("plan").measurement_inputs, vec![2, 1]);
 }
+
+fn four_outs() -> Vec<(u16, String)> {
+    (0..4).map(|c| (c, format!("Out {}", c + 1))).collect()
+}
+
+fn wide(loopback: Option<LoopbackRoute>) -> OpenSession {
+    let mut o = open((0..12).collect(), loopback);
+    o.config.output_channels = 4;
+    o
+}
+
+/// A new sweep plays on the stimulus outputs of the I/O settings, every one a row of its
+/// own; the loopback's output is among them, and a row can be added or dropped.
+#[test]
+fn sweep_outputs_follow_the_stimulus_outputs() {
+    let o = wide(Some(LoopbackRoute {
+        output: 0,
+        input: 0,
+    }));
+    let new = || {
+        Form::sweep(
+            Some(&o),
+            0,
+            &names(&o),
+            &four_outs(),
+            &[1],
+            Some(Dbfs(-50.0)),
+        )
+    };
+    // Without stimulus outputs: the first other output and the loopback's.
+    assert_eq!(new().sweep_outputs(), [1, 0]);
+    // Two stimulus outputs, neither the loopback's: it is kept, first.
+    let mut f = new().play_on(Some(&o), &[2, 3]);
+    assert_eq!(f.sweep_outputs(), [0, 2, 3]);
+    assert_eq!(swept(&f, &o).expect("sweep").outputs, [0, 2, 3]);
+    // One empty row after the last pick, while an output is left.
+    let rows: Vec<String> = f
+        .fields
+        .iter()
+        .filter(|x| matches!(x.id, FieldId::Output | FieldId::MoreOutput(_)))
+        .map(|x| format!("{}: {}", x.label, x.display()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            "Output: Out 1",
+            "Output 2: Out 3",
+            "Output 3: Out 4",
+            "Output 4: none"
+        ]
+    );
+    // ← on a further row to `none` drops it; the rows close up.
+    focus(&mut f, FieldId::MoreOutput(2));
+    f.cycle(-1);
+    f.cycle(-1);
+    assert_eq!(f.sweep_outputs(), [0, 3]);
+    // Stimulus outputs the session lacks change nothing.
+    assert_eq!(new().play_on(Some(&o), &[9]).sweep_outputs(), [1, 0]);
+}
+
+/// The loopback's output dropped while its input is the reference: refused, in words. With
+/// another reference the outputs are the operator's business.
+#[test]
+fn sweep_without_the_loopback_output_is_refused() {
+    let o = wide(Some(LoopbackRoute {
+        output: 0,
+        input: 0,
+    }));
+    let mut f = Form::sweep(
+        Some(&o),
+        0,
+        &names(&o),
+        &four_outs(),
+        &[1],
+        Some(Dbfs(-50.0)),
+    );
+    f.set_sweep_outputs(&[2]);
+    let e = swept(&f, &o).expect_err("silent reference");
+    assert_eq!(
+        e,
+        "the reference, In 1, records Out 1: add Out 1 to the outputs (the empty Output row), \
+         or pick another reference"
+    );
+    assert!(f.set_channel(FieldId::Reference, 5));
+    assert_eq!(swept(&f, &o).expect("sweep").outputs, [2]);
+}
+
+/// Editing a sweep shows every output it plays on, also one the session no longer has.
+#[test]
+fn sweep_edit_shows_its_outputs() {
+    let o = wide(None);
+    let mut f = Form::sweep(
+        Some(&o),
+        0,
+        &names(&o),
+        &four_outs(),
+        &[1],
+        Some(Dbfs(-50.0)),
+    );
+    assert!(f.set_channel(FieldId::Reference, 0));
+    f.set_sweep_outputs(&[1, 3]);
+    let config = swept(&f, &o).expect("sweep");
+    let m = Measurement {
+        id: MeasId(3),
+        config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
+            name: "S".into(),
+            kind: MeasKind::Sweep { config },
+        },
+        config_rev: ac2_proto::units::Rev(1),
+        running: false,
+        delay: None,
+        grid_id: None,
+        colour: None,
+        layout: None,
+        offset: ac2_proto::units::Db(0.0),
+        eq: Vec::new(),
+    };
+    let e = Form::edit_sweep(&m, Some(&o), &names(&o), &outs()).expect("edit");
+    assert_eq!(e.sweep_outputs(), [1, 3]);
+    let i = e
+        .fields
+        .iter()
+        .position(|x| x.id == FieldId::MoreOutput(2))
+        .expect("row");
+    assert_eq!(e.fields[i].display(), "Out 4 (not open)");
+}
+
+/// The list of a channel field: what ←/→ would step through, one line each; with many
+/// inputs the ones used last come first. A pick sets the field and closes the list.
+#[test]
+fn channel_list_offers_what_the_field_can_name() {
+    let o = wide(Some(LoopbackRoute {
+        output: 0,
+        input: 0,
+    }));
+    let mut f = Form::sweep(
+        Some(&o),
+        0,
+        &names(&o),
+        &four_outs(),
+        &[1],
+        Some(Dbfs(-50.0)),
+    );
+    let at = |f: &Form, id| f.fields.iter().position(|x| x.id == id).expect("field");
+    // The first measurement row: every input but the reference, the cursor on its pick.
+    let i = at(&f, FieldId::Measurement);
+    f.open_list(i, &[7, 0, 3]);
+    let l = f.list.clone().expect("list");
+    assert!(l.inputs);
+    let lines: Vec<(Option<u16>, bool)> = l.rows.iter().map(|r| (r.channel, r.recent)).collect();
+    // Used last: 7 and 3 (0 is the reference, never a measurement), then all eleven.
+    assert_eq!(
+        lines[..3],
+        [(Some(7), true), (Some(3), true), (Some(1), false)]
+    );
+    assert_eq!(l.rows.len(), 2 + 11);
+    assert_eq!(l.rows[l.cursor].channel, Some(1));
+    assert_eq!(f.keys_hint(), OPEN_KEYS);
+    // ↑ twice from the first of all: onto the first used-last line, and no further.
+    f.list_move(-1);
+    f.list_move(-1);
+    f.list_move(-1);
+    f.list_pick(None);
+    assert!(f.list.is_none());
+    assert_eq!(f.sweep_inputs(), [7]);
+    // A further row offers `none` first; a click on a line picks it.
+    let i = at(&f, FieldId::MoreMeasurement(2));
+    f.open_list(i, &[]);
+    let l = f.list.clone().expect("list");
+    assert_eq!(l.rows[0].name, "none");
+    assert!(
+        !l.rows
+            .iter()
+            .any(|r| r.channel == Some(7) || r.channel == Some(0))
+    );
+    f.list_pick(Some(1));
+    assert_eq!(f.sweep_inputs(), [7, 1]);
+    // An output's list has no meters, and few lines need no used-last part.
+    let i = at(&f, FieldId::Output);
+    f.open_list(i, &[1]);
+    let l = f.list.clone().expect("list");
+    assert!(!l.inputs && l.rows.iter().all(|r| !r.recent));
+    // Moving to another field closes it; a text field opens none.
+    f.move_focus(1);
+    assert!(f.list.is_none());
+    let i = at(&f, FieldId::Name);
+    f.open_list(i, &[]);
+    assert!(f.list.is_none());
+}

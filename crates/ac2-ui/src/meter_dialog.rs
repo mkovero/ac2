@@ -372,24 +372,7 @@ pub(crate) fn cycle(f: &mut Form, d: i32) -> bool {
         }
         FieldId::Bar(b) => {
             let b = usize::from(b);
-            let taken: Vec<u16> = w
-                .bars
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| *i != b)
-                .filter_map(|(_, c)| *c)
-                .collect();
-            // A later row may name nothing; no two rows name one input.
-            let opts: Vec<Option<u16>> = (b > 0)
-                .then_some(None)
-                .into_iter()
-                .chain(
-                    m.inputs
-                        .iter()
-                        .map(|(c, _)| Some(*c))
-                        .filter(|c| c.is_some_and(|c| !taken.contains(&c))),
-                )
-                .collect();
+            let opts = bar_opts(&m, &w, b);
             if opts.is_empty() {
                 return true;
             }
@@ -406,20 +389,71 @@ pub(crate) fn cycle(f: &mut Form, d: i32) -> bool {
         }
         _ => return false,
     }
+    relay(f, &m, &w, id);
+    true
+}
+
+/// What input row `b` can name: a later row nothing, and every input no other row names.
+fn bar_opts(m: &MeterForm, w: &What, b: usize) -> Vec<Option<u16>> {
+    let taken: Vec<u16> = w
+        .bars
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != b)
+        .filter_map(|(_, c)| *c)
+        .collect();
+    (b > 0)
+        .then_some(None)
+        .into_iter()
+        .chain(
+            m.inputs
+                .iter()
+                .map(|(c, _)| Some(*c))
+                .filter(|c| c.is_some_and(|c| !taken.contains(&c))),
+        )
+        .collect()
+}
+
+/// What the input row at field `i` can name, in order; `None` when it is not an input row.
+pub(crate) fn bar_options(f: &Form, i: usize) -> Option<Vec<Option<u16>>> {
+    let m = f.meter.as_deref()?;
+    let FieldId::Bar(b) = f.fields.get(i)?.id else {
+        return None;
+    };
+    Some(bar_opts(m, &what(f, m), usize::from(b)))
+}
+
+/// The input row at field `i` names `to`. False when it is not an input row.
+pub(crate) fn set_bar(f: &mut Form, i: usize, to: Option<u16>) -> bool {
+    let Some(m) = f.meter.clone() else {
+        return false;
+    };
+    let Some(id @ FieldId::Bar(b)) = f.fields.get(i).map(|x| x.id) else {
+        return false;
+    };
+    let mut w = what(f, &m);
+    if let Some(slot) = w.bars.get_mut(usize::from(b)) {
+        *slot = to;
+    }
+    relay(f, &m, &w, id);
+    true
+}
+
+/// The What part laid out again for `w`, the focus kept on field `id`.
+fn relay(f: &mut Form, m: &MeterForm, w: &What, id: FieldId) {
     let rigs: Vec<Field> = f
         .fields
         .iter()
         .filter(|x| is_rig(x.id) || matches!(x.id, FieldId::EmberDecay | FieldId::EmberGlow))
         .cloned()
         .collect();
-    f.fields = what_fields(&m, &w);
+    f.fields = what_fields(m, w);
     f.fields.extend(rigs);
     if let Some(i) = f.fields.iter().position(|x| x.id == id) {
         f.focus = i;
     }
     rehead(f);
     f.error = None;
-    true
 }
 
 fn is_rig(id: FieldId) -> bool {

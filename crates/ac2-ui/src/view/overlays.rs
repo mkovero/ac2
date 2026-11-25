@@ -307,6 +307,8 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
     let meters = app.state.input_meters();
     backdrop(ctx);
     let mut msg = None;
+    // Where the open list hangs: under its field's value.
+    let mut list_at: Option<egui::Rect> = None;
     egui::Area::new(egui::Id::new("ac2-form"))
         .order(egui::Order::Foreground)
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 90.0))
@@ -374,16 +376,31 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                                         if ui.small_button("‹").clicked() {
                                             msg = Some(FormMsg::Cycle(i, -1));
                                         }
+                                        let channel = matches!(field.value, Value::Channel { .. });
+                                        let shown = if channel && !options.is_empty() {
+                                            format!("{shown}  ▾")
+                                        } else {
+                                            shown
+                                        };
                                         let text = RichText::new(shown).color(ch.text);
                                         let b = egui::Button::selectable(focused, text);
-                                        let r = if matches!(field.value, Value::Channel { .. }) {
+                                        let r = if channel {
                                             // Fixed width: the meters line up.
                                             ui.add_sized([170.0, 20.0], b)
                                         } else {
                                             ui.add(b)
                                         };
+                                        if f.list.as_ref().is_some_and(|l| l.field == i) {
+                                            list_at = Some(r.rect);
+                                        }
                                         if r.clicked() {
-                                            msg = Some(FormMsg::Cycle(i, 1));
+                                            // A channel is picked from its list; a choice
+                                            // of a few steps on.
+                                            msg = Some(if channel {
+                                                FormMsg::List(i)
+                                            } else {
+                                                FormMsg::Cycle(i, 1)
+                                            });
                                         }
                                         if ui.small_button("›").clicked() {
                                             msg = Some(FormMsg::Cycle(i, 1));
@@ -430,9 +447,76 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 }
             });
         });
+    if let (Some(l), Some(at)) = (&f.list, list_at)
+        && let Some(row) = channel_list(ctx, ch, l, at, &meters)
+    {
+        msg = Some(FormMsg::ListPick(row));
+    }
     if let Some(m) = msg {
         app.dispatch(Msg::Form(m));
     }
+}
+
+/// The open list of a dialog's channel field, hung under the field's value: one line per
+/// channel, inputs with their meters, the cursor's line highlighted and kept in view. The
+/// line clicked, if any.
+fn channel_list(
+    ctx: &egui::Context,
+    ch: &Chrome,
+    l: &crate::forms::ChannelList,
+    at: egui::Rect,
+    meters: &std::collections::BTreeMap<u16, ac2_scene::meter::MeterReading>,
+) -> Option<usize> {
+    let mut clicked = None;
+    egui::Area::new(egui::Id::new("ac2-form-list"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(at.left_bottom() + egui::vec2(0.0, 2.0))
+        .show(ctx, |ui| {
+            card(ch).show(ui, |ui| {
+                ui.set_width(300.0);
+                egui::ScrollArea::vertical()
+                    .max_height(260.0)
+                    .show(ui, |ui| {
+                        let parts = l.rows.first().is_some_and(|r| r.recent);
+                        for (i, r) in l.rows.iter().enumerate() {
+                            let heading = match (parts, i, r.recent) {
+                                (true, 0, _) => Some(crate::forms::RECENT_HEADING),
+                                (true, _, false) if l.rows[i - 1].recent => {
+                                    Some(crate::forms::ALL_HEADING)
+                                }
+                                _ => None,
+                            };
+                            if let Some(h) = heading {
+                                ui.label(RichText::new(h).small().color(ch.dim));
+                            }
+                            ui.horizontal(|ui| {
+                                let on = i == l.cursor;
+                                let text = RichText::new(r.name.as_str()).color(ch.text);
+                                let b =
+                                    ui.add_sized([170.0, 20.0], egui::Button::selectable(on, text));
+                                // Brought into view when the cursor moves to it, not
+                                // every frame: the wheel can still scroll away from it.
+                                let seen = egui::Id::new("ac2-form-list-cursor");
+                                if on && ui.data(|d| d.get_temp::<usize>(seen)) != Some(i) {
+                                    b.scroll_to_me(None);
+                                    ui.data_mut(|d| d.insert_temp(seen, i));
+                                }
+                                if b.clicked() {
+                                    clicked = Some(i);
+                                }
+                                if let Some(c) = r.channel.filter(|_| l.inputs) {
+                                    let m = meters
+                                        .get(&c)
+                                        .cloned()
+                                        .unwrap_or_else(ac2_scene::meter::MeterReading::none);
+                                    super::session::meter(ui, &m, ch);
+                                }
+                            });
+                        }
+                    });
+            });
+        });
+    clicked
 }
 
 /// The candidate list of an ambiguous delay finding, over the top of the transfer pane. No

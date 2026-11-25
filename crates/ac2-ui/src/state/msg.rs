@@ -555,6 +555,10 @@ pub enum FormMsg {
     Focus(usize),
     /// ←/→ on field `.0`.
     Cycle(usize, i32),
+    /// The list of channel field `.0` opened, or closed when it is open.
+    List(usize),
+    /// Line `.0` of the open list picked.
+    ListPick(usize),
     Submit,
     /// Closes the dialog without touching the stimulus.
     Cancel,

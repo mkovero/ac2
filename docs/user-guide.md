@@ -3078,7 +3078,9 @@ dialog:
 | Field | Choices |
 |---|---|
 | reference | the session's loopback input; without a loopback mapping it reads "choose the reference" and nothing is made until one is picked |
-| measurement, output | by name (the session's loopback output always plays too) |
+| measurement | by name: the first mic |
+| output | by name: the **stimulus outputs** of *Inputs & outputs* (the **S** rows), one row each; with no stimulus output, the first other output and the loopback's. The loopback's output is always among them while the reference is its input, and a sweep without it is refused in words |
+| output 2, 3 … | further outputs the same play drives: after the last an empty row (*none*) adds the next; **←/→** to *none* drops one |
 | measurement 2, 3 … | further mics the same play records, each into its own trace: once a mic is picked an empty row (*none*) follows to add the next; **←/→** to *none* drops one. No input twice, none the reference; at most 16 |
 | **level** | typed, no default |
 | from, to | typed, 20 Hz and 20 kHz by default |
@@ -3091,6 +3093,13 @@ dialog:
 
 **←/→** step a choice and stop at the ends; a text field's text is selected on focus
 (**Ctrl+A** selects again), so typing replaces it.
+
+**Space** on an input or output field (or a click on it) opens its **list**: everything the
+field can name, one line each, inputs with their live meters. With eight or more to choose
+from, the (up to five) the session's measurements *used last* come first, then *all* in
+channel order. **↑/↓** move, **Enter** or **Space** picks, **Esc** closes the list and
+leaves the dialog open. Every dialog that picks an input has it: transfer, spectrum, RTA,
+SPL, sweep, dynamics, the Programme meter's input rows.
 
 1. **Enter** makes the measurement and **plays nothing**. It opens on a screen of its own,
    one sweep pane with the focus; the panes before stay with the measurement they belong

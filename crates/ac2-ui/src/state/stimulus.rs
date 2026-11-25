@@ -444,7 +444,8 @@ impl AppState {
             &outputs,
             &mics,
             self.rig.stimulus.level,
-        );
+        )
+        .play_on(Some(&o), &self.rig.stimulus.outputs);
         self.overlay = Overlay::Form(Box::new(f));
         if self.rig.devices.is_none() {
             out.push(Request::Devices);

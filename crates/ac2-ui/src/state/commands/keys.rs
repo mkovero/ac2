@@ -189,6 +189,18 @@ impl AppState {
                 }
                 return;
             }
+            // The open list of a channel field owns the keys until it closes.
+            Overlay::Form(f) if f.list.is_some() => {
+                match chord.key {
+                    Key::Enter => f.list_pick(None),
+                    Key::ArrowUp => f.list_move(-1),
+                    Key::ArrowDown => f.list_move(1),
+                    Key::ArrowLeft => f.cycle(-1),
+                    Key::ArrowRight => f.cycle(1),
+                    _ => self.swallow_text = swallow,
+                }
+                return;
+            }
             Overlay::Form(f) => {
                 match chord.key {
                     Key::Enter => self.submit_form(out),
@@ -301,6 +313,8 @@ impl AppState {
             }
             // Esc cancels the mark question, not the editor.
             Overlay::Eq(e) if e.confirm_mark => e.confirm_mark = false,
+            // Esc closes a dialog's open list, not the dialog.
+            Overlay::Form(f) if f.list.is_some() => f.list = None,
             // The plan editor closes back to the walk setup it opened from.
             Overlay::PlanEditor(e) => {
                 let back = e.back.clone();
@@ -322,8 +336,22 @@ impl AppState {
                 t = chars.collect();
             }
         }
+        // Space on a channel field lists what it can name; in a text field it is a space.
+        // On the open list it picks, as Enter does.
+        if t == " " {
+            if let Overlay::Form(f) = &mut self.overlay
+                && f.list.is_some()
+            {
+                f.list_pick(None);
+                return;
+            }
+            if self.open_form_list(None) {
+                return;
+            }
+        }
         match &mut self.overlay {
             Overlay::Palette(p) => p.type_text(&t),
+            Overlay::Form(f) if f.list.is_some() => {}
             Overlay::Form(f) => f.type_text(&t),
             Overlay::Settings(_) => self.settings_text(&t),
             Overlay::Sessions(_) => self.sessions_text(&t),

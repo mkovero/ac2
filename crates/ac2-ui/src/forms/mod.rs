@@ -18,11 +18,13 @@ use ac2_proto::units::{Dbfs, Hz, MeasId, Seconds};
 
 mod build;
 mod dynamics;
+mod list;
 mod options;
-mod sweep_inputs;
+mod rows;
 
 use options::*;
 
+pub use list::{ALL_HEADING, ChannelList, ListRow, OPEN_KEYS, RECENT_HEADING};
 pub(crate) use options::resolution_field;
 pub use options::{
     LF_HARMONICS_HINT, RESOLUTION_HINT, TRANSFER_RESOLUTION_HINT, parse_buffer, parse_rate,
@@ -227,6 +229,9 @@ pub enum FieldId {
     /// A sweep's measurement input `n` (one-based) after the first, [`FieldId::Measurement`]:
     /// one play records every one into its own trace.
     MoreMeasurement(u8),
+    /// A sweep's output `n` (one-based) after the first, [`FieldId::Output`]: one play
+    /// drives every one.
+    MoreOutput(u8),
     /// The rig's programme-meter settings ([`ac2_proto::model::LevelsSettings`]).
     Ballistic,
     LoudnessTarget,
@@ -335,7 +340,7 @@ impl Field {
             } => options.get(*i).cloned().unwrap_or_default(),
             Value::Channel { index: None, .. } => match self.id {
                 FieldId::Bar(n) if n > 0 => ac2_scene::programme::form::NO_BAR.to_owned(),
-                FieldId::MoreMeasurement(_) => sweep_inputs::NONE.to_owned(),
+                FieldId::MoreMeasurement(_) | FieldId::MoreOutput(_) => rows::NONE.to_owned(),
                 _ => format!("choose the {}", self.label.to_lowercase()),
             },
         }
@@ -377,6 +382,8 @@ pub struct Form {
     pub meter: Option<Box<crate::meter_dialog::MeterForm>>,
     /// The stimulus signal dialog's own state ([`crate::signal_dialog`]).
     pub signal: Option<Box<crate::signal_dialog::SignalForm>>,
+    /// The open list of the focused channel field ([`list`]).
+    pub list: Option<list::ChannelList>,
     /// A heading drawn above the field it names.
     pub headings: Vec<(FieldId, String)>,
     /// The averaging field's values, one per option.
@@ -447,6 +454,7 @@ impl Form {
     /// default instead of appending to it.
     pub fn focus_field(&mut self, i: usize) {
         if i < self.fields.len() && i != self.focus {
+            self.list = None;
             self.focus = i;
             self.select_all();
         }
@@ -455,6 +463,9 @@ impl Form {
     /// The footer's key cue: only the keys that do something in this form, so a dialog of
     /// plain values never promises ←→ or an input list it does not have.
     pub fn keys_hint(&self) -> String {
+        if self.list.is_some() {
+            return list::OPEN_KEYS.to_owned();
+        }
         let mut parts = vec![self.kind.submit().to_string()];
         if self.fields.len() > 1 {
             parts.push("↑↓ field".into());
@@ -468,7 +479,8 @@ impl Form {
             .iter()
             .any(|f| matches!(f.value, Value::Choice { .. }));
         if channel {
-            parts.push("←→ choose (inputs by name)".into());
+            parts.push("←→ choose".into());
+            parts.push(list::KEYS.into());
         } else if choice {
             parts.push("←→ choose".into());
         }
@@ -486,7 +498,7 @@ impl Form {
             return m.pair_of(f).map_or_else(Vec::new, |(l, r)| vec![l, r]);
         }
         f.channel_value()
-            .filter(|_| f.id != FieldId::Output)
+            .filter(|_| !matches!(f.id, FieldId::Output | FieldId::MoreOutput(_)))
             .into_iter()
             .collect()
     }
@@ -507,12 +519,24 @@ impl Form {
         );
     }
 
+    /// What follows a new pick on the focused choice or channel field: the parts of the
+    /// dialog that depend on it are laid out again.
+    pub(super) fn picked(&mut self) {
+        self.error = None;
+        if self.math.is_some() {
+            self.math_changed();
+        }
+        self.reference_moved();
+        crate::ir_import_dialog::rehint(self, self.focus);
+    }
+
     /// ←/→ on the focused choice or channel: the next or previous option, stopping at the
     /// ends. An unchosen channel takes the first option on →, the last on ←.
     pub fn cycle(&mut self, d: i32) {
+        self.list = None;
         if crate::meter_dialog::cycle(self, d)
             || crate::signal_dialog::cycle(self, d)
-            || self.cycle_sweep_input(d)
+            || self.cycle_row(d)
         {
             return;
         }
@@ -540,12 +564,7 @@ impl Form {
                 });
             }
         }
-        self.error = None;
-        if self.math.is_some() {
-            self.math_changed();
-        }
-        self.reference_moved();
-        crate::ir_import_dialog::rehint(self, self.focus);
+        self.picked();
         if let Some((i, r)) = self
             .choice_index(FieldId::FftSize)
             .and_then(|i| spec_resolutions().get(i).map(|r| (i, *r)))

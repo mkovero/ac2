@@ -17,6 +17,7 @@ impl Form {
             ir_import: None,
             meter: None,
             signal: None,
+            list: None,
             headings: Vec::new(),
             averaging: AVERAGING.to_vec(),
             stream: None,
@@ -334,8 +335,9 @@ impl Form {
     /// name). The reference is the session's loopback input; without one it is left for the
     /// operator to choose, because the analysis divides by it and an input picked by channel
     /// order would give a plausible but meaningless result. Mic and speaker output default
-    /// as for a transfer measurement; the loopback output (when the session has one) always
-    /// plays the sweep too. `level` is the operator's typed stimulus level, if any: there is
+    /// as for a transfer measurement, and the loopback output (when the session has one) is
+    /// an output row of its own; [`Form::play_on`] puts the app's stimulus outputs there
+    /// instead. `level` is the operator's typed stimulus level, if any: there is
     /// no default.
     pub fn sweep(
         open: Option<&OpenSession>,
@@ -365,9 +367,9 @@ impl Form {
                     .iter()
                     .find(|(c, _)| *c == l)
                     .map_or_else(|| format!("output {}", l + 1), |(_, n)| n.clone());
-                format!("the speaker; the loopback output, {name}, plays too")
+                format!("what plays the sweep; {name} feeds the reference")
             }
-            None => "the speaker".to_owned(),
+            None => "what plays the sweep".to_owned(),
         };
         let fields = vec![
             Field::channel(
@@ -416,6 +418,10 @@ impl Form {
         let mut f = Self::new(FormKind::Sweep, fields);
         let first: Vec<u16> = f.channel(FieldId::Measurement).into_iter().collect();
         f.set_sweep_inputs(&first);
+        let plays: Vec<u16> = std::iter::once(speaker)
+            .chain(loopback_out.filter(|l| *l != speaker && outputs.iter().any(|(c, _)| c == l)))
+            .collect();
+        f.set_sweep_outputs(&plays);
         f
     }
 
@@ -437,7 +443,8 @@ impl Form {
                 inputs.push((i, format!("In {} (not captured)", i + 1)));
             }
         }
-        let mut f = Self::sweep(open, 0, &inputs, outputs, &[], Some(c.level));
+        let outputs = with_outputs(outputs, &c.outputs);
+        let mut f = Self::sweep(open, 0, &inputs, &outputs, &[], Some(c.level));
         f.kind = FormKind::SweepEdit;
         f.sweep_edit = Some(m.id);
         let nearest = |v: f64, opts: &[f64]| {
@@ -449,12 +456,6 @@ impl Form {
         let durations = DURATIONS.map(|d| d.1);
         let tails = TAILS.map(|t| t.1);
         let repeats = REPEATS.map(|r| f64::from(r.1));
-        let speaker = c
-            .outputs
-            .iter()
-            .copied()
-            .find(|o| open.and_then(|o| o.config.loopback).map(|l| l.output) != Some(*o))
-            .or_else(|| c.outputs.first().copied());
         for field in &mut f.fields {
             match (field.id, &mut field.value) {
                 (
@@ -464,14 +465,6 @@ impl Form {
                     },
                 ) => {
                     *index = channels.iter().position(|x| *x == c.reference_input);
-                }
-                (
-                    FieldId::Output,
-                    Value::Channel {
-                        channels, index, ..
-                    },
-                ) => {
-                    *index = speaker.and_then(|s| channels.iter().position(|x| *x == s));
                 }
                 (FieldId::From, Value::Text(t)) => {
                     *t = ac2_scene::format::freq_readout(c.sweep.start.0)
@@ -505,6 +498,7 @@ impl Form {
             }
         }
         f.set_sweep_inputs(&c.measurement_inputs);
+        f.set_sweep_outputs(&c.outputs);
         Ok(f)
     }
 
@@ -578,15 +572,7 @@ impl Form {
                 ac2_scene::format::freq_readout(nyquist)
             ));
         }
-        let speaker = self
-            .channel(FieldId::Output)
-            .ok_or("no output to play on")?;
-        let mut outputs = vec![speaker];
-        if let Some(l) = open.config.loopback
-            && l.output != speaker
-        {
-            outputs.push(l.output);
-        }
+        let outputs = self.play_outputs(Some(open))?;
         let duration = DURATIONS[self
             .choice_index(FieldId::Duration)
             .unwrap_or(DEFAULT_DURATION)]
@@ -771,6 +757,18 @@ impl Form {
 }
 
 /// The dialog that makes a measurement of kind `k`.
+/// `outputs` with those of `used` the session no longer has: a measurement's settings stay
+/// what they are until the operator changes them.
+pub(super) fn with_outputs(outputs: &[(u16, String)], used: &[u16]) -> Vec<(u16, String)> {
+    let mut all = outputs.to_vec();
+    for &o in used {
+        if !all.iter().any(|(x, _)| *x == o) {
+            all.push((o, format!("Out {} (not open)", o + 1)));
+        }
+    }
+    all
+}
+
 pub(super) fn form_kind(k: &MeasKind) -> Option<FormKind> {
     Some(match k {
         MeasKind::Transfer { .. } => FormKind::Transfer,

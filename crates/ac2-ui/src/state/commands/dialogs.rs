@@ -17,6 +17,20 @@ impl AppState {
                     f.focus_field(i);
                 }
             }
+            FormMsg::List(i) => {
+                if let Overlay::Form(f) = &mut self.overlay
+                    && f.list.as_ref().is_some_and(|l| l.field == i)
+                {
+                    f.list = None;
+                } else {
+                    self.open_form_list(Some(i));
+                }
+            }
+            FormMsg::ListPick(row) => {
+                if let Overlay::Form(f) = &mut self.overlay {
+                    f.list_pick(Some(row));
+                }
+            }
             FormMsg::Cycle(i, d) => {
                 if let Overlay::Form(f) = &mut self.overlay {
                     f.focus_field(i);

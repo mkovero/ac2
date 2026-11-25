@@ -72,7 +72,7 @@ impl Form {
                 "Output",
                 outputs,
                 pick(FieldId::Output),
-                "the processor's input; the loopback output plays too",
+                "what plays the bursts: the processor's input and the loopback",
             ),
             Field::text(FieldId::Carrier, "Carrier", "1 kHz", ""),
             Field::choice(FieldId::Onset, "Onset", &ONSETS.map(|o| o.0), 0),
@@ -100,6 +100,7 @@ impl Form {
         let mut f = Self::new(FormKind::Dynamics, fields);
         let first: Vec<u16> = f.channel(FieldId::Measurement).into_iter().collect();
         f.set_sweep_inputs(&first);
+        f.set_sweep_outputs(&sweep.sweep_outputs());
         f
     }
 
@@ -119,13 +120,13 @@ impl Form {
                 inputs.push((i, format!("In {} (not captured)", i + 1)));
             }
         }
-        let mut f = Self::dynamics(open, 0, &inputs, outputs);
+        let outputs = super::build::with_outputs(outputs, &c.outputs);
+        let mut f = Self::dynamics(open, 0, &inputs, &outputs);
         f.kind = FormKind::DynamicsEdit;
         f.sweep_edit = Some(m.id);
         let carrier = format!("{} Hz", fixed(c.carrier.0, 0));
         let bursts: Vec<String> = c.bursts.iter().map(|b| typed(b.0)).collect();
         let lengths: Vec<String> = c.durations.iter().map(|d| seconds_text(d.0)).collect();
-        let speaker = c.outputs.first().copied();
         for field in &mut f.fields {
             match (field.id, &mut field.value) {
                 (
@@ -135,16 +136,6 @@ impl Form {
                     },
                 ) => {
                     *index = channels.iter().position(|x| *x == c.reference_input);
-                }
-                (
-                    FieldId::Output,
-                    Value::Channel {
-                        channels, index, ..
-                    },
-                ) => {
-                    *index = speaker
-                        .and_then(|s| channels.iter().position(|x| *x == s))
-                        .or(*index);
                 }
                 (FieldId::Carrier, Value::Text(t)) => t.clone_from(&carrier),
                 (FieldId::Onset, Value::Choice { index, .. }) => {
@@ -159,6 +150,7 @@ impl Form {
             }
         }
         f.set_sweep_inputs(&c.measurement_inputs);
+        f.set_sweep_outputs(&c.outputs);
         Ok(f)
     }
 
@@ -183,15 +175,7 @@ impl Form {
             rest_max: Seconds(DynamicsConfig::DEFAULT_REST_MAX),
         };
         c.check_inputs()?;
-        let speaker = self
-            .channel(FieldId::Output)
-            .ok_or("no output to play on")?;
-        let mut outputs = vec![speaker];
-        if let Some(l) = open.config.loopback
-            && l.output != speaker
-        {
-            outputs.push(l.output);
-        }
+        let outputs = self.play_outputs(Some(open))?;
         let carrier = in_field::<Freq>(self.text(FieldId::Carrier), "hz")?.0;
         let pilot = self.text(FieldId::Pilot).trim();
         if pilot.is_empty() {

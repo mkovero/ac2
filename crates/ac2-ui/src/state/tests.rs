@@ -785,6 +785,8 @@ mod dynamics;
 
 mod new_meas;
 
+mod form_list;
+
 mod meter_form;
 mod programme_views;
 
