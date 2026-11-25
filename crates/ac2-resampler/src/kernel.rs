@@ -30,6 +30,12 @@ pub struct Kernel {
 }
 
 impl Kernel {
+    /// The largest table [`Kernel::new`] builds: 16 MiB, 18 times the measurement preset's,
+    /// room for a longer or finer kernel. Each output reads two rows picked by its phase, in
+    /// an order no cache predicts, so a table far past the caches is a slower kernel, not a
+    /// better one; and the other limits alone would allow 1 GiB, which is an accident.
+    pub const MAX_TABLE_BYTES: usize = 16 << 20;
+
     /// The preset the crate's quality targets are measured on; see the crate docs for the
     /// numbers behind each constant.
     pub fn measurement() -> Self {
@@ -41,6 +47,8 @@ impl Kernel {
         .expect("the measurement preset is a valid spec")
     }
 
+    /// Builds the table, refused with [`Error::KernelSpec`] for a spec outside its limits and
+    /// [`Error::TableTooLarge`] for a table over [`Self::MAX_TABLE_BYTES`].
     pub fn new(spec: KernelSpec) -> Result<Self, Error> {
         if spec.half_length == 0 || spec.half_length > 1024 {
             return Err(Error::KernelSpec(spec));
@@ -53,6 +61,11 @@ impl Kernel {
         }
         let n = spec.half_length;
         let taps = 2 * n;
+        // Within the limits above this is at most 1 GiB, so it cannot overflow.
+        let bytes = (spec.phases + 1) * taps * size_of::<f64>();
+        if bytes > Self::MAX_TABLE_BYTES {
+            return Err(Error::TableTooLarge { spec, bytes });
+        }
         let i0_beta = bessel_i0(spec.beta);
         let mut table = vec![0.0; (spec.phases + 1) * taps];
         for (p, row) in table.chunks_exact_mut(taps).enumerate() {
@@ -205,6 +218,29 @@ mod tests {
         ] {
             assert!(matches!(Kernel::new(spec), Err(Error::KernelSpec(_))));
         }
+        // Within every per-field limit, but a 1 GiB table.
+        let huge = KernelSpec {
+            half_length: 1024,
+            phases: 1 << 16,
+            beta: 8.0,
+        };
+        assert_eq!(
+            Kernel::new(huge).unwrap_err(),
+            Error::TableTooLarge {
+                spec: huge,
+                bytes: 65_537 * 2048 * 8
+            }
+        );
+        // 2¹⁵ + 1 rows of 64 taps is just over 16 MiB (the design table's 2¹⁴ phases build).
+        let over = KernelSpec {
+            half_length: 32,
+            phases: 1 << 15,
+            beta: 16.0,
+        };
+        assert!(matches!(
+            Kernel::new(over),
+            Err(Error::TableTooLarge { .. })
+        ));
     }
 
     #[test]

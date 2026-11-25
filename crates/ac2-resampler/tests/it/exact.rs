@@ -24,10 +24,10 @@ fn integer_positions_at_step_one_copy_bit_for_bit() {
         f32::MIN_POSITIVE,
         -1.0,
     ]);
-    let mut r = Resampler::new(kernel.clone(), input.len());
+    let mut r = Resampler::new(kernel.clone(), input.len(), 0).unwrap();
     r.push(&input);
     let start = kernel.history();
-    let n = r.available(Pos::from_index(start), Step::ONE);
+    let n = r.available(Pos::from_index(start), Step::ONE).unwrap();
     assert_eq!(n as u64, input.len() as u64 - kernel.taps() as u64 + 1);
     let mut out = vec![0.0f32; n];
     let next = r.pull(Pos::from_index(start), Step::ONE, &mut out).unwrap();
@@ -44,7 +44,7 @@ proptest! {
     #[test]
     fn any_integer_position_copies_its_sample(bits in prop::collection::vec(any::<u32>(), 64..200), at in 27u64..36) {
         let input: Vec<f32> = bits.into_iter().map(f32::from_bits).collect();
-        let mut r = Resampler::new(KERNEL.clone(), input.len());
+        let mut r = Resampler::new(KERNEL.clone(), input.len(), 0).unwrap();
         r.push(&input);
         let mut out = [0.0f32; 1];
         r.pull(Pos::from_index(at), Step::ONE, &mut out).unwrap();

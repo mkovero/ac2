@@ -40,7 +40,7 @@ fn measure(kernel: &Arc<Kernel>, freq: f64, frac: f64, step: f64, n: usize) -> M
     let input: Vec<f32> = (0..n_in)
         .map(|i| (w * i as f64 + PHASE).sin() as f32)
         .collect();
-    let mut r = Resampler::new(kernel.clone(), n_in);
+    let mut r = Resampler::new(kernel.clone(), n_in, 0).unwrap();
     r.push(&input);
     let mut out = vec![0.0f32; n];
     r.pull(
@@ -78,77 +78,116 @@ fn fracs(count: usize) -> impl Iterator<Item = f64> {
     (0..count).map(move |i| (i as f64 + 0.37) / count as f64)
 }
 
-/// Worst peak error and gain/phase deviation over `freqs × STEPS × fracs`, asserting the
-/// targets; prints the worst error per frequency × step.
-fn check(freqs: &[f64], n_fracs: usize, n: usize) {
-    let kernel = Arc::new(Kernel::measurement());
-    let (mut worst, mut gain, mut phase) = (f64::NEG_INFINITY, 0.0f64, 0.0f64);
-    println!("worst peak error, dB re tone, over {n_fracs} offsets; steps {STEPS:?}");
+/// The worst of a sweep.
+pub struct Worst {
+    /// Peak error, dB re the tone.
+    pub error_db: f64,
+    /// |gain|, dB.
+    pub gain_db: f64,
+    /// |phase|, degrees.
+    pub phase_deg: f64,
+    /// The frequency of the worst peak error.
+    pub at_hz: f64,
+}
+
+/// Worst peak error and gain/phase deviation over `freqs × steps × fracs`; prints the worst
+/// error per frequency × step.
+pub fn sweep(
+    kernel: &Arc<Kernel>,
+    freqs: &[f64],
+    steps: &[f64],
+    n_fracs: usize,
+    n: usize,
+) -> Worst {
+    let mut w = Worst {
+        error_db: f64::NEG_INFINITY,
+        gain_db: 0.0,
+        phase_deg: 0.0,
+        at_hz: 0.0,
+    };
+    println!("worst peak error, dB re tone, over {n_fracs} offsets; steps {steps:?}");
     for &freq in freqs {
         let mut row = Vec::new();
-        for step in STEPS {
+        for &step in steps {
             let mut cell = f64::NEG_INFINITY;
             for frac in fracs(n_fracs) {
-                let m = measure(&kernel, freq, frac, step, n);
-                assert!(
-                    m.peak_error_db <= -110.0,
-                    "{freq} Hz, step {step}, offset {frac}: error {:.1} dB",
-                    m.peak_error_db
-                );
-                assert!(m.gain_db.abs() <= 0.001, "{freq} Hz: gain {} dB", m.gain_db);
-                // 1e-4 rad is the phase a −80 dB quadrature error gives; far looser than the
-                // peak error bound above, which already covers phase.
-                assert!(
-                    m.phase_deg.abs() <= 1e-4_f64.to_degrees(),
-                    "{freq} Hz: {} deg",
-                    m.phase_deg
-                );
+                let m = measure(kernel, freq, frac, step, n);
                 cell = cell.max(m.peak_error_db);
-                gain = gain.max(m.gain_db.abs());
-                phase = phase.max(m.phase_deg.abs());
+                w.gain_db = w.gain_db.max(m.gain_db.abs());
+                w.phase_deg = w.phase_deg.max(m.phase_deg.abs());
             }
-            worst = worst.max(cell);
+            if cell > w.error_db {
+                (w.error_db, w.at_hz) = (cell, freq);
+            }
             row.push(format!("{cell:7.1}"));
         }
         println!("{freq:8.0} Hz {}", row.join(" "));
     }
-    println!("worst {worst:.1} dB, |gain| ≤ {gain:.2e} dB, |phase| ≤ {phase:.2e} deg");
+    println!(
+        "worst {:.1} dB at {:.0} Hz, |gain| ≤ {:.2e} dB, |phase| ≤ {:.2e} deg",
+        w.error_db, w.at_hz, w.gain_db, w.phase_deg
+    );
+    w
+}
+
+/// Gain and phase bounds for every tier: under 2× above the measured worst (slow tier,
+/// 2.9e-6 dB and 5.9e-6°), so a regression of a few dB in either fails.
+fn assert_gain_phase(w: &Worst) {
+    assert!(w.gain_db <= 1e-5, "gain {:.2e} dB", w.gain_db);
+    assert!(w.phase_deg <= 1e-5, "phase {:.2e} deg", w.phase_deg);
+}
+
+/// The kernel's error has a ripple of a few hundred hertz period in frequency, so the grid
+/// is dense where it peaks: a log grid alone missed the worst cell by 4 dB.
+pub fn top_octave() -> impl Iterator<Item = f64> {
+    (0..=100).map(|i| 10_000.0 + 100.0 * i as f64)
 }
 
 #[test]
 fn tones_meet_targets_on_a_coarse_grid() {
-    check(&[20.0, 1_000.0, 10_000.0, 18_000.0, 20_000.0], 3, 384);
+    let kernel = Arc::new(Kernel::measurement());
+    let w = sweep(
+        &kernel,
+        &[
+            20.0, 1_000.0, 10_000.0, 15_900.0, 18_000.0, 19_700.0, 20_000.0,
+        ],
+        &STEPS,
+        3,
+        384,
+    );
+    // Measured −127.7 dB at 19700 Hz; bounds about 1.5 dB above.
+    assert!(
+        w.error_db <= -126.2,
+        "{:.1} dB at {} Hz",
+        w.error_db,
+        w.at_hz
+    );
+    assert_gain_phase(&w);
 }
 
 #[test]
 fn slow_tones_meet_targets_20_hz_to_20_khz() {
-    let mut freqs: Vec<f64> = (0..=30)
-        .map(|i| 20.0 * 1000f64.powf(i as f64 / 30.0))
+    let freqs: Vec<f64> = (0..30)
+        .map(|i| 20.0 * 500f64.powf(i as f64 / 30.0))
+        .chain(top_octave())
         .collect();
-    freqs.extend([17_000.0, 18_000.0, 19_000.0, 19_500.0, 19_900.0]);
-    check(&freqs, 16, 1024);
+    let w = sweep(&Arc::new(Kernel::measurement()), &freqs, &STEPS, 8, 1024);
+    // Measured −127.7 dB at 19700 Hz.
+    assert!(
+        w.error_db <= -126.2,
+        "{:.1} dB at {} Hz",
+        w.error_db,
+        w.at_hz
+    );
+    assert_gain_phase(&w);
 }
 
-/// The floor under the kernel's error: an exact copy (offset 0, step 1) only shows the f32
-/// rounding of the input sine, which every output carries too.
+/// Low tones, where the kernel's own error is far smaller, through the tap sum (non-zero
+/// offsets): what remains is the f32 rounding of the 56 inputs and of the output.
 #[test]
-fn f32_rounding_floor_is_far_below_target() {
+fn f32_floor_through_the_tap_sum() {
     let kernel = Arc::new(Kernel::measurement());
-    let mut floor = f64::NEG_INFINITY;
-    for freq in [20.0, 1_000.0, 20_000.0] {
-        let w = 2.0 * PI * freq / FS;
-        let input: Vec<f32> = (0..4096)
-            .map(|i| (w * i as f64 + PHASE).sin() as f32)
-            .collect();
-        let mut r = Resampler::new(kernel.clone(), input.len());
-        r.push(&input);
-        let mut out = vec![0.0; 2048];
-        r.pull(Pos::from_index(START), Step::ONE, &mut out).unwrap();
-        for (i, &y) in out.iter().enumerate() {
-            let ideal = (w * (START as usize + i) as f64 + PHASE).sin();
-            floor = floor.max(20.0 * (f64::from(y) - ideal).abs().log10());
-        }
-    }
-    println!("f32 rounding floor {floor:.1} dB");
-    assert!(floor < -145.0, "{floor}");
+    let w = sweep(&kernel, &[20.0, 100.0, 1_000.0], &STEPS, 8, 1024);
+    // Measured −140.9 dB at 1 kHz.
+    assert!(w.error_db <= -139.4, "{:.1} dB", w.error_db);
 }

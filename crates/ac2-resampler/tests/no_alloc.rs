@@ -52,7 +52,7 @@ static ALLOCATOR: Counting = Counting;
 
 #[test]
 fn push_pull_and_reset_do_not_allocate() {
-    let mut r = Resampler::new(Arc::new(Kernel::measurement()), 256);
+    let mut r = Resampler::new(Arc::new(Kernel::measurement()), 256, 0).unwrap();
     let input: Vec<f32> = (0..256).map(|i| (i as f32 * 0.05).sin()).collect();
     let big = vec![0.1f32; 10_000];
     let mut out = vec![0.0f32; 512];
@@ -62,7 +62,7 @@ fn push_pull_and_reset_do_not_allocate() {
     let mut pos = Pos::new(r.kernel().history(), 0.5).unwrap();
     for _ in 0..50 {
         r.push(&input);
-        let n = r.available(pos, step).min(out.len());
+        let n = r.available(pos, step).unwrap().min(out.len());
         pos = r.pull(pos, step, &mut out[..n]).unwrap();
     }
     let _ = r.pull(pos, step, &mut out);

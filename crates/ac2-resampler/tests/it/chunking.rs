@@ -7,9 +7,9 @@ use proptest::prelude::*;
 
 /// Everything from one push and one pull.
 fn whole(kernel: &Arc<Kernel>, input: &[f32], start: Pos, step: Step) -> Vec<f32> {
-    let mut r = Resampler::new(kernel.clone(), input.len());
+    let mut r = Resampler::new(kernel.clone(), input.len(), 0).unwrap();
     r.push(input);
-    let mut out = vec![0.0; r.available(start, step)];
+    let mut out = vec![0.0; r.available(start, step).unwrap()];
     r.pull(start, step, &mut out).unwrap();
     out
 }
@@ -24,7 +24,7 @@ fn chunked(
     pushes: &[usize],
     pulls: &[usize],
 ) -> Vec<f32> {
-    let mut r = Resampler::new(kernel.clone(), *pushes.iter().max().unwrap_or(&1));
+    let mut r = Resampler::new(kernel.clone(), *pushes.iter().max().unwrap_or(&1), 0).unwrap();
     let (mut out, mut pos, mut at) = (Vec::new(), start, 0);
     let mut pull_sizes = pulls.iter().cycle();
     for &len in pushes.iter().cycle() {
@@ -35,7 +35,7 @@ fn chunked(
         r.push(&input[at..end]);
         at = end;
         loop {
-            let n = (*pull_sizes.next().unwrap()).min(r.available(pos, step));
+            let n = (*pull_sizes.next().unwrap()).min(r.available(pos, step).unwrap());
             if n == 0 {
                 break;
             }

@@ -8,7 +8,15 @@ use crate::{Error, Kernel, Pos, Step};
 /// input-sample time. Input index 0 is the first sample pushed after creation or
 /// [`reset`](Self::reset).
 ///
-/// `push` and `pull` do not allocate.
+/// # Threading
+///
+/// One thread pushes and pulls, and it is not the audio callback: the callback exchanges
+/// blocks with that thread through its own queues. `push` and `pull` do not allocate, so the
+/// thread may run at real-time priority.
+///
+/// The kernel is shared through an `Arc`. Dropping its last clone — the last `Resampler` built
+/// on it, once the caller's own clone is gone — frees the table (0.9 MB for
+/// [`Kernel::measurement`]) on the dropping thread; keep a clone where freeing is allowed.
 #[derive(Clone, Debug)]
 pub struct Resampler {
     kernel: Arc<Kernel>,
@@ -16,23 +24,51 @@ pub struct Resampler {
     /// `n % capacity + capacity`, so any run of up to `capacity` retained samples is one
     /// contiguous slice and the kernel's inner loop never wraps.
     ring: Vec<f32>,
+    /// A power of two, so a sample index maps to its slot with a mask.
     capacity: usize,
     /// Input samples pushed since creation or reset: the index of the next one.
     pushed: u64,
 }
 
 impl Resampler {
-    /// A resampler retaining at least `max_block + kernel.taps()` input samples: enough that
-    /// pushing up to `max_block` samples between pulls that take all
-    /// [`available`](Self::available) output never drops history a later pull needs.
-    pub fn new(kernel: Arc<Kernel>, max_block: usize) -> Self {
-        let capacity = (max_block + kernel.taps() + 1).next_power_of_two();
-        Self {
+    /// The most input samples `max_block + max_backlog + taps` may ask to retain: 2²⁴, almost
+    /// three minutes at 96 kHz. A backlog that long is a consumer that has stopped, not jitter
+    /// to ride out, and the ring (two f32 copies, rounded up to a power of two) stays within
+    /// 128 MiB.
+    pub const MAX_RETAINED: usize = 1 << 24;
+
+    /// A resampler retaining at least `max_block + max_backlog + kernel.taps()` input
+    /// samples.
+    ///
+    /// The guarantee, in terms of the *frontier* — the first position the input does not yet
+    /// cover, `pushed() − lookahead()`: pushes totalling up to `max_block` samples between two
+    /// pulls never drop input the second pull needs, as long as it starts no more than
+    /// `max_backlog` input samples before the frontier as it stood before those pushes. A
+    /// caller that always pulls everything [`available`](Self::available) sets
+    /// `max_backlog = 0`; one that leaves up to `B` samples' worth of output unpulled, or
+    /// re-anchors its position up to `B` samples backwards, sets `max_backlog ≥ B`.
+    ///
+    /// Refused with [`Error::RetentionTooLarge`] above [`Self::MAX_RETAINED`].
+    pub fn new(kernel: Arc<Kernel>, max_block: usize, max_backlog: usize) -> Result<Self, Error> {
+        let too_large = Error::RetentionTooLarge {
+            max_block,
+            max_backlog,
+        };
+        // A pull at `frontier − max_backlog` reads from `history()` before it; after
+        // `max_block` more samples the newest is `max_block + lookahead() − 1` past the
+        // frontier: `max_block + max_backlog + taps − 1` samples in all.
+        let needed = max_block
+            .checked_add(max_backlog)
+            .and_then(|n| n.checked_add(kernel.taps()))
+            .filter(|&n| n <= Self::MAX_RETAINED)
+            .ok_or(too_large)?;
+        let capacity = needed.next_power_of_two();
+        Ok(Self {
             kernel,
             ring: vec![0.0; 2 * capacity],
             capacity,
             pushed: 0,
-        }
+        })
     }
 
     pub fn kernel(&self) -> &Kernel {
@@ -68,25 +104,37 @@ impl Resampler {
         self.pushed = 0;
     }
 
-    /// How many outputs from `pos` on, `step` apart, the input pushed so far covers.
-    pub fn available(&self, pos: Pos, step: Step) -> usize {
-        let Some(last) = self.pushed.checked_sub(1 + self.kernel.lookahead()) else {
-            return 0;
+    /// How many outputs from `pos` on, `step` apart, the input pushed so far covers: a
+    /// [`pull`](Self::pull) of up to that many succeeds. Refused with
+    /// [`Error::BeforeHistory`] when the first output needs input from before the oldest
+    /// retained sample or before index 0 — the same check `pull` makes.
+    pub fn available(&self, pos: Pos, step: Step) -> Result<usize, Error> {
+        let oldest = self.oldest();
+        if pos
+            .index()
+            .checked_sub(self.kernel.history())
+            .is_none_or(|first| first < oldest)
+        {
+            return Err(Error::BeforeHistory { pos, oldest });
+        }
+        // The first index whose lookahead reaches past the input.
+        let Some(end) = self.pushed.checked_sub(self.kernel.lookahead()) else {
+            return Ok(0);
         };
-        // The first position whose lookahead reaches past the input.
-        let end = Pos::from_index(last + 1).raw();
+        let end = Pos::from_index(end).raw();
         if pos.raw() >= end {
-            return 0;
+            return Ok(0);
         }
         let n = (end - pos.raw() - 1) / step.raw() + 1;
-        usize::try_from(n).unwrap_or(usize::MAX)
+        Ok(usize::try_from(n).unwrap_or(usize::MAX))
     }
 
     /// Writes `out.len()` outputs at `pos`, `pos + step`, …, and returns the position after
-    /// the last. Fails, writing nothing, when the input does not yet reach the last output or
-    /// no longer reaches back to the first.
+    /// the last. Fails, writing nothing, when [`available`](Self::available) fails or covers
+    /// fewer than `out.len()` outputs. An empty `out` is checked the same way: it returns
+    /// `pos` exactly when `available` succeeds.
     pub fn pull(&self, pos: Pos, step: Step, out: &mut [f32]) -> Result<Pos, Error> {
-        let available = self.available(pos, step);
+        let available = self.available(pos, step)?;
         if out.len() > available {
             return Err(Error::InputShort {
                 requested: out.len(),
@@ -94,10 +142,6 @@ impl Resampler {
             });
         }
         let history = self.kernel.history();
-        let oldest = self.oldest();
-        if pos.index() < oldest + history {
-            return Err(Error::BeforeHistory { pos, oldest });
-        }
         let taps = self.kernel.taps();
         let mut p = pos;
         for o in out.iter_mut() {
@@ -111,7 +155,7 @@ impl Resampler {
             } else {
                 self.kernel.apply(&self.ring[at..at + taps], frac) as f32
             };
-            p = p.advanced(step, 1);
+            p = p.stepped(step);
         }
         Ok(p)
     }
