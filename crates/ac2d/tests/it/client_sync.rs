@@ -40,7 +40,7 @@ async fn stop(h: ac2d::Handle) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn hello_snapshot_and_live_events() {
     init_log();
-    let h = Daemon::start(config(manual_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(config(manual_rig(), local_ipc())).unwrap();
     let other = mirror(&h, "other").await;
     other
         .call(Command::MeasCreate {
@@ -71,7 +71,7 @@ async fn hello_snapshot_and_live_events() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stale_base_is_a_conflict() {
     init_log();
-    let h = Daemon::start(config(manual_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(config(manual_rig(), local_ipc())).unwrap();
     let c = mirror(&h, "ac2-client-test").await;
     let m = match c
         .call(Command::MeasCreate {
@@ -177,7 +177,7 @@ async fn a_restart_reads_not_responding_then_a_new_incarnation() {
 async fn two_daemons_are_two_rigs_by_id_and_name() {
     init_log();
     let start = |name: &str| {
-        let mut cfg = config(manual_rig(), local_tcp());
+        let mut cfg = config(manual_rig(), local_ipc());
         cfg.name = name.into();
         Daemon::start(cfg).unwrap()
     };

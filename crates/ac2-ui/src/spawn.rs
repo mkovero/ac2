@@ -356,6 +356,18 @@ pub fn spawn_local(
 /// Starts the simulated rig at `exe` (always owned: it holds no interface and its
 /// measurements live only in it) and reads where it listens from its stdout.
 pub fn spawn_simulated(exe: &Path) -> Result<(Spawned, Endpoints), String> {
+    // Its local pair is ipc like every daemon's, in the runtime directory (closed to other
+    // users) beside the user's own daemon's, named by this app's process so a second app's
+    // simulated rig never binds over this one's. It removes the files when it stops.
+    let dir = ac2_client::endpoint::runtime_dir();
+    let sock = |end: &str| {
+        let name = format!("sim-{}-{end}.sock", std::process::id());
+        format!("ipc://{}", dir.join(name).display())
+    };
+    let at = Endpoints {
+        ctrl: sock("ctrl"),
+        data: sock("data"),
+    };
     let mut cmd = command(exe);
     cmd.args([
         "--backend",
@@ -364,9 +376,9 @@ pub fn spawn_simulated(exe: &Path) -> Result<(Spawned, Endpoints), String> {
         "--name",
         "Simulated rig",
         "--ctrl",
-        "tcp://127.0.0.1:0",
+        &at.ctrl,
         "--data",
-        "tcp://127.0.0.1:0",
+        &at.data,
         "--print-endpoints",
     ])
     .stdout(Stdio::piped());

@@ -3,6 +3,7 @@
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use ac2_audio::Backend;
@@ -297,14 +298,40 @@ pub enum Listen {
         /// Unique name within the process.
         name: String,
     },
-    /// Local machine only: `ipc://` endpoints, or `tcp://` on a loopback address (the
-    /// Windows default). No authentication: the OS user boundary is the trust boundary.
+    /// Local machine only: `ipc://` endpoints, on every OS. No authentication: the socket
+    /// directory, which only this user may enter, is the trust boundary.
     Local {
         /// Ctrl (ROUTER) endpoint.
         ctrl: String,
         /// Data (ROUTER) endpoint.
         data: String,
     },
+}
+
+impl Listen {
+    /// A local pair apart from the user's daemon's, for a daemon that keeps nothing (a test,
+    /// a simulated rig): socket files named by process and count in one directory of this
+    /// user's under the temp directory, which on Windows lies under the profile as the
+    /// socket directory must. The daemon removes its socket files when it stops, so the
+    /// directory is all that stays.
+    pub fn apart() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let user = std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "user".to_owned());
+        let dir = std::env::temp_dir().join(format!("ac2-apart-{user}"));
+        let name = format!(
+            "{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        );
+        let sock =
+            |end: &str| format!("ipc://{}", dir.join(format!("{name}-{end}.sock")).display());
+        Self::Local {
+            ctrl: sock("ctrl"),
+            data: sock("data"),
+        }
+    }
 }
 
 /// Key files of the network.
@@ -331,24 +358,9 @@ impl std::error::Error for ListenError {}
 /// The network's default ctrl port; data is + 1.
 pub const DEFAULT_PORT: u16 = 47_820;
 
-/// Ctrl port of the Windows local endpoints (data + 1), apart from the network's default so
-/// the two never clash.
-pub const LOCAL_PORT: u16 = 47_822;
-
-/// Per-user directory of the local daemon's sockets and pid file: `$AC2_RUNTIME_DIR`, else
-/// `$XDG_RUNTIME_DIR/ac2`, else `<temp>/ac2-<user>` (the same rule as `ac2-client`).
-pub fn runtime_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("AC2_RUNTIME_DIR").filter(|d| !d.is_empty()) {
-        return PathBuf::from(d);
-    }
-    if let Some(d) = std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
-        return PathBuf::from(d).join("ac2");
-    }
-    let user = std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_else(|_| "user".to_owned());
-    std::env::temp_dir().join(format!("ac2-{user}"))
-}
+/// Per-user directory of the local daemon's sockets, lock and pid file (the same rule as
+/// `ac2-client`, one function).
+pub use ac2_paths::runtime_dir;
 
 /// The pid file of the local daemon, in [`runtime_dir`].
 pub fn pid_file() -> PathBuf {
@@ -366,43 +378,28 @@ pub(crate) fn tcp_host_port(endpoint: &str) -> Option<(&str, &str)> {
     }
 }
 
-fn is_loopback_tcp(endpoint: &str) -> bool {
-    matches!(
-        tcp_host_port(endpoint),
-        Some(("127.0.0.1" | "::1" | "localhost", _))
-    )
-}
-
 impl Listen {
-    /// The platform's default local endpoints: `ipc://<runtime dir>/ctrl.sock` and
-    /// `data.sock` on Unix, `tcp://127.0.0.1:47822` / `:47823` on Windows.
+    /// The default local endpoints, on every OS: `ipc://<runtime dir>/ctrl.sock` and
+    /// `data.sock`, reachable only through a directory closed to other users
+    /// ([`ac2_paths::socket_dir`]).
     pub fn default_local() -> Self {
-        #[cfg(unix)]
-        {
-            let dir = runtime_dir();
-            Self::Local {
-                ctrl: format!("ipc://{}", dir.join("ctrl.sock").display()),
-                data: format!("ipc://{}", dir.join("data.sock").display()),
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            Self::Local {
-                ctrl: format!("tcp://127.0.0.1:{LOCAL_PORT}"),
-                data: format!("tcp://127.0.0.1:{}", LOCAL_PORT + 1),
-            }
+        let dir = runtime_dir();
+        Self::Local {
+            ctrl: format!("ipc://{}", dir.join("ctrl.sock").display()),
+            data: format!("ipc://{}", dir.join("data.sock").display()),
         }
     }
 
-    /// Checks that the endpoints are local (`ipc://` or loopback TCP), and that `network`
-    /// fits beside them ([`crate::network::check_port`]).
+    /// Checks that the endpoints are local (`ipc://`, with a path the socket address holds)
+    /// and that a fixed `network` port is one ([`crate::network::check_port`]). Loopback TCP
+    /// is no local endpoint: any process on the host could reach it as the operator.
     pub fn validate(&self, network: &NetworkChoice) -> Result<(), ListenError> {
         if let NetworkChoice::Fixed(NetListen {
             port: NetPort::Port(p),
             ..
         }) = network
         {
-            crate::network::check_port(*p, self)?;
+            crate::network::check_port(*p)?;
         }
         match self {
             Self::Inproc { name } => {
@@ -412,13 +409,13 @@ impl Listen {
             }
             Self::Local { ctrl, data } => {
                 for e in [ctrl, data] {
-                    let ok = e.starts_with("ipc://") || is_loopback_tcp(e);
-                    if !ok {
+                    if !e.starts_with("ipc://") {
                         return Err(ListenError(format!(
-                            "{e}: local mode serves only ipc:// or tcp:// on a loopback address; \
-                             other interfaces are the network's (CURVE)"
+                            "{e}: the local pair serves only ipc://, whose directory only this \
+                             user may enter; TCP is the network's (CURVE)"
                         )));
                     }
+                    ac2_paths::socket_dir::check_path(e).map_err(|e| ListenError(e.to_string()))?;
                 }
             }
         }
@@ -431,54 +428,67 @@ mod tests {
     use super::*;
 
     #[test]
-    fn local_refuses_non_loopback() {
+    fn the_local_pair_is_ipc_only() {
         let ok = Listen::Local {
-            ctrl: "tcp://127.0.0.1:1".into(),
-            data: "ipc:///tmp/x".into(),
+            ctrl: "ipc:///tmp/x/ctrl.sock".into(),
+            data: "ipc:///tmp/x/data.sock".into(),
         };
         assert!(ok.validate(&NetworkChoice::Off).is_ok());
-        let bad = Listen::Local {
-            ctrl: "tcp://0.0.0.0:1".into(),
-            data: "ipc:///tmp/x".into(),
-        };
-        assert!(bad.validate(&NetworkChoice::Off).is_err());
+        for tcp in [
+            "tcp://127.0.0.1:1",
+            "tcp://[::1]:1",
+            "tcp://localhost:1",
+            "tcp://0.0.0.0:1",
+        ] {
+            let bad = Listen::Local {
+                ctrl: tcp.into(),
+                data: "ipc:///tmp/x/data.sock".into(),
+            };
+            let e = bad.validate(&NetworkChoice::Off).expect_err("refused");
+            assert!(e.0.contains("only ipc://"), "{e}");
+        }
     }
 
     #[test]
-    fn a_fixed_network_must_fit_beside_local_tcp() {
-        let local = Listen::Local {
-            ctrl: "tcp://127.0.0.1:47820".into(),
-            data: "tcp://127.0.0.1:47821".into(),
+    fn a_local_socket_path_the_address_cannot_hold_is_refused() {
+        let long = format!(
+            "ipc:///{}/ctrl.sock",
+            "d".repeat(ac2_paths::socket_dir::MAX_SOCKET_PATH)
+        );
+        let l = Listen::Local {
+            ctrl: long,
+            data: "ipc:///tmp/x/data.sock".into(),
         };
+        let e = l.validate(&NetworkChoice::Off).expect_err("refused");
+        assert!(e.0.contains("bytes"), "{e}");
+    }
+
+    #[test]
+    fn a_fixed_network_port_needs_room_for_data() {
+        let local = Listen::default_local();
         let at = |port| {
             NetworkChoice::Fixed(NetListen {
                 bind: NetBind::All,
                 port: NetPort::Port(port),
             })
         };
-        assert!(local.validate(&at(DEFAULT_PORT)).is_err());
-        assert!(local.validate(&at(47_819)).is_err());
-        assert!(local.validate(&at(47_822)).is_ok());
+        assert!(local.validate(&at(DEFAULT_PORT)).is_ok());
         assert!(local.validate(&at(0)).is_err());
+        assert!(local.validate(&at(u16::MAX)).is_err());
     }
 
-    /// Clients find the daemon at these ports without asking it: both sides must agree,
-    /// and the default local pair must never sit on the default network ports.
+    /// Clients find the daemon where it listens without asking it: both sides must agree.
     #[test]
-    fn the_daemons_ports_are_the_clients() {
-        assert_eq!(LOCAL_PORT, ac2_client::endpoint::LOCAL_PORT);
+    fn the_daemons_endpoints_are_the_clients() {
         assert_eq!(DEFAULT_PORT, ac2_client::endpoint::DEFAULT_PORT);
-        let windows_local = Listen::Local {
-            ctrl: format!("tcp://127.0.0.1:{LOCAL_PORT}"),
-            data: format!("tcp://127.0.0.1:{}", LOCAL_PORT + 1),
-        };
-        assert!(
-            windows_local
-                .validate(&NetworkChoice::Fixed(NetListen {
-                    bind: NetBind::All,
-                    port: NetPort::Port(DEFAULT_PORT),
-                }))
-                .is_ok()
+        let ours = Listen::default_local();
+        let theirs = ac2_client::Endpoints::local();
+        assert_eq!(
+            ours,
+            Listen::Local {
+                ctrl: theirs.ctrl,
+                data: theirs.data
+            }
         );
     }
 }

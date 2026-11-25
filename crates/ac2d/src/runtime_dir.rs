@@ -5,33 +5,48 @@
 //! the clients ([`ac2_paths::socket_dir`]), which refuse to connect through such a
 //! directory.
 
+use ac2_paths::socket_dir::{self, SocketDirError};
+
 use crate::StartError;
 
-/// Creates the directory of `endpoint`'s socket (an `ipc://` one; others need none), closes
-/// it to other users, and checks that it is a directory of this user's, mode 0700.
-pub(crate) fn prepare(endpoint: &str) -> Result<(), StartError> {
-    prepare_as(endpoint, effective_uid())
+fn refused(e: SocketDirError) -> StartError {
+    StartError::RuntimeDir {
+        dir: e.dir,
+        problem: e.problem,
+    }
 }
 
+/// Checks that `endpoint`'s socket path fits the socket address, then creates the directory
+/// of its socket (an `ipc://` one; others need none), closes it to other users and checks
+/// it ([`socket_dir::prepare`]). A socket file left by a daemon that died is no concern:
+/// libzmq removes whatever is at the path before it binds, and the instance lock keeps a
+/// second daemon from getting that far.
+pub(crate) fn prepare(endpoint: &str) -> Result<(), StartError> {
+    socket_dir::check_path(endpoint).map_err(refused)?;
+    #[cfg(unix)]
+    {
+        prepare_as(endpoint, socket_dir::effective_uid())
+    }
+    #[cfg(not(unix))]
+    {
+        socket_dir::of_endpoint(endpoint)
+            .map_or(Ok(()), |d| socket_dir::prepare(d).map_err(refused))
+    }
+}
+
+#[cfg(unix)]
 fn prepare_as(endpoint: &str, uid: u32) -> Result<(), StartError> {
-    let Some(dir) = ac2_paths::socket_dir::of_endpoint(endpoint) else {
+    let Some(dir) = socket_dir::of_endpoint(endpoint) else {
         return Ok(());
     };
     std::fs::create_dir_all(dir).map_err(StartError::Io)?;
     // Not checked here: a directory this user cannot change, or a link, is refused by the
     // check below, with what is wrong with it.
-    let _ = ac2_paths::socket_dir::close_as(dir, uid);
-    ac2_paths::socket_dir::check_as(dir, uid).map_err(|e| StartError::RuntimeDir {
-        dir: e.dir,
-        problem: e.problem,
-    })
+    let _ = socket_dir::close_as(dir, uid);
+    socket_dir::check_as(dir, uid).map_err(refused)
 }
 
-fn effective_uid() -> u32 {
-    ac2_paths::socket_dir::effective_uid()
-}
-
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
@@ -60,7 +75,11 @@ mod tests {
     #[test]
     fn another_users_directory_is_refused_by_name() {
         let t = tempfile::tempdir().unwrap();
-        let e = prepare_as(&endpoint(t.path()), effective_uid().wrapping_add(1)).unwrap_err();
+        let e = prepare_as(
+            &endpoint(t.path()),
+            socket_dir::effective_uid().wrapping_add(1),
+        )
+        .unwrap_err();
         let msg = e.to_string();
         assert!(matches!(e, StartError::RuntimeDir { .. }), "{msg}");
         assert!(msg.contains(&t.path().display().to_string()), "{msg}");

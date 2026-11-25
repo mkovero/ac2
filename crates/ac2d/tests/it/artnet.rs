@@ -178,7 +178,7 @@ async fn rig_dmx_until(c: &Client, want: &str) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_universe_follows_the_cues_and_keeps_alive() {
     init_log();
-    let h = Daemon::start(steady_config(realtime_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(steady_config(realtime_rig(), local_ipc())).unwrap();
     let c = connect(&h).await;
     let node = Node::new();
     let target = ArtnetTarget {
@@ -280,7 +280,7 @@ async fn the_universe_follows_the_cues_and_keeps_alive() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn targets_and_tests_are_checked() {
     init_log();
-    let h = Daemon::start(steady_config(realtime_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(steady_config(realtime_rig(), local_ipc())).unwrap();
     let c = connect(&h).await;
     let refused = |e: ClientError| match e {
         ClientError::Daemon(p) => p.code,
@@ -328,7 +328,7 @@ async fn targets_and_tests_are_checked() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_cue_change_fades_and_a_zero_fade_jumps() {
     init_log();
-    let h = Daemon::start(steady_config(realtime_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(steady_config(realtime_rig(), local_ipc())).unwrap();
     let c = connect(&h).await;
     let refused = |e: ClientError| match e {
         ClientError::Daemon(p) => p.code,

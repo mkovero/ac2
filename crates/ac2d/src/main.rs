@@ -264,6 +264,11 @@ fn listen(args: &Args) -> Result<(Listen, NetworkChoice), String> {
         },
         _ => return Err("give both --ctrl and --data".into()),
     };
+    // A local pair that cannot be served is the command line's fault: refused here, before
+    // the lock, the log or the audio.
+    local
+        .validate(&NetworkChoice::Off)
+        .map_err(|e| e.to_string())?;
     let network = match &args.listen {
         // An ephemeral daemon keeps no key to serve a network with.
         None if args.ephemeral => NetworkChoice::Off,
@@ -273,7 +278,7 @@ fn listen(args: &Args) -> Result<(Listen, NetworkChoice), String> {
         Some(l) => {
             let l = NetListen::parse(l).map_err(|e| e.to_string())?;
             if let NetPort::Port(p) = l.port {
-                ac2d::check_port(p, &local).map_err(|e| e.to_string())?;
+                ac2d::check_port(p).map_err(|e| e.to_string())?;
             }
             NetworkChoice::Fixed(l)
         }

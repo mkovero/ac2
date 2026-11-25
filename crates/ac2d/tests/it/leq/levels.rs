@@ -9,7 +9,7 @@ use super::*;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn slow_weightings_change_in_place_and_keep_the_log() {
     init_log();
-    let h = Daemon::start(steady_config(realtime_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(steady_config(realtime_rig(), local_ipc())).unwrap();
     let c = connect(&h).await;
     c.call(Command::StreamOpen {
         config: stream(false),
@@ -93,7 +93,7 @@ async fn slow_peak_limits_and_the_position_correction() {
     use ac2_proto::model::{AlarmSubject, PeakLimit, PeakLimits, PeakQuantity, PositionCorrection};
     init_log();
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = steady_config(realtime_rig(), local_tcp());
+    let mut cfg = steady_config(realtime_rig(), local_ipc());
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;

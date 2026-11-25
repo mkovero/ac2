@@ -418,10 +418,7 @@ mod tests {
     /// The daemon on its simulated rig (no audio leaves the process), a stream open on
     /// both outputs.
     async fn daemon() -> R<(ac2d::Handle, Client)> {
-        let listen = ac2d::Listen::Local {
-            ctrl: "tcp://127.0.0.1:0".into(),
-            data: "tcp://127.0.0.1:0".into(),
-        };
+        let listen = ac2d::Listen::apart();
         let backend = Arc::new(ac2d::fake_rig()?);
         let h = ac2d::Daemon::start(ac2d::DaemonConfig::new(backend, listen, -10.0))?;
         let ep = Endpoints {

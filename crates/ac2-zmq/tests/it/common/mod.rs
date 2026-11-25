@@ -27,7 +27,6 @@ pub fn unique(name: &str) -> String {
 #[derive(Clone, Copy, Debug)]
 pub enum Transport {
     Tcp,
-    #[cfg(unix)]
     Ipc,
     Inproc,
 }
@@ -36,7 +35,6 @@ pub enum Transport {
 pub fn bind_endpoint(t: Transport, dir: &std::path::Path, name: &str) -> String {
     match t {
         Transport::Tcp => "tcp://127.0.0.1:*".to_owned(),
-        #[cfg(unix)]
         Transport::Ipc => format!("ipc://{}", dir.join(unique(name)).display()),
         Transport::Inproc => {
             let _ = dir;

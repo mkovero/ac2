@@ -68,8 +68,8 @@ mod tests {
     fn links_libzmq_4_3_5_with_curve() {
         assert_eq!(libzmq_version(), (4, 3, 5));
         assert!(libzmq_has("curve"), "libzmq built without CURVE");
-        #[cfg(unix)]
-        assert!(libzmq_has("ipc"));
+        // The local pair is ipc on every OS, Windows included.
+        assert!(libzmq_has("ipc"), "libzmq built without ipc");
     }
 
     #[test]

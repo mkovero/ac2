@@ -1,5 +1,5 @@
 //! The same ctrl + data round trip on every transport ac2 uses: tcp://127.0.0.1, ipc://
-//! (Linux/macOS), inproc:// (embedded daemon). CURVE runs on tcp and ipc; libzmq never runs a
+//! (the local pair, every OS: AF_UNIX on Windows too), inproc:// (embedded daemon). CURVE runs on tcp and ipc; libzmq never runs a
 //! security mechanism on inproc.
 
 use crate::common;
@@ -65,13 +65,11 @@ fn tcp_loopback_curve() -> TestResult {
     round_trip(Transport::Tcp, true)
 }
 
-#[cfg(unix)]
 #[test]
 fn ipc() -> TestResult {
     round_trip(Transport::Ipc, false)
 }
 
-#[cfg(unix)]
 #[test]
 fn ipc_curve() -> TestResult {
     round_trip(Transport::Ipc, true)
@@ -80,4 +78,30 @@ fn ipc_curve() -> TestResult {
 #[test]
 fn inproc() -> TestResult {
     round_trip(Transport::Inproc, false)
+}
+
+/// A socket file left by a process that died is no obstacle: libzmq removes whatever is at
+/// the path before it binds (on Windows with `DeleteFile`, as AF_UNIX there asks), and
+/// the new socket answers there.
+#[test]
+fn ipc_binds_over_a_socket_file_left_behind() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("ctrl.sock");
+    let ep = format!("ipc://{}", path.display());
+    // A plain file on every OS; on Unix also a real socket's file, which std leaves on drop.
+    std::fs::write(&path, b"")?;
+    #[cfg(unix)]
+    {
+        std::fs::remove_file(&path)?;
+        drop(std::os::unix::net::UnixListener::bind(&path)?);
+        use std::os::unix::fs::FileTypeExt;
+        assert!(std::fs::symlink_metadata(&path)?.file_type().is_socket());
+    }
+    let ctx = Context::new()?;
+    let server = CtrlServer::start(&ctx, ctx.socket(SocketType::Router)?, &ep)?;
+    let client_ctx = Context::new()?;
+    let d = dealer(&client_ctx, server.endpoint(), None)?;
+    send_req(&d, 1, b"echo:stale")?;
+    assert_eq!(recv_reply(&d)?, (1, "stale".to_owned()));
+    Ok(())
 }

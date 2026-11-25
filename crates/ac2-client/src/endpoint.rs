@@ -1,7 +1,7 @@
 //! Where the daemon listens.
 //!
 //! Local mode (the default) never touches the network: `ipc://` sockets in a per-user runtime
-//! directory on Unix, `tcp://127.0.0.1` on Windows (where ipc is not used). Remote mode is
+//! directory closed to other users, on every OS ([`ac2_paths::socket_dir`]). Remote mode is
 //! `tcp://<host>:<port>` for ctrl and `<port + 1>` for data, always with CURVE.
 
 use std::fmt;
@@ -10,9 +10,6 @@ use std::str::FromStr;
 
 /// Default network ctrl port; data is this + 1.
 pub const DEFAULT_PORT: u16 = 47_820;
-/// Local ctrl port on Windows (no ipc there); data is this + 1. Apart from the network
-/// ports, since a daemon serves both at once.
-pub const LOCAL_PORT: u16 = 47_822;
 
 /// Ctrl (ROUTER) and data (ROUTER) endpoints of one daemon.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,14 +23,7 @@ pub struct Endpoints {
 impl Endpoints {
     /// The local daemon's endpoints for this OS and user.
     pub fn local() -> Self {
-        #[cfg(unix)]
-        {
-            Self::local_in(&runtime_dir())
-        }
-        #[cfg(not(unix))]
-        {
-            Self::tcp("127.0.0.1", LOCAL_PORT)
-        }
+        Self::local_in(&runtime_dir())
     }
 
     /// Local ipc endpoints inside `dir` (`ctrl.sock`, `data.sock`).
@@ -86,20 +76,9 @@ impl Endpoints {
     }
 }
 
-/// Per-user directory holding the local daemon's sockets and pid file:
-/// `$AC2_RUNTIME_DIR`, else `$XDG_RUNTIME_DIR/ac2`, else `<temp>/ac2-<user>`.
-pub fn runtime_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("AC2_RUNTIME_DIR").filter(|d| !d.is_empty()) {
-        return PathBuf::from(d);
-    }
-    if let Some(d) = std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
-        return PathBuf::from(d).join("ac2");
-    }
-    let user = std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_else(|_| "user".to_owned());
-    std::env::temp_dir().join(format!("ac2-{user}"))
-}
+/// Per-user directory holding the local daemon's sockets and pid file (one rule for the
+/// daemon and its clients).
+pub use ac2_paths::runtime_dir;
 
 /// The pid file the local daemon writes in [`runtime_dir`].
 pub fn pid_file() -> PathBuf {
@@ -184,21 +163,21 @@ pub fn endpoints_file() -> PathBuf {
 /// The line `ac2d --print-endpoints` prints and the endpoints file starts with.
 const LISTENING: &str = "ac2d: listening ctrl=";
 
-/// The endpoints of an `ac2d: listening ctrl=… data=…` line, as bound.
+/// The endpoints of an `ac2d: listening ctrl=… data=…` line, as bound. A path may hold
+/// spaces (a Windows profile named `John Smith`), so data runs to the end of the line.
 pub fn parse_listening(line: &str) -> Option<Endpoints> {
     let (ctrl, data) = line
         .trim_end()
         .strip_prefix(LISTENING)?
         .split_once(" data=")?;
-    (!ctrl.is_empty() && !data.is_empty() && !data.contains(' ')).then(|| Endpoints {
+    (!ctrl.is_empty() && !data.is_empty()).then(|| Endpoints {
         ctrl: ctrl.to_owned(),
         data: data.to_owned(),
     })
 }
 
-/// The daemon holding the instance lock, as its endpoints file says: its local pair
-/// (ipc or loopback, no authentication), which every daemon serves whatever its network
-/// does, made dialable ([`Endpoints::dialable`]).
+/// The daemon holding the instance lock, as its endpoints file says: its local pair (ipc,
+/// no authentication), which every daemon serves whatever its network does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockHolder {
     /// Where to reach it.
@@ -206,43 +185,24 @@ pub struct LockHolder {
 }
 
 impl LockHolder {
-    /// The endpoints file's text (see [`endpoints_file`]); `None` when it is not one.
+    /// The endpoints file's text (see [`endpoints_file`]); `None` when it is not one, or
+    /// names anything but an ipc pair (no daemon serves its local pair on another
+    /// transport).
     pub fn parse(text: &str) -> Option<Self> {
         let mut lines = text.lines();
-        let endpoints = parse_listening(lines.next()?)?.dialable();
-        lines.next().is_none().then_some(Self { endpoints })
+        let endpoints = parse_listening(lines.next()?)?;
+        let ipc = [&endpoints.ctrl, &endpoints.data]
+            .iter()
+            .all(|e| e.starts_with("ipc://"));
+        (ipc && lines.next().is_none()).then_some(Self { endpoints })
     }
 
     /// Reads [`endpoints_file`]; `None` while there is none (the holder is still binding),
     /// it does not parse, or the directory it lies in is not this user's own (whoever can
     /// write there could point the app at a daemon of their own).
     pub fn read() -> Option<Self> {
-        #[cfg(unix)]
         ac2_paths::socket_dir::check(&runtime_dir()).ok()?;
         Self::parse(&std::fs::read_to_string(endpoints_file()).ok()?)
-    }
-}
-
-impl Endpoints {
-    /// Endpoints a client can connect to: a wildcard bind (`tcp://0.0.0.0:P`, `tcp://[::]:P`,
-    /// `tcp://*:P`) names no address to dial, so it is reached on loopback.
-    pub fn dialable(self) -> Self {
-        let dial = |ep: String| {
-            for (any, lo) in [
-                ("tcp://0.0.0.0:", "tcp://127.0.0.1:"),
-                ("tcp://*:", "tcp://127.0.0.1:"),
-                ("tcp://[::]:", "tcp://[::1]:"),
-            ] {
-                if let Some(port) = ep.strip_prefix(any) {
-                    return format!("{lo}{port}");
-                }
-            }
-            ep
-        };
-        Self {
-            ctrl: dial(self.ctrl),
-            data: dial(self.data),
-        }
     }
 }
 
@@ -264,18 +224,24 @@ mod tests {
                 endpoints: ep("ipc:///run/ac2/ctrl.sock", "ipc:///run/ac2/data.sock")
             })
         );
+        let windows = r"ipc://C:\Users\John Smith\AppData\Local\ac2\run";
+        assert_eq!(
+            LockHolder::parse(&format!(
+                "ac2d: listening ctrl={windows}\\ctrl.sock data={windows}\\data.sock\n"
+            )),
+            Some(LockHolder {
+                endpoints: ep(
+                    &format!("{windows}\\ctrl.sock"),
+                    &format!("{windows}\\data.sock")
+                )
+            })
+        );
+        // A local pair is never TCP: a file naming one names no daemon of this user's.
         assert_eq!(
             LockHolder::parse(
                 "ac2d: listening ctrl=tcp://127.0.0.1:47822 data=tcp://127.0.0.1:47823\n"
             ),
-            Some(LockHolder {
-                endpoints: ep("tcp://127.0.0.1:47822", "tcp://127.0.0.1:47823")
-            })
-        );
-        assert_eq!(
-            parse_listening("ac2d: listening ctrl=tcp://[::]:5 data=tcp://[::]:6")
-                .map(Endpoints::dialable),
-            Some(ep("tcp://[::1]:5", "tcp://[::1]:6"))
+            None
         );
         // Torn or foreign text names no daemon.
         assert_eq!(

@@ -7,7 +7,7 @@ use crate::common;
 
 use std::time::{Duration, Instant};
 
-use ac2d::{Daemon, Listen, Mdns, NetworkSecurity};
+use ac2d::{Daemon, Mdns, NetworkSecurity};
 use common::*;
 
 fn mdns_opts() -> ac2_discovery::Options {
@@ -27,10 +27,7 @@ fn network_mode_advertises_fingerprint_local_mode_does_not() {
     let mdns = mdns_opts();
     let browser = ac2_discovery::Browser::start(&mdns).unwrap();
 
-    let local = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
+    let local = common::local_ipc();
     let mut cfg = config(manual_rig(), local);
     cfg.name = "local rig".into();
     cfg.mdns = Some(Mdns {

@@ -36,7 +36,7 @@ fn desired() -> GeneratorDesired {
 async fn rig(expiry: Duration) -> (Handle, FakeBackend, Client) {
     init_log();
     let backend = manual_rig();
-    let mut cfg = config(backend.clone(), local_tcp());
+    let mut cfg = config(backend.clone(), local_ipc());
     cfg.lease_expiry = expiry;
     let h = Daemon::start(cfg).unwrap();
     let c = mirror(&h, "ac2-client-test").await;

@@ -18,12 +18,9 @@ use std::time::{Duration, Instant};
 const SPL: &str = "FOH SPL";
 const TF: &str = "TF 1";
 
-/// Any free port.
-fn any_port() -> Endpoints {
-    Endpoints {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    }
+/// The local pair in `dir`: ipc, as every local pair is.
+fn local_pair(dir: &Path) -> Endpoints {
+    Endpoints::local_in(&dir.join("run"))
 }
 
 /// A daemon on the simulated rig that autosaves to `dir` (and comes up with what it saved
@@ -297,7 +294,7 @@ fn saved_measurements(s: &AppState) -> Vec<ac2_proto::model::Measurement> {
 #[test]
 fn a_salvaged_session_keeps_the_kiosk_on_its_meter() -> R {
     let dir = tempfile::tempdir()?;
-    let (handle, ep) = daemon(dir.path(), &any_port(), true)?;
+    let (handle, ep) = daemon(dir.path(), &local_pair(dir.path()), true)?;
     let cli = Cli::connect(&ep)?;
     let (mut desk, mut kiosk) = rig(&ep, &cli)?;
     let saved = saved_measurements(&kiosk.st);
@@ -329,7 +326,7 @@ fn a_salvaged_session_keeps_the_kiosk_on_its_meter() -> R {
 #[test]
 fn a_swapped_daemon_salvaged_keeps_the_kiosk_on_its_meter() -> R {
     let dir = tempfile::tempdir()?;
-    let (handle, ep) = daemon(dir.path(), &any_port(), true)?;
+    let (handle, ep) = daemon(dir.path(), &local_pair(dir.path()), true)?;
     let cli = Cli::connect(&ep)?;
     let (mut desk, mut kiosk) = rig(&ep, &cli)?;
     let saved = saved_measurements(&kiosk.st);
@@ -372,7 +369,7 @@ fn a_swapped_daemon_salvaged_keeps_the_kiosk_on_its_meter() -> R {
 #[test]
 fn a_restarted_daemon_keeps_the_kiosk_on_its_meter() -> R {
     let dir = tempfile::tempdir()?;
-    let (handle, ep) = daemon(dir.path(), &any_port(), true)?;
+    let (handle, ep) = daemon(dir.path(), &local_pair(dir.path()), true)?;
     let cli = Cli::connect(&ep)?;
     let (mut desk, mut kiosk) = rig(&ep, &cli)?;
     drop(cli);
@@ -417,7 +414,7 @@ fn a_restarted_daemon_keeps_the_kiosk_on_its_meter() -> R {
 #[test]
 fn a_desk_laying_out_the_kiosk_meter_keeps_the_kiosk_on_its_meter() -> R {
     let dir = tempfile::tempdir()?;
-    let (handle, ep) = daemon(dir.path(), &any_port(), true)?;
+    let (handle, ep) = daemon(dir.path(), &local_pair(dir.path()), true)?;
     let cli = Cli::connect(&ep)?;
     let (mut desk, mut kiosk) = rig(&ep, &cli)?;
     let spl = meas_named(&desk.st, SPL).ok_or("FOH SPL on the desk")?;

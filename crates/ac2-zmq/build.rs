@@ -29,7 +29,10 @@ fn main() {
     let include = if target.contains("msvc") {
         // libsodium's headers mark every symbol `dllimport` under MSVC unless SODIUM_STATIC is
         // defined; the static archive is linked. cc reads CXXFLAGS when it compiles libzmq.
-        set_env("CXXFLAGS", &format!("{flags} /DSODIUM_STATIC"));
+        set_env(
+            "CXXFLAGS",
+            &format!("{flags} /DSODIUM_STATIC {WINDOWS_IPC}"),
+        );
         msvc_sodium_include_shim(&sodium_include)
     } else {
         // libzmq's sources are not -Wextra clean; cc would relay every warning as a cargo
@@ -52,6 +55,15 @@ fn main() {
         }
     }
 }
+
+/// The ipc transport on Windows (AF_UNIX, Windows 10 1803 and later): the local pair is
+/// ipc on every OS. zeromq-src defines `ZMQ_HAVE_IPC` there only when a test program it
+/// compiles finds `afunix.h`, and a failed probe would leave a libzmq that refuses every
+/// `ipc://` endpoint at run time; defined here it is the same on every build, and a
+/// missing header fails the build instead. The same value twice is no redefinition.
+/// `ZMQ_HAVE_STRUCT_SOCKADDR_UN` zeromq-src defines for Windows itself: `afunix.h` declares
+/// the struct.
+const WINDOWS_IPC: &str = "/DZMQ_HAVE_IPC=1";
 
 /// Preprocessor defines that compile libzmq's TCP keepalive tuning in.
 ///

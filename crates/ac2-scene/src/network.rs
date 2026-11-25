@@ -5,8 +5,8 @@
 use std::net::IpAddr;
 
 use ac2_proto::model::{
-    LocalServer, NetBind, NetInterface, NetSaved, NetSettingKind, NetStatus, NetStatusView,
-    NotSavedReason, PeerNetStatus,
+    NetBind, NetInterface, NetSaved, NetSettingKind, NetStatus, NetStatusView, NotSavedReason,
+    PeerNetStatus,
 };
 
 use crate::rig::{reason_kind_text, reason_text};
@@ -348,38 +348,13 @@ pub fn change_failed(c: NetChange) -> &'static str {
     }
 }
 
-/// The ports a local pair on TCP holds (loopback, as on Windows): the network may not
-/// take them.
-pub fn local_tcp_ports(local: Option<&LocalServer>) -> Vec<u16> {
-    match local {
-        Some(LocalServer::Local { ctrl, data }) => [ctrl, data]
-            .into_iter()
-            .filter_map(|e| tcp_host_port(e)?.1.parse().ok())
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
 /// A typed network port, checked as the daemon checks it: data takes the next port, so
-/// 65535 has none; neither may be a port the local pair holds on TCP.
-pub fn parse_port(text: &str, local_tcp: &[u16]) -> Result<u16, String> {
-    let p = match text.trim().parse::<u16>() {
-        Ok(p) if p != 0 && p != u16::MAX => p,
-        _ => return Err("type a port from 1 to 65534 (data takes the next one)".into()),
-    };
-    if local_tcp.contains(&p) || local_tcp.contains(&(p + 1)) {
-        let held = local_tcp
-            .iter()
-            .map(u16::to_string)
-            .collect::<Vec<_>>()
-            .join(" and ");
-        return Err(format!(
-            "port {p} (data {}) would take TCP {held}, which apps on this computer reach ac2d \
-             on (as on Windows): pick another port",
-            p + 1
-        ));
+/// 65535 has none. The local pair is ipc, so no port clashes with it.
+pub fn parse_port(text: &str) -> Result<u16, String> {
+    match text.trim().parse::<u16>() {
+        Ok(p) if p != 0 && p != u16::MAX => Ok(p),
+        _ => Err("type a port from 1 to 65534 (data takes the next one)".into()),
     }
-    Ok(p)
 }
 
 /// A typed address of this computer.

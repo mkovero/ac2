@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use ac2_zmq::{AuthorizedHandle, KeyPair, SecureContext, Socket, SocketType};
 
-use crate::config::{DEFAULT_PORT, Listen, ListenError, tcp_host_port};
+use crate::config::{DEFAULT_PORT, ListenError, tcp_host_port};
 
 pub use ac2_proto::model::{NetBind, NetInterface, NetReason, NetStatus};
 
@@ -176,27 +176,13 @@ impl Backoff {
 }
 
 /// The one check of a network port, at start (`--listen`) and for any later setting: not
-/// 0, not 65535 (data needs the port after it), and with the local pair on TCP (Windows,
-/// or `--ctrl/--data` on tcp) neither it nor the next one a local port.
-pub fn check_port(port: u16, local: &Listen) -> Result<(), ListenError> {
+/// 0, not 65535 (data needs the port after it). The local pair is ipc, so no port of the
+/// network can clash with it.
+pub fn check_port(port: u16) -> Result<(), ListenError> {
     if port == 0 || port == u16::MAX {
         return Err(ListenError(format!(
             "port {port}: need a fixed port from 1 to 65534 (data is on the next one)"
         )));
-    }
-    if let Listen::Local { ctrl, data } = local {
-        for e in [ctrl, data] {
-            if let Some(p) = tcp_host_port(e).and_then(|(_, p)| p.parse::<u16>().ok())
-                && p != 0
-                && (p == port || p == port + 1)
-            {
-                return Err(ListenError(format!(
-                    "port {port}: the network's ports {port} and {} must not be the local \
-                     endpoint {e}",
-                    port + 1
-                )));
-            }
-        }
     }
     Ok(())
 }
@@ -486,19 +472,8 @@ mod tests {
 
     #[test]
     fn one_port_check() {
-        let local = Listen::Local {
-            ctrl: "tcp://127.0.0.1:6000".into(),
-            data: "tcp://127.0.0.1:6001".into(),
-        };
-        assert!(check_port(0, &local).is_err());
-        assert!(check_port(u16::MAX, &local).is_err());
-        assert!(check_port(5999, &local).is_err());
-        assert!(check_port(6001, &local).is_err());
-        assert!(check_port(6002, &local).is_ok());
-        let ipc = Listen::Local {
-            ctrl: "ipc:///run/ctrl".into(),
-            data: "ipc:///run/data".into(),
-        };
-        assert!(check_port(6000, &ipc).is_ok());
+        assert!(check_port(0).is_err());
+        assert!(check_port(u16::MAX).is_err());
+        assert!(check_port(6000).is_ok());
     }
 }

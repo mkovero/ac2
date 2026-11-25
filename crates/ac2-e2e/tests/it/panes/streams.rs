@@ -348,10 +348,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
 #[test]
 fn record_and_replay_from_the_app() -> R {
     let dir = tempfile::tempdir()?;
-    let listen = ac2d::Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
+    let listen = ac2d::Listen::apart();
     let audio = ac2d::backend(ac2d::BackendChoice::Fake)?;
     let mut config = ac2d::DaemonConfig::new(audio, listen, -10.0);
     config.session_dir = dir.path().join("sessions");

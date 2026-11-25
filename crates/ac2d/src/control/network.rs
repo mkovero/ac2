@@ -17,7 +17,7 @@ use ac2_proto::units::RigId;
 use ac2_zmq::{Admission, AuthorizedHandle, AuthorizedKeys, KeyPair, PublicKey, Role};
 
 use crate::authlog::{AuthLog, RefusedList};
-use crate::config::{Listen, Mdns, NetworkSecurity};
+use crate::config::{Mdns, NetworkSecurity};
 use crate::damage::Damage;
 use crate::io::{Attach, AttachQueue};
 use crate::network::{
@@ -81,8 +81,6 @@ struct Bound {
 /// What [`NetCtl::new`] needs.
 pub(crate) struct NetSetup {
     pub(crate) choice: NetworkChoice,
-    /// The local endpoints, which a network port must not take.
-    pub(crate) local: Listen,
     pub(crate) files: Option<NetworkSecurity>,
     pub(crate) interfaces: Interfaces,
     pub(crate) retry: Backoff,
@@ -95,7 +93,6 @@ pub(crate) struct NetSetup {
 /// The network's state on the control thread.
 pub(crate) struct NetCtl {
     choice: NetworkChoice,
-    local: Listen,
     /// The setting of a [`NetworkChoice::FromSettings`] network and where it is kept.
     settings: NetSettings,
     store: Option<NetStore>,
@@ -129,7 +126,7 @@ impl NetCtl {
         let mut damage = Vec::new();
         let (store, settings) = match &s.choice {
             NetworkChoice::FromSettings { store } => {
-                let (store, settings, d) = NetStore::load(store.clone(), &s.local);
+                let (store, settings, d) = NetStore::load(store.clone());
                 damage.extend(d);
                 (Some(store), settings)
             }
@@ -182,7 +179,6 @@ impl NetCtl {
         Ok((
             Self {
                 choice: s.choice,
-                local: s.local,
                 settings,
                 store,
                 files: s.files,
@@ -323,7 +319,7 @@ impl NetCtl {
         // next time, and none given leaves the kept one as it is, unchecked: a plain off
         // must work whatever is kept.
         let choice = if enabled || given {
-            check_port(choice.port, &self.local).map_err(|e| crate::util::invalid(e.0))?;
+            check_port(choice.port).map_err(|e| crate::util::invalid(e.0))?;
             check_bind(&choice.bind).map_err(|e| crate::util::invalid(e.0))?;
             Some(choice)
         } else {

@@ -83,11 +83,8 @@ fn windows_leave_the_stimulus_alone_and_the_stop_chord_stops_from_one() -> R {
 fn simulated_rig_starts_measuring() -> R {
     let daemon = sim_daemon(Setup::Demo)?;
     let config = daemon.client_config(NAME);
-    // Loopback TCP, as the app reaches the simulated rig it starts.
-    assert!(
-        config.endpoints.ctrl.starts_with("tcp://127.0.0.1:"),
-        "{config:?}"
-    );
+    // ipc, as the app reaches the simulated rig it starts.
+    assert!(config.endpoints.ctrl.starts_with("ipc://"), "{config:?}");
 
     let mut d = Driver::connect(config, &daemon.describe())?;
     d.synced()?;

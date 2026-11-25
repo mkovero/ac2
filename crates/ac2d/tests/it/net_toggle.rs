@@ -73,7 +73,7 @@ fn settings_config(
     laptop: &KeyPair,
     store: Option<PathBuf>,
 ) -> ac2d::DaemonConfig {
-    let mut cfg = config(backend, local_tcp());
+    let mut cfg = config(backend, local_ipc());
     cfg.network = NetworkChoice::FromSettings { store };
     cfg.keys = Some(security(dir, laptop));
     cfg.interfaces = interfaces();

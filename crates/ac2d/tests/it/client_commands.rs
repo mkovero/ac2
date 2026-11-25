@@ -29,7 +29,7 @@ async fn trace(c: &Client, cmd: Command) -> TraceMeta {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delay_find_outcome_and_insert() {
     init_log();
-    let h = Daemon::start(config(manual_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(config(manual_rig(), local_ipc())).unwrap();
     let c = mirror(&h, "ac2-client-test").await;
     c.call(Command::StreamOpen {
         config: stream(true),
@@ -86,7 +86,7 @@ async fn traces_and_sessions() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let backend = manual_rig();
-    let mut cfg = steady_config(backend.clone(), local_tcp());
+    let mut cfg = steady_config(backend.clone(), local_ipc());
     cfg.session_dir = dir.path().join("sessions");
     let h = Daemon::start(cfg).unwrap();
     let c = mirror(&h, "ac2-client-test").await;
@@ -237,7 +237,7 @@ async fn traces_and_sessions() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn band_transfer_from_typed_levels() {
     init_log();
-    let h = Daemon::start(config(manual_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(config(manual_rig(), local_ipc())).unwrap();
     let c = mirror(&h, "ac2-client-test").await;
     let ReplyBody::Measurement(m) = c
         .call(Command::MeasCreate {

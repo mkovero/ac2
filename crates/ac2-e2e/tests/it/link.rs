@@ -5,8 +5,9 @@
 //! dropped and connected anew.
 //!
 //! A daemon that stops answering without closing its connections (a half-open link after a
-//! lost network, a host frozen) is a TCP relay the test freezes: the link's connections stay
-//! open, nothing moves either way.
+//! lost network, a host frozen) is a TCP relay of its network pair (CURVE on loopback) the
+//! test freezes: the link's connections stay open, nothing moves either way. The local pair
+//! is ipc, with nothing between client and daemon to freeze.
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
@@ -15,12 +16,57 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use ac2_client::{ClientConfig, Endpoints};
-use ac2_e2e::{Setup, SimDaemon, sim_daemon};
+use ac2_e2e::{Setup, SimDaemon, sim_daemon, sim_daemon_with};
 use ac2_proto::model::{GenAction, Generator, GeneratorSettings, Signal};
 use ac2_proto::units::Dbfs;
 use ac2_ui::conn::{Conn, ConnEvent, QUIT_GRACE, Request, StimEvent, Target};
+use ac2_zmq::{CurveClient, KeyPair};
 
+use crate::cross_rig::{net_endpoints, on_loopback};
 use crate::harness::{Cli, R};
+
+/// The simulated rig with its network on, reached through a [`Relay`] of its network pair.
+struct Relayed {
+    relay: Relay,
+    curve: CurveClient,
+    daemon: SimDaemon,
+    _keys: tempfile::TempDir,
+}
+
+impl Relayed {
+    fn new(setup: Setup) -> R<Self> {
+        let keys_dir = tempfile::tempdir()?;
+        let app = KeyPair::generate()?;
+        let keys = KeyPair::generate()?;
+        let mut failed = None;
+        let daemon = sim_daemon_with(setup, |cfg| {
+            failed = on_loopback(cfg, keys_dir.path(), &app, &keys).err();
+        })?;
+        if let Some(e) = failed {
+            return Err(e);
+        }
+        let h = daemon.handle().ok_or("no daemon")?;
+        let (ctrl, data) = net_endpoints(h);
+        let relay = Relay::to(&Endpoints { ctrl, data })?;
+        let curve = CurveClient {
+            keys: app,
+            server_key: h.server_public_key().ok_or("no server key")?,
+        };
+        Ok(Self {
+            relay,
+            curve,
+            daemon,
+            _keys: keys_dir,
+        })
+    }
+
+    /// The link's settings: through the relay, with the app's CURVE keys.
+    fn config(&self) -> ClientConfig {
+        let mut c = ClientConfig::new(self.relay.endpoints.clone(), "ac2-ui link test");
+        c.curve = Some(self.curve.clone());
+        c
+    }
+}
 
 /// A relay of a daemon's two endpoints that can be frozen: while frozen it holds every
 /// connection open and passes nothing either way.
@@ -180,8 +226,8 @@ fn generator_until(cli: &Cli, what: &str, ok: impl Fn(&Generator) -> bool) -> Ge
 }
 
 /// Connects and arms (never fires: arming is enough to hold the lease).
-fn armed(endpoints: Endpoints) -> R<Conn> {
-    let conn = link(endpoints)?;
+fn armed(config: ClientConfig) -> R<Conn> {
+    let conn = link_with(config)?;
     wait_for(&conn, "connected", |e| {
         matches!(e, ConnEvent::Connected { .. })
     });
@@ -210,7 +256,7 @@ fn rig() -> R<(SimDaemon, Cli)> {
 #[test]
 fn quit_stops_and_releases_the_stimulus() -> R {
     let (daemon, cli) = rig()?;
-    let conn = armed(daemon.endpoints().clone())?;
+    let conn = armed(daemon.client_config("ac2-ui link test"))?;
     generator_until(&cli, "armed", |g| g.armed);
     assert!(conn.close(), "the link finished within the grace period");
     let g = generator_until(&cli, "released", |g| !g.armed && g.owner.is_none());
@@ -220,12 +266,12 @@ fn quit_stops_and_releases_the_stimulus() -> R {
 
 #[test]
 fn quit_waits_at_most_the_grace_period_for_a_silent_daemon() -> R {
-    let (daemon, cli) = rig()?;
-    let relay = Relay::to(daemon.endpoints())?;
-    let conn = armed(relay.endpoints.clone())?;
+    let silent = Relayed::new(Setup::Demo)?;
+    let cli = Cli::connect(silent.daemon.endpoints())?;
+    let conn = armed(silent.config())?;
     generator_until(&cli, "armed", |g| g.armed);
     // The daemon stops answering: stop and release can never complete.
-    relay.freeze(true);
+    silent.relay.freeze(true);
     let t0 = Instant::now();
     // The link gives up on the stop at the same deadline, so `close` may see it finish
     // just in time or not; either way the quit takes the grace period and no longer.
@@ -423,9 +469,9 @@ fn a_silent_daemon_is_dropped_and_connected_anew() -> R {
     // The relay keeps every TCP connection open but passes nothing: the transport looks
     // healthy, as a half-open connection after a lost link does, so only the watchdog
     // notices.
-    let daemon = sim_daemon(Setup::Empty)?;
-    let relay = Relay::to(daemon.endpoints())?;
-    let mut config = ClientConfig::new(relay.endpoints.clone(), "ac2-ui link test");
+    let silent = Relayed::new(Setup::Empty)?;
+    let relay = &silent.relay;
+    let mut config = silent.config();
     config.dead_after = Duration::from_millis(600);
     let conn = link_with(config)?;
     wait_for(&conn, "connected", |e| {
@@ -466,14 +512,13 @@ fn a_silent_daemon_is_dropped_and_connected_anew() -> R {
 #[test]
 fn quit_with_two_rigs_stops_both_within_one_grace_period() -> R {
     let (answering, cli) = rig()?;
-    let (silent, _) = rig()?;
-    let relay = Relay::to(silent.endpoints())?;
+    let silent = Relayed::new(Setup::Demo)?;
     let links = vec![
-        armed(relay.endpoints.clone())?,
-        armed(answering.endpoints().clone())?,
+        armed(silent.config())?,
+        armed(answering.client_config("ac2-ui link test"))?,
     ];
     generator_until(&cli, "armed", |g| g.armed);
-    relay.freeze(true);
+    silent.relay.freeze(true);
     let t0 = Instant::now();
     ac2_ui::conn::close_all(links);
     let took = t0.elapsed();

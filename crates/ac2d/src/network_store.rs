@@ -16,7 +16,6 @@ use std::path::PathBuf;
 use ac2_proto::model::{NetBind, NetChoice, NetSaved, NotSavedReason, StateFile};
 use serde::{Deserialize, Serialize};
 
-use crate::config::Listen;
 use crate::damage::Damage;
 
 /// The file's version; any change of its shape bumps it.
@@ -73,13 +72,9 @@ pub(crate) struct NetStore {
 }
 
 impl NetStore {
-    /// Reads `path` (`None`: kept in memory only), whose ports must not take the `local`
-    /// endpoints'. What it holds when it cannot be used is off; a damaged or other-version
+    /// Reads `path` (`None`: kept in memory only). What it holds when it cannot be used is off; a damaged or other-version
     /// file is set aside.
-    pub(crate) fn load(
-        path: Option<PathBuf>,
-        local: &Listen,
-    ) -> (Self, NetSettings, Option<Damage>) {
+    pub(crate) fn load(path: Option<PathBuf>) -> (Self, NetSettings, Option<Damage>) {
         let Some(path) = path else {
             let store = Self {
                 path: None,
@@ -112,7 +107,7 @@ impl NetStore {
                 return (store, NetSettings::default(), None);
             }
         };
-        match parse(&bytes, local) {
+        match parse(&bytes) {
             Ok(s) => (Self::saved(path), s, None),
             Err(reason) => {
                 let set_aside_as = set_aside(&path);
@@ -219,7 +214,7 @@ fn set_aside(path: &std::path::Path) -> Option<PathBuf> {
 }
 
 /// The setting in the file, held to the rules `server.network` holds a new one to.
-fn parse(bytes: &[u8], local: &Listen) -> Result<NetSettings, String> {
+fn parse(bytes: &[u8]) -> Result<NetSettings, String> {
     let v: Version =
         serde_json::from_slice(bytes).map_err(|e| format!("not a network setting: {e}"))?;
     if v.version != VERSION {
@@ -231,7 +226,7 @@ fn parse(bytes: &[u8], local: &Listen) -> Result<NetSettings, String> {
     let f: File =
         serde_json::from_slice(bytes).map_err(|e| format!("not a network setting: {e}"))?;
     if let Some(c) = &f.settings.choice {
-        crate::network::check_port(c.port, local).map_err(|e| e.0)?;
+        crate::network::check_port(c.port).map_err(|e| e.0)?;
         crate::network::check_bind(&c.bind).map_err(|e| e.0)?;
     }
     Ok(f.settings)
@@ -246,11 +241,7 @@ mod tests {
     fn round_trips_and_refuses_what_it_cannot_serve() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("network.json");
-        let local = Listen::Local {
-            ctrl: "tcp://127.0.0.1:6000".into(),
-            data: "tcp://127.0.0.1:6001".into(),
-        };
-        let (mut store, s, d) = NetStore::load(Some(path.clone()), &local);
+        let (mut store, s, d) = NetStore::load(Some(path.clone()));
         assert_eq!((s, d), (NetSettings::default(), None));
         let on = NetSettings {
             enabled: true,
@@ -263,22 +254,22 @@ mod tests {
         };
         store.save(&on);
         assert_eq!(store.saved_state(), NetSaved::Saved);
-        assert_eq!(NetStore::load(Some(path.clone()), &local).1, on);
+        assert_eq!(NetStore::load(Some(path.clone())).1, on);
         // Off, the choice is kept for the next time it goes on.
         let off = NetSettings {
             enabled: false,
             ..on
         };
         store.save(&off);
-        assert_eq!(NetStore::load(Some(path.clone()), &local).1, off);
+        assert_eq!(NetStore::load(Some(path.clone())).1, off);
         for bad in [
             r#"{"version":2,"enabled":true,"choice":{"bind":{"type":"all"},"port":0}}"#,
-            r#"{"version":2,"enabled":false,"choice":{"bind":{"type":"all"},"port":5999}}"#,
+            r#"{"version":2,"enabled":false,"choice":{"bind":{"type":"all"},"port":65535}}"#,
             r#"{"version":2,"enabled":true,"choice":{"bind":{"type":"interface","name":"e\u0000"},"port":5000}}"#,
             r#"{"version":1,"enabled":true,"bind":{"type":"all"},"port":5000}"#,
         ] {
             std::fs::write(&path, bad).unwrap();
-            let (_, s, d) = NetStore::load(Some(path.clone()), &local);
+            let (_, s, d) = NetStore::load(Some(path.clone()));
             assert!(!s.enabled, "{bad}");
             assert!(d.unwrap().set_aside_as.is_some(), "{bad}");
             assert!(!path.exists(), "{bad}");
@@ -291,9 +282,6 @@ mod tests {
     #[test]
     fn an_unreadable_file_is_left_and_a_stuck_damaged_one_set_aside_before_a_write() {
         use std::os::unix::fs::PermissionsExt;
-        let local = Listen::Inproc {
-            name: "store".into(),
-        };
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("network.json");
         std::fs::write(&path, b"held").unwrap();
@@ -301,7 +289,7 @@ mod tests {
         if std::fs::read(&path).is_ok() {
             return; // Permissions do not bind this user (root): nothing to test.
         }
-        let (mut store, s, d) = NetStore::load(Some(path.clone()), &local);
+        let (mut store, s, d) = NetStore::load(Some(path.clone()));
         assert_eq!((s.enabled, d.is_none()), (false, true));
         store.save(&NetSettings {
             enabled: true,
@@ -319,7 +307,7 @@ mod tests {
         // Damaged in a directory it cannot be moved out of: kept, then set aside first.
         std::fs::write(&path, b"{").unwrap();
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
-        let (mut store, _, d) = NetStore::load(Some(path.clone()), &local);
+        let (mut store, _, d) = NetStore::load(Some(path.clone()));
         assert!(d.unwrap().set_aside_as.is_none());
         assert_eq!(
             store.saved_state(),
@@ -340,7 +328,7 @@ mod tests {
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
         store.save(&on);
         assert_eq!(store.saved_state(), NetSaved::Saved);
-        assert_eq!(NetStore::load(Some(path.clone()), &local).1, on);
+        assert_eq!(NetStore::load(Some(path.clone())).1, on);
         let files = std::fs::read_dir(dir.path()).unwrap().count();
         assert_eq!(files, 2, "the damaged file set aside beside the new one");
     }

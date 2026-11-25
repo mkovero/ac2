@@ -267,13 +267,12 @@ impl ConnectionPage {
     /// Enter on a typed address or port: checked here as the daemon checks it, then picked;
     /// on a network that is on, applied.
     pub(super) fn net_edit(&mut self, kind: ConnEdit, text: String) -> Option<ConnAction> {
-        let (info, sw) = self.net_info()?;
+        let (_, sw) = self.net_info()?;
         let on = matches!(sw, Switch::On { .. });
         let in_force = match sw {
             Switch::On { choice } => Some(choice.port),
             Switch::Off { .. } => None,
         };
-        let local = words::local_tcp_ports(info.local.as_ref());
         match kind {
             ConnEdit::Address => match words::parse_address(&text) {
                 Ok(addr) => {
@@ -291,7 +290,7 @@ impl ConnectionPage {
                     None
                 }
             },
-            ConnEdit::Port => match words::parse_port(&text, &local) {
+            ConnEdit::Port => match words::parse_port(&text) {
                 Ok(p) => {
                     self.net.port = Some(p);
                     if on {
