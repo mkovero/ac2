@@ -3,8 +3,7 @@
 use ac2_client::{Client, expect_body};
 use ac2_proto::model::{
     LeqConfig, LeqPreset, LeqWindow, MeasConfig, MeasKind, Measurement, PeakLimit, PeakQuantity,
-    PositionCorrection, SplConfig, SplLogPage, SplLogRow, SplLogWhich, State, TimeWeighting,
-    Weighting,
+    PositionCorrection, SplConfig, SplLogPage, SplLogWhich, State, TimeWeighting, Weighting,
 };
 use ac2_proto::units::{Db, Seconds};
 use ac2_proto::{Command, ReplyBody};
@@ -420,12 +419,16 @@ async fn log_page(
     Ok(expect_body!("spl.log_get", r, ReplyBody::SplLogPage(p) => p)?)
 }
 
-/// The CSV of `rows` of meter `m` (the session file's format).
-fn log_csv(st: &State, m: &Measurement, rows: &[SplLogRow]) -> Result<String, CliError> {
+/// The CSV of log `d` of meter `m` (the session file's format).
+fn log_csv(
+    st: &State,
+    m: &Measurement,
+    d: &ac2_client::spl_log::LogDownload,
+) -> Result<String, CliError> {
     spl_config(m)?;
-    let info = ac2_client::spl_log::log_info(st, m)
+    let info = ac2_client::spl_log::log_info(st, m, d.started_at)
         .ok_or_else(|| CliError::Usage(format!("{} is not an SPL meter", m.config.name)))?;
-    Ok(ac2_proto::spl_log::export_csv(&info, rows))
+    Ok(ac2_proto::spl_log::export_csv(&info, &d.rows))
 }
 
 /// `spl leq new`: without `--yes`, says what would end and refuses; with it, ends the log
@@ -460,8 +463,9 @@ async fn new_log(cli: &Cli, n: &LeqNew, out: &mut Out<'_>) -> Result<(), CliErro
     c.call(Command::SplLogNew { meas: m.id }).await?;
     let file = match &n.export {
         Some(path) => {
-            let rows = ac2_client::spl_log::all_rows(&c, m.id, SplLogWhich::Previous).await?;
-            let csv = log_csv(&st, &m, &rows)?;
+            let d = ac2_client::spl_log::all_rows(&c, m.id, SplLogWhich::Previous).await?;
+            let csv = log_csv(&st, &m, &d)?;
+            let rows = d.rows;
             std::fs::write(path, csv.as_bytes()).map_err(|e| {
                 CliError::Usage(format!(
                     "the new log started, but {} could not be written ({e}); the ended log is \
@@ -508,8 +512,9 @@ async fn export(cli: &Cli, e: &LeqExport, out: &mut Out<'_>) -> Result<(), CliEr
     } else {
         SplLogWhich::Current
     };
-    let rows = ac2_client::spl_log::all_rows(&c, m.id, log).await?;
-    let csv = log_csv(&st, m, &rows)?;
+    let d = ac2_client::spl_log::all_rows(&c, m.id, log).await?;
+    let csv = log_csv(&st, m, &d)?;
+    let rows = d.rows;
     match &e.out {
         Some(path) => {
             std::fs::write(path, csv.as_bytes())?;

@@ -15,6 +15,7 @@ fn flags(j: LeqJudgement, on_course: bool) -> LeqFlags {
     let f = match j {
         LeqJudgement::NoLimit => LeqFlags::NONE,
         LeqJudgement::NotCalibrated => LeqFlags::LIMIT,
+        LeqJudgement::CantTell => LeqFlags::LIMIT.with(LeqFlags::CANT_TELL),
         LeqJudgement::Ok => LeqFlags::LIMIT.with(LeqFlags::JUDGED),
         LeqJudgement::Near => LeqFlags::LIMIT.with(LeqFlags::JUDGED).with(LeqFlags::NEAR),
         LeqJudgement::Over => LeqFlags::LIMIT.with(LeqFlags::JUDGED).with(LeqFlags::OVER),
@@ -81,8 +82,8 @@ fn frame() -> BandLeqFrame {
         weighting,
         elapsed: Seconds(elapsed),
         measured: Seconds(elapsed),
-        period: BandPeriod::Night,
-        period_after_horizon: BandPeriod::Night,
+        period: Some(BandPeriod::Night),
+        period_after_horizon: Some(BandPeriod::Night),
     };
     let mut windows: Vec<BandWindowState> = (0..n)
         .map(|i| state(i, 3600.0, Weighting::Z, 3600.0))
@@ -298,8 +299,8 @@ fn filling_period_change_correction_and_offline() {
     for w in &mut f.meta.windows[..LF_BAND_COUNT] {
         w.elapsed = Seconds(1800.0);
         w.measured = Seconds(1790.0);
-        w.period = BandPeriod::Day;
-        w.period_after_horizon = BandPeriod::Night;
+        w.period = Some(BandPeriod::Day);
+        w.period_after_horizon = Some(BandPeriod::Night);
     }
     f.meta.correction = Db(8.0);
     let t = band_leq_text(&cfg(), &f, PlotChrome::Full);
@@ -315,14 +316,29 @@ fn filling_period_change_correction_and_offline() {
         Some("until full: stay ≤ 81.2 dB SPL")
     );
     for w in &mut f.meta.windows[..LF_BAND_COUNT] {
-        w.period = BandPeriod::Night;
-        w.period_after_horizon = BandPeriod::Day;
+        w.period = Some(BandPeriod::Night);
+        w.period_after_horizon = Some(BandPeriod::Day);
     }
     assert_eq!(
         band_leq_text(&cfg(), &f, PlotChrome::Full).rows[0]
             .period
             .as_deref(),
         Some("night limits (22–07) · headroom for the day limits")
+    );
+    // The time of day not known: the period and the judgement read "can't tell".
+    for (k, w) in f.meta.windows[..LF_BAND_COUNT].iter_mut().enumerate() {
+        w.period = None;
+        w.period_after_horizon = None;
+        f.flags[k] = flags(LeqJudgement::CantTell, false);
+    }
+    let t = band_leq_text(&cfg(), &f, PlotChrome::Full);
+    assert_eq!(
+        t.rows[0].period.as_deref(),
+        Some("can't tell day or night: clock not set")
+    );
+    assert_eq!(
+        t.rows[0].bars[4].state_text.as_deref(),
+        Some("can't tell: clock not set")
     );
 }
 
@@ -634,8 +650,8 @@ fn a_single_band_window_is_one_bar_named_by_its_band() {
         weighting: Weighting::Z,
         elapsed: Seconds(60.0),
         measured: Seconds(60.0),
-        period: BandPeriod::Day,
-        period_after_horizon: BandPeriod::Day,
+        period: Some(BandPeriod::Day),
+        period_after_horizon: Some(BandPeriod::Day),
     }];
     f.leq = vec![72.0];
     f.limit = vec![80.0];

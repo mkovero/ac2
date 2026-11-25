@@ -87,7 +87,8 @@ impl AppState {
             .measurements
             .iter()
             .find(|m| m.id == meas)
-            .and_then(|m| ac2_client::spl_log::log_info(st, m))
+            // The download sets the log's start (`export_leq_log`).
+            .and_then(|m| ac2_client::spl_log::log_info(st, m, ac2_proto::units::WallNs(0)))
             .ok_or("that SPL meter is gone")?;
         out.push(Request::ExportLeqLog {
             info,

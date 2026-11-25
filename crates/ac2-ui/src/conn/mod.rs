@@ -207,8 +207,9 @@ pub enum Request {
     /// ([`ConnEvent::LeqSpan`]).
     LeqSpan {
         meas: MeasId,
-        from: ac2_proto::units::WallNs,
-        to: ac2_proto::units::WallNs,
+        /// Second indices of the meter's log, inclusive.
+        from: u64,
+        to: u64,
         step_s: u32,
         ask: u64,
     },

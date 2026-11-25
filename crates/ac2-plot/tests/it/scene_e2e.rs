@@ -605,8 +605,11 @@ fn leq_strip_cursor_on_the_readout_plate() {
         windows: cfg.windows.clone(),
         scale: LevelScale::DbSpl,
         step_s: 60,
+        first_second: Some(0),
+        last_second: Some(86_399),
         log_start: Some(WallNs((end_s - 86_400) * 1_000_000_000)),
         log_until: Some(WallNs(end_s * 1_000_000_000)),
+        second: (0..30u64).map(|k| 86_399 - (29 - k) * 60).collect(),
         at,
         leq: (0..n)
             .map(|i| (0..30).map(|k| level(i, k)).collect())

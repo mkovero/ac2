@@ -255,6 +255,7 @@ impl Pair {
 ///         },
 ///     }),
 ///     stamp_map: None,
+///     rtc: true,
 /// };
 /// let rig = |name, rate_hz| RigClockFacts {
 ///     id: None,

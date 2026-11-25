@@ -16,6 +16,7 @@ const LEVELS: &str = "from the rigs' level frames";
 fn pupu_clocks() -> Clocks {
     Clocks {
         system: SystemClock::Synced { maxerror_us: 3027 },
+        rtc: true,
         capture: Some(DeviceClock {
             device: DeviceId("system".into()),
             rate: SampleClock::Measured {

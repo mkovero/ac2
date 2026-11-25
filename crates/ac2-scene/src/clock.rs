@@ -108,6 +108,7 @@ mod tests {
     fn clocks(rate: Option<SampleClock>, system: SystemClock) -> Clocks {
         Clocks {
             system,
+            rtc: true,
             capture: rate.map(|rate| DeviceClock {
                 device: DeviceId("system".into()),
                 rate,

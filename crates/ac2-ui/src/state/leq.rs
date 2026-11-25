@@ -19,6 +19,9 @@ pub struct LeqUi {
     pub(super) span_pending: Option<strip::SpanAsk>,
     /// Number of the newest span fetch.
     pub(super) span_ask: u64,
+    /// Each meter's newest second index a history reply named, with that second's end
+    /// (daemon wall clock, s): where a span looked at by time is asked for by index.
+    pub(super) index_at: BTreeMap<MeasId, (u64, f64)>,
     /// Which log and windows each SPL meter's history was last rebuilt for.
     pub(super) logs: BTreeMap<MeasId, LeqLogSeen>,
     /// Number of the newest history rebuild asked for.
@@ -28,6 +31,15 @@ pub struct LeqUi {
     /// The SPL / Leq page last applied, with what its call is named: a conflict brings it
     /// back with its edits.
     pub(super) sent: Option<(String, Box<LeqDialog>)>,
+}
+
+impl LeqUi {
+    /// Keeps the newest second index `h` names, with its wall time.
+    pub(super) fn note_index(&mut self, meas: MeasId, h: &ac2_proto::model::SplHistory) {
+        if let (Some(s), Some(t)) = (h.last_second, h.log_until) {
+            self.index_at.insert(meas, (s, t.0 as f64 / 1e9));
+        }
+    }
 }
 
 /// What the app keeps for the SPL panes' history strips and the Leq page, by pane: the
@@ -226,7 +238,10 @@ impl AppState {
             return;
         }
         match result {
-            Ok(h) => self.rig.leq.history.entry(meas).or_default().1.backfill(&h),
+            Ok(h) => {
+                self.rig.leq.note_index(meas, &h);
+                self.rig.leq.history.entry(meas).or_default().1.backfill(&h);
+            }
             Err(e) => {
                 let name = self
                     .measurements()

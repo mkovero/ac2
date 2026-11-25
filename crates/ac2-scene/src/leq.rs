@@ -45,7 +45,7 @@ pub use history::{
 use history::{decimate, lay_out_strip};
 pub use run::{LeqRunText, NewLogConfirm, new_log_confirm, run_text};
 use tiles::TILE_INSTRUCTION_EM;
-pub use tiles::{LeqTile, TileKind, TileState, leq_tiles, tile_colors, time_to};
+pub use tiles::{CANT_TELL, LeqTile, TileKind, TileState, leq_tiles, tile_colors, time_to};
 
 /// `LAeq 30 min`.
 pub fn window_name(w: &LeqWindow) -> String {

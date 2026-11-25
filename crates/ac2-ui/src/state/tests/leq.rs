@@ -505,8 +505,12 @@ pub(super) fn rebuilt(seconds: u64, end_s: u64) -> SplHistory {
         windows,
         scale: LevelScale::DbSpl,
         step_s: 1,
+        // Index k is the second ending at wall second k + 1.
+        first_second: Some(end_s - seconds),
+        last_second: Some(end_s - 1),
         log_start: Some(WallNs((end_s - seconds) * 1_000_000_000)),
         log_until: Some(WallNs(end_s * 1_000_000_000)),
+        second: (end_s - seconds..end_s).collect(),
         at: (0..seconds)
             .map(|k| WallNs((end_s - seconds + 1 + k) * 1_000_000_000))
             .collect(),

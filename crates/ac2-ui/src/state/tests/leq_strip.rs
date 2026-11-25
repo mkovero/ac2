@@ -37,7 +37,8 @@ fn span_asked(r: &[Request]) -> Option<(f64, f64, u32, u64)> {
             step_s,
             ask,
             ..
-        } => Some((from.0 as f64 / 1e9, to.0 as f64 / 1e9, *step_s, *ask)),
+        // Asked by index; index k is the second ending at wall second k + 1.
+        } => Some((*from as f64 + 1.0, *to as f64 + 1.0, *step_s, *ask)),
         _ => None,
     })
 }
@@ -51,8 +52,13 @@ fn span_reply(end: u64, step: u32, n: u64) -> SplHistory {
         windows,
         scale: LevelScale::DbSpl,
         step_s: step,
+        first_second: Some(10_000),
+        last_second: Some(49_999),
         log_start: Some(WallNs(10_000 * 1_000_000_000)),
         log_until: Some(WallNs(50_000 * 1_000_000_000)),
+        second: (0..n)
+            .map(|k| end - (n - 1 - k) * u64::from(step) - 1)
+            .collect(),
         at: (0..n)
             .map(|k| WallNs((end - (n - 1 - k) * u64::from(step)) * 1_000_000_000))
             .collect(),

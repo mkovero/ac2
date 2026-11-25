@@ -365,7 +365,11 @@ fn the_leq_log_exports_as_csv_in_a_new_folder() -> R {
     let t0 = 1_792_000_000_000_000_000;
     let rows: Vec<SplLogRow> = (0..n)
         .map(|k| SplLogRow {
+            second: k,
+            run: 0,
             start: WallNs(t0 + k * 1_000_000_000),
+            clock: ac2_proto::model::LogClock::Synced,
+            gap: (k == 0).then_some(ac2_proto::model::LogGap::Known),
             measured: Seconds(1.0),
             laeq: Dbfs(-20.0),
             lceq: Dbfs(-18.0),
@@ -381,6 +385,8 @@ fn the_leq_log_exports_as_csv_in_a_new_folder() -> R {
         name: "FOH SPL".into(),
         input: 1,
         mic: None,
+        zone: "UTC".into(),
+        started: WallNs(t0),
     };
     let dir = tempfile::tempdir()?;
     let stream = dir.path().join("long");
@@ -418,6 +424,7 @@ fn the_leq_log_exports_as_csv_in_a_new_folder() -> R {
                 info: info.clone(),
                 rows,
                 bands: Vec::new(),
+                mark: None,
             }],
             traces: Vec::new(),
             walks: Vec::new(),

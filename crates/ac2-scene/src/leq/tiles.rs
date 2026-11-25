@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// A day/night limit's state while the time of day is not known.
+pub const CANT_TELL: &str = "can't tell: clock not set";
+
 /// How a tile is coloured.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TileState {
@@ -9,6 +12,9 @@ pub enum TileState {
     NoLimit,
     /// A limit, not judged (dBFS).
     NotCalibrated,
+    /// A day/night limit, not judged: the time of day is not known (the clock unsynced on
+    /// a host without an RTC).
+    CantTell,
     Ok,
     Near,
     Over,
@@ -19,6 +25,7 @@ impl From<LeqJudgement> for TileState {
         match j {
             LeqJudgement::NoLimit => TileState::NoLimit,
             LeqJudgement::NotCalibrated => TileState::NotCalibrated,
+            LeqJudgement::CantTell => TileState::CantTell,
             LeqJudgement::Ok => TileState::Ok,
             LeqJudgement::Near => TileState::Near,
             LeqJudgement::Over => TileState::Over,
@@ -102,7 +109,7 @@ impl LeqTile {
         let coloured = match self.state {
             TileState::Ok | TileState::Over => true,
             TileState::Near => !self.on_course,
-            TileState::NoLimit | TileState::NotCalibrated => false,
+            TileState::NoLimit | TileState::NotCalibrated | TileState::CantTell => false,
         };
         self.state_text
             .as_deref()
@@ -201,6 +208,7 @@ fn state_text(state: TileState, on_course: bool) -> Option<String> {
     match state {
         TileState::NoLimit => None,
         TileState::NotCalibrated => Some("not calibrated".into()),
+        TileState::CantTell => Some(CANT_TELL.into()),
         TileState::Ok => Some("OK".into()),
         TileState::Near if on_course => Some("ON COURSE".into()),
         TileState::Near => Some("NEAR".into()),
@@ -336,7 +344,7 @@ pub fn tile_colors(state: TileState, theme: &Theme) -> (Color, Color) {
     match state {
         TileState::Over => (theme.banner_fault.background, theme.banner_fault.text),
         TileState::Near => (theme.banner_warning.background, theme.banner_warning.text),
-        TileState::NoLimit | TileState::NotCalibrated | TileState::Ok => {
+        TileState::NoLimit | TileState::NotCalibrated | TileState::CantTell | TileState::Ok => {
             (theme.plot_background, theme.text)
         }
     }

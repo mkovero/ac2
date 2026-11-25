@@ -30,8 +30,14 @@ fn bucketed(n: u64, end_s: u64, step: u32) -> SplHistory {
         windows: c.windows.clone(),
         scale: LevelScale::DbSpl,
         step_s: step,
+        first_second: Some(0),
+        last_second: Some(86_399),
         log_start: Some(WallNs((end_s - 86_400) * 1_000_000_000)),
         log_until: Some(WallNs(end_s * 1_000_000_000)),
+        second: at
+            .iter()
+            .map(|t| t.0 / 1_000_000_000 - (end_s - 86_400) - 1)
+            .collect(),
         at,
         leq,
         over,
