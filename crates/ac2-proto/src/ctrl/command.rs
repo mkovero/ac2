@@ -34,7 +34,9 @@ pub enum Command {
     /// Version handshake; the first request of every connection.
     #[serde(rename = "hello")]
     Hello {
-        /// Client software name and version, for logs.
+        /// Client software name and version, for logs; decoded one line, at most
+        /// [`crate::printable::MAX_CLIENT_CHARS`] characters.
+        #[serde(deserialize_with = "crate::printable::client_string")]
         client: String,
     },
 
