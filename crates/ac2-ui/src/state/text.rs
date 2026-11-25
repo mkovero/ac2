@@ -77,7 +77,7 @@ impl AppState {
     /// How message text says to capture into a slot: its keys, else the palette entry.
     pub(super) fn capture_keys(&self) -> String {
         self.slot_keys(&CAPTURE_SLOT)
-            .unwrap_or_else(|| self.keys.palette_entry("Capture to slot …"))
+            .unwrap_or_else(|| self.keys.palette_entry("Capture pane to slot …"))
     }
 
     /// How message text says to set up a sweep: its key, else the palette entry.

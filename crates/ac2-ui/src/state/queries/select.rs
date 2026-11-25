@@ -246,22 +246,30 @@ impl AppState {
         m
     }
 
-    /// The measurement a capture stores: the live curve of the focused pane the keys act
-    /// on ([`Self::focused_live`]), when it is one that can be stored as a trace.
-    pub(in crate::state) fn capture_source(&mut self) -> Option<Measurement> {
-        let m = self
-            .focused_live()
-            .filter(|m| m.config.kind.publishes_tf() || m.config.kind.publishes_levels())
-            .cloned();
-        if m.is_none() {
+    /// The measurements a capture key stores: every live curve the focused pane draws (its
+    /// own, a math trace of its group, one compared behind it), running or stopped, the
+    /// pane's own first, each when it can be stored as a trace. A hidden one is not drawn,
+    /// so not stored.
+    pub(in crate::state) fn capture_sources(&mut self) -> Vec<Measurement> {
+        let f = self.layout.focus;
+        let kind = self.layout.kind(f);
+        let ours = self.layout.view(f).is_some_and(|v| self.ours(v));
+        let shown = self.pane_meas(f);
+        let own = shown.map(|m| m.id);
+        let mut v: Vec<Measurement> = self
+            .measurements()
+            .into_iter()
+            .filter(|m| ours && (m.config.kind.publishes_tf() || m.config.kind.publishes_levels()))
+            .filter(|m| self.live_on_pane(kind, m, shown) || self.live_compared_on(kind, m, f))
+            .cloned()
+            .collect();
+        v.sort_by_key(|m| Some(m.id) != own);
+        if v.is_empty() {
             let to_it = self.to_it();
             let new = self.new_meas_reach();
-            self.warn(format!(
-                "this pane shows no transfer, spectrum, RTA or math measurement to capture \
-                 ({to_it}; {new} makes one)"
-            ));
+            self.warn(ac2_scene::capture::nothing_to_capture(&to_it, &new));
         }
-        m
+        v
     }
 
     /// G / Shift+G: the focused pane's next or previous view, in its kind's chain.

@@ -649,22 +649,7 @@ impl AppState {
             | C::Slot6
             | C::Slot7
             | C::Slot8
-            | C::Slot9 => {
-                let slot = slot_of(c);
-                if let Some(m) = self.capture_source() {
-                    // The slot's previous trace is replaced unless it is locked; a locked
-                    // one only gives up the slot.
-                    let replace = self.slots()[usize::from(slot - 1)]
-                        .filter(|t| !t.edit.locked)
-                        .map(|t| t.id);
-                    out.push(Request::Capture {
-                        meas: m.id,
-                        slot,
-                        name: format!("{} S{slot}", m.config.name),
-                        replace,
-                    });
-                }
-            }
+            | C::Slot9 => self.capture_slot(slot_of(c), out),
             C::ShowSlot1
             | C::ShowSlot2
             | C::ShowSlot3
@@ -673,26 +658,7 @@ impl AppState {
             | C::ShowSlot6
             | C::ShowSlot7
             | C::ShowSlot8
-            | C::ShowSlot9 => {
-                let slot = slot_of(c);
-                match self.slots()[usize::from(slot - 1)].map(|t| t.id) {
-                    None => {
-                        let how = self
-                            .keys
-                            .label(text::CAPTURE_SLOT[usize::from(slot - 1)], Scope::Global)
-                            .map_or_else(
-                                || {
-                                    self.keys.palette_entry(
-                                        text::CAPTURE_SLOT[usize::from(slot - 1)].title(),
-                                    )
-                                },
-                                |k| format!("{k} captures into it"),
-                            );
-                        self.warn(format!("slot {slot} is empty ({how})"));
-                    }
-                    Some(id) => self.toggle_shown(id, out),
-                }
-            }
+            | C::ShowSlot9 => self.show_slot(slot_of(c), out),
             c @ (C::ImportTrace
             | C::Sessions
             | C::SessionNew

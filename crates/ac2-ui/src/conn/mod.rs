@@ -76,6 +76,25 @@ impl DataSnapshot {
     }
 }
 
+/// One measurement of a [`Request::Capture`]: `meas` stored as `name` (its name in the
+/// toast is `label`), deleting `replace` first.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CaptureItem {
+    pub meas: MeasId,
+    pub label: String,
+    pub name: String,
+    pub replace: Option<TraceId>,
+}
+
+/// Why a capture stored nothing.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CaptureRefusal {
+    /// The daemon refused it as invalid: the measurement has no result to store.
+    NoResult,
+    /// Anything else, in its words.
+    Failed(String),
+}
+
 /// What the link reports.
 #[derive(Clone, Debug)]
 pub enum ConnEvent {
@@ -121,10 +140,11 @@ pub enum ConnEvent {
         pick: DelayPick,
         finding: Box<DelayFinding>,
     },
-    /// A capture into a slot finished.
+    /// A capture into a slot finished: per item of the request, in its order, the item's
+    /// measurement name and the trace stored or why none was.
     Captured {
         slot: u8,
-        trace: Box<TraceMeta>,
+        results: Vec<(String, Result<Box<TraceMeta>, CaptureRefusal>)>,
     },
     Stimulus(StimEvent),
     /// `session.devices` answered (or could not be asked).
@@ -251,13 +271,9 @@ pub enum Request {
         band: FinderBand,
         observation: Option<Seconds>,
     },
-    /// `trace.capture` of `meas` into `slot` as `name`, deleting `replace` first.
-    Capture {
-        meas: MeasId,
-        slot: u8,
-        name: String,
-        replace: Option<TraceId>,
-    },
+    /// `trace.capture` of each of `items` into `slot`, one after the other, answered by
+    /// one [`ConnEvent::Captured`].
+    Capture { slot: u8, items: Vec<CaptureItem> },
     /// Read a local file and `trace.import` it (`ir`: how a WAV impulse response is read;
     /// `None` for a text file). The client reads it, so a remote daemon gets its content.
     Import {

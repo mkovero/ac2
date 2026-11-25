@@ -223,7 +223,12 @@ impl Control {
     ) -> ReplyBody {
         let gid = self.register_grid(grid.clone());
         debug_assert_eq!(gid, meta.grid_id);
-        for other in meta::take_slot(&self.store.state().traces, meta.id, meta.edit.slot) {
+        for other in meta::take_slot(
+            &self.store.state().traces,
+            meta.id,
+            meta.edit.owner,
+            meta.edit.slot,
+        ) {
             self.commit(Change::Trace(Patch::Set(other)));
         }
         debug_assert_eq!(mic_curve.is_some(), meta.mic_curve.is_some());
@@ -557,7 +562,7 @@ impl Control {
                 "trace {id} is locked; unlock it to change its curve"
             )));
         }
-        for other in meta::take_slot(&self.store.state().traces, id, edit.slot) {
+        for other in meta::take_slot(&self.store.state().traces, id, edit.owner, edit.slot) {
             self.commit(Change::Trace(Patch::Set(other)));
         }
         t.edit = edit;

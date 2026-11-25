@@ -166,7 +166,7 @@ const DIGIT_GROUPS: [([CommandId; 9], &str); 3] = {
                 C::Slot8,
                 C::Slot9,
             ],
-            "Capture to slot 1…9",
+            "Capture pane to slot 1…9",
         ),
         (
             [
@@ -180,7 +180,7 @@ const DIGIT_GROUPS: [([CommandId; 9], &str); 3] = {
                 C::ShowSlot8,
                 C::ShowSlot9,
             ],
-            "Show/hide slot 1…9",
+            "Show/hide pane's slot 1…9",
         ),
         (
             [
@@ -672,8 +672,8 @@ mod tests {
         assert!(b.contains(&("P", CommandId::Peaks.title())));
         assert!(b.contains(&("↑/↓", "Stimulus level ±1 dB")));
         assert!(b.contains(&("X/Shift+X", "Find first arrival/strongest peak")));
-        assert!(b.contains(&("Ctrl+1…9", "Capture to slot 1…9")));
-        assert!(b.contains(&("1…9", "Show/hide slot 1…9")));
+        assert!(b.contains(&("Ctrl+1…9", "Capture pane to slot 1…9")));
+        assert!(b.contains(&("1…9", "Show/hide pane's slot 1…9")));
         assert!(b.contains(&("Alt+1…9", "Focus pane 1…9")));
         assert!(b.contains(&("V/Shift+V", "Next/previous trace")));
         // Too wide side by side: a row each, one key per line when they do not fit.

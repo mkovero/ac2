@@ -31,6 +31,7 @@ pub mod between_rigs;
 pub mod cal;
 pub mod cal_notice;
 mod canvas;
+pub mod capture;
 pub mod chrome;
 pub mod clock;
 pub mod clock_domain;

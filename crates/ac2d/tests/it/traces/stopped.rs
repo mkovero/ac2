@@ -161,3 +161,32 @@ fn a_restart_or_reset_drops_the_kept_result() {
     );
     r.h.shutdown();
 }
+
+/// Slots are per measurement: two measurements captured into slot 1 each keep theirs, and a
+/// second capture of one takes only that one's slot.
+#[test]
+fn each_measurement_has_its_own_slots() {
+    let mut r = rig("slots-per-meas");
+    r.c.ok(Command::MeasCreate {
+        config: transfer("second"),
+    });
+    let second = r.c.state().measurements.last().unwrap().id;
+    r.c.ok(Command::MeasStart { meas: second });
+    settle(&mut r.d, &mut r.c, &r.sub, r.tok, 0);
+    let into_1 = |c: &mut Client, meas: MeasId, name: &str| {
+        c.trace(Command::TraceCapture {
+            meas,
+            name: name.into(),
+            slot: Some(1),
+        })
+    };
+    let a = into_1(&mut r.c, MeasId(1), "main S1");
+    let b = into_1(&mut r.c, second, "second S1");
+    let a2 = into_1(&mut r.c, MeasId(1), "main S1 again");
+    let all = traces(&mut r.c);
+    let slot_of = |id| all.iter().find(|t| t.id == id).unwrap().edit.slot;
+    assert_eq!(slot_of(a.id), None);
+    assert_eq!(slot_of(b.id), Some(1));
+    assert_eq!(slot_of(a2.id), Some(1));
+    r.h.shutdown();
+}

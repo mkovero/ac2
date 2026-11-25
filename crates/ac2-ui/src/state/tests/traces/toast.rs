@@ -261,5 +261,8 @@ fn toasts_name_the_keys_the_keymap_binds() {
     assert_eq!(t.last_toast(), "no SPL meter: make one first (F8)");
     t.keys = Keymap::from_toml("[global]\nslot_5 = []\npalette = \"F9\"\n").expect("valid");
     t.key("5");
-    assert_eq!(t.last_toast(), "slot 5 is empty (Capture to slot 5 in F9)");
+    assert_eq!(
+        t.last_toast(),
+        "slot 5 is empty (Capture pane to slot 5 in F9)"
+    );
 }

@@ -64,6 +64,7 @@ mod settings_signal;
 mod settings_stim;
 pub use settings_impl::SettingsMsg;
 mod cam3d;
+mod capture;
 mod ir_nav;
 pub use cam3d::Cam3dMsg;
 pub use ir_nav::IrNavMsg;

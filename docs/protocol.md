@@ -1378,9 +1378,10 @@ display edits and are never applied to the stored data.
   `name`}] — the operands that went into the captured result, named as at capture —,
   `phase`: `PhaseBasis`}, `delay` its stated delay, `depth` and `mic` nil,
   `uncalibrated`; `refused` when the expression lacks its operands at that moment.
-- **Slots.** `TraceEdit.slot` (1…9 or nil). A slot holds at most one trace: capturing or
-  updating into a slot clears it on the trace that held it (a `trace` event for that one
-  too).
+- **Slots.** `TraceEdit.slot` (1…9 or nil), per owner (`edit.owner`): each owner's
+  slot holds at most one trace, so two measurements each have a slot 1. Capturing or
+  updating into a slot clears it on the trace of the same owner that held it (a `trace`
+  event for that one too); moving a trace to another owner takes the slot there.
 - **Last write wins.** `trace.update` replaces the whole `TraceEdit` and carries no
   `base` (`expect_rev` is the only guard): of two clients' edits, the later one stands whole.
 - **Lock.** `trace.update` on a locked trace may change only `visible`, `order`, `slot`,

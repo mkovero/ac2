@@ -109,14 +109,21 @@ pub fn lock_allows(old: &TraceEdit, new: &TraceEdit) -> bool {
             && old.smoothing == new.smoothing)
 }
 
-/// Other traces that hold `slot` and must give it up for trace `id`, with the slot cleared.
-pub fn take_slot(traces: &[TraceMeta], id: TraceId, slot: Option<u8>) -> Vec<TraceMeta> {
+/// Other traces of `owner` that hold `slot` and must give it up for trace `id`, with the
+/// slot cleared. Slots are per owner: each measurement's captures have slots 1…9 of their
+/// own, so one key captures every measurement a pane draws into the same slot number.
+pub fn take_slot(
+    traces: &[TraceMeta],
+    id: TraceId,
+    owner: TraceOwner,
+    slot: Option<u8>,
+) -> Vec<TraceMeta> {
     let Some(slot) = slot else {
         return Vec::new();
     };
     traces
         .iter()
-        .filter(|t| t.id != id && t.edit.slot == Some(slot))
+        .filter(|t| t.id != id && t.edit.owner == owner && t.edit.slot == Some(slot))
         .map(|t| {
             let mut t = t.clone();
             t.edit.slot = None;

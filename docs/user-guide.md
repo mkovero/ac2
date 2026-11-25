@@ -2801,9 +2801,15 @@ unsmoothed.
 
 ### Capturing and selecting
 
-- **Ctrl+1 … Ctrl+9** capture the focused pane's measurement into slot 1–9 (replacing
-  what was there): its own, or the selected live curve when the pane draws it (one
-  compared into it, a math trace of its group). **1 … 9** show and hide a slot.
+- **Ctrl+1 … Ctrl+9** capture every live curve the focused pane draws into slot 1–9, in
+  whichever view it shows: its own measurement, a math trace of its group and those
+  compared into it, running or stopped (a transfer's capture keeps its IR). A curve hidden
+  with **A** is not drawn, so not captured. Slots are per measurement: each one's capture
+  goes into its own slot of that number, named `{name} S{N}`, replacing its trace there
+  (a locked one only gives up the slot). One toast says what was stored and what was not:
+  `slot 1: TF 1, TF 2 captured · TF 3: no result yet`. **1 … 9** show and hide the
+  focused pane's traces in that slot (all of them hide when any is shown); with none of
+  the pane's there, every trace in the slot.
 - A stopped measurement captures the result it had as it stopped (its curve and, for a
   transfer, its IR: what its views still show), until it starts again, is reset, gets a new
   delay or a change that restarts its averages. With nothing measured since then the toast
@@ -2819,7 +2825,7 @@ unsmoothed.
 - **End** (palette *Select live*) goes back to the live measurement. **Esc** only stops the
   stimulus: the stop reflex never changes the selection.
 - **A** shows or hides the selected trace.
-- Palette *Move trace to slot…* puts it in slot 1–9 (`none` frees its slot).
+- Palette *Move trace to slot…* puts it in its measurement's slot 1–9 (`none` frees its slot).
 
 ### Trace keys
 
@@ -4496,24 +4502,24 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `C` | Compare… | `compare` |
 | `Shift+←` | Cursor left | `cursor_left` |
 | `Shift+→` | Cursor right | `cursor_right` |
-| `Ctrl+1` | Capture to slot 1 | `slot_1` |
-| `Ctrl+2` | Capture to slot 2 | `slot_2` |
-| `Ctrl+3` | Capture to slot 3 | `slot_3` |
-| `Ctrl+4` | Capture to slot 4 | `slot_4` |
-| `Ctrl+5` | Capture to slot 5 | `slot_5` |
-| `Ctrl+6` | Capture to slot 6 | `slot_6` |
-| `Ctrl+7` | Capture to slot 7 | `slot_7` |
-| `Ctrl+8` | Capture to slot 8 | `slot_8` |
-| `Ctrl+9` | Capture to slot 9 | `slot_9` |
-| `1` | Show/hide slot 1 | `show_slot_1` |
-| `2` | Show/hide slot 2 | `show_slot_2` |
-| `3` | Show/hide slot 3 | `show_slot_3` |
-| `4` | Show/hide slot 4 | `show_slot_4` |
-| `5` | Show/hide slot 5 | `show_slot_5` |
-| `6` | Show/hide slot 6 | `show_slot_6` |
-| `7` | Show/hide slot 7 | `show_slot_7` |
-| `8` | Show/hide slot 8 | `show_slot_8` |
-| `9` | Show/hide slot 9 | `show_slot_9` |
+| `Ctrl+1` | Capture pane to slot 1 | `slot_1` |
+| `Ctrl+2` | Capture pane to slot 2 | `slot_2` |
+| `Ctrl+3` | Capture pane to slot 3 | `slot_3` |
+| `Ctrl+4` | Capture pane to slot 4 | `slot_4` |
+| `Ctrl+5` | Capture pane to slot 5 | `slot_5` |
+| `Ctrl+6` | Capture pane to slot 6 | `slot_6` |
+| `Ctrl+7` | Capture pane to slot 7 | `slot_7` |
+| `Ctrl+8` | Capture pane to slot 8 | `slot_8` |
+| `Ctrl+9` | Capture pane to slot 9 | `slot_9` |
+| `1` | Show/hide pane's slot 1 | `show_slot_1` |
+| `2` | Show/hide pane's slot 2 | `show_slot_2` |
+| `3` | Show/hide pane's slot 3 | `show_slot_3` |
+| `4` | Show/hide pane's slot 4 | `show_slot_4` |
+| `5` | Show/hide pane's slot 5 | `show_slot_5` |
+| `6` | Show/hide pane's slot 6 | `show_slot_6` |
+| `7` | Show/hide pane's slot 7 | `show_slot_7` |
+| `8` | Show/hide pane's slot 8 | `show_slot_8` |
+| `9` | Show/hide pane's slot 9 | `show_slot_9` |
 | `V` | Next trace | `next_trace` |
 | `Shift+V` | Previous trace | `prev_trace` |
 | `Alt+V` | Next trace incl. hidden | `next_any_trace` |

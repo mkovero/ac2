@@ -110,25 +110,21 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                 }
             });
         }
-        Request::Capture {
-            meas,
-            slot,
-            name,
-            replace,
-        } => {
+        Request::Capture { slot, items } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
-                let r = capture(&c, meas, slot, name, replace).await;
-                match r {
-                    Ok(trace) => o.send(ConnEvent::Captured {
-                        slot,
-                        trace: Box::new(trace),
-                    }),
-                    Err(e) => o.send(ConnEvent::Reply {
-                        what: format!("capture slot {slot}"),
-                        result: Err(e.to_string()),
-                    }),
+                let mut results = Vec::with_capacity(items.len());
+                for i in items {
+                    let r = match capture(&c, i.meas, slot, i.name, i.replace).await {
+                        Ok(t) => Ok(Box::new(t)),
+                        Err(e) if e.code() == Some(ac2_proto::ErrorCode::Invalid) => {
+                            Err(super::CaptureRefusal::NoResult)
+                        }
+                        Err(e) => Err(super::CaptureRefusal::Failed(e.to_string())),
+                    };
+                    results.push((i.label, r));
                 }
+                o.send(ConnEvent::Captured { slot, results });
             });
         }
         Request::ImportCurve { path, mic, input } => {

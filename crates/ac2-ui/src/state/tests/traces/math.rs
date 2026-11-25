@@ -2,73 +2,56 @@
 
 use super::*;
 
+/// Each capture of a slot request: (measurement, slot, replaced trace, trace name).
+fn captures(r: &[Request]) -> Vec<(MeasId, u8, Option<TraceId>, String)> {
+    r.iter()
+        .flat_map(|q| match q {
+            Request::Capture { slot, items } => items
+                .iter()
+                .map(|i| (i.meas, *slot, i.replace, i.name.clone()))
+                .collect(),
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+fn owned_by(id: u32, slot: u8, meas: u32) -> TraceMeta {
+    let mut t = stored(id, Some(slot), 2);
+    t.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(meas) };
+    t
+}
+
 #[test]
 fn slots_capture_and_replace() {
     let mut t = T::new();
     let r = t.key("Ctrl+3");
-    assert!(matches!(
-        r.as_slice(),
-        [Request::Capture {
-            meas: MeasId(1),
-            slot: 3,
-            replace: None,
-            name,
-        }] if name == "Main L S3"
-    ));
-    // Slots are the daemon's: a mirrored trace in slot 3 is what Ctrl+3 replaces.
-    t.conn(with_traces(vec![stored(9, Some(3), 2)]));
-    assert_eq!(t.st.slots()[2].map(|t| t.id), Some(TraceId(9)));
+    assert_eq!(captures(&r), [(MeasId(1), 3, None, "Main L S3".to_owned())]);
+    // Slots are per measurement: measurement 1's trace in slot 3 is what Ctrl+3 replaces,
+    // another owner's is not.
+    t.conn(with_traces(vec![owned_by(8, 3, 2), owned_by(9, 3, 1)]));
     let r = t.key("Ctrl+3");
-    assert!(matches!(
-        r.as_slice(),
-        [Request::Capture {
-            slot: 3,
-            replace: Some(TraceId(9)),
-            ..
-        }]
-    ));
+    assert_eq!(captures(&r)[0].2, Some(TraceId(9)));
     // A locked trace is not deleted; it only gives up the slot.
-    let mut locked = stored(9, Some(3), 2);
+    let mut locked = owned_by(9, 3, 1);
     locked.edit.locked = true;
     t.conn(with_traces(vec![locked]));
     let r = t.key("Ctrl+3");
-    assert!(matches!(
-        r.as_slice(),
-        [Request::Capture {
-            slot: 3,
-            replace: None,
-            ..
-        }]
-    ));
+    assert_eq!(captures(&r)[0].2, None);
     // A capture stores what the focused pane shows: the spectrum selected in the list is
     // not on the transfer pane, whose own measurement is captured.
     t.st.rig.selected = Some(MeasId(2));
     let r = t.key("Ctrl+1");
-    assert!(
-        matches!(
-            r.as_slice(),
-            [Request::Capture {
-                meas: MeasId(1),
-                slot: 1,
-                ..
-            }]
-        ),
-        "{r:?}"
+    assert_eq!(
+        captures(&r).iter().map(|c| c.0).collect::<Vec<_>>(),
+        [MeasId(1)]
     );
     // The spectrum pane captures the spectrum, whatever the list has selected.
     t.key("Alt+2");
     t.st.rig.selected = Some(MeasId(1));
     let r = t.key("Ctrl+1");
-    assert!(
-        matches!(
-            r.as_slice(),
-            [Request::Capture {
-                meas: MeasId(2),
-                slot: 1,
-                ..
-            }]
-        ),
-        "{r:?}"
+    assert_eq!(
+        captures(&r).iter().map(|c| c.0).collect::<Vec<_>>(),
+        [MeasId(2)]
     );
     // A pane with no curve to store says so.
     t.key("Alt+4");
@@ -78,6 +61,48 @@ fn slots_capture_and_replace() {
     // A trace deleted daemon-side frees its slot.
     t.conn(mirror(daemon_state()));
     assert!(t.st.slots()[2].is_none());
+}
+
+/// Ctrl+N stores every live curve the focused pane draws, running or stopped, each into its
+/// own slot N; a hidden one is not drawn, so not stored. One toast names the result.
+#[test]
+fn ctrl_digit_captures_every_live_curve_of_the_pane() {
+    use crate::conn::CaptureRefusal;
+    let mut s = daemon_state();
+    let mut stopped = meas(5, "TF 2", transfer());
+    stopped.running = false;
+    s.measurements.push(stopped);
+    s.measurements.push(meas(6, "TF 3", transfer()));
+    s.traces = vec![owned_by(9, 1, 5)];
+    let mut t = T::new();
+    t.conn(mirror(s));
+    let p = t.pane(PaneKind::Transfer);
+    t.st.layout.set_focus(p);
+    let picks = [
+        Pick::here(EntryRef::Live { meas: MeasId(5) }),
+        Pick::here(EntryRef::Live { meas: MeasId(6) }),
+    ];
+    t.st.layout.view_mut(p).expect("the pane").with = With::of(&picks);
+    t.st.rig.hidden_meas.insert(MeasId(6));
+    let r = t.key("Ctrl+1");
+    assert_eq!(
+        captures(&r),
+        [
+            (MeasId(1), 1, None, "Main L S1".to_owned()),
+            (MeasId(5), 1, Some(TraceId(9)), "TF 2 S1".to_owned()),
+        ]
+    );
+    t.conn(ConnEvent::Captured {
+        slot: 1,
+        results: vec![
+            ("Main L".into(), Ok(Box::new(owned_by(20, 1, 1)))),
+            ("TF 2".into(), Err(CaptureRefusal::NoResult)),
+        ],
+    });
+    assert_eq!(
+        t.last_toast(),
+        "slot 1: Main L captured · TF 2: no result yet"
+    );
 }
 
 #[test]

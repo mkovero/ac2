@@ -361,9 +361,7 @@ impl AppState {
                 pick,
                 finding,
             } => self.delay_found(meas, pick, *finding, out),
-            ConnEvent::Captured { slot, trace } => {
-                self.toast(format!("slot {slot}: {} captured", trace.edit.name));
-            }
+            ConnEvent::Captured { slot, results } => self.captured(slot, results),
             ConnEvent::Stimulus(s) => self.stim_event(s, out),
             ConnEvent::Server { what, result } => {
                 let result = result.map(|s| *s);
