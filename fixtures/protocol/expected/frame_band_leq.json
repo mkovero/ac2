@@ -17,27 +17,32 @@
    {
     "name": "leq",
     "unit": "db_spl",
-    "elem": "f32"
+    "elem": "f32",
+    "len": 3
    },
    {
     "name": "limit",
     "unit": "db_spl",
-    "elem": "f32"
+    "elem": "f32",
+    "len": 3
    },
    {
     "name": "allowed",
     "unit": "db_spl",
-    "elem": "f32"
+    "elem": "f32",
+    "len": 3
    },
    {
     "name": "recover",
     "unit": "seconds",
-    "elem": "f32"
+    "elem": "f32",
+    "len": 3
    },
    {
     "name": "leq_flags",
     "unit": "bitmask",
-    "elem": "u32"
+    "elem": "u32",
+    "len": 3
    }
   ],
   "meta": {

@@ -111,6 +111,55 @@ pub enum ArrayName {
     GonioX,
     /// Goniometer point y (`(l + r)/√2` after auto gain), every pair's points in turn.
     GonioY,
+    /// Normalised zero-lag correlation per pair, −1 … 1; NaN while a side is under the gate.
+    PairCorr,
+    /// The side of each pair under the correlation gate: 0 none, 1 left, 2 right.
+    PairQuiet,
+    /// Momentary loudness per source.
+    LufsM,
+    /// Short-term loudness per source.
+    LufsS,
+    /// Highest momentary loudness per source since its reset.
+    LufsMMax,
+    /// Highest short-term loudness per source since its reset.
+    LufsSMax,
+    /// Integrated loudness per source; NaN until a block passes the absolute gate.
+    LufsI,
+    /// Loudness range per source; NaN until a short-term value passes its gate.
+    Lra,
+    /// Highest true peak of each source's channels since its reset.
+    TpMax,
+    /// Metered time per source since its reset.
+    LoudS,
+}
+
+/// What an array has one element per, which sets its length.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrayPer {
+    /// Per column (the frame's `n`).
+    Column,
+    /// Per pair of the metadata's `pairs`.
+    Pair,
+    /// Per loudness source of the metadata's `sources`.
+    Source,
+}
+
+impl ArrayName {
+    /// What the array has one element per.
+    pub fn per(self) -> ArrayPer {
+        match self {
+            Self::PairCorr | Self::PairQuiet => ArrayPer::Pair,
+            Self::LufsM
+            | Self::LufsS
+            | Self::LufsMMax
+            | Self::LufsSMax
+            | Self::LufsI
+            | Self::Lra
+            | Self::TpMax
+            | Self::LoudS => ArrayPer::Source,
+            _ => ArrayPer::Column,
+        }
+    }
 }
 
 /// Array unit.
@@ -143,6 +192,14 @@ pub enum Unit {
     Count,
     /// Goniometer coordinate, −127 … 127 of the pair's auto gain (i8 elements).
     GonioUnit,
+    /// Normalised correlation, −1 … 1.
+    Correlation,
+    /// A pair's side (u32 elements): 0 none, 1 left, 2 right.
+    Side,
+    /// LUFS (BS.1770 loudness re full scale).
+    Lufs,
+    /// LU (a loudness difference).
+    Lu,
 }
 
 /// Element type of an array part.
@@ -187,14 +244,21 @@ pub struct ArrayDesc {
     pub unit: Unit,
     /// Element type.
     pub elem: Elem,
+    /// Elements: `n` for a column array, the metadata's pair or source count for a pair or
+    /// source array ([`ArrayName::per`]).
+    pub len: u32,
 }
 
+/// The descriptor of `name` in `unit`, its length to be set from its values.
 pub(super) fn desc(name: ArrayName, unit: Unit) -> ArrayDesc {
     // The curves a display draws at frame rate go in 16 bits (precision budget in
-    // `crate::packing`), the linear IR relative to its peak; meters and Leq windows are read
-    // as numbers or summed further and stay f32.
+    // `crate::packing`), the linear IR relative to its peak. So do the programme meters'
+    // levels and loudness: a bar or readout shows 0.1 dB, and in 16 bits a frame goes as
+    // small differences from the one before, where an f32 reading costs its four bytes in
+    // every frame. Leq windows are summed further, correlation and metered time are not in
+    // dB, and they stay f32.
     let elem = match (name, unit) {
-        (_, Unit::Bitmask | Unit::Count) => Elem::U32,
+        (_, Unit::Bitmask | Unit::Count | Unit::Side) => Elem::U32,
         (_, Unit::GonioUnit) => Elem::I8,
         (
             ArrayName::Mag
@@ -204,7 +268,19 @@ pub(super) fn desc(name: ArrayName, unit: Unit) -> ArrayDesc {
             | ArrayName::AlignPhaseBefore
             | ArrayName::AlignPhaseAfter
             | ArrayName::AlignSumBefore
-            | ArrayName::AlignSumAfter,
+            | ArrayName::AlignSumAfter
+            | ArrayName::Peak
+            | ArrayName::Rms
+            | ArrayName::Ppm
+            | ArrayName::TruePeak
+            | ArrayName::Max
+            | ArrayName::LufsM
+            | ArrayName::LufsS
+            | ArrayName::LufsMMax
+            | ArrayName::LufsSMax
+            | ArrayName::LufsI
+            | ArrayName::Lra
+            | ArrayName::TpMax,
             _,
         ) => Elem::I16,
         (ArrayName::RangeLo | ArrayName::RangeHi, _) => Elem::I16MagOffset,
@@ -213,7 +289,12 @@ pub(super) fn desc(name: ArrayName, unit: Unit) -> ArrayDesc {
         (ArrayName::IrLinear, _) => Elem::Bfp16,
         _ => Elem::F32,
     };
-    ArrayDesc { name, unit, elem }
+    ArrayDesc {
+        name,
+        unit,
+        elem,
+        len: 0,
+    }
 }
 
 pub(super) fn level_unit(scale: LevelScale) -> Unit {

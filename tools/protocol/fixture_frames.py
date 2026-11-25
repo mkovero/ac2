@@ -43,12 +43,17 @@ def stamp(grid, protection=WEAK_REFERENCE):
     }
 
 
+# The programme meters' levels and loudness: 16-bit hundredths, as the curves.
+LEVELS_I16 = ("peak", "rms", "ppm", "true_peak", "max", "lufs_m", "lufs_s", "lufs_m_max",
+              "lufs_s_max", "lufs_i", "lra", "tp_max")
+
+
 def arr(name, unit, elem=None):
     """The element encoding is fixed per array (docs/protocol.md §5.3)."""
     if elem is None:
         elem = {"mag": "i16", "phase": "i16", "level": "i16", "ir_etc": "i16", "coh": "u16", "ir_linear": "bfp16",
-                "gonio_x": "i8", "gonio_y": "i8", "overs": "u32"}.get(name, "f32")
-        if name.startswith("align_"):
+                "gonio_x": "i8", "gonio_y": "i8", "overs": "u32", "pair_quiet": "u32"}.get(name, "f32")
+        if name.startswith("align_") or name in LEVELS_I16:
             elem = "i16"
         if name in ("range_lo", "range_hi"):
             elem = "i16_mag_offset"
@@ -72,7 +77,7 @@ def frame(topic, kind, grid, meta, arrays, protection=WEAK_REFERENCE):
     header = {"v": p.PROTO_VERSION, "kind": kind}
     header.update(stamp(grid, protection))
     header["n"] = n
-    header["arrays"] = [d for d, _ in arrays]
+    header["arrays"] = [{**d, "len": len(vals)} for d, vals in arrays]
     header["meta"] = {kind: meta}
     values = {
         d["name"]: [p.wire_value(d, v, vals) for v in vals] for d, vals in arrays
@@ -227,18 +232,28 @@ PREVIEW_INPUTS = [
     {"channel": 1, "kind": {"type": "line"}},
 ]
 PREVIEW_PAIRS = [{"left": 0, "right": 1, "name": None}]
-PAIR_LOUDNESS = {
-    "source": {"type": "pair", "left": 0, "right": 1},
-    "momentary": -23.25,
-    "short_term": -22.75,
-    "integrated": -23.0,
-    "range": 6.25,
-    "max_momentary": -18.5,
-    "max_short_term": -20.125,
-    "max_true_peak": -1.25,
-    "duration": 45.0,
-    "since": 1_789_999_955_000_000_000,
-}
+PAIR_SOURCE = {"source": {"type": "pair", "left": 0, "right": 1}, "since": 1_789_999_955_000_000_000}
+PAIR_01 = {"left": 0, "right": 1}
+# Per source: momentary, short-term, their maxima, integrated, range, max true peak, duration.
+PAIR_LOUDNESS = [-23.25, -22.75, -18.5, -20.125, -23.0, 6.25, -1.25, 45.0]
+SILENT_LOUDNESS = [-INF, -INF, -INF, -INF, NAN, NAN, -INF, 0.0]
+
+
+def levels_arrays(ballistic_unit, peak, rms, clip, ppm, true_peak, mx, overs, corr, quiet, loudness):
+    """A levels frame's arrays: per input, per pair (`corr`, `quiet`), per source."""
+    names = [("lufs_m", "lufs"), ("lufs_s", "lufs"), ("lufs_m_max", "lufs"), ("lufs_s_max", "lufs"),
+             ("lufs_i", "lufs"), ("lra", "lu"), ("tp_max", "dbtp"), ("loud_s", "seconds")]
+    return [
+        (arr("peak", "dbfs"), peak),
+        (arr("rms", "dbfs"), rms),
+        (arr("clip", "bitmask", "u32"), clip),
+        (arr("ppm", ballistic_unit), ppm),
+        (arr("true_peak", "dbtp"), true_peak),
+        (arr("max", ballistic_unit), mx),
+        (arr("overs", "count"), overs),
+        (arr("pair_corr", "correlation"), corr),
+        (arr("pair_quiet", "side"), quiet),
+    ] + [(arr(name, unit), [src[i] for src in loudness]) for i, (name, unit) in enumerate(names)]
 
 
 def gonio_points():
@@ -533,32 +548,13 @@ def frames():
             {
                 "channels": [0, 1, 2],
                 "ballistic": "type1",
-                "pair_levels": [{"left": 0, "right": 1, "correlation": 0.875, "quiet": None}],
-                "loudness": [
-                    PAIR_LOUDNESS,
-                    {
-                        "source": {"type": "input", "channel": 2},
-                        "momentary": -INF,
-                        "short_term": -INF,
-                        "integrated": None,
-                        "range": None,
-                        "max_momentary": -INF,
-                        "max_short_term": -INF,
-                        "max_true_peak": -INF,
-                        "duration": 0.0,
-                        "since": 1_790_000_000_000_000_000,
-                    },
-                ],
+                "pairs": [PAIR_01],
+                "sources": [PAIR_SOURCE, {"source": {"type": "input", "channel": 2},
+                                          "since": 1_790_000_000_000_000_000}],
             },
-            [
-                (arr("peak", "dbfs"), [-6.0, -0.0625, -INF]),
-                (arr("rms", "dbfs"), [-18.5, -3.25, -INF]),
-                (arr("clip", "bitmask", "u32"), [0, HELD, 0]),
-                (arr("ppm", "dbfs"), [-7.5, -1.25, -INF]),
-                (arr("true_peak", "dbtp"), [-5.75, 0.5, -INF]),
-                (arr("max", "dbfs"), [-2.0, 0.25, -INF]),
-                (arr("overs", "count"), [0, 3, 0]),
-            ],
+            levels_arrays("dbfs", [-6.0, -0.0625, -INF], [-18.5, -3.25, -INF], [0, HELD, 0],
+                          [-7.5, -1.25, -INF], [-5.75, 0.5, -INF], [-2.0, 0.25, -INF], [0, 3, 0],
+                          [0.875], [0], [PAIR_LOUDNESS, SILENT_LOUDNESS]),
             protection=0,
         ),
         "source_levels": frame(
@@ -568,20 +564,13 @@ def frames():
             {
                 "channels": [0, 1],
                 "ballistic": "type1",
-                "pair_levels": [{"left": 0, "right": 1, "correlation": 0.875, "quiet": None}],
-                "loudness": [PAIR_LOUDNESS],
+                "pairs": [PAIR_01],
+                "sources": [PAIR_SOURCE],
                 "sample_rate_hz": 96_000,
                 "mark": {"sample": 4_800_256, "system_ns": 1_790_000_000_123_456_789, "breaks": 1},
             },
-            [
-                (arr("peak", "dbfs"), [-6.0, -0.0625]),
-                (arr("rms", "dbfs"), [-18.5, -3.25]),
-                (arr("clip", "bitmask", "u32"), [0, HELD]),
-                (arr("ppm", "dbfs"), [-7.5, -1.25]),
-                (arr("true_peak", "dbtp"), [-5.75, 0.5]),
-                (arr("max", "dbfs"), [-2.0, 0.25]),
-                (arr("overs", "count"), [0, 3]),
-            ],
+            levels_arrays("dbfs", [-6.0, -0.0625], [-18.5, -3.25], [0, HELD], [-7.5, -1.25],
+                          [-5.75, 0.5], [-2.0, 0.25], [0, 3], [0.875], [0], [PAIR_LOUDNESS]),
             protection=0,
         ),
         "stream_gonio": gonio_frame("stream/gonio", "stream_gonio"),
@@ -597,18 +586,10 @@ def frames():
                 "inputs": PREVIEW_INPUTS,
                 "pairs": PREVIEW_PAIRS,
                 "ballistic": "true_peak",
-                "pair_levels": [{"left": 0, "right": 1, "correlation": None, "quiet": "right"}],
-                "loudness": [PAIR_LOUDNESS],
+                "sources": [PAIR_SOURCE],
             },
-            [
-                (arr("peak", "dbfs"), [-12.0, -40.5]),
-                (arr("rms", "dbfs"), [-20.0, -52.25]),
-                (arr("clip", "bitmask", "u32"), [0, CLIP]),
-                (arr("ppm", "dbfs"), [-11.75, -40.25]),
-                (arr("true_peak", "dbtp"), [-11.75, -40.25]),
-                (arr("max", "dbfs"), [-3.0, -38.0]),
-                (arr("overs", "count"), [1, 0]),
-            ],
+            levels_arrays("dbtp", [-12.0, -40.5], [-20.0, -52.25], [0, CLIP], [-11.75, -40.25],
+                          [-11.75, -40.25], [-3.0, -38.0], [1, 0], [NAN], [2], [PAIR_LOUDNESS]),
             protection=0,
         ),
         "timing": frame(

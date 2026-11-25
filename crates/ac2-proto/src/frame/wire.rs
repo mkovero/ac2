@@ -18,12 +18,12 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::PROTO_VERSION;
 use crate::grid::GridId;
-use crate::model::FreqRange;
 use crate::packing::{self, array_size};
 use crate::topic::Topic;
-use crate::units::{DaemonIncarnation, Rev, SampleIndex, Seconds, StreamEpoch, WallNs};
+use crate::units::{DaemonIncarnation, Rev, SampleIndex, StreamEpoch, WallNs};
 
 use super::decode::topic_kind;
+use super::per_frame::{self, PerFrame};
 use super::{
     ArrayDesc, CodedFrame, DecodeError, EncodeError, Frame, FrameHeader, FrameKind, FrameMeta,
     MAX_ARRAYS, MAX_FRAME_BYTES, MAX_HEADER_BYTES, MAX_N, MAX_PARTS, ProtectionFlags, Unit,
@@ -69,134 +69,15 @@ impl<'de> Deserialize<'de> for Form {
     }
 }
 
-/// The per-frame metadata of a `tf` delta.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TfPerFrame {
-    filled: f32,
-    settling: Option<FreqRange>,
-}
-
-/// The per-frame metadata of a `bins` delta: how much its stage holds.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BinsPerFrame {
-    blocks: u64,
-    eff_avg: f32,
-}
-
-/// The per-frame metadata of an `spl` delta: its readings.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SplPerFrame {
-    level: f64,
-    lmax: f64,
-    lmin: f64,
-    leq: f64,
-    lpeak: f64,
-    duration: Seconds,
-}
-
-/// The per-frame metadata of a `source/levels` delta: its timing mark, which moves with every
-/// frame while the rest of its metadata may stand.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SourcePerFrame {
-    mark: Option<super::LevelsMark>,
-}
-
-/// What a delta carries of the metadata, fixed per kind: `tf` how full its averages are
-/// and where they are still filling, `bins` its stage's blocks and effective averages, `spl`
-/// its readings, `source/levels` its timing mark, every other kind nothing (any change of its
-/// metadata goes as a keyframe).
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum PerFrame {
-    Tf(TfPerFrame),
-    Bins(BinsPerFrame),
-    Spl(SplPerFrame),
-    Source(SourcePerFrame),
-    Static,
-}
-
-fn per_frame(m: &FrameMeta) -> PerFrame {
-    match m {
-        FrameMeta::Tf(t) => PerFrame::Tf(TfPerFrame {
-            filled: t.filled,
-            settling: t.settling,
-        }),
-        FrameMeta::Bins(b) => PerFrame::Bins(BinsPerFrame {
-            blocks: b.blocks,
-            eff_avg: b.eff_avg,
-        }),
-        FrameMeta::Spl(s) => PerFrame::Spl(SplPerFrame {
-            level: s.level,
-            lmax: s.lmax,
-            lmin: s.lmin,
-            leq: s.leq,
-            lpeak: s.lpeak,
-            duration: s.duration,
-        }),
-        FrameMeta::SourceLevels(s) => PerFrame::Source(SourcePerFrame { mark: s.mark }),
-        // Named one by one: a new kind of metadata has to say here whether any of it
-        // moves from frame to frame.
-        FrameMeta::Ir(_)
-        | FrameMeta::Rta(_)
-        | FrameMeta::Spec(_)
-        | FrameMeta::Leq(_)
-        | FrameMeta::BandLeq(_)
-        | FrameMeta::Levels(_)
-        | FrameMeta::StreamLevels(_)
-        | FrameMeta::PreviewLevels(_)
-        | FrameMeta::StreamGonio(_)
-        | FrameMeta::PreviewGonio(_)
-        | FrameMeta::Timing(_)
-        | FrameMeta::Ka(_) => PerFrame::Static,
-    }
-}
-
-/// `base` with the per-frame fields `p`; `None` if `p` is not of `base`'s kind.
-fn with_per_frame(base: &FrameMeta, p: PerFrame) -> Option<FrameMeta> {
-    let mut m = base.clone();
-    match (&mut m, p) {
-        (FrameMeta::Tf(t), PerFrame::Tf(p)) => {
-            t.filled = p.filled;
-            t.settling = p.settling;
-        }
-        (FrameMeta::Bins(b), PerFrame::Bins(p)) => {
-            b.blocks = p.blocks;
-            b.eff_avg = p.eff_avg;
-        }
-        (FrameMeta::Spl(s), PerFrame::Spl(p)) => {
-            s.level = p.level;
-            s.lmax = p.lmax;
-            s.lmin = p.lmin;
-            s.leq = p.leq;
-            s.lpeak = p.lpeak;
-            s.duration = p.duration;
-        }
-        (FrameMeta::SourceLevels(s), PerFrame::Source(p)) => s.mark = p.mark,
-        (
-            FrameMeta::Tf(_) | FrameMeta::Bins(_) | FrameMeta::Spl(_) | FrameMeta::SourceLevels(_),
-            _,
-        )
-        | (_, PerFrame::Tf(_) | PerFrame::Bins(_) | PerFrame::Spl(_) | PerFrame::Source(_)) => {
-            return None;
-        }
-        (_, PerFrame::Static) => {}
-    }
-    Some(m)
-}
-
 /// Whether `f` can go as a delta on `base`: same topic and every static field the same.
-/// The metadata compare by their msgpack bytes, so a NaN in a static field compares equal
-/// to itself.
+/// The configuration stamp is not one: a delta carries its own, so a step that changes no
+/// static field (a delay nudge, a meter setting) continues the chain. The metadata compare
+/// by their msgpack bytes, so a NaN in a static field compares equal to itself.
 fn fits(f: &CodedFrame, base: &CodedFrame) -> bool {
     let (a, b) = (&f.stamp, &base.stamp);
     if f.topic != base.topic
         || a.stream_epoch != b.stream_epoch
         || a.daemon_incarnation != b.daemon_incarnation
-        || a.config_rev != b.config_rev
-        || a.config_applied_at != b.config_applied_at
         || a.grid_id != b.grid_id
         || f.n != base.n
         || f.arrays != base.arrays
@@ -204,7 +85,7 @@ fn fits(f: &CodedFrame, base: &CodedFrame) -> bool {
     {
         return false;
     }
-    let Some(as_base) = with_per_frame(&base.meta, per_frame(&f.meta)) else {
+    let Some(as_base) = per_frame::with(&base.meta, &per_frame::of(&f.meta)) else {
         return false;
     };
     match (rmp_serde::to_vec(&f.meta), rmp_serde::to_vec(&as_base)) {
@@ -247,6 +128,8 @@ struct DeltaHeader<M> {
     audio_sample: SampleIndex,
     capture_wall_ns: WallNs,
     protection: ProtectionFlags,
+    config_rev: Rev,
+    config_applied_at: SampleIndex,
     meta: M,
     crc: u32,
 }
@@ -264,7 +147,25 @@ fn parts(f: &CodedFrame, mut body: Vec<u8>, payload: Option<Vec<u8>>) -> Vec<Vec
 }
 
 /// A keyframe of `f`: its parts `[topic, body]`.
+/// `f`'s codes are the size its descriptors state, so slicing them by array is in bounds.
+fn sized(f: &CodedFrame) -> Result<(), EncodeError> {
+    let expected = f
+        .arrays
+        .iter()
+        .map(|d| array_size(d.elem, d.len as usize))
+        .sum();
+    if f.codes.len() == expected {
+        Ok(())
+    } else {
+        Err(EncodeError::Codes {
+            expected,
+            got: f.codes.len(),
+        })
+    }
+}
+
 pub fn encode_key(f: &CodedFrame) -> Result<Vec<Vec<u8>>, EncodeError> {
+    sized(f)?;
     let s = &f.stamp;
     let header = KeyHeaderRef {
         v: PROTO_VERSION,
@@ -292,7 +193,7 @@ pub fn encode_key(f: &CodedFrame) -> Result<Vec<Vec<u8>>, EncodeError> {
         let mut raw = Vec::with_capacity(f.codes.len());
         let mut at = 0;
         for d in &f.arrays {
-            let k = array_size(d.elem, f.n as usize);
+            let k = array_size(d.elem, d.len as usize);
             packing::put_intra(&mut raw, d.elem, &f.codes[at..at + k]);
             at += k;
         }
@@ -307,13 +208,14 @@ pub fn encode_delta(
     f: &CodedFrame,
     base: &CodedFrame,
 ) -> Result<Option<Vec<Vec<u8>>>, EncodeError> {
+    sized(f)?;
     if !fits(f, base) {
         return Ok(None);
     }
     let mut raw = Vec::with_capacity(f.codes.len());
     let mut at = 0;
     for d in &f.arrays {
-        let k = array_size(d.elem, f.n as usize);
+        let k = array_size(d.elem, d.len as usize);
         let deg = d.unit == Unit::Deg;
         if !packing::put_delta(
             &mut raw,
@@ -335,23 +237,20 @@ pub fn encode_delta(
         audio_sample: s.audio_sample,
         capture_wall_ns: s.capture_wall_ns,
         protection: s.protection,
+        config_rev: s.config_rev,
+        config_applied_at: s.config_applied_at,
         crc: f.crc(),
-        meta: (),
+        meta: per_frame::of(&f.meta),
     };
-    let hb = match per_frame(&f.meta) {
-        PerFrame::Tf(p) => msgpack(&head.with(p))?,
-        PerFrame::Bins(p) => msgpack(&head.with(p))?,
-        PerFrame::Spl(p) => msgpack(&head.with(p))?,
-        PerFrame::Source(p) => msgpack(&head.with(p))?,
-        PerFrame::Static => msgpack(&head)?,
-    };
+    let hb = msgpack(&head)?;
     let payload = (!f.arrays.is_empty()).then(|| packing::deflate(&raw));
     Ok(Some(parts(f, hb, payload)))
 }
 
 impl<M> DeltaHeader<M> {
-    fn with<N>(self, meta: N) -> DeltaHeader<N> {
-        DeltaHeader {
+    /// The header without its metadata, and the metadata.
+    fn split(self) -> (DeltaHeader<()>, M) {
+        let h = DeltaHeader {
             v: self.v,
             form: self.form,
             seq: self.seq,
@@ -359,9 +258,12 @@ impl<M> DeltaHeader<M> {
             audio_sample: self.audio_sample,
             capture_wall_ns: self.capture_wall_ns,
             protection: self.protection,
+            config_rev: self.config_rev,
+            config_applied_at: self.config_applied_at,
             crc: self.crc,
-            meta,
-        }
+            meta: (),
+        };
+        (h, self.meta)
     }
 }
 
@@ -377,6 +279,8 @@ pub struct DeltaFrame {
     audio_sample: SampleIndex,
     capture_wall_ns: WallNs,
     protection: ProtectionFlags,
+    config_rev: Rev,
+    config_applied_at: SampleIndex,
     crc: u32,
     per_frame: PerFrame,
     /// Deflated delta payload; sized by the base.
@@ -405,7 +309,7 @@ impl DeltaFrame {
         let mut codes = Vec::with_capacity(expected);
         let mut at = 0;
         for d in &base.arrays {
-            let k = array_size(d.elem, base.n as usize);
+            let k = array_size(d.elem, d.len as usize);
             packing::get_delta(
                 &mut codes,
                 d.elem,
@@ -422,12 +326,14 @@ impl DeltaFrame {
                 got,
             });
         }
-        let meta = with_per_frame(&base.meta, self.per_frame).ok_or(DecodeError::KindMismatch)?;
+        let meta = per_frame::with(&base.meta, &self.per_frame).ok_or(DecodeError::KindMismatch)?;
         let mut stamp = base.stamp;
         stamp.seq = self.seq;
         stamp.audio_sample = self.audio_sample;
         stamp.capture_wall_ns = self.capture_wall_ns;
         stamp.protection = self.protection;
+        stamp.config_rev = self.config_rev;
+        stamp.config_applied_at = self.config_applied_at;
         Ok(CodedFrame {
             topic: base.topic,
             stamp,
@@ -441,10 +347,6 @@ impl DeltaFrame {
 
 /// A frame as received: a keyframe whole, or a delta that needs its base.
 #[derive(Debug, Clone, PartialEq)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "moved once, from the decoder into the frame held; a box would cost an allocation per keyframe"
-)]
 pub enum WireFrame {
     /// Keyframe, CRC checked.
     Key(CodedFrame),
@@ -584,10 +486,25 @@ fn decode_key(topic: Topic, kind: FrameKind, body: &[u8]) -> Result<CodedFrame, 
     if h.form != Form::Key || h.kind != kind || h.meta.kind() != kind {
         return Err(DecodeError::KindMismatch);
     }
+    // Every length is checked against the count its name belongs to before any buffer is
+    // sized from it.
+    for d in &h.arrays {
+        if d.len > MAX_N {
+            return Err(DecodeError::TooManyElements(d.len));
+        }
+        if h.meta.count(d.name.per(), h.n) != Some(d.len as usize) {
+            return Err(DecodeError::Schema(format!(
+                "{:?}: {} elements, not one per {:?}",
+                d.name,
+                d.len,
+                d.name.per()
+            )));
+        }
+    }
     let sizes: Vec<usize> = h
         .arrays
         .iter()
-        .map(|d| array_size(d.elem, h.n as usize))
+        .map(|d| array_size(d.elem, d.len as usize))
         .collect();
     let expected = sizes.iter().sum();
     let mut codes = Vec::with_capacity(expected);
@@ -627,31 +544,30 @@ fn decode_key(topic: Topic, kind: FrameKind, body: &[u8]) -> Result<CodedFrame, 
 }
 
 fn decode_delta(topic: Topic, kind: FrameKind, body: &[u8]) -> Result<DeltaFrame, DecodeError> {
+    fn read<M: serde::de::DeserializeOwned>(
+        body: &[u8],
+        m: fn(M) -> PerFrame,
+    ) -> Result<(DeltaHeader<()>, PerFrame, &[u8]), DecodeError> {
+        let (h, p): (DeltaHeader<M>, _) = header(body)?;
+        let (h, meta) = h.split();
+        Ok((h, m(meta), p))
+    }
     let (h, per_frame, payload) = match kind {
-        FrameKind::Tf => {
-            let (h, p): (DeltaHeader<TfPerFrame>, _) = header(body)?;
-            let m = PerFrame::Tf(h.meta);
-            (h.with(()), m, p)
-        }
-        FrameKind::Bins => {
-            let (h, p): (DeltaHeader<BinsPerFrame>, _) = header(body)?;
-            let m = PerFrame::Bins(h.meta);
-            (h.with(()), m, p)
-        }
-        FrameKind::Spl => {
-            let (h, p): (DeltaHeader<SplPerFrame>, _) = header(body)?;
-            let m = PerFrame::Spl(h.meta);
-            (h.with(()), m, p)
-        }
-        FrameKind::SourceLevels => {
-            let (h, p): (DeltaHeader<SourcePerFrame>, _) = header(body)?;
-            let m = PerFrame::Source(h.meta);
-            (h.with(()), m, p)
-        }
-        _ => {
-            let (h, p): (DeltaHeader<()>, _) = header(body)?;
-            (h, PerFrame::Static, p)
-        }
+        FrameKind::Tf => read(body, PerFrame::Tf)?,
+        FrameKind::Bins => read(body, PerFrame::Bins)?,
+        FrameKind::Spl => read(body, PerFrame::Spl)?,
+        FrameKind::Spec => read(body, PerFrame::Spec)?,
+        FrameKind::StreamGonio | FrameKind::PreviewGonio => read(body, PerFrame::Gonio)?,
+        FrameKind::SourceLevels => read(body, PerFrame::Source)?,
+        FrameKind::Ir
+        | FrameKind::Rta
+        | FrameKind::Leq
+        | FrameKind::BandLeq
+        | FrameKind::Levels
+        | FrameKind::StreamLevels
+        | FrameKind::PreviewLevels
+        | FrameKind::Timing
+        | FrameKind::Ka => read(body, |()| PerFrame::Static)?,
     };
     version(h.v)?;
     if h.form != Form::Delta {
@@ -664,6 +580,8 @@ fn decode_delta(topic: Topic, kind: FrameKind, body: &[u8]) -> Result<DeltaFrame
         audio_sample: h.audio_sample,
         capture_wall_ns: h.capture_wall_ns,
         protection: h.protection,
+        config_rev: h.config_rev,
+        config_applied_at: h.config_applied_at,
         crc: h.crc,
         per_frame,
         payload: payload.to_vec(),

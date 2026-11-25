@@ -7,10 +7,11 @@ use crate::frame::{
     BinsMeta, ClipFlags, DaemonHealth, Frame, FrameData, FrameStamp, GONIO_POINTS, GenSummary,
     GonioFrame, GonioPair, HarmonicLevel, HarmonicReading, IrFrame, IrMeta, KaMeta, LeqFlags,
     LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMark, LevelsMeta, LoudnessSource,
-    MathState, OperandState, OperandStatus, PairLevels, PreviewLevelsFrame, PreviewLevelsMeta,
-    ProtectionFlags, RtaFrame, RtaMeta, SourceLevelsFrame, SourceLevelsMeta, SourceLoudness,
-    SpecBand, SpecBands, SpecFrame, SpecHarmonics, SpecMeta, SplFrame, SplMeta, StreamLevelsFrame,
-    StreamLevelsMeta, TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
+    LoudnessSourceMeta, MathState, MeterPair, OperandState, OperandStatus, PairLevels,
+    PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta, SourceLevelsFrame,
+    SourceLevelsMeta, SourceLoudness, SpecBand, SpecBands, SpecFrame, SpecHarmonics, SpecMeta,
+    SplFrame, SplMeta, StreamLevelsFrame, StreamLevelsMeta, TfFrame, TfMeta, TimingMeta,
+    TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -19,7 +20,6 @@ use crate::units::*;
 /// A pair's loudness 45 s after its reset: integrated passed the gate, LRA still settling.
 fn pair_loudness() -> SourceLoudness {
     SourceLoudness {
-        source: LoudnessSource::Pair { left: 0, right: 1 },
         momentary: Lufs(-23.25),
         short_term: Lufs(-22.75),
         integrated: Some(Lufs(-23.0)),
@@ -28,9 +28,18 @@ fn pair_loudness() -> SourceLoudness {
         max_short_term: Lufs(-20.125),
         max_true_peak: Dbtp(-1.25),
         duration: Seconds(45.0),
+    }
+}
+
+/// The pair 0 + 1 as a loudness source, reset 45 s before the sample frames.
+fn pair_source() -> LoudnessSourceMeta {
+    LoudnessSourceMeta {
+        source: LoudnessSource::Pair { left: 0, right: 1 },
         since: WallNs(1_789_999_955_000_000_000),
     }
 }
+
+const PAIR_01: MeterPair = MeterPair { left: 0, right: 1 };
 
 /// The stamp the sample frames carry (with the kind's grid).
 pub fn stamp(grid: Option<GridDef>) -> FrameStamp {
@@ -487,28 +496,32 @@ pub fn frames() -> Vec<Frame> {
                 meta: StreamLevelsMeta {
                     channels: vec![0, 1, 2],
                     ballistic: Ballistic::Type1,
-                    pair_levels: vec![PairLevels {
-                        left: 0,
-                        right: 1,
-                        correlation: Some(0.875),
-                        quiet: None,
-                    }],
-                    loudness: vec![
-                        pair_loudness(),
-                        SourceLoudness {
+                    pairs: vec![PAIR_01],
+                    sources: vec![
+                        pair_source(),
+                        LoudnessSourceMeta {
                             source: LoudnessSource::Input { channel: 2 },
-                            momentary: Lufs(f64::NEG_INFINITY),
-                            short_term: Lufs(f64::NEG_INFINITY),
-                            integrated: None,
-                            range: None,
-                            max_momentary: Lufs(f64::NEG_INFINITY),
-                            max_short_term: Lufs(f64::NEG_INFINITY),
-                            max_true_peak: Dbtp(f64::NEG_INFINITY),
-                            duration: Seconds(0.0),
                             since: WallNs(1_790_000_000_000_000_000),
                         },
                     ],
                 },
+                pair_levels: vec![PairLevels {
+                    correlation: Some(0.875),
+                    quiet: None,
+                }],
+                loudness: vec![
+                    pair_loudness(),
+                    SourceLoudness {
+                        momentary: Lufs(f64::NEG_INFINITY),
+                        short_term: Lufs(f64::NEG_INFINITY),
+                        integrated: None,
+                        range: None,
+                        max_momentary: Lufs(f64::NEG_INFINITY),
+                        max_short_term: Lufs(f64::NEG_INFINITY),
+                        max_true_peak: Dbtp(f64::NEG_INFINITY),
+                        duration: Seconds(0.0),
+                    },
+                ],
                 peak: vec![-6.0, -0.0625, f32::NEG_INFINITY],
                 rms: vec![-18.5, -3.25, f32::NEG_INFINITY],
                 clip: vec![ClipFlags::NONE, ClipFlags::HELD, ClipFlags::NONE],
@@ -534,13 +547,8 @@ pub fn frames() -> Vec<Frame> {
                 meta: SourceLevelsMeta {
                     channels: vec![0, 1],
                     ballistic: Ballistic::Type1,
-                    pair_levels: vec![PairLevels {
-                        left: 0,
-                        right: 1,
-                        correlation: Some(0.875),
-                        quiet: None,
-                    }],
-                    loudness: vec![pair_loudness()],
+                    pairs: vec![PAIR_01],
+                    sources: vec![pair_source()],
                     sample_rate_hz: 96_000,
                     mark: Some(LevelsMark {
                         sample: SampleIndex(4_800_256),
@@ -548,6 +556,11 @@ pub fn frames() -> Vec<Frame> {
                         breaks: 1,
                     }),
                 },
+                pair_levels: vec![PairLevels {
+                    correlation: Some(0.875),
+                    quiet: None,
+                }],
+                loudness: vec![pair_loudness()],
                 peak: vec![-6.0, -0.0625],
                 rms: vec![-18.5, -3.25],
                 clip: vec![ClipFlags::NONE, ClipFlags::HELD],
@@ -590,14 +603,13 @@ pub fn frames() -> Vec<Frame> {
                         name: None,
                     }],
                     ballistic: Ballistic::TruePeak,
-                    pair_levels: vec![PairLevels {
-                        left: 0,
-                        right: 1,
-                        correlation: None,
-                        quiet: Some(PairSide::Right),
-                    }],
-                    loudness: vec![pair_loudness()],
+                    sources: vec![pair_source()],
                 },
+                pair_levels: vec![PairLevels {
+                    correlation: None,
+                    quiet: Some(PairSide::Right),
+                }],
+                loudness: vec![pair_loudness()],
                 peak: vec![-12.0, -40.5],
                 rms: vec![-20.0, -52.25],
                 clip: vec![ClipFlags::NONE, ClipFlags::CLIP],

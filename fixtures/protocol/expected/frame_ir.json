@@ -17,12 +17,14 @@
    {
     "name": "ir_linear",
     "unit": "full_scale",
-    "elem": "bfp16"
+    "elem": "bfp16",
+    "len": 6
    },
    {
     "name": "ir_etc",
     "unit": "db",
-    "elem": "i16"
+    "elem": "i16",
+    "len": 6
    }
   ],
   "meta": {

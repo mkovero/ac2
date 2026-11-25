@@ -17,57 +17,68 @@
    {
     "name": "mag",
     "unit": "db",
-    "elem": "i16"
+    "elem": "i16",
+    "len": 480
    },
    {
     "name": "phase",
     "unit": "deg",
-    "elem": "i16"
+    "elem": "i16",
+    "len": 480
    },
    {
     "name": "coh",
     "unit": "coherence",
-    "elem": "u16"
+    "elem": "u16",
+    "len": 480
    },
    {
     "name": "validity",
     "unit": "bitmask",
-    "elem": "u32"
+    "elem": "u32",
+    "len": 480
    },
    {
     "name": "align_phase_before",
     "unit": "deg",
-    "elem": "i16"
+    "elem": "i16",
+    "len": 480
    },
    {
     "name": "align_phase_after",
     "unit": "deg",
-    "elem": "i16"
+    "elem": "i16",
+    "len": 480
    },
    {
     "name": "align_sum_before",
     "unit": "db",
-    "elem": "i16"
+    "elem": "i16",
+    "len": 480
    },
    {
     "name": "align_sum_after",
     "unit": "db",
-    "elem": "i16"
+    "elem": "i16",
+    "len": 480
    },
    {
     "name": "range_lo",
     "unit": "db",
-    "elem": "i16_mag_offset"
+    "elem": "i16_mag_offset",
+    "len": 480
    },
    {
     "name": "range_hi",
     "unit": "db",
-    "elem": "i16_mag_offset"
+    "elem": "i16_mag_offset",
+    "len": 480
    },
    {
     "name": "range_coh",
     "unit": "coherence",
-    "elem": "u8"
+    "elem": "u8",
+    "len": 480
    }
   ],
   "meta": {

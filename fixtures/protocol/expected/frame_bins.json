@@ -17,17 +17,20 @@
    {
     "name": "mag",
     "unit": "db",
-    "elem": "i16"
+    "elem": "i16",
+    "len": 16
    },
    {
     "name": "phase",
     "unit": "deg",
-    "elem": "i16"
+    "elem": "i16",
+    "len": 16
    },
    {
     "name": "coh",
     "unit": "coherence",
-    "elem": "u16"
+    "elem": "u16",
+    "len": 16
    }
   ],
   "meta": {

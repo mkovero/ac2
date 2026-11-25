@@ -167,10 +167,10 @@ impl<'a> Arrays<'a> {
         }
     }
 
-    /// A count array (`u32` elements, no bit meaning).
-    fn counts(&mut self, name: ArrayName) -> Result<Vec<u32>, DecodeError> {
+    /// A `u32` array without bit meaning (a count, a side).
+    fn u32s(&mut self, name: ArrayName, unit: Unit) -> Result<Vec<u32>, DecodeError> {
         let b = self
-            .find(name, Unit::Count)?
+            .find(name, unit)?
             .ok_or_else(|| DecodeError::Schema(format!("missing {name:?}")))?;
         Ok(packing::get_u32(b))
     }
@@ -191,6 +191,20 @@ impl<'a> Arrays<'a> {
                 self.descs[i].name
             ))),
         }
+    }
+}
+
+impl super::levels::Read for Arrays<'_> {
+    fn f32(&mut self, name: ArrayName, unit: Unit) -> Result<Vec<f32>, DecodeError> {
+        Arrays::f32(self, name, unit)
+    }
+
+    fn u32s(&mut self, name: ArrayName, unit: Unit) -> Result<Vec<u32>, DecodeError> {
+        Arrays::u32s(self, name, unit)
+    }
+
+    fn clip(&mut self) -> Result<Vec<super::ClipFlags>, DecodeError> {
+        self.mask(ArrayName::Clip)
     }
 }
 
@@ -234,10 +248,20 @@ pub(super) fn to_frame(c: &CodedFrame) -> Result<Frame, DecodeError> {
     if !c.stamp.protection.is_known() {
         return Err(DecodeError::Schema("undefined protection bits".into()));
     }
+    for d in &c.arrays {
+        if c.meta.count(d.name.per(), c.n) != Some(d.len as usize) {
+            return Err(DecodeError::Schema(format!(
+                "{:?}: {} elements, not one per {:?}",
+                d.name,
+                d.len,
+                d.name.per()
+            )));
+        }
+    }
     let sizes: Vec<usize> = c
         .arrays
         .iter()
-        .map(|d| array_size(d.elem, c.n as usize))
+        .map(|d| array_size(d.elem, d.len as usize))
         .collect();
     if sizes.iter().sum::<usize>() != c.codes.len() {
         return Err(DecodeError::Payload {
@@ -365,15 +389,18 @@ pub(super) fn to_frame(c: &CodedFrame) -> Result<Frame, DecodeError> {
                     "stream levels: channels.len() != n".into(),
                 ));
             }
+            let l = super::levels::read(&mut a, meta.ballistic)?;
             FrameData::StreamLevels(StreamLevelsFrame {
                 meta,
-                peak: a.f32(ArrayName::Peak, Unit::Dbfs)?,
-                rms: a.f32(ArrayName::Rms, Unit::Dbfs)?,
-                clip: a.mask(ArrayName::Clip)?,
-                ppm: a.f32(ArrayName::Ppm, Unit::Dbfs)?,
-                true_peak: a.f32(ArrayName::TruePeak, Unit::Dbtp)?,
-                max: a.f32(ArrayName::Max, Unit::Dbfs)?,
-                overs: a.counts(ArrayName::Overs)?,
+                pair_levels: l.pair_levels,
+                loudness: l.loudness,
+                peak: l.peak,
+                rms: l.rms,
+                clip: l.clip,
+                ppm: l.ppm,
+                true_peak: l.true_peak,
+                max: l.max,
+                overs: l.overs,
             })
         }
         FrameMeta::PreviewLevels(meta) => {
@@ -382,15 +409,18 @@ pub(super) fn to_frame(c: &CodedFrame) -> Result<Frame, DecodeError> {
                     "preview levels: channels.len() != n".into(),
                 ));
             }
+            let l = super::levels::read(&mut a, meta.ballistic)?;
             FrameData::PreviewLevels(PreviewLevelsFrame {
                 meta,
-                peak: a.f32(ArrayName::Peak, Unit::Dbfs)?,
-                rms: a.f32(ArrayName::Rms, Unit::Dbfs)?,
-                clip: a.mask(ArrayName::Clip)?,
-                ppm: a.f32(ArrayName::Ppm, Unit::Dbfs)?,
-                true_peak: a.f32(ArrayName::TruePeak, Unit::Dbtp)?,
-                max: a.f32(ArrayName::Max, Unit::Dbfs)?,
-                overs: a.counts(ArrayName::Overs)?,
+                pair_levels: l.pair_levels,
+                loudness: l.loudness,
+                peak: l.peak,
+                rms: l.rms,
+                clip: l.clip,
+                ppm: l.ppm,
+                true_peak: l.true_peak,
+                max: l.max,
+                overs: l.overs,
             })
         }
         FrameMeta::SourceLevels(meta) => {
@@ -399,15 +429,18 @@ pub(super) fn to_frame(c: &CodedFrame) -> Result<Frame, DecodeError> {
                     "source levels: channels.len() != n".into(),
                 ));
             }
+            let l = super::levels::read(&mut a, meta.ballistic)?;
             FrameData::SourceLevels(SourceLevelsFrame {
                 meta,
-                peak: a.f32(ArrayName::Peak, Unit::Dbfs)?,
-                rms: a.f32(ArrayName::Rms, Unit::Dbfs)?,
-                clip: a.mask(ArrayName::Clip)?,
-                ppm: a.f32(ArrayName::Ppm, Unit::Dbfs)?,
-                true_peak: a.f32(ArrayName::TruePeak, Unit::Dbtp)?,
-                max: a.f32(ArrayName::Max, Unit::Dbfs)?,
-                overs: a.counts(ArrayName::Overs)?,
+                pair_levels: l.pair_levels,
+                loudness: l.loudness,
+                peak: l.peak,
+                rms: l.rms,
+                clip: l.clip,
+                ppm: l.ppm,
+                true_peak: l.true_peak,
+                max: l.max,
+                overs: l.overs,
             })
         }
         FrameMeta::StreamGonio(meta) => FrameData::StreamGonio(gonio(&mut a, meta, h.n)?),

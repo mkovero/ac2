@@ -90,12 +90,20 @@ pub enum DecodeError {
 /// Why a frame could not be encoded (it would be refused by the decoder).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum EncodeError {
-    /// Arrays of one frame have different lengths.
+    /// An array's length is not the count it belongs to (`n`, the pairs or the sources).
     #[error("array {name:?} has {got} elements, expected {expected}")]
     Length {
         /// Array.
         name: ArrayName,
-        /// Expected (`n`).
+        /// Expected.
+        expected: usize,
+        /// Got.
+        got: usize,
+    },
+    /// A coded frame's codes are not the size its array descriptors state.
+    #[error("{got} bytes of codes, the arrays state {expected}")]
+    Codes {
+        /// Σ `len` × element size.
         expected: usize,
         /// Got.
         got: usize,
