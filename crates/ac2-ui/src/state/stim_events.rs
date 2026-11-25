@@ -9,8 +9,14 @@ impl AppState {
     pub(super) fn stim_event(&mut self, s: StimEvent, out: &mut Vec<Request>) {
         match s {
             StimEvent::Armed => {
+                let armed_with = self.rig.due.armed_with.take();
+                // An arm that lands behind a stop sent after it: the stop, queued behind the
+                // arm in the link's one stimulus task, ends the lease the arm took.
+                if self.rig.stimulus.phase == StimPhase::Stopping {
+                    return;
+                }
                 self.rig.stimulus.phase = StimPhase::Armed;
-                if self.rig.due.armed_with.take() != self.rig.stimulus.settings() {
+                if armed_with != self.rig.stimulus.settings() {
                     self.resend_stimulus(out);
                 }
                 let d = self.rig.stimulus.describe();
@@ -49,6 +55,9 @@ impl AppState {
                     };
                 }
             }
+            // Only the stop this app is waiting on acts: a second stop in flight (Esc after
+            // Space), or one sent with nothing live, lands on what the first already did.
+            StimEvent::Stopped if self.rig.stimulus.phase != StimPhase::Stopping => {}
             StimEvent::Stopped => {
                 self.rig.stimulus.phase = StimPhase::Idle;
                 // The mirror may still show the generator as this client left it: until it
@@ -80,7 +89,7 @@ impl AppState {
                 self.rig.sweep.releasing = false;
                 self.rig.sweep.arm_after_stop = false;
                 self.end_sweep_mode();
-                self.fault(format!("stimulus lease lost: {msg}"));
+                self.fault(ac2_scene::stim_item::lease_lost(&msg));
             }
             StimEvent::Failed(msg) => {
                 self.rig.sweep.releasing = false;
@@ -100,7 +109,7 @@ impl AppState {
                     StimPhase::Stopping => StimPhase::Idle,
                     p => p,
                 };
-                self.fault(format!("stimulus: {msg}"));
+                self.fault(ac2_scene::stim_item::refused(&msg));
             }
         }
     }

@@ -132,9 +132,9 @@ impl AppState {
                     .map(|m| m.config.name.clone())
                     .collect();
                 self.rig.choice.meas_seen.extend(seen);
-                if !self.mirror_lease_mine() {
-                    self.rig.stimulus.stopped_unmirrored = false;
-                }
+                // The first mirror after a stop ends the wait, whatever it shows: a generator
+                // still "ours" then is a same-name client playing, which Space stops.
+                self.rig.stimulus.stopped_unmirrored = false;
                 let ids: Vec<MeasId> = self.measurements().iter().map(|m| m.id).collect();
                 if let Some(p) = self.rig.pending.select
                     && ids.contains(&p)

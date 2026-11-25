@@ -474,6 +474,15 @@ fn stop_anywhere_stops_every_rig() {
         .collect();
     assert_eq!(stops, vec![RIG, PUPU]);
     assert_eq!(pupu(&t).stimulus.phase, StimPhase::Stopping);
+    // With nothing live anywhere, the stop still goes to every rig connected.
+    let mut t = two_mirrored();
+    let r = t.st.update(Msg::Key(STOP_ANYWHERE), &t.keys);
+    let stops: Vec<RigId> = r
+        .iter()
+        .filter(|(_, q)| matches!(q, Request::StimStop))
+        .map(|(rig, _)| *rig)
+        .collect();
+    assert_eq!(stops, vec![RIG, PUPU]);
 }
 
 /// Closing the rig shown shows the next one first; the closed rig goes to the app, which

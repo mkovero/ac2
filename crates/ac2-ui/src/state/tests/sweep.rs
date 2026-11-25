@@ -3,7 +3,7 @@
 use super::*;
 
 /// The daemon's state with the sweep measurement, the lease this client's.
-fn sweep_state() -> State {
+pub(super) fn sweep_state() -> State {
     let mut s = daemon_state();
     s.measurements.push(sweep_measurement());
     s.generator.owner = Some(ClientId("c1".into()));

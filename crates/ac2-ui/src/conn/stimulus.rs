@@ -182,13 +182,51 @@ pub(super) async fn detect(
     r
 }
 
+/// How a stop reaches the daemon.
+#[derive(Debug, PartialEq, Eq)]
+enum StopVia {
+    /// Our lease still holds: ending it stops and releases our stimulus.
+    Lease,
+    /// Our lease was taken over: ending it stops nothing, yet the operator asked for silence,
+    /// so the universal stop follows.
+    LeaseThenUniversal,
+    /// No lease here: the universal stop silences whoever plays.
+    Universal,
+}
+
+fn stop_via(lease_lost: Option<bool>) -> StopVia {
+    match lease_lost {
+        Some(false) => StopVia::Lease,
+        Some(true) => StopVia::LeaseThenUniversal,
+        None => StopVia::Universal,
+    }
+}
+
 pub(super) async fn stop(client: &Client, lease: &mut Option<StimulusLease>) -> StimEvent {
-    let r = match lease.take() {
-        Some(l) => l.end().await,
-        None => client.call(Command::GenStop).await.map(drop),
+    let l = lease.take();
+    let via = stop_via(l.as_ref().map(|l| l.lost().is_some()));
+    let r = match (via, l) {
+        (StopVia::Lease, Some(l)) => l.end().await,
+        (StopVia::LeaseThenUniversal, Some(l)) => {
+            let _ = l.end().await;
+            client.call(Command::GenStop).await.map(drop)
+        }
+        _ => client.call(Command::GenStop).await.map(drop),
     };
     match r {
         Ok(()) => StimEvent::Stopped,
         Err(e) => StimEvent::Failed(format!("stop: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stop_always_reaches_the_daemon() {
+        assert_eq!(stop_via(Some(false)), StopVia::Lease);
+        assert_eq!(stop_via(Some(true)), StopVia::LeaseThenUniversal);
+        assert_eq!(stop_via(None), StopVia::Universal);
     }
 }

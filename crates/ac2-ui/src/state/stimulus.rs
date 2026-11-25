@@ -141,8 +141,15 @@ impl AppState {
     }
 
     /// What the stimulus keys start next, for the top bar: armed, what Enter fires; idle,
-    /// what Space arms on the focused view. `None` while a request is in flight or playing.
+    /// what Space arms on the focused view. `None` whenever neither starts anything: a
+    /// request in flight, playing, a stimulus under this name from elsewhere, another
+    /// client's.
     pub fn stimulus_next(&self) -> Option<(NextKey, NextStimulus)> {
+        match self.own_stim() {
+            OwnStim::Armed => {}
+            OwnStim::Idle if !self.other_holds() => {}
+            _ => return None,
+        }
         let level = self.rig.stimulus.level;
         match self.rig.stimulus.phase {
             StimPhase::Armed => Some((
@@ -189,24 +196,23 @@ impl AppState {
                 .find(|(_, id)| *id == c)
                 .map_or_else(String::new, |(k, _)| k.label())
         };
-        let g = self.daemon().map(|s| &s.generator);
-        if self.rig.sweep.run.is_some() || g.is_some_and(|g| g.firing) {
-            return Drive::Playing;
-        }
-        let mine = g
-            .and_then(|g| g.owner.as_ref())
-            .is_some_and(|o| Some(o) == self.my_client_id());
-        let armed = match self.rig.stimulus.phase {
-            StimPhase::Armed => true,
-            StimPhase::Stopping => false,
-            StimPhase::Idle => match g {
-                Some(g) if g.armed && !mine => return Drive::Playing,
-                Some(g) => g.armed,
-                None => false,
-            },
-            StimPhase::Arming | StimPhase::FireRequested | StimPhase::Firing => {
+        // The keys the banner names are the ones Space and Enter act on now: only this
+        // app's own stimulus, off or armed, has a key that starts it.
+        let armed = match self.own_stim() {
+            OwnStim::Armed => true,
+            OwnStim::Idle
+                if self
+                    .daemon()
+                    .is_some_and(|s| s.generator.armed || s.generator.firing) =>
+            {
                 return Drive::Playing;
             }
+            OwnStim::Idle => false,
+            OwnStim::Arming
+            | OwnStim::Playing
+            | OwnStim::Run
+            | OwnStim::Stopping
+            | OwnStim::Elsewhere => return Drive::Playing,
         };
         // Armed with a sweep, Enter plays the sweep; Space on a live view re-arms the
         // generator, so there the off reminder is the one that holds.
@@ -295,7 +301,7 @@ impl AppState {
         self.arm_sweep(plan, force, out);
         match phase {
             StimPhase::Stopping => {
-                self.toast("stopping… arms the re-sweep once the stop is done (Esc cancels)");
+                self.toast(ac2_scene::stim_item::RESWEEP_AFTER_STOP);
             }
             StimPhase::Armed => self.toast(ac2_scene::stim_item::armed_sweep_toast(
                 &ac2_scene::stim_item::sweep_run_of(
@@ -322,7 +328,7 @@ impl AppState {
                 self.sine_bins(),
                 self.session_rate(),
             )));
-            self.toast("say what to play first; Enter takes pink noise");
+            self.toast(ac2_scene::stim_item::CHOOSE_SIGNAL_FIRST);
             return;
         }
         if self.rig.sweep.plan.is_some() {
@@ -379,7 +385,7 @@ impl AppState {
         }
         if self.rig.stimulus.level.is_none() {
             self.prompt(PromptKind::StimulusLevel, String::new());
-            self.toast("type a level first; nothing is armed without one");
+            self.toast(ac2_scene::stim_item::LEVEL_FIRST);
             return;
         }
         if self.daemon().is_some_and(|s| s.session.open.is_none()) {
@@ -548,7 +554,7 @@ impl AppState {
         match r.status {
             SweepStatus::Playing { .. } => {}
             SweepStatus::Analysing => {
-                self.toast("sweep recorded: analysing");
+                self.toast(ac2_scene::stim_item::SWEEP_ANALYSING);
             }
             SweepStatus::Done { traces } => {
                 self.rig.sweep.run = None;
@@ -597,7 +603,7 @@ impl AppState {
             SweepStatus::Failed { msg, .. } => {
                 self.rig.sweep.run = None;
                 self.release_after_sweep(out);
-                self.fault(format!("sweep failed: {msg}"));
+                self.fault(ac2_scene::stim_item::sweep_failed(&msg));
             }
         }
     }

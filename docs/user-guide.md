@@ -974,9 +974,9 @@ Without signal on the reference the transfer pane shows **NO REFERENCE**, with a
 | Situation | Detail shown |
 |---|---|
 | this app's stimulus off | `stimulus off: Space arms, Enter starts it` |
-| armed and silent | `stimulus armed: Enter starts it` |
+| armed by this app and silent | `stimulus armed: Enter starts it` |
 | on the sweep view (where Space arms a sweep) | `stimulus off: arm it from a transfer pane` |
-| stimulus playing (this app's or another client's) | `reference silent: check the loopback cable` |
+| stimulus playing (this app's or another client's), or an arm or stop on its way, or one under this app's name it did not arm | `reference silent: check the loopback cable` |
 
 With a loopback that also returns the generator's own output (the **R** and **S** roles,
 `session open --loopback-out 1 --loopback-in 1` from the CLI), the daemon continuously
@@ -1001,7 +1001,9 @@ accident:
   sweep or dynamics run Space and Enter do nothing either, so a second Enter never discards
   the run; **Esc** stops it (and discards it). **Esc** stops (with a window open, Esc first closes it),
   **Shift+Esc** stops from anywhere, from any client, and with several rigs held it stops
-  every rig's stimulus, not only the one shown;
+  every rig's stimulus, not only the one shown. Connected, Esc and Shift+Esc always send
+  the stop, even when the top bar shows nothing armed (before the rig's state arrives, or
+  while it lags); a stop of nothing says nothing;
 - the top bar's right end always shows the stimulus of the rig shown, fixed, never
   scrolled away: its state and, armed or playing, what plays and where, then what the keys
   do now, and while anything is armed or playing the stop beside it:
@@ -1014,9 +1016,9 @@ accident:
   | fire requested | `FIRE… pink −24.0 dBFS → out 1, 2 · Space or Enter stops` |
   | playing | `FIRING pink −24.0 dBFS → out 1, 2 · Space or Enter stops` |
   | a sweep or dynamics run playing | `FIRING sweep −30.0 dBFS → out 1 · Esc stops (and discards it)` |
-  | stopping | `STOPPING…` (also while the daemon still says it plays) |
-  | another client's | `FIRING white −30.0 dBFS → out 2 · held by alice` (what the daemon plays) |
-  | under this app's name from an earlier connection | `ARMED pink −24.0 dBFS → out 1, 2 · Space disarms` (Enter cannot fire it: this connection holds no lease; it says `armed elsewhere under this name: Space disarms`) |
+  | stopping | `STOPPING…` (also while the daemon still says it plays, until its next state arrives) |
+  | another client's | `FIRING white −30.0 dBFS → out 2 · held by alice` (what the daemon plays; Space and Enter arm and fire nothing, Space says who holds it) |
+  | under this app's name, not armed by this run of the app | `ARMED pink −24.0 dBFS → out 1, 2 · Space disarms`, playing `FIRING pink −24.0 dBFS → out 1, 2 · Space stops` (Enter cannot fire it: this connection holds no lease; it says `armed elsewhere under this name: Space disarms` or `playing elsewhere under this name: Space stops`) |
 
   followed by **■ Stop stimulus: Shift+Esc** while armed or playing. Off, the hover says
   what Space would arm. With several rigs it names the rig shown (`pupu: STIM OFF · Space

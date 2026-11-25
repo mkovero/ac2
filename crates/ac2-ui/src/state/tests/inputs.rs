@@ -370,6 +370,7 @@ fn outputs_never_change_under_a_held_stimulus() {
     t.conn(mirror(with_output_device("hw:UMC1820")));
     assert_eq!(t.st.rig.stimulus.outputs, vec![0]);
     // Once stopped, the device's remembered outputs apply.
+    t.key("Esc");
     t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     t.conn(mirror(with_output_device("hw:UMC1820")));
     assert_eq!(t.st.rig.stimulus.outputs, vec![3]);

@@ -147,7 +147,7 @@ fn the_bar_says_stopping_while_the_stop_is_in_flight() {
 /// so, Space stops it, and the bar offers Space alone.
 #[test]
 fn a_lease_from_elsewhere_is_stopped_never_fired() {
-    use ac2_scene::stim_item::{ARMED_ELSEWHERE, StimState};
+    use ac2_scene::stim_item::{ARMED_ELSEWHERE, PLAYING_ELSEWHERE, StimState};
     for firing in [false, true] {
         let mut t = T::new();
         t.pink_at(-20.0);
@@ -162,7 +162,12 @@ fn a_lease_from_elsewhere_is_stopped_never_fired() {
         };
         assert_eq!(t.st.stim_state(), Some(shown));
         assert!(t.key("Enter").is_empty(), "firing {firing}");
-        assert_eq!(t.last_toast(), ARMED_ELSEWHERE);
+        let said = if firing {
+            PLAYING_ELSEWHERE
+        } else {
+            ARMED_ELSEWHERE
+        };
+        assert_eq!(t.last_toast(), said);
         assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
         assert!(only_stop(&t.key("Space")), "firing {firing}");
     }
@@ -480,6 +485,10 @@ fn a_second_stop_keeps_what_the_first_asked() {
     assert_eq!(meas_stops(&r), [MeasId(1), MeasId(5)]);
     assert_eq!(t.st.toasts.list.len(), n + 1);
     assert_eq!(t.last_toast(), "stimulus stopped · Main L, TF 2 stopped");
+    // The second stop lands on what the first did: no transfer stop, no toast.
+    let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.toasts.list.len(), n + 1);
 }
 
 /// A stimulus under this name from elsewhere, stopped here, stops no transfer: this run of

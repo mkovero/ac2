@@ -45,6 +45,28 @@ impl StimState {
     }
 }
 
+/// What Space and Enter do now, as the app reads its own stimulus: the one source of the
+/// keys the item offers, so the item never offers a key that does something else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StimKeys {
+    /// Neither acts on it: an arm or a stop on its way, another client's stimulus, a run
+    /// done playing, or a window has the keys.
+    None,
+    /// Off: Space arms (or the level key types a level), as `off_keys` says.
+    Off,
+    Armed,
+    /// The noise or sine plays or is about to.
+    Playing,
+    /// A sweep or dynamics run plays or is about to: a second Space or Enter must not
+    /// discard it, so only Esc ends it.
+    Run,
+    /// Armed under this client's name, not by this run of the app (an earlier
+    /// connection's lease): Space disarms it, Enter cannot fire it.
+    ElsewhereArmed,
+    /// Playing under this client's name, not started by this run of the app.
+    ElsewherePlaying,
+}
+
 /// What the item is built from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StimInputs<'a> {
@@ -57,14 +79,7 @@ pub struct StimInputs<'a> {
     /// Off: what Space (or the level key) does on the focused view, short (`Space arms`,
     /// `L types a level`, `Space: sweep…`); `None` while a window has those keys.
     pub off_keys: Option<&'a str>,
-    /// The stimulus keys reach the stimulus: no window has them.
-    pub keys: bool,
-    /// A sweep or dynamics run plays or is about to: a second Space or Enter must not
-    /// discard it, so only Esc ends it.
-    pub run: bool,
-    /// The generator is under this client's name but was not armed by this run of the app
-    /// (an earlier connection's lease): Space stops it, Enter cannot fire it.
-    pub elsewhere: bool,
+    pub keys: StimKeys,
     /// More than one rig: the rig shown, by name, so the keys are read as acting on it.
     pub rig: Option<&'a str>,
     /// The long form of what Space or Enter starts next, for the hover.
@@ -145,6 +160,14 @@ pub const NOT_ARMED: &str = "not armed: Space arms first";
 /// Enter on a stimulus armed under this client's name by an earlier connection: this
 /// connection holds no lease to fire it under.
 pub const ARMED_ELSEWHERE: &str = "armed elsewhere under this name: Space disarms";
+/// Enter on a stimulus playing under this client's name, not started by this run of the app.
+pub const PLAYING_ELSEWHERE: &str = "playing elsewhere under this name: Space stops";
+
+/// Space with another client holding the generator: this app's arm would be refused, and
+/// taking it over is a deliberate step of its own.
+pub fn held_elsewhere(who: &str) -> String {
+    format!("held by {who}: Take over stimulus (palette) arms this view's in its place")
+}
 
 /// What plays and where: `pink −20.0 dBFS → out 1, 2` (`prefix` names a signal other than
 /// pink, with its trailing space), `no level` before one is typed.
@@ -189,6 +212,31 @@ pub fn dynamics_started(name: &str, longest_s: f64) -> String {
     )
 }
 
+/// The lease was lost: the daemon took the stimulus back (expired, taken over).
+pub fn lease_lost(why: &str) -> String {
+    format!("stimulus lease lost: {why}")
+}
+
+/// The daemon refused a stimulus request, or it could not be sent.
+pub fn refused(why: &str) -> String {
+    format!("stimulus: {why}")
+}
+
+/// A re-sweep asked for while this app's stop is on its way.
+pub const RESWEEP_AFTER_STOP: &str =
+    "stopping… arms the re-sweep once the stop is done (Esc cancels)";
+/// The first Space of the run, before a signal was chosen.
+pub const CHOOSE_SIGNAL_FIRST: &str = "say what to play first; Enter takes pink noise";
+/// Space before a level was typed.
+pub const LEVEL_FIRST: &str = "type a level first; nothing is armed without one";
+/// The sweep has played and the daemon works out its result.
+pub const SWEEP_ANALYSING: &str = "sweep recorded: analysing";
+
+/// The sweep run failed in the daemon.
+pub fn sweep_failed(why: &str) -> String {
+    format!("sweep failed: {why}")
+}
+
 /// A sweep or dynamics run playing or about to: what ends it.
 pub const RUN_KEYS: &str = "Esc stops (and discards it)";
 
@@ -209,24 +257,24 @@ pub fn stim_item(i: &StimInputs<'_>) -> StimItem {
         StimState::Arming | StimState::Armed | StimState::FirePending => Tone::Warn,
         StimState::Firing => Tone::Fault,
     };
-    // Another client's stimulus: Space and Enter arm and fire this app's, so only the stop
-    // (beside the item) is said.
-    let keys = match (s, i.held_by, i.keys) {
-        (StimState::Off, None, _) => i.off_keys.map(str::to_owned),
-        // Arming, a second Space does nothing and Enter has nothing to fire yet: only the
-        // stop stands beside it.
-        (_, Some(_), _) | (_, _, false) | (StimState::Stopping | StimState::Arming, ..) => None,
-        (StimState::Armed, ..) if i.elsewhere => Some(ELSEWHERE_ARMED_KEYS.to_owned()),
-        (StimState::Armed, ..) => Some(ARMED_KEYS.to_owned()),
-        (StimState::FirePending | StimState::Firing, ..) if i.elsewhere => {
-            Some(ELSEWHERE_PLAYING_KEYS.to_owned())
-        }
-        (StimState::FirePending | StimState::Firing, ..) if i.run => Some(RUN_KEYS.to_owned()),
-        (StimState::FirePending | StimState::Firing, ..) => Some(PLAYING_KEYS.to_owned()),
-    };
+    let keys = match i.keys {
+        StimKeys::None => None,
+        StimKeys::Off => i.off_keys,
+        StimKeys::Armed => Some(ARMED_KEYS),
+        StimKeys::Playing => Some(PLAYING_KEYS),
+        StimKeys::Run => Some(RUN_KEYS),
+        StimKeys::ElsewhereArmed => Some(ELSEWHERE_ARMED_KEYS),
+        StimKeys::ElsewherePlaying => Some(ELSEWHERE_PLAYING_KEYS),
+    }
+    .map(str::to_owned);
     let mut hover = Vec::new();
     if !s.live() {
         hover.push(i.plays.to_owned());
+    }
+    match i.keys {
+        StimKeys::ElsewhereArmed => hover.push(ARMED_ELSEWHERE.to_owned()),
+        StimKeys::ElsewherePlaying => hover.push(PLAYING_ELSEWHERE.to_owned()),
+        _ => {}
     }
     if let Some(l) = i.next_long {
         hover.push(l.to_owned());
@@ -247,15 +295,19 @@ pub fn stim_item(i: &StimInputs<'_>) -> StimItem {
 mod tests {
     use super::*;
 
+    /// `state` as this app's own, with the keys it gives.
     fn at(state: StimState) -> StimInputs<'static> {
         StimInputs {
             state,
             plays: "pink −20.0 dBFS → out 1, 2",
             held_by: None,
             off_keys: Some("Space arms"),
-            keys: true,
-            run: false,
-            elsewhere: false,
+            keys: match state {
+                StimState::Off => StimKeys::Off,
+                StimState::Armed => StimKeys::Armed,
+                StimState::FirePending | StimState::Firing => StimKeys::Playing,
+                StimState::Arming | StimState::Stopping => StimKeys::None,
+            },
             rig: None,
             next_long: None,
             tip: "L types the level",
@@ -325,6 +377,7 @@ mod tests {
         i.rig = Some("pupu");
         assert_eq!(text(i), "pupu: STIM OFF · Space arms");
         i.state = StimState::Firing;
+        i.keys = StimKeys::Playing;
         assert_eq!(
             text(i),
             "pupu: FIRING pink −20.0 dBFS → out 1, 2 · Space or Enter stops"
@@ -335,6 +388,7 @@ mod tests {
     fn another_clients_stimulus_says_who_and_no_keys() {
         let mut i = at(StimState::Firing);
         i.held_by = Some("alice");
+        i.keys = StimKeys::None;
         let item = stim_item(&i);
         assert_eq!(
             item.text(),
@@ -348,11 +402,11 @@ mod tests {
     #[test]
     fn with_a_window_open_the_keys_are_the_windows() {
         let mut i = at(StimState::Armed);
-        i.keys = false;
+        i.keys = StimKeys::None;
         assert_eq!(text(i), "ARMED pink −20.0 dBFS → out 1, 2");
         i.state = StimState::Firing;
         assert_eq!(text(i), "FIRING pink −20.0 dBFS → out 1, 2");
-        i.state = StimState::Off;
+        let mut i = at(StimState::Off);
         i.off_keys = None;
         assert_eq!(text(i), "STIM OFF");
     }
@@ -362,6 +416,7 @@ mod tests {
     fn a_narrow_bar_drops_the_keys_then_the_holder_then_what_plays() {
         let mut i = at(StimState::Firing);
         i.held_by = Some("alice");
+        i.keys = StimKeys::None;
         i.rig = Some("pupu");
         let item = stim_item(&i);
         let texts: Vec<String> = (0..StimItem::STEPS)
@@ -397,25 +452,32 @@ mod tests {
     #[test]
     fn a_run_says_esc_stops_it() {
         let mut i = at(StimState::Firing);
-        i.run = true;
+        i.keys = StimKeys::Run;
         assert_eq!(
             text(i),
             "FIRING pink −20.0 dBFS → out 1, 2 · Esc stops (and discards it)"
         );
         i.state = StimState::FirePending;
         assert!(text(i).ends_with(" · Esc stops (and discards it)"));
-        i.state = StimState::Armed;
-        assert!(text(i).ends_with(" · Enter fires · Space disarms"));
     }
 
     /// Under this client's name from an earlier connection: only Space acts on it.
     #[test]
     fn a_lease_from_elsewhere_offers_space_alone() {
         let mut i = at(StimState::Armed);
-        i.elsewhere = true;
+        i.keys = StimKeys::ElsewhereArmed;
         assert_eq!(text(i), "ARMED pink −20.0 dBFS → out 1, 2 · Space disarms");
+        assert_eq!(
+            stim_item(&i).hover,
+            "armed elsewhere under this name: Space disarms · L types the level"
+        );
         i.state = StimState::Firing;
+        i.keys = StimKeys::ElsewherePlaying;
         assert_eq!(text(i), "FIRING pink −20.0 dBFS → out 1, 2 · Space stops");
+        assert_eq!(
+            stim_item(&i).hover,
+            "playing elsewhere under this name: Space stops · L types the level"
+        );
     }
 
     #[test]

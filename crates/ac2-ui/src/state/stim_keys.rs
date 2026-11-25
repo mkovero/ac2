@@ -8,7 +8,7 @@
 //! sound never starts it again.
 
 use super::*;
-use ac2_scene::stim_item::StimState;
+use ac2_scene::stim_item::{StimKeys, StimState};
 
 /// This app's stimulus on the rig shown, as Space, Enter and the bar read it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,20 +32,56 @@ pub enum OwnStim {
 }
 
 impl AppState {
+    /// The one source of what Space and Enter do, and so of the keys the bar offers.
     pub fn own_stim(&self) -> OwnStim {
+        let phase = self.rig.stimulus.phase;
+        if phase == StimPhase::Stopping
+            || (phase == StimPhase::Idle && self.rig.stimulus.stopped_unmirrored)
+        {
+            return OwnStim::Stopping;
+        }
         let run_planned = self.rig.sweep.plan.is_some() || self.rig.dynamics_run.plan.is_some();
         if self.rig.sweep.run.is_some() || self.rig.dynamics_run.run.is_some() {
             return OwnStim::Run;
         }
-        match self.rig.stimulus.phase {
+        match phase {
             StimPhase::Arming => OwnStim::Arming,
             StimPhase::Armed => OwnStim::Armed,
             StimPhase::FireRequested | StimPhase::Firing if run_planned => OwnStim::Run,
             StimPhase::FireRequested | StimPhase::Firing => OwnStim::Playing,
-            StimPhase::Stopping => OwnStim::Stopping,
-            StimPhase::Idle if self.rig.stimulus.stopped_unmirrored => OwnStim::Stopping,
             StimPhase::Idle if self.mirror_lease_mine() => OwnStim::Elsewhere,
-            StimPhase::Idle => OwnStim::Idle,
+            StimPhase::Idle | StimPhase::Stopping => OwnStim::Idle,
+        }
+    }
+
+    /// Another client holds the generator: this app's arm would be refused.
+    pub(super) fn other_holds(&self) -> bool {
+        self.daemon().is_some_and(|s| {
+            s.generator
+                .owner
+                .as_ref()
+                .is_some_and(|o| Some(o) != self.my_client_id())
+        })
+    }
+
+    /// What Space and Enter do now, as the bar offers them: from [`Self::own_stim`], as the
+    /// keys themselves act. Off, the bar names the next arm even with a window open (the
+    /// level key reaches past it); otherwise a window has the keys.
+    pub fn stim_keys(&self) -> StimKeys {
+        let window = self.overlay != Overlay::None;
+        let firing = self.daemon().is_some_and(|s| s.generator.firing);
+        match self.own_stim() {
+            OwnStim::Idle if self.other_holds() => StimKeys::None,
+            OwnStim::Idle => StimKeys::Off,
+            _ if window => StimKeys::None,
+            OwnStim::Arming | OwnStim::Stopping => StimKeys::None,
+            OwnStim::Armed => StimKeys::Armed,
+            OwnStim::Playing => StimKeys::Playing,
+            // Done playing, the run analyses: nothing plays for a key to stop.
+            OwnStim::Run if self.stim_state().is_some_and(StimState::live) => StimKeys::Run,
+            OwnStim::Run => StimKeys::None,
+            OwnStim::Elsewhere if firing => StimKeys::ElsewherePlaying,
+            OwnStim::Elsewhere => StimKeys::ElsewhereArmed,
         }
     }
 
@@ -97,21 +133,25 @@ impl AppState {
     }
 
     /// The stimulus of the rig shown as the top bar states it; `None` before the daemon's
-    /// state is mirrored. The mirrored generator is the truth, but for this app's stop in
-    /// flight: the mirror says it plays until the stop lands, and the keys do nothing
-    /// meanwhile, so the bar says `STOPPING…` and offers no key.
+    /// state is mirrored. This app's own stimulus as [`Self::own_stim`] has it, since the
+    /// local phase leads where the mirror lags (an arm seen to land, a stop sent); anyone
+    /// else's, and a run's between its steps, as the mirror has it.
     pub fn stim_state(&self) -> Option<StimState> {
         let g = &self.daemon()?.generator;
-        // The local phase leads where the mirror lags it: an arm this app saw land, a stop
-        // it sent or saw land before the mirror says so.
-        Some(match ((g.armed, g.firing), self.rig.stimulus.phase) {
-            (_, StimPhase::Stopping) => StimState::Stopping,
-            (_, StimPhase::Idle) if self.rig.stimulus.stopped_unmirrored => StimState::Stopping,
-            ((_, true), _) | (_, StimPhase::Firing) => StimState::Firing,
-            (_, StimPhase::FireRequested) => StimState::FirePending,
-            ((true, false), _) | (_, StimPhase::Armed) => StimState::Armed,
-            (_, StimPhase::Arming) => StimState::Arming,
-            _ => StimState::Off,
+        let mirrored = if g.firing {
+            StimState::Firing
+        } else if g.armed {
+            StimState::Armed
+        } else {
+            StimState::Off
+        };
+        Some(match (self.own_stim(), self.rig.stimulus.phase) {
+            (OwnStim::Stopping, _) => StimState::Stopping,
+            (OwnStim::Arming, _) => StimState::Arming,
+            (OwnStim::Armed, _) => StimState::Armed,
+            (OwnStim::Playing | OwnStim::Run, StimPhase::FireRequested) => StimState::FirePending,
+            (OwnStim::Playing | OwnStim::Run, StimPhase::Firing) => StimState::Firing,
+            (OwnStim::Run | OwnStim::Playing | OwnStim::Elsewhere | OwnStim::Idle, _) => mirrored,
         })
     }
 
@@ -123,12 +163,24 @@ impl AppState {
         match self.own_stim() {
             OwnStim::Armed | OwnStim::Playing | OwnStim::Elsewhere => self.stop_stimulus_here(out),
             OwnStim::Arming | OwnStim::Run | OwnStim::Stopping => {}
+            OwnStim::Idle if self.other_holds() => {
+                let who = self.daemon().and_then(|s| {
+                    let g = &s.generator;
+                    let rig = self.rig_name(self.active());
+                    g.owner
+                        .as_ref()
+                        .map(|o| ac2_scene::stimulus::holder(o, g.owner_local, &rig))
+                });
+                self.warn(ac2_scene::stim_item::held_elsewhere(
+                    &who.unwrap_or_default(),
+                ));
+            }
             OwnStim::Idle => self.space(false, keymap, out),
         }
     }
 
-    /// Enter: fires what this run of the app armed, stops this app's noise or sine while it plays; nothing
-    /// while an arm, a stop or a run is on its way.
+    /// Enter: fires what this run of the app armed, stops this app's noise or sine while it
+    /// plays; nothing while an arm, a stop or a run is on its way.
     pub(super) fn enter_key(&mut self, out: &mut Vec<Request>) {
         match self.own_stim() {
             OwnStim::Playing => self.stop_stimulus_here(out),
@@ -146,6 +198,9 @@ impl AppState {
                 }
             }
             OwnStim::Idle => self.warn(ac2_scene::stim_item::NOT_ARMED),
+            OwnStim::Elsewhere if self.daemon().is_some_and(|s| s.generator.firing) => {
+                self.warn(ac2_scene::stim_item::PLAYING_ELSEWHERE);
+            }
             OwnStim::Elsewhere => self.warn(ac2_scene::stim_item::ARMED_ELSEWHERE),
             OwnStim::Arming | OwnStim::Run | OwnStim::Stopping => {}
         }
@@ -166,12 +221,18 @@ impl AppState {
         }
     }
 
-    /// Stops the stimulus of the rig shown where it is armed or firing, and drops a re-arm
-    /// waiting on a stop: Esc, Shift+Esc, Space and Enter, and the palette's stop. Sent
-    /// while it plays, with the preference on, the stop takes the transfers measuring
-    /// against the loopback with it once it lands.
+    /// Stops the stimulus of the rig shown, and drops a re-arm waiting on a stop: Esc,
+    /// Shift+Esc, Space and Enter, and the palette's stop. Connected, a stop always goes
+    /// out, whatever this app believes plays: the mirror may not have arrived or may lag,
+    /// and the stop is the one key that must never be second-guessed. Only a stop of
+    /// something live is waited on (and so said once it lands); sent while this app's noise
+    /// or sine plays, with the preference on, it takes the transfers measuring against the
+    /// loopback with it.
     pub(super) fn stop_stimulus_here(&mut self, out: &mut Vec<Request>) {
         self.rig.sweep.arm_after_stop = false;
+        if !self.connected() {
+            return;
+        }
         if self.stimulus_live() {
             // Only this app's own noise or sine, started in this run: another client's
             // stimulus feeds measurements this app did not start it for, and an aborted run
@@ -182,8 +243,8 @@ impl AppState {
                     self.own_stim() == OwnStim::Playing && self.prefs.stop_transfers_with_stimulus;
             }
             self.rig.stimulus.phase = StimPhase::Stopping;
-            out.push(Request::StimStop);
         }
+        out.push(Request::StimStop);
     }
 
     /// This app's stop has landed: stops each running transfer measurement whose reference
