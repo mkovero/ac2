@@ -99,7 +99,8 @@ impl Control {
             .with_server(s.server.network.summary());
         let dedup = Dedup::new(s.dedup);
         let rigm = rig_meas::RigMeas::new(&saved, s.rig_logs.as_deref());
-        Self {
+        let stored_ceiling = saved.ceiling_dbfs;
+        let mut c = Self {
             store,
             cal,
             dedup,
@@ -120,7 +121,7 @@ impl Control {
                 level: None,
                 source: None,
                 tone: None,
-                ceiling_set: saved.ceiling_dbfs,
+                ceiling_set: stored_ceiling,
             },
             grids: HashMap::new(),
             seqs: Arc::new(Seqs::default()),
@@ -163,6 +164,24 @@ impl Control {
             },
             levels: Default::default(),
             s,
+        };
+        c.store_start_ceiling(stored_ceiling);
+        c
+    }
+
+    /// Stores the level the daemon starts with when the file holds another (none, or one
+    /// above a lowered bound). The level that protects the speakers then only ever rises by
+    /// a typed, confirmed `gen.ceiling`: a later start with a higher `--max-level` reads
+    /// this level back instead of taking its own bound, and lowering then raising the bound
+    /// does not bring an older, higher level back.
+    fn store_start_ceiling(&mut self, stored: Option<f64>) {
+        let now = self.s.ceiling_dbfs;
+        if stored == Some(now) {
+            return;
+        }
+        self.out.ceiling_set = Some(now);
+        if let Err(e) = self.rig.settings.persist(&self.rig_settings_now()) {
+            tracing::error!("system max level {now:.1} dBFS not stored: {}", e.msg);
         }
     }
 }

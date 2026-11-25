@@ -251,9 +251,58 @@ fn level_and_output_labels_survive_a_restart_under_the_bound() {
     assert_eq!(ceiling(&mut c, -32.0, true), Err(ErrorCode::Invalid));
     h.shutdown();
 
-    // A higher bound again: the kept level (it was never raised) is still in force.
+    // A higher bound again: the capped level was stored, so the older, higher one does
+    // not come back without a typed raise.
+    let h = start(-6.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    let g = c.state().generator;
+    assert_eq!((g.ceiling, g.ceiling_bound), (Dbfs(-40.0), Dbfs(-6.0)));
+    ceiling(&mut c, -32.0, true).unwrap();
+    h.shutdown();
     let h = start(-6.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
     assert_eq!(c.state().generator.ceiling, Dbfs(-32.0));
     h.shutdown();
+}
+
+#[test]
+fn a_restart_with_a_higher_bound_never_raises_the_level_by_itself() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("rig.json");
+    let start = |bound: f64| {
+        let mut cfg = config(manual_rig(), inproc("ceiling-higher-bound"));
+        cfg.max_level_dbfs = bound;
+        cfg.rig_settings = Some(file.clone());
+        Daemon::start(cfg).unwrap()
+    };
+    let stored = || -> serde_json::Value {
+        serde_json::from_slice::<serde_json::Value>(&std::fs::read(&file).unwrap()).unwrap()
+            ["ceiling_dbfs"]
+            .clone()
+    };
+
+    // No file: the bound is the level in force, and it is stored right away.
+    let h = start(-50.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    assert_eq!(c.state().generator.ceiling, Dbfs(-50.0));
+    h.shutdown();
+    assert_eq!(stored(), serde_json::json!(-50.0));
+
+    let h = start(-20.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    let g = c.state().generator;
+    assert_eq!((g.ceiling, g.ceiling_bound), (Dbfs(-50.0), Dbfs(-20.0)));
+    h.shutdown();
+
+    // A file with no level (as written before a level was stored): setting the level in
+    // force stores it.
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    v["ceiling_dbfs"] = serde_json::Value::Null;
+    std::fs::write(&file, serde_json::to_vec(&v).unwrap()).unwrap();
+    let h = start(-30.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    assert_eq!(c.state().generator.ceiling, Dbfs(-30.0));
+    h.shutdown();
+    assert_eq!(stored(), serde_json::json!(-30.0));
 }

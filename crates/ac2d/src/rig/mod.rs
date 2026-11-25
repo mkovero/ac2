@@ -315,8 +315,9 @@ fn set_aside(p: &Path, tag: &str) -> Option<PathBuf> {
 }
 
 /// The system max level the daemon starts with: the one last set, never above `bound`
-/// (a later, lower `--max-level` wins), else `bound`. A ceiling the file holds but that
-/// cannot be read is `None` here, so the daemon starts at `bound`, as with no file.
+/// (a later, lower `--max-level` wins), else `bound`; the start stores what this returns.
+/// A ceiling the file holds but that cannot be read is `None` here, so the daemon starts
+/// at `bound`, as with no file.
 pub(crate) fn start_ceiling(saved: Option<f64>, bound: f64) -> f64 {
     saved.map_or(bound, |c| c.min(bound))
 }

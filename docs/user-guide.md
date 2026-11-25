@@ -431,7 +431,11 @@ names the max: `Stimulus level (dBFS, max −40.0)`). Above that, **Stop transfe
 stimulus** (**←/→**, on by default) is the rule of [Stopping the stimulus stops its
 transfers](#stopping-the-stimulus-stops-its-transfers).
 
-The daemon keeps the level across restarts. CLI: `ac2 gen ceiling`,
+The daemon keeps the level across restarts and never raises it by itself: its first start
+stores the bound as the level, a restart with a higher `--max-level` keeps the stored level
+(only a typed raise goes above it), and a restart with a lower bound caps the level there
+and stores the capped level, so raising the bound again later does not bring the older,
+higher level back. CLI: `ac2 gen ceiling`,
 `ac2 gen ceiling -40dbfs`, `ac2 gen ceiling -30dbfs --yes`.
 
 #### Connection

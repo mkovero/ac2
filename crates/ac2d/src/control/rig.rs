@@ -67,6 +67,15 @@ impl Control {
             )));
         }
         if new == old {
+            // The level in force, kept where a restart reads it if the file has none yet
+            // (its start could not write it): a later start then never takes a higher bound.
+            if self.out.ceiling_set != Some(new) {
+                self.rig.settings.persist(&RigSettings {
+                    ceiling_dbfs: Some(new),
+                    ..self.rig_settings_now()
+                })?;
+                self.out.ceiling_set = Some(new);
+            }
             return Ok(ReplyBody::Generator(self.store.state().generator.clone()));
         }
         let peak = crate::stimulus::peak_limit(new).map_err(|e| invalid(e.to_string()))?;
