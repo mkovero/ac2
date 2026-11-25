@@ -23,6 +23,7 @@ mod cursor;
 mod drop_math;
 mod duplicate;
 mod dynamics;
+mod edit_chain;
 mod eq;
 mod harness;
 mod ir_overlay;

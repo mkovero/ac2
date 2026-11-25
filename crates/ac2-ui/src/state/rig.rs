@@ -315,17 +315,30 @@ impl RigState {
         }
     }
 
-    /// The daemon's measurements, by id.
+    /// The rig's measurements as this app has them, by id: each as [`Self::meas`] reads it,
+    /// so a list and a lookup never disagree about an edit still on its way.
     pub fn measurements(&self) -> Vec<&Measurement> {
         let mut v: Vec<&Measurement> = self
             .daemon()
-            .map(|s| s.measurements.iter().collect())
+            .map(|s| {
+                s.measurements
+                    .iter()
+                    .map(|m| self.meas_edits.view(m.id).unwrap_or(m))
+                    .collect()
+            })
             .unwrap_or_default();
         v.sort_by_key(|m| m.id);
         v
     }
 
+    /// Measurement `id` as this app has it: the mirror's, or what this app's edits of it
+    /// make of it while their replies and events are still to come. Edits are made on it.
     pub fn meas(&self, id: MeasId) -> Option<&Measurement> {
+        self.meas_edits.view(id).or_else(|| self.mirrored_meas(id))
+    }
+
+    /// Measurement `id` as the mirror alone holds it.
+    pub(super) fn mirrored_meas(&self, id: MeasId) -> Option<&Measurement> {
         self.daemon()?.measurements.iter().find(|m| m.id == id)
     }
 

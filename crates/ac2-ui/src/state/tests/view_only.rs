@@ -27,3 +27,22 @@ fn a_viewer_is_refused_an_edit_before_it_is_sent() {
         t.last_toast()
     );
 }
+
+/// A viewer's layout call is refused before it is sent and answered as refused: the next
+/// layout edit is refused aloud again, not held behind a call that never comes back.
+#[test]
+fn a_viewers_refused_layout_holds_nothing_back() {
+    let mut t = T::new();
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
+    as_viewer(&mut t);
+    for _ in 0..2 {
+        t.st.toasts.list.clear();
+        assert!(t.key("N").iter().all(Request::viewer_may_send));
+        assert!(
+            t.last_toast().starts_with("not sent: "),
+            "{}",
+            t.last_toast()
+        );
+    }
+    assert!(t.st.rig.layout_queue.calls.is_empty());
+}

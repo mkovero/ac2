@@ -331,6 +331,13 @@ pub fn edits_dropped(name: &str, n: usize) -> String {
     format!("{name}: {n} later {edits} not sent — it changed elsewhere, shown as it is now")
 }
 
+/// The warning when the link to a rig went down (or another daemon answers there) while
+/// measurement edits waited to be sent: the ids they name may be another measurement's.
+pub fn edits_unsent_link(n: usize) -> String {
+    let edits = if n == 1 { "edit" } else { "edits" };
+    format!("{n} measurement {edits} not sent — the link to the rig went down")
+}
+
 /// The toast when the refused edit stays on its page, rebased on the newer settings.
 pub fn conflict_kept_toast(what: &str) -> String {
     format!("{what}: changed elsewhere — not applied, your edits kept")

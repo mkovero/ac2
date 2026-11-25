@@ -33,7 +33,7 @@ pub(crate) struct OtherRigs {
     pub(super) elsewhere: Vec<(RigId, Request)>,
     /// Set by a switch during [`AppState::update`]: how many of the requests made so far
     /// were the rig shown before. Those after it are the newly shown rig's, for its link.
-    switched_at: Option<usize>,
+    pub(super) switched_at: Option<usize>,
     /// The slot the next rig added takes.
     next_slot: u32,
     /// Rigs closed, whose links the app closes (stopping the stimulus they hold first).
@@ -583,6 +583,8 @@ impl AppState {
         self.rig.due.own_panes_due = false;
         self.rig.due.row_curve = None;
         self.rig.input_pick = None;
+        // What was asked so far is the rig left's: its edits wait in its own chains.
+        self.finish_requests(out, 0);
         std::mem::swap(
             &mut self.view.tf.phase_reference,
             &mut self.rig.phase_reference,

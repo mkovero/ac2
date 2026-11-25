@@ -472,8 +472,9 @@ impl AppState {
             let views = &self.layout.views;
             self.plot_px.retain(|p, _| views.contains_key(p));
         }
-        self.chain_meas_edits(&mut out);
-        self.refuse_view_only(&mut out);
+        // A switch midway finished the rig left's requests before it.
+        let from = self.others.switched_at.unwrap_or(0);
+        self.finish_requests(&mut out, from);
         out
     }
 

@@ -25,9 +25,9 @@
 //! level ranges the operator set travel; the focus, W and F stay this app's. A layout
 //! received is put on screen, never sent back: only what the operator does here is sent.
 //!
-//! One call per measurement is in flight at a time, the newest edit waiting behind it: each
-//! call is a task of its own on the link, so two in flight could reach the daemon in either
-//! order and leave it holding an older layout than the screen. A call is done when it is
+//! One call per measurement is in flight at a time, the newest edit waiting behind it: edits
+//! made faster than the daemon answers go as one, the newest, and never leave it holding an
+//! older layout than the screen. A call is done when it is
 //! answered and the daemon's copy has shown it: a reply can come before the state events
 //! that carry the layouts sent before it, and those older layouts are this app's own.
 
@@ -35,6 +35,8 @@ use ac2_proto::model::PaneLayout;
 use ac2_proto::model::layout as wire;
 
 use crate::state::*;
+
+mod calls;
 
 /// The `meas.layout` calls in flight and the edits waiting behind them.
 #[derive(Clone, Debug, Default)]
@@ -513,49 +515,6 @@ impl AppState {
             },
             what,
         );
-    }
-
-    /// A reply to a `meas.layout` call of this app's: `true` when it was one. Said only
-    /// when the measurement got its first layout or the call failed: every pane edit
-    /// answered aloud would bury what the edit itself said.
-    /// The edit held behind the call goes now.
-    pub(in crate::state) fn layout_reply(
-        &mut self,
-        what: &str,
-        result: &Result<(), String>,
-        out: &mut Vec<Request>,
-    ) -> bool {
-        let Some(i) = self
-            .rig
-            .layout_queue
-            .calls
-            .iter()
-            .position(|c| c.what == what && !c.answered)
-        else {
-            return false;
-        };
-        let meas = self.rig.layout_queue.calls[i].meas;
-        match result {
-            Ok(()) => {
-                let c = &mut self.rig.layout_queue.calls[i];
-                c.answered = true;
-                let first = c.first;
-                if c.applied {
-                    self.rig.layout_queue.calls.remove(i);
-                }
-                if first {
-                    self.toast(what);
-                }
-            }
-            Err(e) => {
-                self.rig.layout_queue.calls.remove(i);
-                self.fault(format!("{what}: {e}"));
-            }
-        }
-        if let Some(l) = self.rig.layout_queue.queued.remove(&meas) {
-            self.send_layout(meas, l, out);
-        }
-        true
     }
 
     /// Layout `l` of the own panes' owner on screen, each pane on the measurement it was

@@ -58,23 +58,36 @@ answers with the measurement as committed). An edit that carries a base (`meas.u
 `meas.eq put`) waits for the replies of the edits of that measurement in flight and takes
 its `base` from the measurement the last reply carries, not from the mirror; the edits
 without a base are last write wins and go at once unless a based edit waits ahead of them,
-since the daemon runs one client's requests in the order sent. A queued `meas.update` was
-made on the configuration the mirror held then, so it is rebased field by field: what the
-edit changed (compared with that configuration) is laid over the configuration the reply
-carries, and a changed enum variant is taken whole, so an earlier edit's change still in
-flight is not undone. A `stale_meas` refusal then means another client or the daemon
+since the daemon runs one client's requests in the order sent (the app's link puts each
+request on the socket as it is made and only awaits the reply apart). Chains are per rig:
+an edit waits in the chain of the rig it goes to, and is answered there. The next edit is made
+on what the app will have made of the measurement: the newer of the mirror and the last
+reply, with the configuration of the newest `meas.update` sent or waiting, so a step key
+pressed twice before the first reply steps twice and a toggle pressed twice ends where it
+began. A queued edit then only takes the newer `edit_rev` (or, for an EQ `put`, the set's
+newer `rev`), and only when its own base was the one the app knew when it was made and the
+reply shows what it replaces (the configuration, the set's body) as it was made on: nothing
+but this app's own edits came between. Otherwise it goes as made and the daemon refuses
+it; a base deliberately older (the SPL / Leq page, below) always goes as made. A
+`stale_meas` refusal then means another client or the daemon
 committed the measurement in between: the app shows the conflict toast (`<what>: changed
 elsewhere — reloaded`, as for any refused base), drops that measurement's queued edits and
 warns how many were not sent (`<name>: n later edits not sent — it changed elsewhere, shown
-as it is now`). A page held open over time (the SPL / Leq page) is made on the `edit_rev` it opened on;
+as it is now`). The queued edits are dropped as well when the link goes down or another
+daemon incarnation answers (`n measurement edits not sent — the link to the rig went down`):
+the ids they name may be another measurement's. Every edit dropped, or refused before it is
+sent to a viewer, is answered to what waits for its reply as a refusal would be (the layout
+queue, the EQ editor, the SPL / Leq page). A page held open over time (the SPL / Leq page) is made on the `edit_rev` it opened on;
 while the meter's name, scope and SPL configuration stay what the page was made on, it takes
 each newer `edit_rev` the mirror shows (a pane laid out, a start, a job restart), so only a
 change of what Apply writes refuses it. The one `meas.update` the connection sends on its own (a sweep's stimulus
 settings, `conn/stimulus.rs`) is outside the chain and takes the mirror's `edit_rev`; a
 refusal there is reported like any failed call.
 
-**`config_rev`** keeps exactly one meaning: the rev of the last commit that changed what the
-measurement's job computes from its configuration. It no longer moves for a delay change.
+**`config_rev`** keeps exactly one meaning: the rev from which frames show the last change
+of what the measurement's job computes from its configuration. It is later than every
+commit before that change and no later than the change's own commit (a kind change that
+deletes the delay first may name the rev of a commit it makes on the way). It no longer moves for a delay change.
 Display-only and owner-only edits leave it, as today.
 
 **Delay entity.** Delay state leaves `Measurement` (the field `delay` goes) and becomes:
