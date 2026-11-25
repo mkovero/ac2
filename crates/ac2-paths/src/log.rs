@@ -2,6 +2,11 @@
 //! to stderr (journald and terminals read it) and to `<program>.log` in [`log_dir`], so an
 //! app launched from a GUI with no terminal still leaves a log a tester can send.
 //!
+//! A program with an audit trail (the daemon: who raised the ceiling, authorized or revoked
+//! a client, made sound) also writes the events of its audit target to
+//! `<program>-audit.log`, whatever the filter, kept across restarts and rotated on its own
+//! cap: no volume of ordinary lines, a client's included, can push an audit line out.
+//!
 //! Only the daemon's control and I/O threads and the UI log; the audio callbacks never do,
 //! because formatting and file writes allocate and make syscalls.
 
@@ -10,7 +15,8 @@ use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::filter::{LevelFilter, Targets};
+use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry, fmt};
 
@@ -29,6 +35,46 @@ pub fn filter() -> EnvFilter {
 /// one started: a kiosk runs for weeks, and a warning repeated every few seconds must not
 /// fill the disk the autosave and the SPL logs need. At most twice this is kept.
 pub const MAX_LOG_BYTES: u64 = 16 << 20;
+
+/// Largest the audit file grows before it is moved to `<program>-audit.log.1`: an audit
+/// line is an operator's act, a few a day, so this holds years of them.
+pub const MAX_AUDIT_BYTES: u64 = 4 << 20;
+
+/// A program's audit trail: the events of `target` (and its children) go to
+/// `<dir>/<program>-audit.log` as well as to the ordinary log.
+#[derive(Debug, Clone, Copy)]
+pub struct AuditLog<'a> {
+    /// Directory of the audit file.
+    pub dir: &'a Path,
+    /// The tracing target audit events are logged at.
+    pub target: &'static str,
+}
+
+/// An open audit file and the target whose events it takes.
+#[derive(Debug)]
+pub struct AuditFile {
+    file: CappedFile,
+    target: &'static str,
+}
+
+impl AuditFile {
+    /// `<dir>/<program>-audit.log`, opened for append: unlike the ordinary log it is not
+    /// started anew at each run, so a restart keeps the trail.
+    pub fn open(dir: &Path, program: &str, target: &'static str, cap: u64) -> io::Result<Self> {
+        fs::create_dir_all(dir)?;
+        let path = audit_path(dir, program);
+        let f = OpenOptions::new().create(true).append(true).open(&path)?;
+        Ok(Self {
+            file: CappedFile::new(f, path, cap),
+            target,
+        })
+    }
+}
+
+/// Where [`AuditFile::open`] writes.
+pub fn audit_path(dir: &Path, program: &str) -> PathBuf {
+    dir.join(format!("{program}-audit.log"))
+}
 
 /// The log file, moved to `.1` (replacing the one before) and started anew whenever the
 /// next line would take it past its cap.
@@ -113,24 +159,30 @@ pub fn open_log(dir: &Path, program: &str) -> io::Result<(File, PathBuf)> {
     Ok((f, path))
 }
 
-/// The subscriber: `filter` over stderr and, when given, `file` (without colour codes).
+/// The subscriber: `filter` over stderr and, when given, `file` (without colour codes); the
+/// audit target's events to `audit` whatever `filter` says.
 pub fn subscriber(
     filter: EnvFilter,
     file: Option<CappedFile>,
+    audit: Option<AuditFile>,
 ) -> impl tracing_core::Subscriber + Send + Sync {
     // Each event is formatted into one buffer and written with one call, so threads' lines
     // never interleave.
     let file = file.map(|f| fmt::layer().with_ansi(false).with_writer(Arc::new(f)));
-    Registry::default()
-        .with(filter)
-        // Colour codes only for a terminal: journald and redirected files store them as
-        // literal escape bytes.
-        .with(
-            fmt::layer()
-                .with_ansi(io::stderr().is_terminal())
-                .with_writer(io::stderr),
-        )
-        .with(file)
+    // Colour codes only for a terminal: journald and redirected files store them as literal
+    // escape bytes.
+    let general = fmt::layer()
+        .with_ansi(io::stderr().is_terminal())
+        .with_writer(io::stderr)
+        .and_then(file)
+        .with_filter(filter);
+    let audit = audit.map(|a| {
+        fmt::layer()
+            .with_ansi(false)
+            .with_writer(Arc::new(a.file))
+            .with_filter(Targets::new().with_target(a.target, LevelFilter::INFO))
+    });
+    Registry::default().with(general).with(audit)
 }
 
 /// Installs the global subscriber with `RUST_LOG` (default [`DEFAULT_FILTER`]), logging to
@@ -138,6 +190,16 @@ pub fn subscriber(
 /// `None` when no file was asked for or it could not be opened (said on stderr: logging to a
 /// terminal still works, and a read-only home must not stop the program).
 pub fn init_in(dir: Option<&Path>, program: &str) -> Option<PathBuf> {
+    init_with(dir, None, program).0
+}
+
+/// [`init_in`], with the audit trail `audit` when given; returns the log file's path and the
+/// audit file's.
+pub fn init_with(
+    dir: Option<&Path>,
+    audit: Option<AuditLog<'_>>,
+    program: &str,
+) -> (Option<PathBuf>, Option<PathBuf>) {
     let opened = dir.and_then(|d| match open_log(d, program) {
         Ok(o) => Some(o),
         Err(e) => {
@@ -148,12 +210,23 @@ pub fn init_in(dir: Option<&Path>, program: &str) -> Option<PathBuf> {
     let (file, path) = opened.map_or((None, None), |(f, p)| {
         (Some(CappedFile::new(f, p.clone(), MAX_LOG_BYTES)), Some(p))
     });
+    let audit =
+        audit.and_then(
+            |a| match AuditFile::open(a.dir, program, a.target, MAX_AUDIT_BYTES) {
+                Ok(f) => Some(f),
+                Err(e) => {
+                    eprintln!("{program}: no audit file in {}: {e}", a.dir.display());
+                    None
+                }
+            },
+        );
+    let audit_at = audit.as_ref().map(|a| a.file.path.clone());
     // Also routes the `log` crate's records (the audio backends use it) into this filter.
-    if let Err(e) = subscriber(filter(), file).try_init() {
+    if let Err(e) = subscriber(filter(), file, audit).try_init() {
         eprintln!("{program}: logging already set up: {e}");
-        return None;
+        return (None, None);
     }
-    path
+    (path, audit_at)
 }
 
 /// [`init_in`] with the platform [`log_dir`].
@@ -207,6 +280,7 @@ mod tests {
         let sub = subscriber(
             EnvFilter::new("info"),
             Some(CappedFile::new(f, path.clone(), cap)),
+            None,
         );
         tracing::subscriber::with_default(sub, || {
             for k in 0..500 {
@@ -235,7 +309,7 @@ mod tests {
         let (f, path) = open_log(dir.path(), "prog").expect("open log");
         assert_eq!(path, dir.path().join("prog.log"));
         tracing::subscriber::with_default(
-            subscriber(EnvFilter::new("info"), Some(capped(f, &path))),
+            subscriber(EnvFilter::new("info"), Some(capped(f, &path)), None),
             || {
                 tracing::info!("first run");
                 tracing::debug!("filtered out");
@@ -251,7 +325,7 @@ mod tests {
 
         let (f, _) = open_log(dir.path(), "prog").expect("open log");
         tracing::subscriber::with_default(
-            subscriber(EnvFilter::new("info"), Some(capped(f, &path))),
+            subscriber(EnvFilter::new("info"), Some(capped(f, &path)), None),
             || {
                 tracing::warn!("second run");
             },
@@ -270,7 +344,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let (f, path) = open_log(dir.path(), "prog").expect("open log");
         tracing::subscriber::with_default(
-            subscriber(EnvFilter::new(DEFAULT_FILTER), Some(capped(f, &path))),
+            subscriber(EnvFilter::new(DEFAULT_FILTER), Some(capped(f, &path)), None),
             || {
                 tracing::info!(target: "ac2d::control", "ours");
                 tracing::info!(target: "ac2_ui", "ui");
@@ -283,5 +357,34 @@ mod tests {
             assert!(s.contains(want), "{want}: {s}");
         }
         assert!(!s.contains("theirs"), "{s}");
+    }
+
+    /// Audit lines land in their own file whatever the filter, and a flood of ordinary
+    /// lines that rotates the log twice leaves them there.
+    #[test]
+    fn audit_lines_outlive_a_flood_of_ordinary_ones() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (f, path) = open_log(dir.path(), "prog").expect("open log");
+        let audit = AuditFile::open(dir.path(), "prog", "prog::audit", 4096).expect("audit");
+        let sub = subscriber(
+            EnvFilter::new("warn"),
+            Some(CappedFile::new(f, path.clone(), 4096)),
+            Some(audit),
+        );
+        tracing::subscriber::with_default(sub, || {
+            tracing::info!(target: "prog::audit", "ceiling raised by laptop");
+            for k in 0..500 {
+                tracing::warn!(target: "prog::control", "ordinary line {k:04}");
+            }
+            tracing::warn!(target: "prog::other", "not an audit line");
+        });
+        let trail = fs::read_to_string(audit_path(dir.path(), "prog")).expect("audit file");
+        assert!(trail.contains("ceiling raised by laptop"), "{trail}");
+        assert!(!trail.contains("ordinary line") && !trail.contains("not an audit"));
+        let log = fs::read_to_string(&path).expect("log");
+        assert!(
+            !log.contains("ceiling raised"),
+            "info is below the ordinary filter"
+        );
     }
 }
