@@ -494,8 +494,8 @@ def frames():
                         "weighting": "z",
                         "elapsed": 1800.0,
                         "measured": 1790.0,
-                        "period": "night",
-                        "period_after_horizon": "night",
+                        "period": None,
+                        "period_after_horizon": None,
                     },
                     {
                         "band": 1000.0,
@@ -504,7 +504,7 @@ def frames():
                         "elapsed": 900.0,
                         "measured": 900.0,
                         "period": "night",
-                        "period_after_horizon": "night",
+                        "period_after_horizon": "day",
                     },
                 ],
                 "predicted": {

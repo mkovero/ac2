@@ -73,6 +73,7 @@ RIG = {
         "correlation_gate": -50.0,
         "loudness_target": -16.0,
     },
+    "zone": {"name": "Europe/Helsinki", "utc_offset_s": 10800},
     "osc": {"sent": 12, "last_error": "Connection refused (os error 111)"},
     "artnet": {"sent": 340, "last_error": None},
     "dmx": dmx([(12, 255), (14, 40)]),
@@ -687,8 +688,8 @@ def requests():
                 "meas": 4,
                 "span": {
                     "type": "range",
-                    "from": 1789500000000000000,
-                    "to": 1789510800000000000,
+                    "from": 86400,
+                    "to": 97199,
                     "step_s": 30,
                 },
             },
@@ -978,6 +979,7 @@ def events():
             "rev": 91,
             "payload": {
                 "system": {"type": "synced", "maxerror_us": 3027},
+                "rtc": True,
                 "capture": {
                     "device": "system",
                     "rate": {"type": "measured", "ppm": 6.25, "span": 59.5, "against": "system_clock"},
@@ -990,6 +992,7 @@ def events():
             "rev": 92,
             "payload": {
                 "system": {"type": "unsynced", "maxerror_us": 16000000},
+                "rtc": False,
                 "capture": {"device": "system", "rate": {"type": "measuring"}},
                 "stamp_map": None,
             },
@@ -999,11 +1002,12 @@ def events():
             "rev": 93,
             "payload": {
                 "system": {"type": "not_stated"},
+                "rtc": True,
                 "capture": {"device": "soundcheck.wav", "rate": {"type": "synthetic"}},
                 "stamp_map": None,
             },
         },
-        {"kind": "clocks", "rev": 94, "payload": {"system": {"type": "not_stated"}, "capture": None, "stamp_map": None}},
+        {"kind": "clocks", "rev": 94, "payload": {"system": {"type": "not_stated"}, "rtc": True, "capture": None, "stamp_map": None}},
         {
             "kind": "sweep",
             "rev": 55,

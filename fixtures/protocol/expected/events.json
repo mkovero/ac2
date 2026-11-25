@@ -1220,6 +1220,7 @@
     "type": "synced",
     "maxerror_us": 3027
    },
+   "rtc": true,
    "capture": {
     "device": "system",
     "rate": {
@@ -1240,6 +1241,7 @@
     "type": "unsynced",
     "maxerror_us": 16000000
    },
+   "rtc": false,
    "capture": {
     "device": "system",
     "rate": {
@@ -1256,6 +1258,7 @@
    "system": {
     "type": "not_stated"
    },
+   "rtc": true,
    "capture": {
     "device": "soundcheck.wav",
     "rate": {
@@ -1272,6 +1275,7 @@
    "system": {
     "type": "not_stated"
    },
+   "rtc": true,
    "capture": null,
    "stamp_map": null
   }
@@ -1429,6 +1433,10 @@
     "over_threshold": -1.0,
     "correlation_gate": -50.0,
     "loudness_target": -16.0
+   },
+   "zone": {
+    "name": "Europe/Helsinki",
+    "utc_offset_s": 10800
    },
    "osc": {
     "sent": 12,
