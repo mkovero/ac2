@@ -11,7 +11,8 @@ A 106 daemon started before that sets an old authorized-clients file aside as
 `authorized_clients.damaged-<time>`: convert that file and put it back as
 `authorized_clients`, the daemon stopped.
 
-Each file is rewritten atomically; the original is kept beside it as `<name>.pre106`.
+Each file is rewritten atomically; the original is kept beside it as `<name>.pre106`
+(`.pre106.1`, … when an earlier run's backup is there: none is ever written over).
 A file already in the new shape is left alone. Covers, per file:
 
 - rig.json (rig settings) 11 -> 12: `monitor_session` -> `monitor_stream`; a band
@@ -235,22 +236,51 @@ def convert_auth(text):
     return "\n".join(out) + "\n" if changed else None
 
 
+def sync_dir(d):
+    fd = os.open(d, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def keep_original(path, mode):
+    """Copies `path` beside it as `<path>.pre106`, or `.pre106.1`, `.2`, … when that is
+    taken: a backup made by an earlier run is the only copy of what it holds, so it is never
+    written over. The copy is on disk before the original is replaced."""
+    n = 0
+    while True:
+        keep = path + ".pre106" + (f".{n}" if n else "")
+        try:
+            fd = os.open(keep, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            break
+        except FileExistsError:
+            n += 1
+    with os.fdopen(fd, "wb") as out, open(path, "rb") as src:
+        shutil.copyfileobj(src, out)
+        out.flush()
+        os.fsync(out.fileno())
+    shutil.copystat(path, keep)
+    os.chmod(keep, mode)
+    sync_dir(os.path.dirname(os.path.abspath(path)))
+    return keep
+
+
 def write_beside(path, text, mode=None):
     """Writes `text` over `path` atomically, with `mode` (default: its own); the original
-    kept as `.pre106`, with the same mode."""
-    keep = path + ".pre106"
-    shutil.copy2(path, keep)
-    if mode is not None:
-        os.chmod(keep, mode)
+    kept beside it ([`keep_original`]), with the same mode."""
+    mode = os.stat(path).st_mode & 0o777 if mode is None else mode
+    keep = keep_original(path, mode)
     d = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".convert-")
-    os.chmod(tmp, os.stat(path).st_mode & 0o777 if mode is None else mode)
+    os.chmod(tmp, mode)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
-    print(f"{path}: converted (original kept as {path}.pre106)")
+    sync_dir(d)
+    print(f"{path}: converted (original kept as {keep})")
 
 
 def rewrite(path, convert):
