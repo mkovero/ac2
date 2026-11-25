@@ -54,11 +54,7 @@ fn reachable(a: &IpAddr) -> bool {
 /// several networks lists all its addresses), or one whose reachable addresses all failed
 /// (the link keeps trying the paired one). A rig still at its paired host but on another port
 /// keeps the host as paired (a name stays a name).
-pub(crate) fn followed(
-    peer: &RigPeer,
-    advert: &Rig,
-    failed: &[IpAddr],
-) -> Option<String> {
+pub(crate) fn followed(peer: &RigPeer, advert: &Rig, failed: &[IpAddr]) -> Option<String> {
     if advert.advert.server_key != peer.key || advert.addresses.is_empty() {
         return None;
     }
