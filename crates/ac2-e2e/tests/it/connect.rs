@@ -56,6 +56,18 @@ fn the_simulated_rig_is_an_ac2d_the_app_starts() {
         return;
     };
     let tmp = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+    // The simulated rig the app starts inherits this environment: its log, audit trail,
+    // sockets and session directory go into the test's folder, never the user's (it clears
+    // its session directory's staging folder at start).
+    for (var, sub) in [
+        ("AC2_LOG_DIR", "logs"),
+        ("AC2_RUNTIME_DIR", "run"),
+        ("AC2_SESSION_DIR", "sessions"),
+    ] {
+        // SAFETY: nextest runs each test in a process of its own, and this runs before the
+        // test starts any thread that reads the environment.
+        unsafe { std::env::set_var(var, tmp.path().join(sub)) };
+    }
     let d = ConnectDialog::new(KeyDir::new(tmp.path()), "ac2-e2e test", false, None);
     let opts = AppOptions {
         target: None,

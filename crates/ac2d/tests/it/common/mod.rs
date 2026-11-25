@@ -80,8 +80,18 @@ pub fn realtime_rig() -> FakeBackend {
     rig(FakeDrive::Thread(Pace::Realtime))
 }
 
+/// A session directory inside the build's scratch space, never the user's: a daemon clears
+/// its session directory's staging folder at start, which on the user's directory would
+/// take a running daemon's spooled uploads with it.
+pub fn test_sessions() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("sessions-{}", std::process::id()))
+}
+
 pub fn config(backend: FakeBackend, listen: Listen) -> DaemonConfig {
-    DaemonConfig::new(Arc::new(backend), listen, -10.0)
+    let mut cfg = DaemonConfig::new(Arc::new(backend), listen, -10.0);
+    cfg.session_dir = test_sessions();
+    cfg
 }
 
 /// [`config`] with a stimulus lease that outlives any stall of a loaded machine, for tests

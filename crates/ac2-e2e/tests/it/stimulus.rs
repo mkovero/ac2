@@ -58,11 +58,10 @@ fn audio_stopped_comes_and_goes_by_itself() -> R {
     let rig = ac2d::fake_rig()?;
     let dir = tempfile::tempdir()?;
     let listen = ac2_e2e::local_pair(dir.path());
-    let handle = ac2d::Daemon::start(ac2d::DaemonConfig::new(
-        Arc::new(rig.clone()),
-        listen,
-        -10.0,
-    ))?;
+    let mut cfg = ac2d::DaemonConfig::new(Arc::new(rig.clone()), listen, -10.0);
+    // Never the user's session directory: a daemon clears its staging folder at start.
+    cfg.session_dir = dir.path().join("sessions");
+    let handle = ac2d::Daemon::start(cfg)?;
     let ep = Endpoints {
         ctrl: handle.ctrl_endpoint().to_owned(),
         data: handle.data_endpoint().to_owned(),

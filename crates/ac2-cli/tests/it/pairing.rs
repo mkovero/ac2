@@ -38,6 +38,7 @@ async fn unauthorized_client_hears_its_fingerprint() {
     let listen = Listen::apart();
     let backend = ac2d::backend(BackendChoice::Fake).unwrap();
     let mut cfg = DaemonConfig::new(backend, listen, -10.0);
+    cfg.session_dir = crate::common::test_sessions();
     cfg.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {
         bind: ac2d::NetBind::Addr {
             addr: std::net::Ipv4Addr::LOCALHOST.into(),
