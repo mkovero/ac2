@@ -30,6 +30,7 @@ app runs). Profiles in `.config/nextest.toml`:
 | crate | role |
 |---|---|
 | `ac2-core` | pure DSP/acoustics math (MTW, delay finder, spectrum/RTA, SPL, rolling Leq, sweep, mic curves, generator); no I/O, no threads, `forbid(unsafe_code)` |
+| `ac2-resampler` | position-driven fractional resampler for ratios near 1 (re-timing a capture onto another clock): Kaiser-sinc polyphase kernel, 64.64 fixed-point positions; pure math, no I/O, `forbid(unsafe_code)` |
 | `ac2-audio` | backend trait + capabilities, sample-indexed blocks; jack (Linux only), asio (Windows, azo), coreaudio (macOS), fake, replay (a recording as a capture-only device) |
 | `cahal` | external: github.com/mkovero/cahal, crates.io — Core Audio HAL binding (macOS); ac2-audio's `coreaudio` backend runs on it |
 | `ac2-proto` | typed protocol: commands, events, frame headers, version; the SPL log CSV format (`spl_log`) |

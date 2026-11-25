@@ -165,6 +165,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ac2-resampler"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
 name = "ac2-room"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,15 @@
+[package]
+name = "ac2-resampler"
+description = "Measurement-grade, position-driven fractional resampler for ratios very near 1."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest = { workspace = true }
