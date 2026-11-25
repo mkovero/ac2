@@ -28,7 +28,7 @@ One agent per stage; each stage lands with its tests on the quick tier.
 
 ## Behaviour
 
-1. `ac2d` **always serves local** (ipc on Linux/macOS, loopback tcp on Windows). The
+1. `ac2d` **always serves local** (ipc on every OS, Windows included). The
    network is an optional listener beside it on a chosen interface or address and port,
    switched on and off **live** by `server.network`: session, audio, jobs and local clients
    keep running. The choice persists in a daemon-side file of its own, so it applies however
@@ -299,12 +299,11 @@ do. `DaemonConfig.network: NetworkChoice`:
   payload). Remote: refused "change it on the rig's own machine".
 - **Confirmation:** none in the daemon (the local user already holds every power, emitting
   sound included); the app asks before enabling, naming the address and port.
-- **Local boundary:** Linux/macOS: ipc files in the per-user runtime dir (0700): that user
-  and root. **Windows: loopback tcp, kept by decision: any local user of the machine, and
-  anything forwarded to its loopback (ssh `-L`, a port proxy), counts as local and can turn
-  the network on and authorize a key.** There is no token; that is the same exposure as
-  every other command there today (emitting sound included), and the user guide says so.
-  Windows local moves off `DEFAULT_PORT` (to 47822/47823) so local and network never clash.
+- **Local boundary:** ipc files in the per-user runtime dir: on Linux/macOS mode 0700 (that
+  user and root); on Windows `%LOCALAPPDATA%\ac2\run`, under the profile's inherited ACL
+  (that user, SYSTEM, Administrators). There is no token; whoever passes that boundary holds
+  every power, as with every other command (emitting sound included). Local TCP is gone
+  (`docs/design/protocol-next.md` §8), so local and network ports never clash.
 - **Key files on Windows** get no ACL step (`write_private_atomic` sets 0600 on Unix only);
   the user guide says the per-user config dir's default ACL is the protection.
 - Off ends every remote connection at once (closed sockets); revocation and ZAP rules are

@@ -10,12 +10,28 @@ and fields, one level deep) is missing here, and it checks `PROTO_VERSION`, `MAX
 The protocol is transport-agnostic bytes. Under ZeroMQ, ctrl is DEALER ↔ ROUTER (one
 message frame per request or reply) and data is DEALER ↔ ROUTER too: the client subscribes
 and returns credit on its data DEALER, the daemon sends multipart frames, events and
-keepalives to each connection as its credit allows (§5.8). The local pair's `ipc://` sockets
-lie in a directory that must be a directory of the user's own (not a link), mode 700: the
-daemon does not start, and a client does not connect, through one that is not, since
-whoever can enter it can reach the daemon or put a socket in its place. A directory not
-there yet is a daemon not running, as a missing socket is; a client checks it once a
-daemon answered there.
+keepalives to each connection as its credit allows (§5.8).
+
+The local pair is `ipc://` (AF_UNIX) on every OS, Windows included; there is no local TCP.
+Its sockets lie in the user's runtime directory: `$AC2_RUNTIME_DIR`, else
+`$XDG_RUNTIME_DIR/ac2` (Linux), else `<temp>/ac2-<user>` (macOS), and on Windows
+`%LOCALAPPDATA%\ac2\run`. That directory is the trust boundary, since whoever can enter it
+can reach the daemon or put a socket in its place, so the daemon does not start, and a
+client does not connect, through one that fails its OS's rule:
+
+- Unix: a directory (not a link) of the user's own, mode 700.
+- Windows: a directory (not a link or junction) whose real path lies under the user's
+  `%LOCALAPPDATA%`. That folder's inherited ACL grants only the user, SYSTEM and
+  Administrators, and an AF_UNIX connect needs write access to the socket file, so the
+  location is the protection; the daemon sets no ACL of its own.
+
+A socket path holds at most 107 bytes (103 on macOS), the size of `sun_path` less its
+terminator; a longer one is refused by name before anything binds, with the advice to set
+`AC2_RUNTIME_DIR` to a shorter directory. A directory not there yet is a daemon not running,
+as a missing socket is; a client checks it once a daemon answered there. A socket file left
+by a daemon that died is replaced at the next bind (libzmq removes it first), and a daemon
+that stops in order removes its own; the instance lock (`ac2d.lock` beside the sockets),
+not the socket, keeps a second daemon of the user's out.
 
 ## 1. Encoding rules
 

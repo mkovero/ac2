@@ -119,7 +119,7 @@ The fake backend is in every `ac2d` build: `BackendChoice::Fake` has no feature 
   dir, rig logs or recordings; nothing read or written in config/data dirs; log
   `ac2d-sim.log`. (`main.rs` today always sets `rig_id` to `File` and every store `Some`.)
 - Spawned on every OS as `ac2d --backend fake --ephemeral --name "Simulated rig"
-  --ctrl tcp://127.0.0.1:0 --data tcp://127.0.0.1:0 --print-endpoints --stop-on-stdin-eof`:
+  --ctrl ipc://<runtime dir>/sim-<pid>-ctrl.sock --data …/sim-<pid>-data.sock --print-endpoints --stop-on-stdin-eof`:
   `--ephemeral`, so no lock, pid or endpoints file (D3) and nothing on disk but its log; the child
   prints its bound endpoints as one stdout line (`ac2d: listening ctrl=… data=…`) that the
   app reads before connecting. Stage 1 checks that `Listen::Local` validation
@@ -241,7 +241,7 @@ start ac2-ui, which starts ac2d for you".
   `start_embedded*` (85 calls; `grep -rn start_embedded crates/ac2-ui/tests`), 73 tests with
   `tests/it/connect.rs` — move to a tests-only crate `crates/ac2-e2e` (`tests/it/`, deps
   `ac2-ui` + `ac2d`) with the `Driver` harness. One helper `sim_daemon(Setup)` runs
-  `ac2d::Daemon::start` on the fake backend over `Listen::Local` (loopback tcp, port 0):
+  `ac2d::Daemon::start` on the fake backend over `Listen::Local` (ipc, in a temp directory of its own):
   call sites change mechanically and use the shipped transport. Afterwards
   `cargo nextest run -p ac2-ui` builds no `ac2d` and no audio crate; `ac2-core` and
   `ac2-traces` stay dev-dependencies (test oracle), so the DSP crate is still compiled for

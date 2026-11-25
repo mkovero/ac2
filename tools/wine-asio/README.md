@@ -61,11 +61,12 @@ is in every Windows build), plus `ac2-loop/` (a standalone check on ac2-audio, n
    SIGKILL at exit (status 137), with or without that program installed, so the check is
    the `PASS` line.
 
-The daemon is built but not run. Under Wine 10, `ac2` gets no reply from `ac2d` over
-loopback TCP: both sit idle in libzmq (the daemon's io thread in `zmq_poll`, its reactor in
-wepoll), with the TCP connection established. Building libzmq with the `select` poller for
-both did not change it. This is ZeroMQ under Wine, not ASIO; the daemon session on ASIO is
-covered by Windows CI on FlexASIO (`tools/release/windows-asio.ps1`).
+The daemon is built but not run. Its local pair is `ipc://` (AF_UNIX) on Windows too, and
+whether Wine's AF_UNIX serves libzmq is untried. Over loopback TCP, which the local pair no
+longer uses, `ac2` got no reply from `ac2d` under Wine 10: both sat idle in libzmq (the
+daemon's io thread in `zmq_poll`, its reactor in wepoll) with the connection established,
+with the `select` poller too. This is ZeroMQ under Wine, not ASIO; the daemon session on
+ASIO is covered by Windows CI on FlexASIO (`tools/release/windows-asio.ps1`).
 
 The build uses CI's pinned prebuilt MSVC libsodium (`tools/release/fetch-libsodium.sh`);
 `sodium-make` stands in for `make` in libsodium's source tree, because

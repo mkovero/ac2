@@ -46,9 +46,11 @@ without one (§2).
    Windows refuses the input ("Access is denied", or FlexASIO fails to start) or hands ac2
    silence from every input, including line inputs. A maker's ASIO driver bypasses it. ac2
    reads your interface's inputs and nothing else.
-4. Firewall: on this computer the daemon listens on `127.0.0.1:47822` and `:47823` only
-   (loopback), so no firewall prompt is expected. If one appears anyway, note it in the
-   report; denying it does not affect local use.
+4. Firewall: on this computer the daemon listens on Unix domain sockets in
+   `%LOCALAPPDATA%\ac2\run` (Windows 10 version 1803 or later), not on a network port, so
+   no firewall prompt is expected. If one appears anyway, note it in the report; denying it
+   does not affect local use. A start that fails naming the *socket directory* goes into the
+   report with the path it names.
 
 Where ac2 keeps its files: settings, calibrations and keys in `%APPDATA%\ac2\config`;
 autosave, saved sessions and recordings in `%APPDATA%\ac2\data`; logs in
