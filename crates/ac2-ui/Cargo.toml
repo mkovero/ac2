@@ -40,9 +40,6 @@ png = "0.18"
 # This computer's CPU use for the health meter (only its CPU figures are read).
 sysinfo = { workspace = true, features = ["system"] }
 serde = { workspace = true, features = ["derive"] }
-# A queued measurement edit merged field by field onto the configuration the edit before
-# it committed (src/state/meas_edits.rs); the recorded daemon answers in tests too.
-serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros"] }
 tracing = { workspace = true }
 toml = "0.8"
@@ -59,5 +56,7 @@ ac2-client = { path = "../ac2-client" }
 ac2-core = { path = "../ac2-core" }
 # Unit tests write impulse-response files as an export would (`ir_import_dialog.rs`).
 ac2-traces = { path = "../ac2-traces" }
+# The recorded daemon answers in fixtures/daemon/ (tests/it/recorded.rs).
+serde_json = { workspace = true }
 egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
 tempfile = { workspace = true }

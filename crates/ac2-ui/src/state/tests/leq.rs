@@ -69,6 +69,8 @@ fn leq_windows_from_the_keyboard() {
         .expect("meas.update");
     assert_eq!(sent.0, MeasId(4));
     assert_eq!(sent.2, "FOH SPL: Leq windows set");
+    // Answered, the mirror left as it was: the page opens on the meter's windows again.
+    t.ack(&r);
     let MeasKind::Spl { config } = sent.1.kind else {
         panic!()
     };

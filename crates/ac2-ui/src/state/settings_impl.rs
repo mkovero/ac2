@@ -211,7 +211,7 @@ impl AppState {
     /// The SPL / Leq page whose Apply `what` was refused: open again with its edits, on the
     /// meter's current configuration. False when no such Apply is waiting, or another
     /// window is up.
-    fn leq_conflict(&mut self, what: &str, out: &mut Vec<Request>) -> bool {
+    pub(super) fn leq_conflict(&mut self, what: &str, out: &mut Vec<Request>) -> bool {
         let Some((_, d)) = self.rig.leq.sent.take_if(|(w, _)| w == what) else {
             return false;
         };

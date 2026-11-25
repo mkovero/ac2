@@ -5,7 +5,7 @@ use super::*;
 use ac2_proto::model::{EqBody, EqEdit, EqRealisation, EqSet, PeakQ};
 use ac2_proto::units::EqSetId;
 
-fn with_set(t: &mut T) {
+pub(super) fn with_set(t: &mut T) {
     t.remirror(|s| {
         let m = s
             .measurements

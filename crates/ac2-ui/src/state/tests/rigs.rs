@@ -896,6 +896,7 @@ fn a_stored_pane_names_its_rig() {
 
 mod rig_clocks;
 mod rig_cross_tf;
+mod rig_edits;
 mod rig_fold;
 mod rig_pairing;
 mod rig_reach;

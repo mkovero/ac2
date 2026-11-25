@@ -63,6 +63,7 @@ impl AppState {
                     rig_id,
                     name,
                 });
+                self.drop_meas_edits(out);
                 self.remember_rig();
                 if let Overlay::Settings(s) = &mut self.overlay {
                     s.stream.backends = None;
@@ -88,6 +89,7 @@ impl AppState {
                     self.toast(ac2_scene::network::network_off_toast(&rig));
                 }
                 self.rig.failed(target, error, down);
+                self.drop_meas_edits(out);
             }
             ConnEvent::Mirror(v) => {
                 let names = self.meas_names();
@@ -103,6 +105,7 @@ impl AppState {
                     .map(|s| s.traces.iter().map(|t| t.id).collect())
                     .unwrap_or_default();
                 self.rig.mirror = Some(v);
+                self.meas_mirrored(reborn, out);
                 self.bind_own_file();
                 let gone_traces: BTreeSet<TraceId> = match self.daemon() {
                     Some(s) if !reborn => {

@@ -17,6 +17,7 @@ impl AppState {
         self.rig.measurements()
     }
 
+    /// Measurement `id` as this app has it ([`RigState::meas`]).
     pub fn meas(&self, id: MeasId) -> Option<&Measurement> {
         self.rig.meas(id)
     }
@@ -25,8 +26,8 @@ impl AppState {
         self.rig.delay(id)
     }
 
-    /// `meas.update` of `meas` to `config`, made on the measurement as the mirror holds it
-    /// (the daemon refuses it with `conflict` when another commit moved it since). The
+    /// `meas.update` of `meas` to `config`, made on the measurement as this app has it
+    /// (the daemon refuses it as stale when another commit moved it since). The
     /// measurement stays the session's or the rig's, as it is.
     pub fn meas_update(&self, meas: MeasId, mut config: ac2_proto::model::MeasConfig) -> Command {
         let m = self.meas(meas);
