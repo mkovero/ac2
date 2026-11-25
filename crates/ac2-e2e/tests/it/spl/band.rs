@@ -341,6 +341,12 @@ fn band_transfer_step(d: &mut Driver, cli: &Cli, lease: StimulusLease, meas: Mea
         "{next}"
     );
 
+    // The meter's own reading of what it measures now: a change of the noise is waited for
+    // there, as the audio a span is marked over is the meter's, however far its processing
+    // trails the wall clock on a loaded machine.
+    let level = |s: &AppState| s.rig.folded.spl_hold.get(&meas).map(|h| h.frame.meta.level);
+    d.until("the meter reading the noise", |s| level(s).is_some())?;
+    let foh = level(&d.st).ok_or("the FOH level")?;
     let mut lease = Some(lease);
     for role in SpanRole::ALL {
         match role {
@@ -348,11 +354,17 @@ fn band_transfer_step(d: &mut Driver, cli: &Cli, lease: StimulusLease, meas: Mea
             SpanRole::Place => {
                 let l = lease.as_ref().ok_or("lease")?;
                 cli.block_on(l.set(pink(-50.0)))?;
+                d.until("the meter reading the noise 30 dB down", |s| {
+                    level(s).is_some_and(|l| l < foh - 25.0)
+                })?;
             }
             SpanRole::Background => {
                 if let Some(l) = lease.take() {
                     cli.block_on(l.end())?;
                 }
+                d.until("the meter reading the noise off", |s| {
+                    level(s).is_some_and(|l| l < foh - 45.0)
+                })?;
             }
         }
         // The band filters' memory of the level before: let it ring out.
