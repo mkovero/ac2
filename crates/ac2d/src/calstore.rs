@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use crate::util::{internal, invalid, perr_detail};
 
 const FORMAT: &str = "ac2-calibrations";
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 /// Normalisation frequency when no sensitivity calibration applies.
 pub(crate) const DEFAULT_F_NORM: f64 = 1000.0;
 

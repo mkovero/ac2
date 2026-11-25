@@ -104,7 +104,7 @@ async fn slow_bands_set_watch_and_transfer() {
     loop {
         match c
             .call(Command::CalSpl {
-                input: 1,
+                channel: 1,
                 mic: "M30".into(),
                 calibrator_level: DbSpl(94.0),
                 calibrator_freq: Hz(1000.0),
@@ -360,9 +360,9 @@ async fn slow_bands_set_watch_and_transfer() {
     assert_eq!(code, 0, "{text}");
     let t = &document(&text)["config"]["kind"]["config"]["bands"]["transfer"];
     assert_eq!(t["origin"], "estimated");
-    assert_eq!(t["bands"][5]["status"], "unchecked");
+    assert_eq!(t["bands"][5]["type"], "unchecked");
     assert_eq!(t["bands"][5]["attenuation"], 25.0);
-    assert_eq!(t["bands"][0]["status"], "missing");
+    assert_eq!(t["bands"][0]["type"], "missing");
     tokio::time::sleep(Duration::from_secs(1)).await;
     let last = watch_last(&ep, "1.5s").await;
     assert_eq!(last["limits_from"], "estimated");
@@ -393,9 +393,9 @@ async fn slow_bands_set_watch_and_transfer() {
     .await;
     assert_eq!(code, 0, "{text}");
     let t = &document(&text)["config"]["kind"]["config"]["bands"]["transfer"]["bands"];
-    assert_eq!(t[5]["status"], "unchecked");
+    assert_eq!(t[5]["type"], "unchecked");
     assert_eq!(t[5]["attenuation"], 30.0);
-    assert_eq!(t[11]["status"], "missing");
+    assert_eq!(t[11]["type"], "missing");
     // A span of a band log the daemon has not logged there is refused by it.
     let (code, text) = run(
         &ep,

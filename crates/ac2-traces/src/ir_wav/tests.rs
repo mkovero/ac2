@@ -76,7 +76,7 @@ fn a_float_impulse_becomes_a_flat_response_with_its_delay() {
     let d = imp.delay.expect("delay").0;
     assert!((d - 300.0 / 48_000.0).abs() < 1e-9, "{d}");
     let ir = imp.ir.as_ref().expect("ir");
-    assert_eq!(ir.sample_rate, Hz(48_000.0));
+    assert_eq!(ir.sample_rate_hz, Hz(48_000.0));
     assert_eq!(ir.ir.linear.len(), 4800);
     assert!((ir.ir.t0.0 + d).abs() < 1e-12);
     assert!((ir.ir.dt.0 - 1.0 / 48_000.0).abs() < 1e-15);
@@ -114,7 +114,7 @@ fn integer_files_of_every_width_read_to_full_scale() {
         data[10 * w..11 * w].copy_from_slice(&peak);
         let imp = import(&plain_wav(1, bits, 1, 44_100, &data), opts()).expect("import");
         let ir = imp.ir.expect("ir");
-        assert_eq!(ir.sample_rate, Hz(44_100.0));
+        assert_eq!(ir.sample_rate_hz, Hz(44_100.0));
         assert_eq!(ir.ir.linear[10], -0.5, "{bits} bits");
         // −0.5: −6.02 dB, and the inversion is the phase (180°).
         let k = imp

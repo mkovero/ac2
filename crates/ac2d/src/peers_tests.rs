@@ -373,7 +373,7 @@ fn audio_parts(channel: u16, start: u64, frames: u32) -> (Topic, Vec<Part>) {
         frames,
         flags: AudioFlags::NONE,
         capture_ns: Some(start * 1000),
-        rate: 48_000,
+        sample_rate_hz: 48_000,
         incarnation: ac2_proto::model::StreamIncarnation {
             daemon: ac2_proto::units::DaemonIncarnation(1),
             epoch: ac2_proto::units::StreamEpoch(1),

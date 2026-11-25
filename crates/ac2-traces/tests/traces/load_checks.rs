@@ -72,13 +72,13 @@ fn crafted_impulse_responses_refuse_before_allocating() {
     let t = with_json(&sweep, "# sweep_ir: ", |v| v["dt"] = serde_json::json!(0.0));
     assert_eq!(refused(&t, "dt"), ImportProblem::BadHeader);
     let t = with_json(&sweep, "# sweep_info: ", |v| {
-        v["sample_rate"] = serde_json::json!(0.0);
+        v["sample_rate_hz"] = serde_json::json!(0.0);
     });
     assert_eq!(refused(&t, "sweep rate"), ImportProblem::BadHeader);
 
     let tf = export_csv(&super::sweep::transfer_with_ir(4));
     let t = with_json(&tf, "# transfer_ir: ", |v| {
-        v["sample_rate"] = serde_json::json!(0.0);
+        v["sample_rate_hz"] = serde_json::json!(0.0);
     });
     assert_eq!(refused(&t, "sample rate"), ImportProblem::BadHeader);
     let t = with_json(&tf, "# transfer_ir: ", |v| {

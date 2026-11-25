@@ -304,7 +304,7 @@ pub fn stored_frame(d: &TraceData) -> Option<IrFrame> {
     Some(IrFrame {
         meas: ac2_proto::units::MeasId(0),
         meta: ac2_proto::frame::IrMeta {
-            sample_rate: s.sample_rate,
+            sample_rate_hz: s.sample_rate_hz,
             t0: s.ir.t0,
             dt: s.ir.dt,
             inserted_delay: d.meta.delay,

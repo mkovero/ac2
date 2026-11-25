@@ -604,7 +604,7 @@ fn big_dynamics_csv() -> Vec<u8> {
     };
     let d = DynamicsData {
         info: DynamicsInfo {
-            sample_rate: Hz(96_000.0),
+            sample_rate_hz: Hz(96_000.0),
             carrier: Hz(8000.0),
             period: 12,
             bursts,

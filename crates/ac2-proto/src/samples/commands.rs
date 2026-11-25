@@ -125,7 +125,7 @@ pub fn commands() -> Vec<Command> {
             format: ExportFormat::IrWav,
         },
         Command::CalSpl {
-            input: 1,
+            channel: 1,
             mic: "M30 #1234".into(),
             calibrator_level: DbSpl(94.0),
             calibrator_freq: Hz(1000.0),
@@ -135,7 +135,7 @@ pub fn commands() -> Vec<Command> {
             label: Some("0°".into()),
             file_name: "M30-1234.frd".into(),
             content: Blob(b"20 -0.5\n20000 1.5\n".to_vec()),
-            input: Some(1),
+            channel: Some(1),
         },
         Command::CalList,
         Command::SplLogGet {
@@ -213,7 +213,7 @@ pub fn commands() -> Vec<Command> {
         Command::CalCurveDelete { curve: curve_id() },
         Command::SplLogNew { meas: MeasId(4) },
         Command::CalSplElectrical(CalSplElectricalArgs {
-            input: 1,
+            channel: 1,
             mic: "M30 #1234".into(),
             connection: ElectricalConnection::InLine,
             volts: Volts(0.015),
@@ -271,11 +271,11 @@ pub fn commands() -> Vec<Command> {
             ],
         },
         Command::ServerInfo,
-        Command::ServerAuthorize {
+        Command::AuthAuthorize {
             name: "laptop".into(),
             key: "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID".into(),
         },
-        Command::ServerRevoke {
+        Command::AuthRevoke {
             name: "laptop".into(),
         },
         Command::AuthAdmitRig {
@@ -358,7 +358,7 @@ pub fn commands() -> Vec<Command> {
         Command::OscTest {
             msg: osc_message("/light/red", vec![OscArg::Int(1)], true),
         },
-        Command::RigMonitorStart {
+        Command::RigMonitorAtStart {
             base: Rev(38),
             on: true,
         },
@@ -488,7 +488,7 @@ pub fn commands() -> Vec<Command> {
             step: 0,
         }),
         Command::RigUnpair {
-            rig: crate::units::RigId(0x6b65_7475),
+            rig_id: crate::units::RigId(0x6b65_7475),
         },
         Command::AuthRevokeRig {
             rig_id: crate::units::RigId(0x7075_7075),

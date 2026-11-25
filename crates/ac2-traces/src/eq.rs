@@ -36,7 +36,9 @@ impl std::error::Error for EqError {}
 /// The core realisation of a wire one.
 pub fn realisation(r: EqRealisation) -> core::Realisation {
     match r {
-        EqRealisation::Digital { rate } => core::Realisation::Digital { rate: rate.0 },
+        EqRealisation::Digital {
+            sample_rate_hz: rate,
+        } => core::Realisation::Digital { rate: rate.0 },
         EqRealisation::Analog => core::Realisation::Analog,
     }
 }
@@ -168,7 +170,7 @@ pub fn section(shape: &EqShape, default_q: PeakQ) -> Option<Section> {
             b2,
             a1,
             a2,
-            rate,
+            sample_rate_hz: rate,
         } => Section::Biquad {
             b: [b0, b1, b2],
             a: [a1, a2],

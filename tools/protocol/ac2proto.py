@@ -214,8 +214,7 @@ _TIMING_STATUS = [
     ("internal_reference", None),
 ]
 _LEVELS = [("channels", None)]
-# `InputKind` is tagged by `kind`, not `type`: its variants name what is on the input.
-_INPUT_KIND = ("kinded", {
+_INPUT_KIND = ("tagged", {
     "mic": [("mic", None), ("curve", ("tagged", {"not_chosen": [], "off": [], "curve": [("label", None)]}))],
     "line": [],
     "digital": [],
@@ -263,24 +262,24 @@ _LOUDNESS = [("source", ("tagged", {"pair": [("left", None), ("right", None)],
 _GONIO_PAIR = [("left", None), ("right", None), ("gain_dbfs", None)]
 META = {
     "tf": [("delay", None), ("nudged", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
-           ("mic_range", ("opt", [("lo", None), ("hi", None)])), ("math", _MATH),
-           ("unresolved", ("opt", ("list", [("lo", None), ("hi", None), ("bin_hz", None)]))),
+           ("mic_range", ("opt", [("lo_hz", None), ("hi_hz", None)])), ("math", _MATH),
+           ("unresolved", ("opt", ("list", [("lo_hz", None), ("hi_hz", None), ("bin_hz", None)]))),
            ("bins", ("opt", [("stages", ("list", [("first_bin", None), ("bins", None), ("bin_hz", None)])),
-                             ("blends", ("list", [("lo", None), ("hi", None)]))])),
-           ("settling", ("opt", [("lo", None), ("hi", None)])), ("filled", None)],
-    "bins": [("stage", None), ("factor", None), ("rate", None), ("bin_hz", None), ("first_bin", None),
+                             ("blends", ("list", [("lo_hz", None), ("hi_hz", None)]))])),
+           ("settling", ("opt", [("lo_hz", None), ("hi_hz", None)])), ("filled", None)],
+    "bins": [("stage", None), ("factor", None), ("sample_rate_hz", None), ("bin_hz", None), ("first_bin", None),
              ("hop", None), ("delay", None), ("nudged", None), ("mic_curve", None),
-             ("mic_range", ("opt", [("lo", None), ("hi", None)])), ("blocks", None), ("eff_avg", None)],
-    "ir": [("sample_rate", None), ("t0", None), ("dt", None), ("inserted_delay", None)],
+             ("mic_range", ("opt", [("lo_hz", None), ("hi_hz", None)])), ("blocks", None), ("eff_avg", None)],
+    "ir": [("sample_rate_hz", None), ("t0", None), ("dt", None), ("inserted_delay", None)],
     "rta": [("fraction", None), ("weighting", None), ("scale", None), ("cal", _CAL), ("mic_curve", None),
-            ("mic_range", ("opt", [("lo", None), ("hi", None)])), ("math", _MATH)],
+            ("mic_range", ("opt", [("lo_hz", None), ("hi_hz", None)])), ("math", _MATH)],
     "spec": [("window", None), ("scale", None), ("level", None), ("cal", _CAL), ("mic_curve", None),
-             ("mic_range", ("opt", [("lo", None), ("hi", None)])), ("smoothing", None),
+             ("mic_range", ("opt", [("lo_hz", None), ("hi_hz", None)])), ("smoothing", None),
              ("math", _MATH),
              ("bands", ("opt", [("bands", ("list", [("window", None), ("hop", None), ("sole", None),
                                                      ("age", None)])),
                                 ("unresolved", [("resolution", None),
-                                                ("ranges", ("list", [("lo", None), ("hi", None)]))])])),
+                                                ("ranges", ("list", [("lo_hz", None), ("hi_hz", None)]))])])),
              ("harmonics", ("opt", [("f0", None), ("on_bin", None), ("reading", _HARMONIC_READING)]))],
     "spl": [("scale", None), ("weighting", None), ("time_weighting", None), ("peak_weighting", None),
             ("level", None), ("lmax", None), ("lmin", None), ("leq", None), ("lpeak", None),
@@ -327,7 +326,7 @@ HEADER = [
 FORM_KEY, FORM_DELTA = 0, 1
 # What a delta carries of the metadata, per kind; every other kind nothing (nil).
 DELTA_META = {
-    "tf": [("filled", None), ("settling", ("opt", [("lo", None), ("hi", None)]))],
+    "tf": [("filled", None), ("settling", ("opt", [("lo_hz", None), ("hi_hz", None)]))],
     "bins": [("blocks", None), ("eff_avg", None)],
     "spl": [("level", None), ("lmax", None), ("lmin", None), ("leq", None), ("lpeak", None),
             ("duration", None)],
@@ -355,10 +354,9 @@ def positional(t, x):
         return positional(sub, x)
     if tag == "list":
         return [positional(sub, v) for v in x]
-    if tag in ("tagged", "kinded"):
-        key = "type" if tag == "tagged" else "kind"
-        fields = sub[x[key]]
-        return [x[key]] + positional(fields, {k: v for k, v in x.items() if k != key})
+    if tag == "tagged":
+        fields = sub[x["type"]]
+        return [x["type"]] + positional(fields, {k: v for k, v in x.items() if k != "type"})
     if tag == "meta":
         ((k, v),) = x.items()
         return {k: positional(sub[k], v)}
@@ -380,11 +378,10 @@ def named(t, x):
         if not isinstance(x, list):
             raise DecodeError(f"expected a list, got {x!r}")
         return [named(sub, v) for v in x]
-    if tag in ("tagged", "kinded"):
+    if tag == "tagged":
         if not isinstance(x, list) or not x or not isinstance(x[0], str) or x[0] not in sub:
             raise DecodeError(f"bad tagged value {x!r}")
-        key = "type" if tag == "tagged" else "kind"
-        return {key: x[0], **named(sub[x[0]], x[1:])}
+        return {"type": x[0], **named(sub[x[0]], x[1:])}
     if tag == "meta":
         if not isinstance(x, dict) or len(x) != 1 or not isinstance(next(iter(x)), str) or next(iter(x)) not in sub:
             raise DecodeError(f"bad meta {x!r}")

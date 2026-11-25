@@ -23,17 +23,17 @@ pub const PLAYING_DB: f64 = 20.0;
 
 /// `60–120 Hz`; `800 Hz–1.80 kHz` across the kilohertz.
 pub fn band_text(b: AlignBand) -> String {
-    if b.hi.0 < 1000.0 {
+    if b.hi_hz.0 < 1000.0 {
         format!(
             "{}–{} Hz",
-            format::freq_tick(b.lo.0),
-            format::freq_tick(b.hi.0)
+            format::freq_tick(b.lo_hz.0),
+            format::freq_tick(b.hi_hz.0)
         )
     } else {
         format!(
             "{}–{}",
-            format::freq_readout(b.lo.0),
-            format::freq_readout(b.hi.0)
+            format::freq_readout(b.lo_hz.0),
+            format::freq_readout(b.hi_hz.0)
         )
     }
 }

@@ -34,7 +34,7 @@
    "bins": {
     "stage": 1,
     "factor": 4,
-    "rate": 12000.0,
+    "sample_rate_hz": 12000.0,
     "bin_hz": 2.9296875,
     "first_bin": 88,
     "hop": 4096,
@@ -42,8 +42,8 @@
     "nudged": 0.0,
     "mic_curve": true,
     "mic_range": {
-     "lo": 20.0,
-     "hi": 20000.0
+     "lo_hz": 20.0,
+     "hi_hz": 20000.0
     },
     "blocks": 12,
     "eff_avg": 9.5

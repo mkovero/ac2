@@ -103,8 +103,8 @@ impl StageStreams {
                 .crossovers
                 .iter()
                 .map(|c| FreqRange {
-                    lo: Hz(c.lo_hz),
-                    hi: Hz(c.hi_hz),
+                    lo_hz: Hz(c.lo_hz),
+                    hi_hz: Hz(c.hi_hz),
                 })
                 .collect(),
         };
@@ -245,7 +245,7 @@ impl StageStreams {
             meta: BinsMeta {
                 stage: d.stage as u8,
                 factor: d.factor as u32,
-                rate: Hz(d.rate_hz),
+                sample_rate_hz: Hz(d.rate_hz),
                 bin_hz: Hz(d.bin_hz),
                 first_bin: d.first as u32,
                 hop: Samples(d.hop as i64),

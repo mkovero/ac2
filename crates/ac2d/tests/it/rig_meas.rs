@@ -1,6 +1,6 @@
 //! Rig SPL meters on the fake rig: a meter of the rig (`scope: rig`) is kept in the rig
 //! settings, not in session files; a load, a new session and a restart keep it with its
-//! id; a loaded session's measurements are numbered around it; `rig.monitor_start` is
+//! id; a loaded session's measurements are numbered around it; `rig.monitor_at_start` is
 //! rev-guarded, and with it on a restarted daemon reopens the recorded device capture-only
 //! and the meter meters and logs on with no client.
 #![allow(clippy::unwrap_used)]
@@ -198,13 +198,13 @@ fn monitor_start_is_rev_guarded() {
     let rig = c.state().rig;
     let stale = Rev(rig.rev.0 + 100);
     let e = c
-        .call(Command::RigMonitorStart {
+        .call(Command::RigMonitorAtStart {
             base: stale,
             on: true,
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Conflict);
-    c.ok(Command::RigMonitorStart {
+    c.ok(Command::RigMonitorAtStart {
         base: rig.rev,
         on: true,
     });
@@ -214,7 +214,7 @@ fn monitor_start_is_rev_guarded() {
     assert_eq!(rig_json(dir.path())["monitor_at_start"], true);
     // The old base is stale now.
     let e = c
-        .call(Command::RigMonitorStart {
+        .call(Command::RigMonitorAtStart {
             base: rig.rev,
             on: false,
         })
@@ -237,7 +237,7 @@ fn monitor_at_start_meters_with_no_client() {
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
     let rev = c.state().rig.rev;
-    c.ok(Command::RigMonitorStart {
+    c.ok(Command::RigMonitorAtStart {
         base: rev,
         on: true,
     });
@@ -327,7 +327,7 @@ fn monitor_at_start_keeps_a_remote_input_it_could_not_add() {
         config: rig_meter("Stage"),
     });
     let rev = c.state().rig.rev;
-    c.ok(Command::RigMonitorStart {
+    c.ok(Command::RigMonitorAtStart {
         base: rev,
         on: true,
     });

@@ -20,8 +20,8 @@ const T: u64 = 480_000;
 
 fn fr(lo: f64, hi: f64) -> FreqRange {
     FreqRange {
-        lo: Hz(lo),
-        hi: Hz(hi),
+        lo_hz: Hz(lo),
+        hi_hz: Hz(hi),
     }
 }
 
@@ -34,8 +34,8 @@ fn unresolved() -> Vec<BinRange> {
     ]
     .into_iter()
     .map(|(lo, hi, b)| BinRange {
-        lo: Hz(lo),
-        hi: Hz(hi),
+        lo_hz: Hz(lo),
+        hi_hz: Hz(hi),
         bin_hz: Hz(b),
     })
     .collect()
@@ -86,7 +86,7 @@ fn stage(b: usize) -> BinsFrame {
         meta: BinsMeta {
             stage: b as u8,
             factor: FACTOR[b],
-            rate: Hz(RATE / f64::from(FACTOR[b])),
+            sample_rate_hz: Hz(RATE / f64::from(FACTOR[b])),
             bin_hz: Hz(DF[b]),
             first_bin: FIRST[b],
             hop: Samples(HOP[b]),
@@ -356,8 +356,8 @@ fn second(fx: &Fx) -> TfTrace<'_> {
 fn long_lf() -> Fx {
     let mut fx = Fx::new();
     let half = |r: &mut FreqRange| {
-        r.lo = Hz(r.lo.0 / 2.0);
-        r.hi = Hz(r.hi.0 / 2.0);
+        r.lo_hz = Hz(r.lo_hz.0 / 2.0);
+        r.hi_hz = Hz(r.hi_hz.0 / 2.0);
     };
     if let Some(l) = fx.meta.bins.as_mut() {
         for (b, st) in l.stages.iter_mut().enumerate() {
@@ -369,8 +369,8 @@ fn long_lf() -> Fx {
         l.blends.iter_mut().for_each(half);
     }
     for r in fx.meta.unresolved.iter_mut().flatten() {
-        r.lo = Hz(r.lo.0 / 2.0);
-        r.hi = Hz(r.hi.0 / 2.0);
+        r.lo_hz = Hz(r.lo_hz.0 / 2.0);
+        r.hi_hz = Hz(r.hi_hz.0 / 2.0);
         r.bin_hz = Hz(r.bin_hz.0 / 2.0);
     }
     for (b, (_, f)) in fx.stages.iter_mut().enumerate() {

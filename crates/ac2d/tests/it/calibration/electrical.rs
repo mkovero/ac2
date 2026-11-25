@@ -10,7 +10,7 @@ fn electrical(
     replace_acoustic: bool,
 ) -> Command {
     Command::CalSplElectrical(CalSplElectricalArgs {
-        input: 1,
+        channel: 1,
         mic: mic.into(),
         connection: ElectricalConnection::InLine,
         volts: Volts(volts),
@@ -209,7 +209,7 @@ async fn slow_electrical_calibration_end_to_end() {
     let r = steady(
         &c,
         Command::CalSpl {
-            input: 1,
+            channel: 1,
             mic: "MM1 34804".into(),
             calibrator_level: DbSpl(94.0),
             calibrator_freq: Hz(1000.0),

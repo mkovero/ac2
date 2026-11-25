@@ -18,7 +18,7 @@
 //! measurement it does not have; a load replaces such traces like any other. A math
 //! trace filed under a rig meter is saved the same way.
 //!
-//! The monitor at start: with `rig.monitor_start` on, each successful `stream.open` while
+//! The monitor at start: with `rig.monitor_at_start` on, each successful `stream.open` while
 //! rig meters exist is recorded in the rig settings, and a restarted daemon reopens that
 //! device capture-only (no output channels, no loopback), so the rig meters meter with no
 //! client connected. With no output stream the generator cannot be routed anywhere
@@ -175,7 +175,7 @@ impl Control {
     }
 
     /// `conflict` unless `base` is the rig's rev (`osc.target`, `artnet.target`,
-    /// `artnet.fade`, `rig.monitor_start`, `levels.set`).
+    /// `artnet.fade`, `rig.monitor_at_start`, `levels.set`).
     pub(super) fn rig_base(&self, base: Rev) -> Result<(), ProtoError> {
         let rev = self.store.state().rig.rev;
         if base == rev {
@@ -237,7 +237,7 @@ impl Control {
             | Command::ArtnetTarget { .. }
             | Command::ArtnetFade { .. }
             | Command::ArtnetTest { .. }
-            | Command::RigMonitorStart { .. }
+            | Command::RigMonitorAtStart { .. }
             | Command::LevelsSet { .. }
             | Command::LevelsReset { .. }
             | Command::MeasOffset { .. }
@@ -296,8 +296,8 @@ impl Control {
             | Command::StreamReplay { .. }
             | Command::ServerInfo
             | Command::ServerNetwork { .. }
-            | Command::ServerAuthorize { .. }
-            | Command::ServerRevoke { .. }
+            | Command::AuthAuthorize { .. }
+            | Command::AuthRevoke { .. }
             | Command::AuthAdmitRig { .. }
             | Command::AuthRevokeRig { .. }
             | Command::RigPair { .. }
@@ -488,8 +488,8 @@ impl Control {
         }
     }
 
-    /// `rig.monitor_start`.
-    pub(super) fn rig_monitor_start(
+    /// `rig.monitor_at_start`.
+    pub(super) fn rig_monitor_at_start(
         &mut self,
         base: Rev,
         on: bool,

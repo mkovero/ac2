@@ -62,7 +62,7 @@ pub struct AudioHeader {
     /// capture times.
     pub capture_ns: Option<u64>,
     /// The source rig's rate, Hz.
-    pub rate: u32,
+    pub sample_rate_hz: u32,
     /// The run of capture the block belongs to.
     pub incarnation: StreamIncarnation,
 }
@@ -162,7 +162,7 @@ mod tests {
             frames,
             flags: AudioFlags::XRUN,
             capture_ns: Some(123_456_789),
-            rate: 96_000,
+            sample_rate_hz: 96_000,
             incarnation: StreamIncarnation {
                 daemon: DaemonIncarnation(7),
                 epoch: StreamEpoch(3),

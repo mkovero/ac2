@@ -223,8 +223,8 @@ fn another_nominal_rate_is_not_locked() {
             s.clock.relation
                 == PeerRelation::NotLocked {
                     reason: NotLockedReason::OtherRate {
-                        theirs: 96_000,
-                        ours: FS,
+                        theirs_hz: 96_000,
+                        ours_hz: FS,
                     },
                 }
                 && s.stream.as_ref().map(|x| x.sample_rate_hz) == Some(96_000)

@@ -552,8 +552,8 @@ fn at_bins(m: &Measurement) -> bool {
 
 fn ladder() -> BinLayout {
     let range = |lo, hi| FreqRange {
-        lo: Hz(lo),
-        hi: Hz(hi),
+        lo_hz: Hz(lo),
+        hi_hz: Hz(hi),
     };
     BinLayout {
         stages: LADDER
@@ -577,8 +577,8 @@ fn ladder_unresolved() -> Vec<BinRange> {
     ]
     .into_iter()
     .map(|(lo, hi, b)| BinRange {
-        lo: Hz(lo),
-        hi: Hz(hi),
+        lo_hz: Hz(lo),
+        hi_hz: Hz(hi),
         bin_hz: Hz(b),
     })
     .collect()
@@ -596,7 +596,7 @@ fn stage_frame(tf: &TfFrame, b: usize, bump_hz: f64) -> BinsFrame {
         meta: BinsMeta {
             stage: b as u8,
             factor,
-            rate: Hz(48_000.0 / f64::from(factor)),
+            sample_rate_hz: Hz(48_000.0 / f64::from(factor)),
             bin_hz: Hz(bin_hz),
             first_bin,
             hop: Samples(hop),
@@ -679,7 +679,7 @@ fn ir_frame(meas: u32) -> IrFrame {
     IrFrame {
         meas: MeasId(meas),
         meta: IrMeta {
-            sample_rate: Hz(48_000.0),
+            sample_rate_hz: Hz(48_000.0),
             t0: Seconds(-96.0 * dt),
             dt: Seconds(dt),
             inserted_delay: Seconds(0.0125),

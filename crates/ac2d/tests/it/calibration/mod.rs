@@ -154,7 +154,7 @@ async fn import(c: &Client, mic: &str, file_name: &str, content: &[u8]) -> Mic {
         label: None,
         file_name: file_name.into(),
         content: Blob(content.to_vec()),
-        input: Some(1),
+        channel: Some(1),
     })
     .await
     .unwrap()

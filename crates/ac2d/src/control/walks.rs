@@ -709,8 +709,12 @@ pub(super) fn check_walk_items(
     Ok(())
 }
 
-/// The plan library in `dir`: every `<name>.json` that parses, is named as its file and
-/// validates. One that does not is left on disk and logged.
+/// The one plan file version this build reads and writes: the plan's fields beside
+/// `version`.
+const PLAN_FILE_VERSION: u64 = 1;
+
+/// The plan library in `dir`: every `<name>.json` of [`PLAN_FILE_VERSION`] that parses, is
+/// named as its file and validates. One that does not is left on disk and logged.
 pub(crate) fn load_plans(dir: &Path) -> Vec<PlanSpec> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -723,7 +727,7 @@ pub(crate) fn load_plans(dir: &Path) -> Vec<PlanSpec> {
         }
         let read = std::fs::read(&path)
             .map_err(|e| e.to_string())
-            .and_then(|b| serde_json::from_slice::<PlanSpec>(&b).map_err(|e| e.to_string()))
+            .and_then(|b| read_plan(&b))
             .and_then(|p| {
                 let stem = path.file_stem().and_then(|s| s.to_str());
                 if stem == Some(p.name.as_str()) {
@@ -745,9 +749,27 @@ pub(crate) fn load_plans(dir: &Path) -> Vec<PlanSpec> {
     plans
 }
 
+fn read_plan(b: &[u8]) -> Result<PlanSpec, String> {
+    let mut v: serde_json::Value = serde_json::from_slice(b).map_err(|e| e.to_string())?;
+    let version = v
+        .as_object_mut()
+        .and_then(|o| o.remove("version"))
+        .and_then(|x| x.as_u64());
+    if version != Some(PLAN_FILE_VERSION) {
+        return Err(format!(
+            "plan file version {version:?}; this ac2d reads {PLAN_FILE_VERSION} only"
+        ));
+    }
+    serde_json::from_value(v).map_err(|e| e.to_string())
+}
+
 fn write_plan(dir: &Path, plan: &PlanSpec) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
-    let bytes = serde_json::to_vec_pretty(plan).map_err(std::io::Error::other)?;
+    let mut v = serde_json::to_value(plan).map_err(std::io::Error::other)?;
+    if let Some(o) = v.as_object_mut() {
+        o.insert("version".into(), PLAN_FILE_VERSION.into());
+    }
+    let bytes = serde_json::to_vec_pretty(&v).map_err(std::io::Error::other)?;
     ac2_paths::write_atomic(&dir.join(format!("{}.json", plan.name)), &bytes)
 }
 

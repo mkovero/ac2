@@ -93,7 +93,7 @@ async fn cut_network_app_loses_its_lease(cut: Cut) {
         }
         Cut::Revoked => {
             local
-                .call(Command::ServerRevoke {
+                .call(Command::AuthRevoke {
                     name: "laptop".into(),
                 })
                 .await

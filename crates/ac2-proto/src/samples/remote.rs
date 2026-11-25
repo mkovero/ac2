@@ -326,8 +326,8 @@ fn standing_rigs() -> Vec<StandingRig> {
             true,
             PeerRelation::NotLocked {
                 reason: NotLockedReason::OtherRate {
-                    theirs: 48_000,
-                    ours: 96_000,
+                    theirs_hz: 48_000,
+                    ours_hz: 96_000,
                 },
             },
             None,

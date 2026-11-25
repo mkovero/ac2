@@ -354,7 +354,7 @@ fn pairing_admits_a_rig_to_its_inputs_only() {
     );
 
     // Removing A on B ends A's stream at once and A's link says why.
-    cb.ok(Command::ServerRevoke {
+    cb.ok(Command::AuthRevoke {
         name: "rig-a".into(),
     });
     wait_remote(&mut ca, "not admitted", |r| {
@@ -464,7 +464,7 @@ fn slow_a_rig_admitted_as_an_app_is_told_so_until_admitted_as_a_rig() {
     cb.ok(Command::StreamOpen {
         config: stream(false),
     });
-    cb.ok(Command::ServerAuthorize {
+    cb.ok(Command::AuthAuthorize {
         name: "rig-a".into(),
         key: a_keys.public.to_z85(),
     });
@@ -823,9 +823,9 @@ fn pairing_and_unpairing_touch_one_rig_only() {
         peer_names(&mut ca),
         vec![(b, "rig-b".into()), (c, "rig-c2".into())]
     );
-    ca.ok(Command::RigUnpair { rig: c });
+    ca.ok(Command::RigUnpair { rig_id: c });
     assert_eq!(peer_names(&mut ca), vec![(b, "rig-b".into())]);
-    let e = ca.call(Command::RigUnpair { rig: c }).unwrap_err();
+    let e = ca.call(Command::RigUnpair { rig_id: c }).unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
     let e = ca
         .call(Command::RigPair {
@@ -871,7 +871,7 @@ fn revoking_a_rig_by_identity_leaves_apps_alone() {
         name: "rig-c".into(),
     });
     // An app authorized under rig-c's name takes that entry: it is an app's now.
-    cb.ok(Command::ServerAuthorize {
+    cb.ok(Command::AuthAuthorize {
         name: "rig-c".into(),
         key: key(),
     });
@@ -905,7 +905,7 @@ fn a_running_feed_outlives_pairing_another_rig() {
     wait_remote(&mut ca, "rig-b's input anchored", |r| {
         r.inputs.first().is_some_and(|i| i.anchor.is_some())
     });
-    cb.ok(Command::ServerRevoke {
+    cb.ok(Command::AuthRevoke {
         name: "rig-a".into(),
     });
     wait_remote(&mut ca, "not admitted", |r| {
@@ -915,7 +915,7 @@ fn a_running_feed_outlives_pairing_another_rig() {
     ca.ok(Command::RigPair {
         peer: unreachable_peer(c, "rig-c"),
     });
-    ca.ok(Command::RigUnpair { rig: c });
+    ca.ok(Command::RigUnpair { rig_id: c });
     // A feed started over is dropped within the command, before its answer.
     let r = remote(&mut ca);
     assert!(

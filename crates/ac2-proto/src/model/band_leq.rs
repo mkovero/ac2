@@ -116,7 +116,7 @@ impl BandCorrection {
 /// One band of a FOH → place transfer: the attenuation and how far it can be trusted
 /// (`docs/design/band-leq.md`, *The transfer*).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum BandTransferBand {
     /// No background measurement: the difference as is.
     Unchecked {

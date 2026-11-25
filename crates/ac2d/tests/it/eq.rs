@@ -314,7 +314,7 @@ fn slow_eq_predicts_without_applying_twice() {
     assert_eq!(
         set.body.realisation,
         EqRealisation::Digital {
-            rate: Hz(f64::from(FS))
+            sample_rate_hz: Hz(f64::from(FS))
         }
     );
     let live = r.channel("Main L after EQ 1");
@@ -545,7 +545,9 @@ fn eq_sets_without_audio() {
     let m = new(&mut c, 1).unwrap();
     assert_eq!(
         m.eq[0].body.realisation,
-        EqRealisation::Digital { rate: Hz(48_000.0) }
+        EqRealisation::Digital {
+            sample_rate_hz: Hz(48_000.0)
+        }
     );
     for n in 2..=8 {
         let m = new(&mut c, 1).unwrap();

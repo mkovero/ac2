@@ -60,7 +60,7 @@ fn source_text(s: &TraceSource) -> String {
                      {:.4} ms, {:?}",
                     f.channel + 1,
                     f.channels,
-                    f.sample_rate.0,
+                    f.sample_rate_hz.0,
                     f.frames,
                     f.kept,
                     f.first,
@@ -271,7 +271,7 @@ pub fn export_csv(t: &StoredTrace) -> String {
     if let Some(ti) = transfer_ir {
         let h = IrHeader::of(&ti.ir);
         let h = TransferIrHeader {
-            sample_rate: ti.sample_rate,
+            sample_rate_hz: ti.sample_rate_hz,
             t0: h.t0,
             dt: h.dt,
             points: h.points,

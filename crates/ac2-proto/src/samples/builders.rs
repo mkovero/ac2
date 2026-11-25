@@ -161,7 +161,7 @@ pub(super) fn line_cal_entry() -> LineCalEntry {
 pub(super) fn edit() -> TraceEdit {
     TraceEdit {
         name: "Main L before EQ".into(),
-        color: Rgb {
+        colour: Rgb {
             r: 230,
             g: 120,
             b: 20,
@@ -405,8 +405,8 @@ pub(super) fn align_measurement() -> Measurement {
                 a: Operand::Trace { trace: TraceId(7) },
                 b: Operand::Meas { meas: MeasId(1) },
                 band: AlignBand {
-                    lo: Hz(60.0),
-                    hi: Hz(120.0),
+                    lo_hz: Hz(60.0),
+                    hi_hz: Hz(120.0),
                 },
                 max_delay: ALIGN_MAX_DELAY_DEFAULT,
             },

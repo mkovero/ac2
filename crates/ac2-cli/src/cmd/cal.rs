@@ -132,7 +132,7 @@ pub(crate) async fn cal_spl(cli: &Cli, a: &CalSpl, out: &mut Out<'_>) -> Result<
     let mic = mic_for(&s, a.input.0, a.mic.as_ref())?;
     let r = c
         .call(Command::CalSpl {
-            input: a.input.0,
+            channel: a.input.0,
             mic,
             calibrator_level: a.reference.0,
             calibrator_freq: a.freq.0,
@@ -154,7 +154,7 @@ async fn cal_electrical(cli: &Cli, a: &CalElectrical, out: &mut Out<'_>) -> Resu
     };
     let r = c
         .call(Command::CalSplElectrical(CalSplElectricalArgs {
-            input: a.input.0,
+            channel: a.input.0,
             mic,
             connection,
             volts: a.volts.0,
@@ -242,7 +242,7 @@ async fn curve_import(cli: &Cli, a: &CalCurveImport, out: &mut Out<'_>) -> Resul
                     CliError::Usage(format!("cannot read {}: {e}", a.file.display()))
                 })?,
             ),
-            input: a.input.map(|i| i.0),
+            channel: a.input.map(|i| i.0),
         })
         .await?;
     let m = expect_body!("cal.curve_import", r, ReplyBody::Mic(m) => m)?;

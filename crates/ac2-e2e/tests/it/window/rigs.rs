@@ -528,7 +528,7 @@ fn rigs_not_paired_share_neither_the_list_nor_panes() -> R {
         "paired: kettu's curve draws on pupu's screen"
     );
 
-    pupu.call(Command::RigUnpair { rig: kettu_id })?;
+    pupu.call(Command::RigUnpair { rig_id: kettu_id })?;
     step_until(&mut h, "pupu's list alone again", |a| {
         listed(a) == [pupu_id]
     });

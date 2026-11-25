@@ -131,8 +131,8 @@ pub(crate) mod tests {
             unresolved: Unresolved {
                 resolution: Resolution::FortyEighth,
                 ranges: vec![FreqRange {
-                    lo: Hz(7.8125),
-                    hi: Hz(101.5),
+                    lo_hz: Hz(7.8125),
+                    hi_hz: Hz(101.5),
                 }],
             },
         }

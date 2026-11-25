@@ -109,7 +109,10 @@ pub(crate) fn judge(e: &Evidence<'_>) -> PeerRelation {
     };
     if let Some((theirs, ours)) = e.other_rate {
         return PeerRelation::NotLocked {
-            reason: NotLockedReason::OtherRate { theirs, ours },
+            reason: NotLockedReason::OtherRate {
+                theirs_hz: theirs,
+                ours_hz: ours,
+            },
         };
     }
     let Some(streaming) = e.streaming_for else {

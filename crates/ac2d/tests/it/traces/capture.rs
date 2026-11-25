@@ -138,7 +138,7 @@ fn capture_average_math_export_import() {
     assert_eq!(file_name, "aligned.csv");
     let csv = String::from_utf8(content.0.clone()).unwrap();
     assert!(
-        csv.starts_with("# ac2 trace export v6\n# name: aligned\n"),
+        csv.starts_with("# ac2 trace export v7\n# name: aligned\n"),
         "{csv}"
     );
     assert!(csv.contains("# source: captured from \"main\" (measurement 1)"));
@@ -295,7 +295,7 @@ fn transfer_capture_keeps_its_ir() {
         slot: Some(1),
     });
     let ir = data(c, raw.id).ir.expect("captured with an IR");
-    assert_eq!(ir.sample_rate, Hz(fs));
+    assert_eq!(ir.sample_rate_hz, Hz(fs));
     assert_eq!(ir.ir.linear.len(), 4096);
     assert_eq!(ir.ir.etc_db.len(), 4096);
     // Live `ir_linear` goes as 16-bit mantissas of one power of two per frame

@@ -173,7 +173,10 @@ pub fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) ->
                     format::signed(ppm, 1)
                 )
             }
-            NotLockedReason::OtherRate { theirs: t, ours: o } => format!(
+            NotLockedReason::OtherRate {
+                theirs_hz: t,
+                ours_hz: o,
+            } => format!(
                 "{label} stopped: {}.",
                 crate::between_rigs::other_rate(theirs, t, o)
             ),
@@ -249,7 +252,10 @@ pub fn clock_words(r: &RemoteState, rig: &RemoteRig) -> (String, bool) {
                 format!("CLOCKS NOT LOCKED {} ppm", format::signed(ppm, 1)),
                 true,
             ),
-            NotLockedReason::OtherRate { theirs, ours } => (
+            NotLockedReason::OtherRate {
+                theirs_hz: theirs,
+                ours_hz: ours,
+            } => (
                 format!(
                     "CLOCKS NOT LOCKED: {}",
                     crate::between_rigs::other_rate(&rig.name, theirs, ours)

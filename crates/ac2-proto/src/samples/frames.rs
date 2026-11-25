@@ -67,23 +67,23 @@ pub fn tf_frame() -> Frame {
                 }),
                 mic_curve: true,
                 mic_range: Some(crate::model::FreqRange {
-                    lo: crate::units::Hz(20.0),
-                    hi: crate::units::Hz(20_000.0),
+                    lo_hz: crate::units::Hz(20.0),
+                    hi_hz: crate::units::Hz(20_000.0),
                 }),
                 settling: Some(crate::model::FreqRange {
-                    lo: crate::units::Hz(7.8125),
-                    hi: crate::units::Hz(68.0),
+                    lo_hz: crate::units::Hz(7.8125),
+                    hi_hz: crate::units::Hz(68.0),
                 }),
                 filled: 0.625,
                 unresolved: Some(vec![
                     BinRange {
-                        lo: Hz(31.25),
-                        hi: Hz(135.5),
+                        lo_hz: Hz(31.25),
+                        hi_hz: Hz(135.5),
                         bin_hz: Hz(0.9765625),
                     },
                     BinRange {
-                        lo: Hz(1625.0),
-                        hi: Hz(3250.0),
+                        lo_hz: Hz(1625.0),
+                        hi_hz: Hz(3250.0),
                         bin_hz: Hz(23.4375),
                     },
                 ]),
@@ -197,8 +197,8 @@ pub fn bin_layout() -> BinLayout {
         bin_hz: Hz(bin_hz),
     };
     let blend = |lo, hi| crate::model::FreqRange {
-        lo: Hz(lo),
-        hi: Hz(hi),
+        lo_hz: Hz(lo),
+        hi_hz: Hz(hi),
     };
     BinLayout {
         stages: vec![
@@ -222,7 +222,7 @@ pub fn bins_frame() -> Frame {
             meta: BinsMeta {
                 stage: 1,
                 factor: 4,
-                rate: Hz(12_000.0),
+                sample_rate_hz: Hz(12_000.0),
                 bin_hz: Hz(2.929_687_5),
                 first_bin: 88,
                 hop: Samples(4096),
@@ -230,8 +230,8 @@ pub fn bins_frame() -> Frame {
                 nudged: Seconds(0.0),
                 mic_curve: true,
                 mic_range: Some(crate::model::FreqRange {
-                    lo: Hz(20.0),
-                    hi: Hz(20_000.0),
+                    lo_hz: Hz(20.0),
+                    hi_hz: Hz(20_000.0),
                 }),
                 blocks: 12,
                 eff_avg: 9.5,
@@ -262,7 +262,7 @@ pub fn frames() -> Vec<Frame> {
             data: FrameData::Ir(IrFrame {
                 meas: MeasId(1),
                 meta: IrMeta {
-                    sample_rate: Hz(48_000.0),
+                    sample_rate_hz: Hz(48_000.0),
                     t0: Seconds(-0.005),
                     dt: Seconds(1.0 / 12_000.0),
                     inserted_delay: Seconds(0.0125),
@@ -287,8 +287,8 @@ pub fn frames() -> Vec<Frame> {
                     },
                     mic_curve: true,
                     mic_range: Some(crate::model::FreqRange {
-                        lo: crate::units::Hz(20.0),
-                        hi: crate::units::Hz(20_000.0),
+                        lo_hz: crate::units::Hz(20.0),
+                        hi_hz: crate::units::Hz(20_000.0),
                     }),
                     math: None,
                 },
@@ -345,8 +345,8 @@ pub fn frames() -> Vec<Frame> {
                         unresolved: Unresolved {
                             resolution: Resolution::FortyEighth,
                             ranges: vec![FreqRange {
-                                lo: crate::units::Hz(7.8125),
-                                hi: Hz(101.5),
+                                lo_hz: crate::units::Hz(7.8125),
+                                hi_hz: Hz(101.5),
                             }],
                         },
                     })),

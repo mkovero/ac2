@@ -32,7 +32,7 @@ pub struct TraceImportArgs {
 #[serde(deny_unknown_fields)]
 pub struct CalSplElectricalArgs {
     /// Input channel.
-    pub input: u16,
+    pub channel: u16,
     /// Mic name.
     pub mic: String,
     /// Where the voltage was measured.

@@ -173,7 +173,7 @@ fn the_overlay_draws_dashed_marks_names_and_the_legend() {
     let frame = IrFrame {
         meas: MeasId(1),
         meta: IrMeta {
-            sample_rate: Hz(48_000.0),
+            sample_rate_hz: Hz(48_000.0),
             t0: Seconds(-0.005),
             dt: Seconds(0.001),
             inserted_delay: Seconds(0.0),
@@ -230,7 +230,7 @@ fn names_avoid_each_other_and_every_line() {
     let frame = IrFrame {
         meas: MeasId(1),
         meta: IrMeta {
-            sample_rate: Hz(48_000.0),
+            sample_rate_hz: Hz(48_000.0),
             t0: Seconds(-0.005),
             dt: Seconds(0.0001),
             inserted_delay: Seconds(0.0),

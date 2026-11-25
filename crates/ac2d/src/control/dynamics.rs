@@ -445,7 +445,7 @@ impl Control {
         let fs = p.sample_rate;
         let data = DynamicsData {
             info: DynamicsInfo {
-                sample_rate: Hz(fs),
+                sample_rate_hz: Hz(fs),
                 carrier: run.carrier,
                 period: p.period,
                 onset: run.onset,

@@ -875,8 +875,8 @@ fn alignment_of_a_capture_and_a_live_seat() {
         slot: Some(1),
     });
     let band = AlignBand {
-        lo: Hz(500.0),
-        hi: Hz(2000.0),
+        lo_hz: Hz(500.0),
+        hi_hz: Hz(2000.0),
     };
     let align = |a, b, band, max_delay| {
         math(
@@ -901,8 +901,8 @@ fn alignment_of_a_capture_and_a_live_seat() {
                 stored,
                 meas(2),
                 AlignBand {
-                    lo: Hz(2000.0),
-                    hi: Hz(500.0),
+                    lo_hz: Hz(2000.0),
+                    hi_hz: Hz(500.0),
                 },
                 Seconds(0.05),
             ),

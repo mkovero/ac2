@@ -277,7 +277,7 @@ mod tests {
             edit: TraceEdit {
                 owner: ac2_proto::model::TraceOwner::Imported,
                 name: name.into(),
-                color: Rgb {
+                colour: Rgb {
                     r: 10,
                     g: 20,
                     b: 30,

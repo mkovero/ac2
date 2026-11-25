@@ -524,7 +524,7 @@ fn connection_page_asks_the_daemon_authorizes_and_revokes() {
     assert!(t.key("Delete").is_empty());
     let r = t.key("Delete");
     assert!(r.iter().any(|r| matches!(r,
-        Request::ServerCall { cmd: Command::ServerRevoke { name }, .. } if name == "laptop")));
+        Request::ServerCall { cmd: Command::AuthRevoke { name }, .. } if name == "laptop")));
     // A on a refused key (past the admitted rig), a name, Enter authorizes it.
     t.key("Down");
     t.key("Down");
@@ -532,7 +532,7 @@ fn connection_page_asks_the_daemon_authorizes_and_revokes() {
     t.text("tablet");
     let r = t.key("Enter");
     assert!(r.iter().any(|r| matches!(r,
-        Request::ServerCall { cmd: Command::ServerAuthorize { name, .. }, .. } if name == "tablet")));
+        Request::ServerCall { cmd: Command::AuthAuthorize { name, .. }, .. } if name == "tablet")));
     // The answer to a change replaces the info; a failure leaves it and says why.
     t.conn(ConnEvent::Server {
         what: Some("client tablet authorized".into()),

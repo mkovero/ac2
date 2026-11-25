@@ -148,8 +148,8 @@ fn stage_frame(
         .collect();
     // Labels an average's result only; the combination itself is per frequency.
     let grid = GridDef::Linear {
-        fs: m0.rate,
-        n: (m0.rate.0 / m0.bin_hz.0).round() as u32,
+        fs: m0.sample_rate_hz,
+        n: (m0.sample_rate_hz.0 / m0.bin_hz.0).round() as u32,
     };
     let nan = || vec![f32::NAN; n];
     let result = (blocks > 0 && ops.iter().all(|(_, f)| f.mag.len() == n))

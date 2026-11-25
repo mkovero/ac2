@@ -682,7 +682,7 @@ fn electrical_calibration_from_the_input_setup_view() {
             Request::Call {
                 cmd:
                     Command::CalSplElectrical(ac2_proto::CalSplElectricalArgs {
-                        input: 1,
+                        channel: 1,
                         volts,
                         mic_sensitivity: None,
                         connection: ElectricalConnection::InLine,

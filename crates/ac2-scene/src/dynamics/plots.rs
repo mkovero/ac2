@@ -174,7 +174,7 @@ pub(super) fn envelopes(
         .fold(0.0, f64::max)
         .max(0.05);
     let period = frame.curves.first().map_or(1e-3, |cv| {
-        f64::from(cv.info().period) / cv.info().sample_rate.0
+        f64::from(cv.info().period) / cv.info().sample_rate_hz.0
     });
     let onset = EdgeAxis::new(-0.005, period, burst, top.x, top.right());
     let release = EdgeAxis::new(0.0, period, rest, bottom.x, bottom.right());
@@ -333,7 +333,7 @@ struct ReleasePoint {
 /// within).
 fn release_points(cv: &DynCurve<'_>, level: f64, recovery: bool) -> Vec<ReleasePoint> {
     let info = cv.info();
-    let period = f64::from(info.period) / info.sample_rate.0;
+    let period = f64::from(info.period) / info.sample_rate_hz.0;
     info.steps
         .iter()
         .zip(cv.rows())

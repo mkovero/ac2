@@ -40,7 +40,7 @@ pub(crate) fn data() -> TraceData {
             edit: TraceEdit {
                 owner: ac2_proto::model::TraceOwner::Imported,
                 name: "1083 sweep".into(),
-                color: Rgb { r: 1, g: 2, b: 3 },
+                colour: Rgb { r: 1, g: 2, b: 3 },
                 visible: true,
                 locked: false,
                 order: 3,
@@ -107,7 +107,7 @@ pub(crate) fn data() -> TraceData {
                     .collect(),
             },
             info: SweepInfo {
-                sample_rate: Hz(48_000.0),
+                sample_rate_hz: Hz(48_000.0),
                 rate: Seconds(0.4),
                 duration: Seconds(3.1),
                 repeats: 2,
@@ -672,8 +672,8 @@ fn the_sweep_ir_has_its_own_axes_and_cursor() {
 fn unresolved_ranges_mark_both_panes() {
     let mut d = data();
     let range = |lo: f64, hi: f64| FreqRange {
-        lo: Hz(lo),
-        hi: Hz(hi),
+        lo_hz: Hz(lo),
+        hi_hz: Hz(hi),
     };
     d.sweep.as_mut().unwrap().unresolved = Some(SweepUnresolved {
         response: Unresolved {

@@ -882,8 +882,8 @@ fn what_the_judge_cannot_tell_ends_the_count_and_the_minute_open_then() {
     // Another nominal rate the same way.
     let other = PeerRelation::NotLocked {
         reason: NotLockedReason::OtherRate {
-            theirs: 48_000,
-            ours: 96_000,
+            theirs_hz: 48_000,
+            ours_hz: 96_000,
         },
     };
     let mut r = Run::from(&[apart(3.0); 5]);

@@ -147,7 +147,7 @@ async fn calibrate(c: &Client, lease: &StimulusLease) {
     loop {
         match c
             .call(Command::CalSpl {
-                input: 1,
+                channel: 1,
                 mic: "M30".into(),
                 calibrator_level: DbSpl(94.0),
                 calibrator_freq: Hz(1000.0),
@@ -799,7 +799,7 @@ async fn slow_a_recorders_wav_replayed_gives_the_bedroom_spans_of_a_transfer() {
     loop {
         match c
             .call(Command::CalSpl {
-                input: 0,
+                channel: 0,
                 mic: "recorder".into(),
                 calibrator_level: DbSpl(94.0),
                 calibrator_freq: Hz(1000.0),

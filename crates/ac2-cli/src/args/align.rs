@@ -69,8 +69,8 @@ impl FromStr for OverlapArg {
                 .map_err(|e| e.0)
         };
         let band = AlignBand {
-            lo: hz(lo)?,
-            hi: hz(hi)?,
+            lo_hz: hz(lo)?,
+            hi_hz: hz(hi)?,
         };
         if !band.is_valid() {
             return Err(format!("{s:?}: the band needs 0 < FROM < TO"));

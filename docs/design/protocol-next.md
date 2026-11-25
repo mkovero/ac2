@@ -472,15 +472,15 @@ network mode.
 | `State.session`, event kind `session`, `Session`, `SessionConfig`, `SessionEpoch`, `session_epoch` (header, welcome, snapshot) | `State.stream`, `stream`, `Stream`, `StreamConfig`, `StreamEpoch`, `stream_epoch` | same + traces (sidecar) |
 | `StandingSession`, `StandingRig.session`, `CantTellReason::NoSession` (`no_session`), `SourceSession`, `SourceState.session`, `RemoteAudio::NoSession` (`RemoteInputStatus.audio` `no_session`) | `StandingStream`, `StandingRig.stream`, `NoStream` (`no_stream`), `SourceStream`, `SourceState.stream`, `RemoteAudio::NoStream` (`no_stream`): one thing, one name | proto, ac2d, scene, ui, cli |
 | frame kinds `session_levels`, `session_gonio`; topics `session/levels`, `session/gonio`, `session/preview`, prefix `session/` | `stream_levels`, `stream_gonio`; `stream/levels`, `stream/gonio`, `stream/preview` (the `stream/` input-meters prefix covers the dialog preview), `stream/` | proto, ac2d, client, ui, plot |
-| `Result` as `{"Ok"}` / `{"Err"}`; `CtrlError::MissingVersion` text | `{"ok"}` / `{"err"}` (snake_case); `missing_version` | proto, tools/protocol |
+| `Result` as `{"Ok"}` / `{"Err"}` | `{"ok"}` / `{"err"}` (snake_case); `CtrlError::MissingVersion` never reaches the wire: a request without `v` is answered `version_mismatch` | proto, tools/protocol |
 | tag keys `kind` (`InputKind`, `Surface`), `state` (`Recovery`), `shape` (`TargetCurve`), `status` (`BandTransferBand`) | `type` | proto, traces, ac2d (calstore, plans), ui |
 | `TraceEdit.color` | `colour` | proto, ui, cli |
-| `cal.spl.input`, `cal.spl_electrical.input` | `channel: u16` | proto, ac2d, cli, ui |
+| `cal.spl.input`, `cal.spl_electrical.input`, `cal.curve_import.input` | `channel: u16` (every `cal.*` names the input by `channel`, as `CalKey`; CLI flags stay `--input`, the operator's word) | proto, ac2d, cli, ui |
 | `rig.unpair.rig` | `rig_id: RigId` | proto, ac2d, cli, ui |
-| `server.authorize`, `server.revoke` | `auth.authorize`, `auth.revoke` | proto, ac2d, cli, ui |
+| `server.authorize`, `server.revoke` | `auth.authorize`, `auth.revoke` (the CLI keeps `ac2 server authorize`, beside `server info`, which lists the refused keys it takes) | proto, ac2d, cli, ui |
 | `rig.monitor_start {base, on}` | `rig.monitor_at_start {base, on}` | proto, ac2d, cli, ui |
-| `sample_rate: Hz` / `u32` (sweep info, `ir` meta, dynamics, trace, sidecar), `BinsMeta.rate` | `sample_rate_hz` | proto, traces, ac2d, ui, scene |
-| `AlignBand.lo/hi`, `FreqRange.lo/hi` | `lo_hz`, `hi_hz` | proto, core conv, ui, scene |
+| `sample_rate: Hz` / `u32` (sweep info, `ir` meta, dynamics, trace, sidecar), `BinsMeta.rate`, `AudioHeader.rate` (`audio/<channel>`), `EqRealisation::Digital.rate`, `EqShape::Biquad.rate` | `sample_rate_hz`; trace export v7, whose reader takes a v6-or-older JSON header line's `sample_rate` / `lo` / `hi` as `sample_rate_hz` / `lo_hz` / `hi_hz` (open question 1) | proto, traces, ac2d, ui, scene |
+| `AlignBand.lo/hi`, `FreqRange.lo/hi`, `BinRange.lo/hi` | `lo_hz`, `hi_hz` (`LevelRange.lo/hi`, a dB axis of the layout, and `MicCurveRef.f_lo/f_hi` stay) | proto, core conv, ui, scene |
 | `NotLockedReason::OtherRate {theirs, ours}` | `{theirs_hz, ours_hz}` | proto, ac2d, scene |
 | `sim` event setting `State.sim_map` | event kind `sim_map: Option<SimState>` | proto, ac2d, client |
 | delta header `…, crc, meta` | `…, config_rev, config_applied_at, …, meta, crc` (§6) | proto |

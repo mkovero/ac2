@@ -89,7 +89,7 @@ pub(crate) async fn peer_remove(cli: &Cli, name: &str, out: &mut Out<'_>) -> Res
     else {
         return Err(CliError::Usage(format!("not paired with {name:?}")));
     };
-    c.call(Command::RigUnpair { rig }).await?;
+    c.call(Command::RigUnpair { rig_id: rig }).await?;
     out.emit(&json!({ "removed": name }), || {
         format!("unpaired from {name}")
     })?;

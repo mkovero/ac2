@@ -242,7 +242,7 @@ pub enum Request {
     Reconnect,
     /// `server.info` ([`ConnEvent::Server`]).
     ServerInfo,
-    /// `server.authorize`, `server.revoke`, `server.network`; answered with the new info
+    /// `auth.authorize`, `auth.revoke`, `server.network`; answered with the new info
     /// ([`ConnEvent::Server`] carrying `what` when done, `failed` when not).
     ServerCall {
         cmd: Command,

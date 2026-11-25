@@ -69,7 +69,9 @@ fn a_refused_section_is_named_even_when_off() {
         *f = Hz(30_000.0);
     }
     let mut b = body(vec![peak(1.0), s]);
-    b.realisation = EqRealisation::Digital { rate: Hz(48_000.0) };
+    b.realisation = EqRealisation::Digital {
+        sample_rate_hz: Hz(48_000.0),
+    };
     let e = response(&b, &[1000.0], &no_traces).expect_err("refused");
     assert_eq!(
         e.to_string(),

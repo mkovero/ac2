@@ -42,7 +42,9 @@ pub fn mark_text(set: &EqSet) -> String {
 /// `digital 48 kHz`, `analog`.
 pub fn realisation_text(r: EqRealisation) -> String {
     match r {
-        EqRealisation::Digital { rate } => format!("digital {}", rate_text(rate.0)),
+        EqRealisation::Digital {
+            sample_rate_hz: rate,
+        } => format!("digital {}", rate_text(rate.0)),
         EqRealisation::Analog => "analog".to_owned(),
     }
 }
@@ -193,7 +195,10 @@ pub fn shape_text(
         EqShape::Gain { gain } => format!("{w} {}", gain_text(gain.0)),
         EqShape::Polarity => "polarity inverted".to_owned(),
         EqShape::Delay { seconds } => format!("{w} {}", format::delay(seconds.0)),
-        EqShape::Biquad { rate, .. } => format!("{w} at {}", rate_text(rate.0)),
+        EqShape::Biquad {
+            sample_rate_hz: rate,
+            ..
+        } => format!("{w} at {}", rate_text(rate.0)),
         EqShape::Response { trace } => format!("{w} of {}", trace_name(trace)),
     }
 }

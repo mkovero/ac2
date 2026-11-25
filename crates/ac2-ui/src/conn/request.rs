@@ -795,7 +795,7 @@ pub(super) async fn import_curve(
             label: None,
             file_name,
             content: ac2_proto::units::Blob(content),
-            input,
+            channel: input,
         })
         .await
         .map_err(|e| e.to_string())?;

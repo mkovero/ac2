@@ -39,7 +39,7 @@ daemon answered there.
   CSV files; counters (`repeat`, `pass`) and line numbers start at 1.
 - Opaque bytes (`lease_token`, file content) are msgpack `bin`, never base64. A lease
   token is 16 bytes (u128, big-endian).
-- Std `Result` values (the reply `result`) are `{"Ok": …}` or `{"Err": …}`.
+- Std `Result` values (the reply `result`) are `{"ok": …}` or `{"err": …}`.
 
 ## 2. Version and hello
 
@@ -49,7 +49,7 @@ fields first:
 
 - `v` missing → refused as `version_mismatch` with `detail.client` 0; it is never assumed.
 - `v` ≠ own version → refused. The daemon answers with a reply at its own version whose
-  `result` is `Err{code: version_mismatch, detail: {type: version, daemon, client}}`. A
+  `result` is `err{code: version_mismatch, detail: {type: version, daemon, client}}`. A
   client that receives a reply with another `v` treats it as the same refusal without
   decoding the body.
 - There is no negotiation, no range of accepted versions and no compatibility layer.
@@ -81,7 +81,7 @@ Frame headers carry `v` too; a frame at another version is refused.
 
 ```
 Request { v: u16, id: u64, cmd: {op: "<name>", args?: {…}}, expect_rev: u64 | nil }
-Reply   { v: u16, id: u64, result: {"Ok": {type: "<body>", value?: …}} | {"Err": ProtoError},
+Reply   { v: u16, id: u64, result: {"ok": {type: "<body>", value?: …}} | {"err": ProtoError},
           warnings: [Warning] }
 ProtoError { code: ErrorCode, msg: string, detail: ErrorDetail | nil }
 Warning { type: "<name>", … }
@@ -154,7 +154,7 @@ mutation.
 | `gen.ceiling` | `ceiling: Dbfs`, `confirm_raise: bool` | `generator` | any client |
 | `osc.target` | `base: Rev` (`rig.rev`), `addr: "ip:port" \| nil` | `ack` (`rig` event) | |
 | `osc.test` | `msg: OscMessage` | `ack` (`rig` event: the sent count) | |
-| `rig.monitor_start` | `base: Rev` (`rig.rev`), `on: bool` | `ack` (`rig` event) | |
+| `rig.monitor_at_start` | `base: Rev` (`rig.rev`), `on: bool` | `ack` (`rig` event) | |
 | `artnet.target` | `base: Rev` (`rig.rev`), `target: ArtnetTarget \| nil` | `ack` (`rig` event) | |
 | `artnet.test` | `channels: [DmxSet]` | `ack` (`rig` event: the sent count) | |
 | `artnet.fade` | `base: Rev` (`rig.rev`), `seconds: f64` | `ack` (`rig` event) | |
@@ -185,9 +185,9 @@ mutation.
 | `trace.target` | `curve: TargetCurve`, `name`, `owner: TraceOwner` | `trace` | |
 | `trace.export` | `trace`, `format: ac2_csv \| ir_wav` | `transfer` (`file_name` the suggested name, `bytes`, `sha256`): fetch with `file.download_chunk`, close with `file.download_end` | non-mutating |
 | `trace.mic_curve` | `trace`, `curve: MicCurveId \| nil` (nil removes) | `trace` | |
-| `cal.spl` | `input`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
-| `cal.spl_electrical` | `input`, `mic`, `connection: in_line \| injected`, `volts: Volts`, `freq: Hz`, `mic_sensitivity: MvPerPa \| nil`, `loading: MicLoading \| nil`, `uncertainty: Db \| nil`, `replace_acoustic: bool` | `calibration` | |
-| `cal.curve_import` | `mic`, `label: string \| nil`, `file_name`, `content: bin`, `input: u16 \| nil` | `mic` | |
+| `cal.spl` | `channel: u16`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
+| `cal.spl_electrical` | `channel: u16`, `mic`, `connection: in_line \| injected`, `volts: Volts`, `freq: Hz`, `mic_sensitivity: MvPerPa \| nil`, `loading: MicLoading \| nil`, `uncertainty: Db \| nil`, `replace_acoustic: bool` | `calibration` | |
+| `cal.curve_import` | `mic`, `label: string \| nil`, `file_name`, `content: bin`, `channel: u16 \| nil` | `mic` | |
 | `cal.curve_rename` | `curve: MicCurveId`, `label` | `mic` | |
 | `cal.curve_delete` | `curve: MicCurveId` | `ack` | |
 | `cal.line` | `channel`, `volts: Volts` | `line_calibration` | |
@@ -238,12 +238,12 @@ mutation.
 | `stream.replay` | `recording: RecordingRef`, `pace: realtime \| fast` | `stream` | |
 | `server.info` | — | `server` | non-mutating |
 | `server.network` | `enabled: bool`, `bind: NetBind \| nil`, `port: u16 \| nil` | `server` | local clients only |
-| `server.authorize` | `name`, `key` (Z85) | `server` | |
-| `server.revoke` | `name` | `server` | |
+| `auth.authorize` | `name`, `key` (Z85) | `server` | |
+| `auth.revoke` | `name` | `server` | |
 | `auth.admit_rig` | `key` (Z85), `rig_id: RigId`, `name` | `server` | |
 | `auth.revoke_rig` | `rig_id: RigId` | `server` | |
 | `rig.pair` | `peer: RigPeer` | `ack` | |
-| `rig.unpair` | `rig: RigId` | `ack` | |
+| `rig.unpair` | `rig_id: RigId` | `ack` | |
 | `source.state` | — | `source_state` | non-mutating; with `hello`, the only command an admitted rig may send |
 
 `stream.status` returns `state.stream`. `trace.list` returns `state.traces`. `plan.list`
@@ -270,7 +270,7 @@ not to the key: an acquire by the current owner's key (a reconnect, or a second 
 with the same key) also fades out, disarms and invalidates the old token, so a new lease
 always starts disarmed. A transport hiccup keeps the lease only by refreshing with the
 held token. Turning the network off or moving it (`server.network`), the listener failing,
-and `server.revoke` of the holder's key end a network client's lease at once the same way,
+and `auth.revoke` of the holder's key end a network client's lease at once the same way,
 with an `expiry` event: that client can no longer refresh or stop it.
 Every acquire, force, arm, fire, set, stop, release
 and expiry is a `generator` event naming the client (`last_action.client`; for `expiry` the
@@ -339,7 +339,7 @@ tagged by `type`: `meter` (the whole meter: the worst state of its limits), `win
 {duration, weighting}, `peak` {quantity}, `band` {duration, weighting, nominal},
 `predicted`. `CueState` is `ok` (under the limit, or none), `near`, `over` or `fault` (the rig
 cannot judge: no audio, device lost, not calibrated).
-`osc.target`, `artnet.target`, `artnet.fade`, `rig.monitor_start` and `levels.set` carry the `rig.rev` they were made on; another is
+`osc.target`, `artnet.target`, `artnet.fade`, `rig.monitor_at_start` and `levels.set` carry the `rig.rev` they were made on; another is
 `conflict` with `detail: conflict {rev}` (the current one). `osc.test` sends one message to
 the target now (setup); `invalid` without a target, `internal` with the operating system's
 reason when the send fails; `append_level` appends 0 dB. `osc.target` refuses an unspecified
@@ -474,8 +474,8 @@ first IPv4 address, else its first global IPv6 one) \| `addr` {`addr`: the addre
 text}. `interfaces`: [`NetInterface` {`name`, `addrs`: [address as text], `up`}], the
 host's interfaces read at each `server.info`, loopback left out; empty to a network
 client. `recording_dir`: string \| nil (where `rec.start`
-records on the daemon host). `server.authorize` adds `key` under `name` to the
-authorized-clients file (atomic write) and to the running handshake check; `server.revoke`
+records on the daemon host). `auth.authorize` adds `key` under `name` to the
+authorized-clients file (atomic write) and to the running handshake check; `auth.revoke`
 removes `name`. A revoked or replaced key's requests are `refused`, its data connection is
 dropped at once (its subscriptions and audio end) and it cannot connect again. A connection
 is bound to the key it authenticated with, so authorizing a different key under a revoked
@@ -515,7 +515,7 @@ CURVE with its own server key pair as the client key. The other rig must first a
 key with `auth.admit_rig` {`key`, `rig_id`, `name`}: an authorized-clients entry marked as
 a rig (`AuthorizedClient.rig` = the admitted rig's id; nil for an operator's client).
 Admitting a name already present replaces its entry, and admitting the rig's own id is
-`invalid`; a replaced or `server.revoke`d key follows the revoke rule above (requests
+`invalid`; a replaced or `auth.revoke`d key follows the revoke rule above (requests
 `refused`, data connection and audio dropped at once, no reconnect). `auth.revoke_rig` {`rig_id`} removes
 every entry admitted as that rig, and only those: an operator's client authorized under the
 same name stays (`not_found` when no entry is that rig's). An
@@ -531,7 +531,7 @@ times), `inputs`: [`SourceInput` {`channel`, `setup`: `InputSetup` \| nil,
 admitted rig sees. `rig.pair` {`peer`: `RigPeer` {`rig`, `name`, `ctrl`, `data`, `key` (the
 other rig's server key, Z85)}} adds one rig this rig takes inputs from, in place of an entry
 for the same rig; a name another paired rig holds is `invalid` (unpair that rig first: an
-entry is found by its name, and replacing it would drop that rig and its feed); `rig.unpair` {`rig`} removes that rig's entry
+entry is found by its name, and replacing it would drop that rig and its feed); `rig.unpair` {`rig_id`} removes that rig's entry
 (`not_found` when there is none). Either leaves the other entries as they are, kept in the rig
 settings; the links follow at once. A running stream's joined feed starts over only when
 an entry it takes inputs from changed or went; pairing or unpairing another rig leaves it
@@ -647,7 +647,7 @@ traces), `on`} (creates or deletes the math trace `curve × EQ`), `copy` {`set`,
 set's filter curve, a locked transfer trace with `source.eq` {`meas`, `set`, `rev`} whose
 columns the daemon recomputes on every edit and load (`rev`: the set's rev they are of; a
 client refetches the data when it changes)}. `EqBody` = {`name`, `realisation`
-(`digital` {`rate`} \| `analog`), `peak_q`: `PeakQ` (`half_gain` \| `minus3db_from_peak` \|
+(`digital` {`sample_rate_hz`} \| `analog`), `peak_q`: `PeakQ` (`half_gain` \| `minus3db_from_peak` \|
 `band_pass`, the default reading of a peaking section's Q), `enabled`, `sections`:
 [`EqSection` {`enabled`, `shape`: `EqShape`}]}; `EqSnapshot` = {`set`, `rev`, `body`}.
 `EqShape` (tagged by `type`): `peaking` {`f`, `gain`, `bw`, `q_measured`: `PeakQ` \| nil},
@@ -656,7 +656,7 @@ client refetches the data when it changes)}. `EqBody` = {`name`, `realisation`
 `alignment`: `butterworth` \| `linkwitz_riley` \| `bessel` {`norm`: `phase` \| `delay` \|
 `minus3db`}, `order`}, `high_pass_q` / `low_pass_q` {`f`, `q`}, `notch` / `band_pass` {`f`,
 `bw`}, `all_pass_1` {`f`}, `all_pass_2` {`f`, `q`}, `gain` {`gain`}, `polarity`, `delay`
-{`seconds`}, `biquad` {`b0`, `b1`, `b2`, `a1`, `a2`, `rate`}, `response` {`trace`}.
+{`seconds`}, `biquad` {`b0`, `b1`, `b2`, `a1`, `a2`, `sample_rate_hz`}, `response` {`trace`}.
 `Bandwidth`: `q` {`value`} \| `octaves` {`n`}; `ShelfSlope`: `q` {`value`} \| `s` {`value`} \|
 `octaves` {`n`}. `invalid` with the section's number and reason for a refused section (f at
 or above fs/2, Q outside 0 … 100, gain beyond ±30 dB, an order the alignment lacks, an
@@ -766,7 +766,7 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   - `expr` (`MathExpr`, tagged by `type`): `binary` {`a`, `op`, `b`}, `average` {`of`:
     2 … 64 distinct operands when created (`meas.update` may leave fewer, and the frames
     then carry no average, `FEW_OPERANDS`), `method` `power` \| `complex` \| `coherence_weighted`} or
-    `align` {`a`, `b`, `band`: `AlignBand` {`lo`, `hi`} (Hz, 0 < `lo` < `hi`), `max_delay`
+    `align` {`a`, `b`, `band`: `AlignBand` {`lo_hz`, `hi_hz`} (0 < `lo_hz` < `hi_hz`), `max_delay`
     (Seconds, 0 < … ≤ 1)}. An operand (`Operand`, tagged by `type`) is `meas` {`meas`},
     `trace` {`trace`} or `eq` {`meas`, `set`} (an EQ set: `B` of a transfer `multiply`
     only; the set's response, or its change `H_now / H_in` when `A` recorded the set in
@@ -1047,7 +1047,7 @@ name of the place the limits are for, 1 … 40 characters, `receiving room` unle
 every line naming the place uses it), `measured_at`: WallNs, `origin`: `TransferOrigin`
 (`measured`: by `spl.band_transfer`; `estimated`: typed by the operator through
 `meas.update`, each band `unchecked` at the guessed attenuation or `missing`), `bands`:
-[`BandTransferBand`; 28] (20 Hz … 10 kHz)}; `BandTransferBand` (tagged by `status`):
+[`BandTransferBand`; 28] (20 Hz … 10 kHz)}; `BandTransferBand` (tagged by `type`):
 `unchecked` {`attenuation`: Db} (no background measured), `clean` {`attenuation`} (≥ 10 dB
 over the background), `corrected` {`attenuation`, `margin`: Db} (3 … 10 dB over it, the
 background subtracted), `unusable` {`at_least`: Db} (< 3 dB over it: a bound), `missing`. A
@@ -1352,7 +1352,7 @@ display edits and are never applied to the stored data.
   frame has display columns (grid `log_bins`) — with columns whose validity mask is set
   stored as NaN.
   A transfer capture also keeps the impulse response its `ir` frame would carry, formed
-  from the same state: `TraceData.ir` (`TransferIr` {`sample_rate`, `ir`: `TraceIr`},
+  from the same state: `TraceData.ir` (`TransferIr` {`sample_rate_hz`, `ir`: `TraceIr`},
   `t0` re the trace's `delay`), every sample (one FFT length of the full-rate stage: 4096 points, ±42.7 ms at 48 kHz). It is nil
   when the measurement has no IR yet (no block accepted with a reference); traces made by
   `trace.average`, math traces, imports of other formats and targets have none.
@@ -1448,7 +1448,7 @@ display edits and are never applied to the stored data.
   a gate not finite, `pre` < 0 or `post` ≤ 0).
 - `trace.target`: a target curve the daemon generates instead of reading a file, as a
   `kind: target` trace under `owner` (as `trace.import`'s), named `name`, `source.generated` {`curve`}, `delay`
-  0. `TargetCurve` (tagged by `shape`): `flat` (0 dB); `tilt` {`slope_db_per_oct`,
+  0. `TargetCurve` (tagged by `type`): `flat` (0 dB); `tilt` {`slope_db_per_oct`,
   `pivot: Hz`, `lf_shelf: LfShelf | nil`} — `slope · log₂(f / pivot)` dB plus, with
   `LfShelf` {`gain: Db`, `corner: Hz`}, the cookbook second-order low shelf at slope S = 1
   with half its gain at `corner` (analog prototype); both on the 1/48-octave log grid from
@@ -1472,7 +1472,9 @@ display edits and are never applied to the stored data.
 `ceiling` m \| nil, `zones` [{`name`, `outline`, `ear_height`, `weight` \| nil, `seats` \|
 nil}], `markers` [{`name`, `kind` speaker \| foh \| point, `at` [x, y, z], `heading_deg` \|
 nil}], `surfaces` [{`surface`, `material`}]; metres) lives in the daemon's plan library,
-one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.plans`.
+one `<name>.json` per plan in its data directory (`plans/`: the plan's fields beside
+`version: 1`; a file of no or another version is skipped and logged), mirrored as
+`State.plans`.
 
 - `plan.save` checks the plan (`ac2_room::plan::validate`: simple counter-clockwise
   polygons, zones inside the outline, markers inside the room …) and replaces the one of
@@ -1691,7 +1693,7 @@ start); otherwise the onset fade is derived. `name` nil names the trace `Run <nu
   only for a sweep imported from an export written without them);
   `ir` (`TraceIr` {`t0`, `dt` re the arrival (the trace's `delay`), `linear`, `etc_db`}, from H5's window to the
   end of the linear window, at most 16384 points, peak-preserving); `info` (`SweepInfo`:
-  `sample_rate`, `rate` (L: harmonic k's impulse at −L·ln k), `duration`, `repeats`,
+  `sample_rate_hz`, `rate` (L: harmonic k's impulse at −L·ln k), `duration`, `repeats`,
   `arrival`, `reference_level` (loopback gain), `window_pre`, `window_post`, `gate_pre`,
   `gate`, `floor_margin`, `clipped`); `room` (`RoomAcoustics | nil`, below; nil only for a
   sweep imported from an export written without it); `unresolved` (`SweepUnresolved | nil`,
@@ -1754,7 +1756,7 @@ an A/B pair plays an identical programme. The generator's level is the highest b
   differs from the gain 6 dB below it), `mismatch` (the reference's edges do not match the
   programme, or its end never came).
 - `trace.get` of a dynamics trace: `dynamics` (`DynamicsData`): `info` (`DynamicsInfo`:
-  `sample_rate`, `carrier`, `period` (samples), `onset`, `pilot`, `bursts`, `durations`,
+  `sample_rate_hz`, `carrier`, `period` (samples), `onset`, `pilot`, `bursts`, `durations`,
   `rest_max`, `replayed`, `reference_input`, `steps`: [`DynamicsStep` {`level`, `burst`,
   `rest` (as played), `recovered` (false: the rest reached `rest_max`)}]), `inputs`:
   [`DynamicsInput` {`input`, `name`, `delay` (the processor's envelope delay), `g0` (gain at
@@ -1978,7 +1980,7 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
   device; no open stream needed); `not_found` when there is none. The input setup is not
   changed.
 - `InputSetup` = {`channel`, `kind: InputKind`, `pair`: `left` | `right` | nil}; `InputKind`
-  is tagged by `kind`: `mic` {`mic`: string | nil, `curve: CurveChoice`} | `line` |
+  is tagged by `type`: `mic` {`mic`: string | nil, `curve: CurveChoice`} | `line` |
   `digital` (`docs/design/programme-meter.md` §1: the kind is declared, never inferred, and
   fixes the dB reference; an input with no row is an unnamed `mic`). `CurveChoice` is
   tagged by `type`: `not_chosen` | `off` | `curve` {`label`}. `Pair` = {`left`, `right`,
@@ -1990,7 +1992,7 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
   mic's only curve on a row where none is chosen (on every change of the setup or the
   library); with several, the row stays `not_chosen` and no curve applies until the
   operator chooses. A new mic name on a row starts `not_chosen`. Mic and pair names are 1–64
-  characters. `cal.spl`, `cal.spl_electrical` and `cal.curve_import` with `input` need a
+  characters. `cal.spl`, `cal.spl_electrical` and `cal.curve_import` with `channel` need a
   `mic` input; an SPL meter (`meas.create` / `meas.start` of a `spl` measurement) needs one
   too and is `invalid` otherwise (*input 3 is a line input; an SPL meter needs a
   microphone*). Transfer, spectrum, RTA and sweeps take any kind.
@@ -2029,10 +2031,10 @@ every sample rate (columns above the band a stream's rate measures are invalid),
 new transfer resolution restarts the job (new columns, averages start over); a sweep's
 applies to its next run, and stored traces keep their grid.
 
-`Unresolved` {`resolution`, `ranges`: [`FreqRange` {`lo`, `hi`: Hz}], ascending, disjoint,
+`Unresolved` {`resolution`, `ranges`: [`FreqRange` {`lo_hz`, `hi_hz`}], ascending, disjoint,
 on column edges} lists where one estimate's resolution cell — the bandwidth its analysis
 window sets — is wider than one column at that resolution, so the columns there are
-interpolation, not detail. Transfer: `TfMeta.unresolved` is [`BinRange` {`lo`, `hi`,
+interpolation, not detail. Transfer: `TfMeta.unresolved` is [`BinRange` {`lo_hz`, `hi_hz`,
 `bin_hz`: Hz}] instead (ascending, disjoint, on column edges; empty: all resolved), each
 range with the bin spacing of the coarsest MTW stage serving it, split where another stage
 takes over (stages switch over where a bin fills a 1/48-octave column, so at 1/96 the band
@@ -2188,7 +2190,7 @@ The mirrored `State` holds: `stream` (`epoch`, `open: OpenStream | nil`, `stoppe
 AudioStopped | nil`; §4.1.1),
 `measurements` (`id`, `config`, `config_rev`, `running`, `delay`, `grid_id`, `colour`,
 `layout`, `offset`, `eq`),
-`traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
+`traces` (`TraceMeta`: `id`, `edit` {name, colour, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
 math | eq | average | generated | sweep | dynamics}, `grid_id`, `delay`, `depth`, `lf_window`, `cal`, `mic`, `mic_curve`, `created_at`,
 `eq_in` ([`EqSnapshot`]: the EQ sets marked in the console when captured), `position`
@@ -2235,7 +2237,7 @@ anything answers there again, a welcome or a failed handshake, or it is followed
 address; a plain loss reads unreachable) | unreachable{since} | not_admitted |
 key_changed | other_rig{found}}, `clock`: `PeerClock`
 {`relation` {measuring | agree | not_locked{reason: cross_rate{ppm, over} |
-own_clock{rig, ppm} | other_rate{theirs, ours}} | cant_tell{reason: system_clock_unsynced{rig} |
+own_clock{rig, ppm} | other_rate{theirs_hz, ours_hz}} | cant_tell{reason: system_clock_unsynced{rig} |
 system_clock_not_stated{rig} | not_against_system_clock{rig} | no_capture_stamps |
 clocks_disagree{by} | no_audio | no_marks | no_stream{rig} | link_down | marks_late{by} |
 not_steady{low, high, line} | marks_keep_breaking}}, `ppm`, `span`, `last_change`},
@@ -2337,7 +2339,7 @@ cut the output within the block, over 2 ms; `reason`: `reset_request` (its setti
 changed, typically in its control panel, or its clock source) \| `resync_request` (its
 clock slipped or relocked) \| `buffer_size_change` \| `rate_change` (`sampleRateDidChange`,
 also at the same rate) \| `clock_lost` (a rate of 0)) \| `device_changed`
-(a device or configuration change whose reopen failed); `recovery` (tagged by `state`):
+(a device or configuration change whose reopen failed); `recovery` (tagged by `type`):
 `opening` {`attempt`: u32 from 1, `started`: WallNs} \| `waiting` {`attempt`, `error`:
 string (what the backend said, e.g. that no JACK server runs), `next_at`: WallNs}.
 
@@ -2571,7 +2573,7 @@ its fields (`["verified", calibrated_at, ["acoustic", calibrator_level]]`); the 
 stays a one-entry map `{kind: [...]}`; enums without data stay strings. Nested orders:
 `Smoothing` [fraction, mode]; `CalStatus` `uncalibrated` \| `verified` /
 `other_mic_or_input` [calibrated_at, basis] \| `line` [calibrated_at, dbu_fs]; `InputKind`
-`mic` [mic, curve] \| `line` \| `digital` (tagged by `kind`); `CalBasis` `acoustic` [calibrator_level] \|
+`mic` [mic, curve] \| `line` \| `digital`; `CalBasis` `acoustic` [calibrator_level] \|
 `electrical` [connection, mic_sensitivity, data_sheet, loading, uncertainty] (`loading` nil
 or [mic_impedance, input_impedance]); `LeqRun` [started_at,
 until, measured, gaps, trimmed, laeq, lceq, lzeq]; `LeqPeak` [level, judgement];
@@ -2616,8 +2618,8 @@ newest frame's age is over that, or when the daemon stopped responding.
 | kind | arrays (name: unit) | meta |
 |---|---|---|
 | `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask; an alignment's (all four or none) `align_phase_before`, `align_phase_after`: deg (A − B as measured and with the fit applied), `align_sum_before`, `align_sum_after`: db (the summation per column); an average's range across positions (all three or none) `range_lo`, `range_hi`: db, `range_coh`: coherence | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math trace), `smoothing`, `mic_curve`, `mic_range` (`FreqRange` \| nil: the lowest and highest point of that mic curve; outside them the curve is held at its end value, so those columns are not corrected; nil without a curve; a transfer math's is the intersection of its included operands' when each states one and they overlap, else nil, and a spectrum or RTA math's is nil), `math` (`MathState` \| nil: a math trace's operands, below), `unresolved` ([`BinRange`] \| nil: where the columns are finer than the bins serving them, with their width, §3.2 *Resolution*), `bins` (`BinLayout` \| nil: at the `bins` resolution, {`stages` ([`BinStage`] {`first_bin`, `bins`, `bin_hz`}, the index is the stage of `bins/<meas>/<stage>`), `blends` ([`FreqRange`]: per hand-over between stage `b` and `b + 1`, where both stages are blended, so the columns are drawn there)}; nil at a grid resolution; a transfer math's (not an alignment's) is its operands' layout when every operand is live, included and at `bins` with one layout (one rate and LF window), whether or not a stage is subscribed, and nil otherwise: with a stored operand, one at a grid resolution or left out, or a stopped one), `settling` (`FreqRange` \| nil: the frequencies whose averages are still filling, the span served by the analysis stages short of their depth; nil once all are full; a math trace's spans its included live operands'), `filled` (f32, 0…1: how full the averages are, counted in accumulated blocks of the least full analysis stage, so refused blocks add nothing; a math trace's is the least of its included live operands, 1 for traces) |
-| `bins` | `mag`: db (20·log10\|H1\|, the mic curve taken off at each bin's frequency), `phase`: deg (arg H1, the delay applied), `coh`: coherence (γ²); element i is bin `first_bin + i` at `(first_bin + i)·bin_hz`; NaN where the reference or the response has no energy (as the column holding that bin reads), and everywhere with `blocks` 0 | `stage`, `factor`, `rate`, `bin_hz`, `first_bin`, `hop` (Samples: between the stage's blocks, at the full rate), `delay`, `nudged`, `mic_curve`, `mic_range` (as that emit's `tf`'s), `blocks` (u64: blocks in the stage's average; 0 when it started over or a cross-rig job stopped), `eff_avg` (f32: effective averages per bin; NaN with `blocks` 0). Per frame: `blocks`, `eff_avg`. The header stamp is that of the `tf` formed in the same emit (`grid_id` nil); a stage is paced by its own `hop` and the 250 ms refresh, so a client draws a stage frame over the shown `tf` only while it is fresh: the same `config_rev`, `delay` and `nudged` as that `tf`, `blocks` > 0, and `audio_sample` at most `hop` + 250 ms (in full-rate samples) behind the `tf`'s for a running curve, equal to it for a stopped one; at a stop the daemon sends a final `tf` and every stage under one stamp (a transfer at any resolution sends its final `tf` and `ir`, subscribed or not, so a client subscribing after the stop gets them). A transfer math's stage is formed only while subscribed, from its operands' unquantised bins of that stage taken with the same answers as the `tf` beside it, combined per bin by the same operation and delay reference as its columns (a bin's phase referred at the bin's own frequency; a live operand's column at the mean frequency of the bins it sums, blend-weighted across a hand-over, so a column holding one bin equals that bin's result, when every included operand is live with one layout; otherwise every operand's column at its centre, as a stored operand's always is, so the operands of one math are referred alike); `delay`, `nudged` and `mic_curve` are the math `tf`'s, `blocks` and `eff_avg` the least of its operands', `hop` the slowest operand's, `mic_range` the intersection of theirs, as the math `tf`'s; an average's range band stays on the grid; a math sends no final frames, so after its `meas.stop` a stage keeps the frame of its last emit |
-| `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt`. The header stamp is that of the `tf` formed in the same emit (`grid_id` nil); at a transfer's stop the daemon sends a final `ir` under the final `tf`'s stamp (none from a cross-rig transfer whose clocks parted) |
+| `bins` | `mag`: db (20·log10\|H1\|, the mic curve taken off at each bin's frequency), `phase`: deg (arg H1, the delay applied), `coh`: coherence (γ²); element i is bin `first_bin + i` at `(first_bin + i)·bin_hz`; NaN where the reference or the response has no energy (as the column holding that bin reads), and everywhere with `blocks` 0 | `stage`, `factor`, `sample_rate_hz`, `bin_hz`, `first_bin`, `hop` (Samples: between the stage's blocks, at the full rate), `delay`, `nudged`, `mic_curve`, `mic_range` (as that emit's `tf`'s), `blocks` (u64: blocks in the stage's average; 0 when it started over or a cross-rig job stopped), `eff_avg` (f32: effective averages per bin; NaN with `blocks` 0). Per frame: `blocks`, `eff_avg`. The header stamp is that of the `tf` formed in the same emit (`grid_id` nil); a stage is paced by its own `hop` and the 250 ms refresh, so a client draws a stage frame over the shown `tf` only while it is fresh: the same `config_rev`, `delay` and `nudged` as that `tf`, `blocks` > 0, and `audio_sample` at most `hop` + 250 ms (in full-rate samples) behind the `tf`'s for a running curve, equal to it for a stopped one; at a stop the daemon sends a final `tf` and every stage under one stamp (a transfer at any resolution sends its final `tf` and `ir`, subscribed or not, so a client subscribing after the stop gets them). A transfer math's stage is formed only while subscribed, from its operands' unquantised bins of that stage taken with the same answers as the `tf` beside it, combined per bin by the same operation and delay reference as its columns (a bin's phase referred at the bin's own frequency; a live operand's column at the mean frequency of the bins it sums, blend-weighted across a hand-over, so a column holding one bin equals that bin's result, when every included operand is live with one layout; otherwise every operand's column at its centre, as a stored operand's always is, so the operands of one math are referred alike); `delay`, `nudged` and `mic_curve` are the math `tf`'s, `blocks` and `eff_avg` the least of its operands', `hop` the slowest operand's, `mic_range` the intersection of theirs, as the math `tf`'s; an average's range band stays on the grid; a math sends no final frames, so after its `meas.stop` a stage keeps the frame of its last emit |
+| `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate_hz`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt`. The header stamp is that of the `tf` formed in the same emit (`grid_id` nil); at a transfer's stop the daemon sends a final `ir` under the final `tf`'s stamp (none from a cross-rig transfer whose clocks parted) |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `mic_range` (as `tf`'s), `math` (`MathState` \| nil) |
 | `spec` | `level`: dbfs or db_spl (tone level), dbfs_per_hz or db_spl_per_hz (density; §3.2 *Spectrum level*); smoothed when `smoothing` is set; NaN for no power; on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins (tone) or their mean power (density) | `window`, `scale`, `level` (`SpecLevel`), `cal`, `mic_curve`, `mic_range` (as `tf`'s), `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil), `harmonics` (`SpecHarmonics` \| nil, §3.2 *Harmonics of the generator's sine*) |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve`, `position` (`PositionCorrection` \| nil: included in the levels) |
@@ -2832,7 +2834,7 @@ per device block of that channel, never deflated. The header is a msgpack map (i
 `frames` (≤ 65536), `flags` (u8: `xrun` 1, the source's backend reported an xrun before
 the block; `gap` 2, the block does not continue the one before on the source rig; other
 bits refused), `capture_ns` (u64 \| nil: the capture stamp of the first frame on the
-source's stamp clock, which its `clocks.stamp_map` puts on system time), `rate`,
+source's stamp clock, which its `clocks.stamp_map` puts on system time), `sample_rate_hz`,
 `incarnation` (`StreamIncarnation`)}.
 
 Bounds, checked before decoding: three parts; total ≤ 2 MiB; topic valid; header
@@ -2881,7 +2883,7 @@ What a daemon reads of each artefact; any other version is refused:
 | artefact | versions read |
 |---|---|
 | trace CSV (§7.1) | `v1` … `v6` |
-| session directory (§7.2) | manifest version 49 only |
+| session directory (§7.2) | manifest version 50 only |
 | raw capture sidecar (§7.5) | version 4 only; the protocol types it holds must still decode |
 | SPL log (§7.4) | `v2` only |
 | band log | `v1` only |
@@ -2890,7 +2892,7 @@ What a daemon reads of each artefact; any other version is refused:
 ### 7.1 Trace text (`trace.import` / `trace.export`)
 
 **ac2 CSV** (`ac2_csv`, what `trace.export` writes): the first line is exactly
-`# ac2 trace export v6` (`v5`, `v4`, `v3`, `v2` and `v1` are read too; another version is `bad_header`); then
+`# ac2 trace export v7` (`v6`, `v5`, `v4`, `v3`, `v2` and `v1` are read too, their `sample_rate`, `lo` and `hi` in JSON header lines read as `sample_rate_hz`, `lo_hz` and `hi_hz`; another version is `bad_header`); then
 `# key: value` lines with every metadata field (`name`, `kind`, `source`, `time_base`,
 `delay_ms`, `delay_nudge_ms`, `polarity`, `offset_db`, `smoothing` (display only, not
 applied), `depth`, `lf_window`, `cal`, `mic` (`name (curve: <label>, …; file …, hash …)`: in the
@@ -2900,7 +2902,7 @@ JSON `TraceMicCurve`, only when one is applied after capture), `created_ns`, `no
 as the JSON `GridDef`); a sweep trace adds `sweep_info` (the JSON `SweepInfo`),
 `sweep_ir` (JSON `{t0, dt, points}`), `sweep_unresolved` (the JSON `SweepUnresolved`) and
 `room_metrics` (the JSON `RoomAcoustics`); a transfer
-trace with an impulse response adds `transfer_ir` (JSON `{sample_rate, t0, dt, points}`). Then the
+trace with an impulse response adds `transfer_ir` (JSON `{sample_rate_hz, t0, dt, points}`). Then the
 header
 `freq_hz,mag_db[,phase_deg][,coherence]` and one row per grid column; a sweep trace
 (`kind: sweep`) adds `h2_db,h2_floor_db,…,h5_db,h5_floor_db,thd_db,thd_floor_db` after
@@ -3068,7 +3070,7 @@ in the recording directory:
   32-bit sizes 0xFFFFFFFF; the audio never moves.
 - `<name>.ac2rec.json`: the sidecar, JSON, `format: "ac2-raw-capture"`, `version: 4`
   (another version is refused), `software` {`ac2`, `build`, `protocol`}, `audio`
-  {`file`, `sample_rate`, `channels`: [{`input` (stream channel), `remote` (`RemoteInput`
+  {`file`, `sample_rate_hz`, `channels`: [{`input` (stream channel), `remote` (`RemoteInput`
   \| nil: whose input a remote channel was), `name`, `mic`, `roles`: [{type: loopback
   \| reference \| measured \| analysed, `measurement`}]}]}, `device` {`backend`,
   `input_device`, `output_device`, `buffer_frames`, `clock`, `stream_epoch`, `loopback`},
@@ -3117,7 +3119,7 @@ too), any sample rate and channel count. One channel is read: `IrImport.channel`
 The result is a `transfer` trace: per column the mean over its edges of the zero-padded
 FFT's interpolant (power for the magnitude, complex for the phase), NaN above Nyquist; no
 coherence. Its `ir` holds every kept sample (`t0` = −the time zero re the first kept
-sample, `dt` = 1/fs) and the Hilbert envelope (ETC). `IrFile` {`sample_rate`, `channels`,
+sample, `dt` = 1/fs) and the Hilbert envelope (ETC). `IrFile` {`sample_rate_hz`, `channels`,
 `channel`, `frames` (the file's), `kept`, `first` (first kept frame), `peak` (seconds re
 the file's first frame), `import` (the `IrImport` used, `channel` filled), `unresolved`
 (`Unresolved`: columns narrower than the window's cell `fs / samples`)}.

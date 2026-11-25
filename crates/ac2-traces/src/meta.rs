@@ -51,7 +51,7 @@ pub const MAX_NAME: usize = 128;
 pub fn new_edit(id: TraceId, name: String, slot: Option<u8>, owner: TraceOwner) -> TraceEdit {
     TraceEdit {
         name,
-        color: PALETTE[(id.0 as usize).wrapping_sub(1) % PALETTE.len()],
+        colour: PALETTE[(id.0 as usize).wrapping_sub(1) % PALETTE.len()],
         visible: true,
         locked: false,
         order: id.0,
@@ -102,7 +102,7 @@ pub fn check_values(e: &TraceEdit) -> Result<(), String> {
 pub fn lock_allows(old: &TraceEdit, new: &TraceEdit) -> bool {
     !old.locked
         || (old.name == new.name
-            && old.color == new.color
+            && old.colour == new.colour
             && old.offset == new.offset
             && old.polarity == new.polarity
             && old.delay_nudge == new.delay_nudge

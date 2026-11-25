@@ -335,7 +335,7 @@ impl ElectricalDialog {
         self.notice = None;
         self.pending = Some(self.what());
         Some(Command::CalSplElectrical(CalSplElectricalArgs {
-            input: self.input,
+            channel: self.input,
             mic: self.mic.clone(),
             connection: self.connection,
             volts,
@@ -451,7 +451,7 @@ mod tests {
         assert_eq!(
             cmd,
             Command::CalSplElectrical(CalSplElectricalArgs {
-                input: 1,
+                channel: 1,
                 mic: "MM1 34804".into(),
                 connection: ElectricalConnection::InLine,
                 volts: Volts(0.015),

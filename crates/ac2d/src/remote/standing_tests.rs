@@ -751,8 +751,8 @@ fn another_nominal_rate_is_not_locked_until_this_rig_closes() {
         r.shown(65.0),
         PeerRelation::NotLocked {
             reason: NotLockedReason::OtherRate {
-                theirs: 96_000,
-                ours: RATE
+                theirs_hz: 96_000,
+                ours_hz: RATE
             }
         }
     );

@@ -21,8 +21,8 @@ fn columns(f: &[f64], h: impl Fn(f64) -> Complex64) -> Columns {
 
 fn band() -> AlignBand {
     AlignBand {
-        lo: Hz(60.0),
-        hi: Hz(120.0),
+        lo_hz: Hz(60.0),
+        hi_hz: Hz(120.0),
     }
 }
 
@@ -107,8 +107,8 @@ fn a_band_off_the_grid_publishes_the_plain_sum() {
         time_base: e,
     };
     let far = AlignBand {
-        lo: Hz(30_000.0),
-        hi: Hz(40_000.0),
+        lo_hz: Hz(30_000.0),
+        hi_hz: Hz(40_000.0),
     };
     let (r, st, _) = align(&a, &a, &f, far, Seconds(0.05)).expect("both operands are usable");
     assert_eq!(

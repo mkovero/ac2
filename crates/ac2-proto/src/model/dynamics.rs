@@ -362,7 +362,7 @@ pub struct DynamicsStep {
 #[serde(deny_unknown_fields)]
 pub struct DynamicsInfo {
     /// Sample rate.
-    pub sample_rate: Hz,
+    pub sample_rate_hz: Hz,
     /// Carrier played.
     pub carrier: Hz,
     /// Its period, samples.

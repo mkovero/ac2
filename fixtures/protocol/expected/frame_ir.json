@@ -27,7 +27,7 @@
   ],
   "meta": {
    "ir": {
-    "sample_rate": 48000.0,
+    "sample_rate_hz": 48000.0,
     "t0": -0.005,
     "dt": 8.333333333333333e-05,
     "inserted_delay": 0.0125

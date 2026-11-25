@@ -405,7 +405,7 @@ impl AppState {
             }
         }
         let unlist = |lister: &str, drop: RigId, peer: &str| Request::Act {
-            cmd: Command::RigUnpair { rig: drop },
+            cmd: Command::RigUnpair { rig_id: drop },
             done: Some(words::unlisted_toast(lister, peer)),
             failed: words::not_unlisted(lister, peer),
         };

@@ -286,7 +286,7 @@ pub(crate) fn trace(id: u32, name: &str, owner: TraceOwner, source: TraceSource)
         id: TraceId(id),
         edit: TraceEdit {
             name: name.into(),
-            color: Rgb { r: 1, g: 2, b: 3 },
+            colour: Rgb { r: 1, g: 2, b: 3 },
             visible: true,
             locked: false,
             order: id,

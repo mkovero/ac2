@@ -167,7 +167,7 @@ fn unlists(r: &[(RigId, Request)], on: RigId) -> Vec<(RigId, String)> {
     r.iter()
         .filter_map(|(rig, q)| match q {
             Request::Act {
-                cmd: Command::RigUnpair { rig: gone },
+                cmd: Command::RigUnpair { rig_id: gone },
                 done,
                 ..
             } if *rig == on => Some((*gone, done.clone().unwrap_or_default())),

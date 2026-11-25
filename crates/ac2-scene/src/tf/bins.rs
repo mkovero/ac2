@@ -138,8 +138,11 @@ pub fn fine_bins(
     }
     let coarse = |k: u32| {
         let f = f64::from(k) * dx;
-        unresolved.iter().any(|r| f >= r.lo.0 && f <= r.hi.0)
-            || layout.blends.iter().any(|r| f >= r.lo.0 && f <= r.hi.0)
+        unresolved.iter().any(|r| f >= r.lo_hz.0 && f <= r.hi_hz.0)
+            || layout
+                .blends
+                .iter()
+                .any(|r| f >= r.lo_hz.0 && f <= r.hi_hz.0)
     };
     let ks = s.first_bin..s.first_bin + s.bins;
     let lo = ks.clone().find(|k| !coarse(*k))?;
@@ -225,7 +228,7 @@ pub fn fresh<'s, 'a>(src: &'s BinSource<'a>, b: usize) -> Option<&'s StageFrame<
         // alone between `tf` refreshes, and the `tf` shown may be the older of the two:
         // either may lead by up to a hop of that stage plus the refresh. Further apart they
         // are averages of different times.
-        let full_rate = m.rate.0 * f64::from(m.factor);
+        let full_rate = m.sample_rate_hz.0 * f64::from(m.factor);
         let apart = (i128::from(tf_at) - i128::from(at)).unsigned_abs();
         (apart as f64) <= m.hop.0 as f64 + REFRESH_S * full_rate
     } else {
@@ -473,7 +476,7 @@ pub fn form_note(
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .any(|r| hz >= r.lo.0 && hz <= r.hi.0);
+        .any(|r| hz >= r.lo_hz.0 && hz <= r.hi_hz.0);
     (!unresolved).then(|| format::resolution(Resolution::NinetySixth))
 }
 
@@ -512,13 +515,13 @@ pub fn blend_marks(
         .enumerate()
         .filter(|(j, _)| spliced.beside_blend(i, *j))
         .map(|(_, r)| crate::unresolved::RangeMark {
-            lo_hz: r.lo.0,
-            hi_hz: r.hi.0,
+            lo_hz: r.lo_hz.0,
+            hi_hz: r.hi_hz.0,
             from_bottom: false,
             text: format!(
                 "{}–{}: {NOTE}",
-                format::freq_rough(r.lo.0),
-                format::freq_rough(r.hi.0)
+                format::freq_rough(r.lo_hz.0),
+                format::freq_rough(r.hi_hz.0)
             ),
             note: NOTE.to_owned(),
         })

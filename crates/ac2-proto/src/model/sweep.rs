@@ -269,7 +269,7 @@ impl TraceIr {
 #[serde(deny_unknown_fields)]
 pub struct SweepInfo {
     /// Sample rate.
-    pub sample_rate: Hz,
+    pub sample_rate_hz: Hz,
     /// Rate constant L of the sweep: harmonic k's impulse sits at −L·ln k.
     pub rate: Seconds,
     /// Actual duration of each emitted sweep (from two octaves below the requested start).

@@ -118,7 +118,7 @@ fn resolution_sets_the_grid_and_frames_say_what_is_unresolved() {
     // At 1/48 only below the deepest stage's edge (κ(48) · 0.977 Hz ≈ 68 Hz), with that
     // stage's bins.
     assert_eq!(u.len(), 1, "{u:?}");
-    assert!(u[0].hi.0 > 60.0 && u[0].hi.0 < 70.0, "{u:?}");
+    assert!(u[0].hi_hz.0 > 60.0 && u[0].hi_hz.0 < 70.0, "{u:?}");
     assert_eq!(bin_widths(&u), [48_000.0 / 49_152.0]);
     let rev = f.stamp.config_rev.0;
 
@@ -138,8 +138,8 @@ fn resolution_sets_the_grid_and_frames_say_what_is_unresolved() {
         bin_widths(&u),
         [48_000.0 / 49_152.0, 12_000.0 / 4096.0, 48_000.0 / 4096.0]
     );
-    assert!(u[1].lo.0 > 190.0 && u[1].hi.0 < 420.0, "{u:?}");
-    assert!(u[2].lo.0 > 790.0 && u[2].hi.0 < 1700.0, "{u:?}");
+    assert!(u[1].lo_hz.0 > 190.0 && u[1].hi_hz.0 < 420.0, "{u:?}");
+    assert!(u[2].lo_hz.0 > 790.0 && u[2].hi_hz.0 < 1700.0, "{u:?}");
 
     // The long window adds a stage two octaves down: four times the window, so the bottom
     // range ends at a quarter of the frequency (κ(48) · 0.244 Hz ≈ 17 Hz).
@@ -153,7 +153,7 @@ fn resolution_sets_the_grid_and_frames_say_what_is_unresolved() {
     assert_eq!(t.mag.len(), 720);
     let u = t.meta.unresolved.clone().expect("unresolved");
     assert_eq!(u.len(), 1, "{u:?}");
-    assert!(u[0].hi.0 > 15.0 && u[0].hi.0 < 17.5, "{u:?}");
+    assert!(u[0].hi_hz.0 > 15.0 && u[0].hi_hz.0 < 17.5, "{u:?}");
     assert_eq!(bin_widths(&u), [48_000.0 / 196_608.0]);
     h.shutdown();
 }
@@ -907,7 +907,7 @@ fn filled_rises_after_a_reset_and_a_delay_step_restarts_it() {
             assert_eq!(settling.is_some(), filled < 1.0, "{settling:?} at {filled}");
             if let Some(r) = settling {
                 assert!(
-                    (r.lo.0 - grid_freq(0)).abs() < 1e-9 && r.hi.0 > r.lo.0,
+                    (r.lo_hz.0 - grid_freq(0)).abs() < 1e-9 && r.hi_hz.0 > r.lo_hz.0,
                     "{r:?}"
                 );
             }

@@ -275,7 +275,7 @@ fn mic_curve_on_a_stored_trace() {
         label: None,
         file_name: "M30.frd".into(),
         content: Blob(CURVE.as_bytes().to_vec()),
-        input: Some(1),
+        channel: Some(1),
     });
     let t = c.trace(Command::TraceMicCurve {
         trace: raw.id,

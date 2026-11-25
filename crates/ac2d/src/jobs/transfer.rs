@@ -279,8 +279,8 @@ impl Transfer {
             .unresolved_bins(&grid)
             .into_iter()
             .map(|(lo, hi, bin)| ac2_proto::model::BinRange {
-                lo: Hz(lo),
-                hi: Hz(hi),
+                lo_hz: Hz(lo),
+                hi_hz: Hz(hi),
                 bin_hz: Hz(bin),
             })
             .collect();
@@ -493,8 +493,8 @@ impl Transfer {
         let (lo, hi) = self.mtw.settling_hz()?;
         let top = self.grid.frequency(self.grid.len() - 1);
         Some(FreqRange {
-            lo: Hz(lo.max(self.grid.frequency(0))),
-            hi: Hz(hi.min(top)),
+            lo_hz: Hz(lo.max(self.grid.frequency(0))),
+            hi_hz: Hz(hi.min(top)),
         })
     }
 
@@ -529,7 +529,7 @@ impl Transfer {
         Some(IrFrame {
             meas: self.meas,
             meta: IrMeta {
-                sample_rate: Hz(self.fs),
+                sample_rate_hz: Hz(self.fs),
                 // Sample n/2 is time zero, the inserted delay.
                 t0: Seconds(-((n / 2) as f64) / self.fs),
                 dt: Seconds(1.0 / self.fs),

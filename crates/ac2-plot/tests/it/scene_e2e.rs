@@ -240,8 +240,8 @@ fn transfer_view_unresolved() {
     ]
     .iter()
     .map(|&(lo, hi, bin)| BinRange {
-        lo: Hz(lo),
-        hi: Hz(hi),
+        lo_hz: Hz(lo),
+        hi_hz: Hz(hi),
         bin_hz: Hz(bin),
     })
     .collect();
@@ -460,8 +460,8 @@ fn spectrum_golden_with(
         unresolved: Unresolved {
             resolution: Resolution::FortyEighth,
             ranges: vec![FreqRange {
-                lo: Hz(7.8125),
-                hi: Hz(101.5),
+                lo_hz: Hz(7.8125),
+                hi_hz: Hz(101.5),
             }],
         },
     };

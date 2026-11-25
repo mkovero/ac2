@@ -93,7 +93,7 @@ impl PeakInput<'_> {
     fn resolved(&self, i: usize) -> bool {
         self.unresolved.is_none_or(|u| {
             let f = self.freqs[i];
-            !u.ranges.iter().any(|r| f >= r.lo.0 && f <= r.hi.0)
+            !u.ranges.iter().any(|r| f >= r.lo_hz.0 && f <= r.hi_hz.0)
         })
     }
 }

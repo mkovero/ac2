@@ -192,7 +192,7 @@ impl AcousticDialog {
         };
         self.pending = Some(self.what());
         Some(Command::CalSpl {
-            input: self.input,
+            channel: self.input,
             mic,
             calibrator_level,
             calibrator_freq,
@@ -275,7 +275,7 @@ mod tests {
         assert_eq!(
             d.submit(),
             Some(Command::CalSpl {
-                input: 1,
+                channel: 1,
                 mic: "MM1 34804".into(),
                 calibrator_level: DbSpl(94.0),
                 calibrator_freq: Hz(1000.0),

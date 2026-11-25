@@ -145,7 +145,7 @@ pub fn ir(ir: &TraceIr) -> Result<(), String> {
 
 /// Checks a transfer trace's impulse response and its sample rate.
 pub fn transfer_ir(t: &TransferIr) -> Result<(), String> {
-    if !(t.sample_rate.0.is_finite() && t.sample_rate.0 > 0.0) {
+    if !(t.sample_rate_hz.0.is_finite() && t.sample_rate_hz.0 > 0.0) {
         return Err("impulse response sample rate must be finite and above 0".into());
     }
     ir(&t.ir)
@@ -168,7 +168,7 @@ fn curve(c: &DistortionCurve, len: usize) -> Result<(), String> {
 /// Checks a sweep's analysis facts: what the analysis divides by or times from is finite
 /// and positive, the rest finite.
 pub fn sweep_info(i: &SweepInfo) -> Result<(), String> {
-    let positive = [i.sample_rate.0, i.rate.0, i.duration.0];
+    let positive = [i.sample_rate_hz.0, i.rate.0, i.duration.0];
     let finite = [
         i.arrival.0,
         i.reference_level.0,
@@ -219,7 +219,7 @@ pub fn sweep(s: &SweepData, len: usize) -> Result<(), String> {
             if !x
                 .ranges
                 .iter()
-                .all(|r| r.lo.0.is_finite() && r.hi.0.is_finite() && r.lo.0 <= r.hi.0)
+                .all(|r| r.lo_hz.0.is_finite() && r.hi_hz.0.is_finite() && r.lo_hz.0 <= r.hi_hz.0)
             {
                 return Err("an unresolved range is not finite and ordered".into());
             }
@@ -282,7 +282,7 @@ pub const DYNAMICS_MAX_STEPS: usize = 128;
 /// rate, finite levels and lengths, and at most [`DYNAMICS_MAX_STEPS`] steps.
 pub fn dynamics_info(i: &DynamicsInfo) -> Result<(), String> {
     let finite = |v: f64| v.is_finite();
-    if !(finite(i.sample_rate.0) && i.sample_rate.0 > 0.0) || i.period < 12 {
+    if !(finite(i.sample_rate_hz.0) && i.sample_rate_hz.0 > 0.0) || i.period < 12 {
         return Err("dynamics: sample rate or carrier period out of range".into());
     }
     if !finite(i.carrier.0) || i.carrier.0 <= 0.0 {

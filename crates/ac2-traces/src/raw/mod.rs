@@ -93,7 +93,7 @@ pub struct AudioFile {
     /// File name, beside the sidecar.
     pub file: String,
     /// Sample rate, Hz.
-    pub sample_rate: u32,
+    pub sample_rate_hz: u32,
     /// Channels in file order.
     pub channels: Vec<RecordedChannel>,
 }
@@ -417,7 +417,7 @@ pub fn listing(dir: &Path, name: &str, s: &Sidecar) -> RecordingFile {
     RecordingFile {
         name: name.to_owned(),
         path: dir.join(&s.audio.file).to_string_lossy().into_owned(),
-        sample_rate_hz: s.audio.sample_rate,
+        sample_rate_hz: s.audio.sample_rate_hz,
         inputs: s.audio.channels.iter().map(|c| c.input).collect(),
         frames: s.end.as_ref().map_or(0, |e| e.frames),
         started_at: s.start.wall_ns,
@@ -599,7 +599,7 @@ pub fn import_wav(src: &Path, dir: &Path, name: &str, now_ns: u64) -> Result<Sid
         },
         audio: AudioFile {
             file: format!("{name}{AUDIO_SUFFIX}"),
-            sample_rate: info.sample_rate,
+            sample_rate_hz: info.sample_rate,
             channels: (0..info.channels)
                 .map(|input| RecordedChannel {
                     input,

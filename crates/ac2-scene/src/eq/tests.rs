@@ -5,7 +5,9 @@ use ac2_proto::units::{Db, Hz, Seconds};
 fn set(enabled: bool, mark: Option<u32>) -> EqSet {
     let body = EqBody {
         name: "EQ 1".into(),
-        realisation: EqRealisation::Digital { rate: Hz(48_000.0) },
+        realisation: EqRealisation::Digital {
+            sample_rate_hz: Hz(48_000.0),
+        },
         peak_q: PeakQ::HalfGain,
         enabled,
         sections: vec![EqSection {
@@ -149,11 +151,15 @@ fn basis_and_set_tags() {
     assert_eq!(set_tags(&set(true, Some(4))), ["in console (rev 4)"]);
     assert_eq!(mark_text(&set(true, None)), "not marked");
     assert_eq!(
-        realisation_text(EqRealisation::Digital { rate: Hz(48_000.0) }),
+        realisation_text(EqRealisation::Digital {
+            sample_rate_hz: Hz(48_000.0)
+        }),
         "digital 48 kHz"
     );
     assert_eq!(
-        realisation_text(EqRealisation::Digital { rate: Hz(44_100.0) }),
+        realisation_text(EqRealisation::Digital {
+            sample_rate_hz: Hz(44_100.0)
+        }),
         "digital 44.1 kHz"
     );
     // The live curve contains what is marked now; unchanged since the mark: no change.

@@ -240,7 +240,7 @@ fn cell(
     if a_flags.get(k) == Some(&true) || b_flags.get(k) == Some(&true) {
         return (CANT_COMPARE.to_string(), false);
     }
-    let period = f64::from(a.info().period) / a.info().sample_rate.0;
+    let period = f64::from(a.info().period) / a.info().sample_rate_hz.0;
     let d = diff(va, value(rb, m), period);
     (diff_text(d), matches!(d, Diff::Num(_, _, true)))
 }

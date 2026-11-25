@@ -301,7 +301,7 @@ impl Control {
         }
     }
 
-    /// `server.authorize`.
+    /// `auth.authorize`.
     pub(super) fn server_authorize(
         &mut self,
         client: &Peer,
@@ -414,7 +414,7 @@ impl Control {
         Ok(ReplyBody::Server(self.server_info(client)))
     }
 
-    /// `server.revoke`.
+    /// `auth.revoke`.
     pub(super) fn server_revoke(
         &mut self,
         client: &Peer,

@@ -107,16 +107,16 @@ impl Control {
                 bind,
                 port,
             } => self.server_network(peer, enabled, bind, port),
-            Command::ServerAuthorize { name, key } => self.server_authorize(peer, &name, &key),
-            Command::ServerRevoke { name } => self.server_revoke(peer, &name),
+            Command::AuthAuthorize { name, key } => self.server_authorize(peer, &name, &key),
+            Command::AuthRevoke { name } => self.server_revoke(peer, &name),
             Command::AuthAdmitRig { key, rig_id, name } => {
                 self.admit_rig(peer, &name, &key, rig_id)
             }
             Command::AuthRevokeRig { rig_id } => self.auth_revoke_rig(peer, rig_id),
             Command::RigPair { peer: p } => self.rig_pair(p),
-            Command::RigUnpair { rig } => self.rig_unpair(rig),
+            Command::RigUnpair { rig_id: rig } => self.rig_unpair(rig),
             Command::SourceState => Ok(ReplyBody::SourceState(Box::new(self.source_state()))),
-            Command::RigMonitorStart { base, on } => self.rig_monitor_start(base, on),
+            Command::RigMonitorAtStart { base, on } => self.rig_monitor_at_start(base, on),
             Command::OscTarget { base, addr } => self.osc_target(base, addr),
             Command::OscTest { msg } => self.osc_test(&msg),
             Command::ArtnetTarget { base, target } => self.artnet_target(base, target),
@@ -297,13 +297,13 @@ impl Control {
             Command::TraceMicCurve { trace, curve } => self.trace_mic_curve(trace, curve),
 
             Command::CalSpl {
-                input,
+                channel: input,
                 mic,
                 calibrator_level,
                 calibrator_freq,
             } => self.cal_spl(input, mic, calibrator_level, calibrator_freq),
             Command::CalSplElectrical(CalSplElectricalArgs {
-                input,
+                channel: input,
                 mic,
                 connection,
                 volts,
@@ -328,7 +328,7 @@ impl Control {
                 label,
                 file_name,
                 content,
-                input,
+                channel: input,
             } => self.cal_curve_import(mic, label, file_name, content, input),
             Command::CalCurveRename { curve, label } => self.cal_curve_rename(curve, label),
             Command::CalCurveDelete { curve } => self.cal_curve_delete(curve),

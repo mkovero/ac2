@@ -24,7 +24,7 @@ pub struct OutputStatus {
 #[serde(deny_unknown_fields)]
 pub struct Rig {
     /// Rev at which these settings were last committed; `osc.target`, `artnet.target`,
-    /// `artnet.fade`, `rig.monitor_start` and `levels.set` name it as their `base`.
+    /// `artnet.fade`, `rig.monitor_at_start` and `levels.set` name it as their `base`.
     pub rev: Rev,
     /// Where OSC cues go (an IP literal and port); `None`: nowhere.
     #[serde(with = "opt_addr")]

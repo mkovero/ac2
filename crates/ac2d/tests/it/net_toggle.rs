@@ -194,7 +194,7 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
 
     // Keys are managed with the network off.
     let tablet = KeyPair::generate().unwrap();
-    c.call(Command::ServerAuthorize {
+    c.call(Command::AuthAuthorize {
         name: "tablet".into(),
         key: tablet.public.to_z85(),
     })
@@ -207,7 +207,7 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
             .collect()
     };
     assert_eq!(named(&c.server(Command::ServerInfo)), ["laptop", "tablet"]);
-    c.call(Command::ServerRevoke {
+    c.call(Command::AuthRevoke {
         name: "tablet".into(),
     })
     .unwrap();
@@ -747,7 +747,7 @@ fn a_request_retried_across_off_and_on_is_answered_once() {
     let tablet = KeyPair::generate().unwrap();
     let req = ac2_proto::Request::new(
         ac2_proto::units::RequestId(7),
-        Command::ServerAuthorize {
+        Command::AuthAuthorize {
             name: "tablet".into(),
             key: tablet.public.to_z85(),
         },

@@ -13,8 +13,8 @@ use crate::view::ViewState;
 
 fn band(lo: f64, hi: f64) -> AlignBand {
     AlignBand {
-        lo: Hz(lo),
-        hi: Hz(hi),
+        lo_hz: Hz(lo),
+        hi_hz: Hz(hi),
     }
 }
 

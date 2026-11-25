@@ -34,9 +34,9 @@ impl Source<'_> {
     /// The ranges, Hz, as `(lo, hi)`.
     pub fn ranges(&self) -> Vec<(f64, f64)> {
         match self {
-            Source::Joined(r) => r.iter().map(|b| (b.lo.0, b.hi.0)).collect(),
+            Source::Joined(r) => r.iter().map(|b| (b.lo_hz.0, b.hi_hz.0)).collect(),
             Source::Interpolated(u) | Source::Steps(u) => {
-                u.ranges.iter().map(|r| (r.lo.0, r.hi.0)).collect()
+                u.ranges.iter().map(|r| (r.lo_hz.0, r.hi_hz.0)).collect()
             }
         }
     }
@@ -69,7 +69,7 @@ pub fn marks(src: Source<'_>, first_hz: f64, what: Option<&str>) -> Vec<RangeMar
             .iter()
             .map(|b| {
                 let note = said(format!("{} bins", format::bin_width(b.bin_hz.0)));
-                (b.lo.0, b.hi.0, note)
+                (b.lo_hz.0, b.hi_hz.0, note)
             })
             .collect(),
         Source::Interpolated(u) | Source::Steps(u) => {
@@ -82,7 +82,7 @@ pub fn marks(src: Source<'_>, first_hz: f64, what: Option<&str>) -> Vec<RangeMar
             let note = said(format!("coarser than {res} ({how})"));
             u.ranges
                 .iter()
-                .map(|r| (r.lo.0, r.hi.0, note.clone()))
+                .map(|r| (r.lo_hz.0, r.hi_hz.0, note.clone()))
                 .collect()
         }
     };
@@ -117,7 +117,7 @@ pub fn at(marks: &[RangeMark], hz: f64) -> Option<&RangeMark> {
 /// the columns there show the mic's own response uncorrected.
 pub fn mic_marks(range: FreqRange, first_hz: f64, last_hz: f64) -> Vec<RangeMark> {
     const NOTE: &str = "outside the mic curve";
-    let (lo, hi) = (range.lo.0, range.hi.0);
+    let (lo, hi) = (range.lo_hz.0, range.hi_hz.0);
     let below = (first_hz < lo).then(|| RangeMark {
         lo_hz: first_hz,
         hi_hz: lo,
@@ -141,7 +141,7 @@ pub fn mic_marks(range: FreqRange, first_hz: f64, last_hz: f64) -> Vec<RangeMark
 /// settled.
 pub fn settling_marks(range: FreqRange, first_hz: f64, last_hz: f64) -> Vec<RangeMark> {
     const NOTE: &str = "still averaging";
-    let (lo, hi) = (range.lo.0.max(first_hz), range.hi.0.min(last_hz));
+    let (lo, hi) = (range.lo_hz.0.max(first_hz), range.hi_hz.0.min(last_hz));
     if hi <= lo {
         return Vec::new();
     }
@@ -214,8 +214,8 @@ mod tests {
             ranges: ranges
                 .iter()
                 .map(|&(lo, hi)| FreqRange {
-                    lo: Hz(lo),
-                    hi: Hz(hi),
+                    lo_hz: Hz(lo),
+                    hi_hz: Hz(hi),
                 })
                 .collect(),
         }
@@ -261,8 +261,8 @@ mod bin_tests {
     fn bins(r: &[(f64, f64, f64)]) -> Vec<BinRange> {
         r.iter()
             .map(|&(lo, hi, bin)| BinRange {
-                lo: Hz(lo),
-                hi: Hz(hi),
+                lo_hz: Hz(lo),
+                hi_hz: Hz(hi),
                 bin_hz: Hz(bin),
             })
             .collect()
@@ -311,8 +311,8 @@ mod mic_tests {
 
     fn span(lo: f64, hi: f64) -> FreqRange {
         FreqRange {
-            lo: Hz(lo),
-            hi: Hz(hi),
+            lo_hz: Hz(lo),
+            hi_hz: Hz(hi),
         }
     }
 

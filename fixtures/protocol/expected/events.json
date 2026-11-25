@@ -488,7 +488,7 @@
     {
      "channel": 1,
      "kind": {
-      "kind": "mic",
+      "type": "mic",
       "mic": "M30 #1234",
       "curve": {
        "type": "curve",
@@ -500,7 +500,7 @@
     {
      "channel": 2,
      "kind": {
-      "kind": "mic",
+      "type": "mic",
       "mic": null,
       "curve": {
        "type": "not_chosen"
@@ -511,7 +511,7 @@
     {
      "channel": 3,
      "kind": {
-      "kind": "mic",
+      "type": "mic",
       "mic": "ECM",
       "curve": {
        "type": "off"
@@ -522,21 +522,21 @@
     {
      "channel": 4,
      "kind": {
-      "kind": "line"
+      "type": "line"
      },
      "pair": "left"
     },
     {
      "channel": 5,
      "kind": {
-      "kind": "line"
+      "type": "line"
      },
      "pair": "right"
     },
     {
      "channel": 6,
      "kind": {
-      "kind": "digital"
+      "type": "digital"
      },
      "pair": null
     }
@@ -830,93 +830,93 @@
          "origin": "measured",
          "bands": [
           {
-           "status": "unchecked",
+           "type": "unchecked",
            "attenuation": 20.0
           },
           {
-           "status": "clean",
+           "type": "clean",
            "attenuation": 25.5
           },
           {
-           "status": "corrected",
+           "type": "corrected",
            "attenuation": 30.0,
            "margin": 5.5
           },
           {
-           "status": "unusable",
+           "type": "unusable",
            "at_least": 35.0
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           },
           {
-           "status": "missing"
+           "type": "missing"
           }
          ]
         }
@@ -1468,8 +1468,8 @@
          "meas": 1
         },
         "band": {
-         "lo": 60.0,
-         "hi": 120.0
+         "lo_hz": 60.0,
+         "hi_hz": 120.0
         },
         "max_delay": 0.05
        },

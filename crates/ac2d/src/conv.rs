@@ -605,7 +605,7 @@ pub(crate) fn stamp_map(l: ac2_core::clock_map::StampLine) -> pm::StampMap {
 /// (outside it the curve is held at its end value).
 pub(crate) fn mic_range(c: &core::mic_curve::Correction) -> pm::FreqRange {
     pm::FreqRange {
-        lo: ac2_proto::units::Hz(c.curve().f_lo()),
-        hi: ac2_proto::units::Hz(c.curve().f_hi()),
+        lo_hz: ac2_proto::units::Hz(c.curve().f_lo()),
+        hi_hz: ac2_proto::units::Hz(c.curve().f_hi()),
     }
 }

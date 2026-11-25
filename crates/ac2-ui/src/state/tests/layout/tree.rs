@@ -18,7 +18,7 @@ fn tree_dots_have_the_colours_of_their_curves() {
     let mut s = tree_state();
     for (i, t) in s.traces.iter_mut().enumerate() {
         let v = 40 * (i as u8 + 1);
-        t.edit.color = Rgb {
+        t.edit.colour = Rgb {
             r: v,
             g: 255 - v,
             b: 7,
@@ -173,7 +173,7 @@ fn tree_dots_have_the_colours_of_their_curves() {
     }
     assert_eq!(curve("1083 94cm"), theme.families[2]);
     for m in &metas {
-        let c = m.edit.color;
+        let c = m.edit.colour;
         assert_ne!(curve(&m.edit.name), Color::from_rgba8([c.r, c.g, c.b, 255]));
     }
     for r in rows.iter().filter(|r| r.depth == 0) {

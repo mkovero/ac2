@@ -1,5 +1,5 @@
 //! `server info|network|authorize`: how the daemon serves clients, its network listener
-//! switched live (`server.network`), and the client keys it admits (`server.authorize`).
+//! switched live (`server.network`), and the client keys it admits (`auth.authorize`).
 //! Refusals (fixed by `--listen`, asked from the network, an in-process daemon, a bad port
 //! or interface) are the daemon's own words, printed as they come.
 
@@ -60,19 +60,19 @@ pub(crate) async fn run(cli: &Cli, cmd: &ServerCmd, out: &mut Out<'_>) -> Result
                 .find(|a| a.name == *name && a.key != key)
                 .map(|a| a.fingerprint.clone());
             let r = c
-                .call(Command::ServerAuthorize {
+                .call(Command::AuthAuthorize {
                     name: name.clone(),
                     key: key.clone(),
                 })
                 .await?;
-            let info = expect_body!("server.authorize", r, ReplyBody::Server(s) => s)?;
+            let info = expect_body!("auth.authorize", r, ReplyBody::Server(s) => s)?;
             let entry = info
                 .network
                 .authorized
                 .iter()
                 .find(|a| a.name == *name && a.key == key)
                 .ok_or(ClientError::UnexpectedReply {
-                    op: "server.authorize",
+                    op: "auth.authorize",
                     got: "server info without the authorized name",
                 })?;
             out.emit(

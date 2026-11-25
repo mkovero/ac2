@@ -62,13 +62,13 @@
      {
       "channel": 0,
       "kind": {
-       "kind": "line"
+       "type": "line"
       }
      },
      {
       "channel": 1,
       "kind": {
-       "kind": "line"
+       "type": "line"
       }
      }
     ],

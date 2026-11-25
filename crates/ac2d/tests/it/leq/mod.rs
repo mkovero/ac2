@@ -119,7 +119,7 @@ async fn calibrate(c: &Client) {
     loop {
         match c
             .call(Command::CalSpl {
-                input: 1,
+                channel: 1,
                 mic: "M30".into(),
                 calibrator_level: DbSpl(94.0),
                 calibrator_freq: Hz(1000.0),

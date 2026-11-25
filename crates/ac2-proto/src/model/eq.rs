@@ -16,7 +16,7 @@ pub enum EqRealisation {
     /// (shows its cramping near Nyquist; columns at or above fs/2 are gaps).
     Digital {
         /// The processor's sample rate.
-        rate: Hz,
+        sample_rate_hz: Hz,
     },
     /// The s-domain prototype (decramped or FIR-based processors).
     Analog,
@@ -243,7 +243,7 @@ pub enum EqShape {
         /// a2.
         a2: f64,
         /// Its sample rate.
-        rate: Hz,
+        sample_rate_hz: Hz,
     },
     /// A stored transfer trace multiplied in (a FIR's exported response, a preset measured).
     Response {

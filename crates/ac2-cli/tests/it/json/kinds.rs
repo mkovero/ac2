@@ -57,10 +57,10 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
         ],
     )
     .await?;
-    assert_eq!(input_row(&i, 1)["kind"]["kind"], "mic");
+    assert_eq!(input_row(&i, 1)["kind"]["type"], "mic");
     assert_eq!(input_row(&i, 1)["mic"], "MM1");
-    assert_eq!(input_row(&i, 2)["kind"], json!({ "kind": "digital" }));
-    assert_eq!(input_row(&i, 3)["kind"], json!({ "kind": "line" }));
+    assert_eq!(input_row(&i, 2)["kind"], json!({ "type": "digital" }));
+    assert_eq!(input_row(&i, 3)["kind"], json!({ "type": "line" }));
     assert_eq!(input_row(&i, 3)["pair"], "left");
     assert_eq!(input_row(&i, 4)["pair"], "right");
     // The text: one line per input, the pair on one line, the app's words.
@@ -190,7 +190,7 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
         ],
     )
     .await?;
-    assert_eq!(input_row(&i, 3)["kind"]["kind"], "mic");
+    assert_eq!(input_row(&i, 3)["kind"]["type"], "mic");
     assert_eq!(input_row(&i, 3)["mic"], "M30");
     let t = ac2(&f, &["stream", "inputs"]).await?.stdout;
     has(&t, "in 3 · mic M30 · ");
