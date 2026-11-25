@@ -209,6 +209,10 @@ in its meta; of the order of 100 kbit/s for eight inputs (off the layout; 1a mea
   block's sample index and its capture stamp **put on system time by the source** (block
   stamps are on the backend's clock, JACK's `CLOCK_MONOTONIC_RAW`, `ac2-audio`
   `stamp.rs`; the source applies its own map). No stamp or no map: no timing in the frame.
+  It goes at half the meter rate, 15 a second, its peaks, true peaks and clips the highest
+  over the two meter frames it spans and its RMS their mean power: the clock fit keeps a
+  mark per 50 ms, so at 30 a second it kept every second one; at 15 it keeps every one, the
+  same points, for half the bytes (about 14 kB/s for eight inputs).
 - The session rig subscribes it on every link whose rig has a session; a frame waiting
   for credit is replaced by the newer one (a hole, not an error).
 - **`peer/<rig>/levels`** (new): what the session rig serves its apps, that peer's frame
@@ -334,12 +338,17 @@ session opens; with streams on demand that minute would come at every start.
   of a few seconds drops the minute open across it, one of over a minute starts the count
   again. Each closed minute keeps two facts: its cross-rig figure, and the worst own line
   either rig stated over it (the rig and its value), so an own line beyond the rule between
-  closes is not lost by being back within at the close. A minute is beyond when either is
+  closes is not lost by being back within at the close. A rig's own line counts there only
+  once it has been stated a whole minute without going back to measuring: until then every
+  reading is a fit still spanning the stream's first seconds, so a start that reads beyond
+  the rule withholds *agree* through the judge but starts no count. A minute is beyond when either is
   over 2 ppm, settled when both are below 1.8. *Agree* once a whole minute closes within
   the rule with no count running and the judge agreeing at the close, never beside a shown
   figure beyond the rule; between closes, after anything took it away, once the judge
   agrees three reports running. A minute closing beyond starts a count, *measuring* with
-  the count (*beyond 2 ppm for 4 of the 10 min a verdict needs*) while it runs. At ten
+  the count while it runs, with both ways out of it (*beyond 2 ppm for 4 min running · not
+  locked at 10, agree after 2 min running within*; *beyond 2 ppm in 1 of 2 min · a verdict
+  at 10, agree after 2 min running within*). At ten
   counted: all ten cross figures beyond, one sign, is *not locked* by the cross-rig rate;
   else all ten own lines beyond, one rig and one sign, *not locked* by that rig's own line;
   else all ten beyond on one line or the other, each line keeping its sign (a free
@@ -357,7 +366,7 @@ session opens; with streams on demand that minute would come at every start.
   (more closed between two reports than one), breaks the run and clears the count. Anything
   the judge cannot tell (an unsynced system clock, marks late or in the future, another
   nominal rate) clears it too, and the minute open then, which spans the disturbance, is
-  dropped at its close. Evidence that only stops (no link, no marks, a hole of a few
+  dropped at its close; *marks for* counts from after it, as the minutes do. Evidence that only stops (no link, no marks, a hole of a few
   seconds) keeps the count, and both *agree* and *not locked* wait for a minute closing
   after it; a hole drops the figure shown with the open minute. Holes that keep any minute
   from closing for 5 min read *can't tell (ketunkolo's timing keeps breaking off before a
