@@ -257,7 +257,8 @@ async fn trace_commands_json() -> R {
     assert_eq!(hidden["edit"]["slot"], json!(null));
     let shown = ok_json(&f, &["trace", "display", "avg", "on", "--json"]).await?;
     assert_eq!(shown["edit"]["visible"], true);
-    // Slot 1 moves from "a" to the average.
+    // The average's slot 1 is its owner's; "a" keeps the slot 1 of the curve it was
+    // captured from.
     let slotted = ok_json(&f, &["trace", "slot", "avg", "1", "--json"]).await?;
     assert_eq!(slotted["edit"]["slot"], 1);
     let l = ok_json(&f, &["trace", "list", "--json"]).await?;
@@ -266,7 +267,7 @@ async fn trace_commands_json() -> R {
             .and_then(|a| a.iter().find(|t| t["edit"]["name"] == name))
             .map(|t| t["edit"]["slot"].clone())
     };
-    assert_eq!(slot_of("a"), Some(json!(null)));
+    assert_eq!(slot_of("a"), Some(json!(1)));
     assert_eq!(slot_of("avg"), Some(json!(1)));
     let freed = ok_json(&f, &["trace", "slot", "avg", "none", "--json"]).await?;
     assert_eq!(freed["edit"]["slot"], json!(null));

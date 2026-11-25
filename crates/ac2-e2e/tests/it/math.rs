@@ -150,6 +150,26 @@ fn math_traces_from_an_empty_daemon() -> R {
         })
     })?;
 
+    // The pane also draws the second position, captured into its own slot 1 beside the
+    // average's; the ratio below is over the average's capture, so that one goes.
+    d.until("both captures in slot 1", |s| {
+        s.trace_list()
+            .iter()
+            .filter(|t| t.edit.slot == Some(1))
+            .count()
+            == 2
+    })?;
+    let other =
+        d.st.trace_list()
+            .iter()
+            .find(|t| t.edit.slot == Some(1) && !matches!(t.source, TraceSource::Math { .. }))
+            .map(|t| t.id)
+            .ok_or("the second position's capture")?;
+    d.conn.send(Request::Call {
+        cmd: Command::TraceDelete { trace: other },
+        what: "deleted".into(),
+    });
+    d.until("one capture left", |s| s.trace_list().len() == 1)?;
     // Edited in the same dialog into A ÷ B: one path over itself is 0 dB.
     d.key("Ctrl+K");
     d.send(Msg::Text("edit measurement".into()));
