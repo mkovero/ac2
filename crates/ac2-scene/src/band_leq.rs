@@ -223,6 +223,7 @@ fn state_text(state: TileState, on_course: bool, chrome: PlotChrome) -> Option<S
         TileState::Near if !chrome.limit_text() && !on_course => None,
         TileState::NoLimit => None,
         TileState::NotCalibrated => Some("not calibrated".into()),
+        TileState::CantTell => Some(crate::leq::CANT_TELL.into()),
         TileState::Ok => Some("OK".into()),
         TileState::Near if on_course => Some("ON COURSE".into()),
         TileState::Near => Some("NEAR".into()),
@@ -250,8 +251,11 @@ fn finite(v: f32) -> Option<f64> {
 }
 
 /// The period line: the set the window is judged by and, when the headroom is computed
-/// against the other set, which.
-pub fn period_text(period: BandPeriod, after_horizon: BandPeriod) -> String {
+/// against the other set, which; "can't tell" while the time of day is not known (`None`).
+pub fn period_text(period: Option<BandPeriod>, after_horizon: Option<BandPeriod>) -> String {
+    let (Some(period), Some(after_horizon)) = (period, after_horizon) else {
+        return "can't tell day or night: clock not set".to_owned();
+    };
     let now = match period {
         BandPeriod::Night => "night limits (22–07)",
         BandPeriod::Day => "day limits (07–22)",

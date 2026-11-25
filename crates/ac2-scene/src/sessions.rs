@@ -286,8 +286,13 @@ pub fn salvage_question(name: &str, version: Option<u32>) -> Question {
 /// `imported 4 traces from friday; 1 refused (traces/x.csv: …)`.
 pub fn salvage_toast(name: &str, s: &Salvage) -> String {
     let n = s.imported.len();
+    let logs = match s.spl_logs.len() {
+        0 => String::new(),
+        1 => " and 1 SPL log".to_owned(),
+        k => format!(" and {k} SPL logs"),
+    };
     let mut t = format!(
-        "imported {n} trace{} from {name}",
+        "imported {n} trace{}{logs} from {name}",
         if n == 1 { "" } else { "s" }
     );
     if let Some(first) = s.refused.first() {
@@ -548,6 +553,7 @@ mod tests {
         let s = Salvage {
             version: Some(19),
             imported: vec![],
+            spl_logs: vec![],
             refused: vec![SalvageRefusal {
                 file: "traces/x.csv".into(),
                 reason: "not an ac2 trace".into(),
@@ -556,6 +562,15 @@ mod tests {
         assert_eq!(
             salvage_toast("old", &s),
             "imported 0 traces from old; 1 refused (traces/x.csv: not an ac2 trace)"
+        );
+        let logs = Salvage {
+            spl_logs: vec![ac2_proto::units::MeasId(3)],
+            refused: vec![],
+            ..s
+        };
+        assert_eq!(
+            salvage_toast("old", &logs),
+            "imported 0 traces and 1 SPL log from old"
         );
         assert_eq!(size(812), "812 B");
         assert_eq!(size(812_000), "812 kB");

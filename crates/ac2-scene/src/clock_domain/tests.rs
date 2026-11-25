@@ -13,6 +13,7 @@ fn synced(maxerror_us: u32) -> SystemClock {
 fn clocks(rate: SampleClock, system: SystemClock) -> Clocks {
     Clocks {
         system,
+        rtc: true,
         capture: Some(DeviceClock {
             device: DeviceId("system".into()),
             rate,

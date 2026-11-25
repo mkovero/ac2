@@ -411,6 +411,12 @@ impl AppState {
         let Some((lo, hi)) = self.log_extent(meas) else {
             return;
         };
+        // The log is asked by second index, which keeps to the wall clock's distance
+        // within a run and across a known gap: counted back from the newest index named.
+        let Some(&(last, until)) = self.rig.leq.index_at.get(&meas) else {
+            return;
+        };
+        let index = |t: f64| (last as f64 - (until - t)).max(0.0);
         let s = f64::from(step);
         let room = (f64::from(SplHistory::MAX_POINTS - 2) * s - (to - from)).max(0.0) / 2.0;
         let margin = (to - from).min(room);
@@ -427,8 +433,8 @@ impl AppState {
         });
         out.push(Request::LeqSpan {
             meas,
-            from: WallNs((a.max(0.0) * 1e9) as u64),
-            to: WallNs((b.max(0.0) * 1e9) as u64),
+            from: index(a).floor() as u64,
+            to: index(b).ceil() as u64,
             step_s: step,
             ask,
         });
@@ -447,6 +453,7 @@ impl AppState {
         }
         match result {
             Ok(h) => {
+                self.rig.leq.note_index(meas, &h);
                 let Some(a) = asked else {
                     return;
                 };
@@ -560,6 +567,7 @@ impl RigState {
     /// A new log of meter `meas` (or new windows): its fetched spans are of the old one.
     pub(in crate::state) fn forget_leq_spans(&mut self, meas: MeasId) {
         self.leq.spans.remove(&meas);
+        self.leq.index_at.remove(&meas);
         if self.leq.span_pending.is_some_and(|p| p.meas == meas) {
             self.leq.span_pending = None;
         }

@@ -19,7 +19,7 @@ use crate::format;
 use crate::primitives::{Color, FillRect, HAlign, Polyline, Rect, Stroke, VAlign};
 use crate::theme::{Theme, contrast_ratio};
 
-use super::{LeqTile, PlotChrome, TileKind, TileState, length};
+use super::{CANT_TELL, LeqTile, PlotChrome, TileKind, TileState, length};
 use crate::view::Style;
 
 /// A judged scale starts this far below the lowest limit…
@@ -178,7 +178,9 @@ pub fn column_colors(state: TileState, theme: &Theme) -> (Color, Color) {
         ),
         TileState::Ok => (theme.plot_background, theme.level_ok),
         // No judgement, no colour.
-        TileState::NoLimit | TileState::NotCalibrated => (theme.plot_background, theme.text_dim),
+        TileState::NoLimit | TileState::NotCalibrated | TileState::CantTell => {
+            (theme.plot_background, theme.text_dim)
+        }
     }
 }
 
@@ -339,7 +341,7 @@ pub(super) fn detail_lines(t: &LeqTile, chrome: PlotChrome) -> [Vec<String>; 3] 
         TileState::Near => vec!["NEAR".to_string()],
         TileState::Ok => vec!["OK".to_string()],
         // Nothing judged: not a call to act on, so not large; said where the limit goes.
-        TileState::NotCalibrated | TileState::NoLimit => vec![],
+        TileState::NotCalibrated | TileState::CantTell | TileState::NoLimit => vec![],
     };
     let limit = match t.limit_db {
         Some(_) if !words => vec![],
@@ -349,6 +351,9 @@ pub(super) fn detail_lines(t: &LeqTile, chrome: PlotChrome) -> [Vec<String>; 3] 
         }
         None if t.state == TileState::NotCalibrated => {
             vec!["not calibrated".to_string(), "uncal.".to_string()]
+        }
+        None if t.state == TileState::CantTell => {
+            vec![CANT_TELL.to_string(), "can't tell".to_string()]
         }
         None => vec![],
     };

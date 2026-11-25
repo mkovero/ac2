@@ -752,12 +752,17 @@ pub(super) async fn export_leq_log(
     log: ac2_proto::model::SplLogWhich,
     path: std::path::PathBuf,
 ) -> Result<(std::path::PathBuf, usize), String> {
-    let rows = ac2_client::spl_log::all_rows(c, info.meas, log)
+    let d = ac2_client::spl_log::all_rows(c, info.meas, log)
         .await
         .map_err(|e| e.to_string())?;
+    // The header's start is the log's as read, whatever the request was made with.
+    let info = ac2_proto::spl_log::SplLogInfo {
+        started: d.started_at,
+        ..info
+    };
     tokio::task::spawn_blocking(move || {
-        let csv = ac2_proto::spl_log::export_csv(&info, &rows);
-        write_new_file(&path, csv.as_bytes()).map(|p| (p, rows.len()))
+        let csv = ac2_proto::spl_log::export_csv(&info, &d.rows);
+        write_new_file(&path, csv.as_bytes()).map(|p| (p, d.rows.len()))
     })
     .await
     .map_err(|e| e.to_string())?

@@ -60,6 +60,7 @@ fn the_connection_page_says_each_rigs_clock() {
     t.remirror(|s| {
         s.clocks = Clocks {
             system: SystemClock::Synced { maxerror_us: 504 },
+            rtc: true,
             capture: Some(DeviceClock {
                 device: DeviceId("fake:loop".into()),
                 rate: SampleClock::Measuring,
@@ -75,6 +76,7 @@ fn the_connection_page_says_each_rigs_clock() {
     let mut s = pupu(&t).daemon().cloned().expect("pupu's state");
     s.clocks = Clocks {
         system: SystemClock::Synced { maxerror_us: 3027 },
+        rtc: true,
         capture: Some(DeviceClock {
             device: DeviceId("system".into()),
             rate: SampleClock::Measured {
@@ -102,6 +104,7 @@ fn the_connection_page_says_each_rigs_clock() {
 fn measured(ppm: f64) -> Clocks {
     Clocks {
         system: SystemClock::Synced { maxerror_us: 504 },
+        rtc: true,
         capture: Some(DeviceClock {
             device: DeviceId("system".into()),
             rate: SampleClock::Measured {
