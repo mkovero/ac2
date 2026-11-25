@@ -113,6 +113,7 @@ fn a_captured_trace_survives_a_daemon_restart() -> R {
     let dir = tempfile::tempdir()?;
     let (handle, ep) = autosaving_daemon(dir.path())?;
     let mut d = Driver::connect(ClientConfig::new(ep, NAME), "local daemon")?;
+    d.keep_transfers_on_stop();
     d.synced()?;
     assert_eq!(
         d.st.autosave_label(now()).map(|l| l.text),

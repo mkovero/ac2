@@ -2,7 +2,7 @@
 //! from the empty session, Shift+W, a room plan drawn in the plan editor, the setup window's
 //! suggestion, the walk pane, two points captured and the walk's average made.
 
-use super::harness::{Driver, R, measuring, scene_texts};
+use super::harness::{Driver, R, measuring_kept, scene_texts};
 use ac2_proto::model::PointState;
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
@@ -55,7 +55,7 @@ fn dimmed(s: &AppState) -> Vec<Action> {
 
 #[test]
 fn spatial_walk_from_an_empty_daemon() -> R {
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let panes = d.st.layout.views.len();
 
     // Shift+W: New walk… first; no plan in the library, so its plan row is New plan….

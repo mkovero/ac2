@@ -2,7 +2,7 @@
 //! steps through the measurements.
 
 use super::{hint_line, new_spectrum};
-use crate::harness::{R, connected, first_transfer, measuring};
+use crate::harness::{R, connected, first_transfer, measuring, measuring_kept};
 use ac2_proto::model::MeasKind;
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::MeasId;
@@ -350,7 +350,7 @@ fn a_child_row_brings_its_measurements_panes_from_an_empty_daemon() -> R {
 fn v_only_selects_from_an_empty_daemon() -> R {
     use ac2_proto::model::TraceOwner;
     use ac2_ui::state::PaneKind;
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let first = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
     d.key("Ctrl+K");
     d.send(Msg::Text("new transfer".into()));

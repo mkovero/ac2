@@ -3,7 +3,7 @@
 
 use super::{hint_line, new_spectrum, spectrum_panes};
 use crate::harness::{
-    Driver, NAME, R, connected, measure_from_empty, measuring, session_from_empty,
+    Driver, NAME, R, connected, measure_from_empty, measuring, measuring_kept, session_from_empty,
 };
 use ac2_client::{ClientConfig, Endpoints};
 use ac2_proto::FrameData;
@@ -41,7 +41,7 @@ fn streams_of(s: &AppState, meas: MeasId) -> Vec<Stream> {
 /// measurement's input levels, which no pane draws, never arrive.
 #[test]
 fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?.id;
     // The measurement dropped on the IR pane too.
     d.key("Alt+3");
@@ -362,6 +362,7 @@ fn record_and_replay_from_the_app() -> R {
         data: handle.data_endpoint().to_owned(),
     };
     let mut d = Driver::connect(ClientConfig::new(ep, NAME), "local daemon")?;
+    d.keep_transfers_on_stop();
     measure_from_empty(&mut d)?;
     assert_eq!(d.st.recording_label(), None, "nothing recorded yet");
     let meas = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;

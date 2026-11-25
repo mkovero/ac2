@@ -1,6 +1,6 @@
 //! Math traces on the transfer and spectrum panes.
 
-use super::harness::{R, measuring};
+use super::harness::{R, measuring, measuring_kept};
 use ac2_proto::FrameData;
 use ac2_proto::model::MeasKind;
 use ac2_proto::topic::{Stream, Topic};
@@ -51,7 +51,7 @@ fn math_traces_from_an_empty_daemon() -> R {
     use ac2_proto::frame::OperandStatus;
     use ac2_proto::model::{MathExpr, MathOp, TraceSource};
     use ac2_ui::conn::Request;
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let first = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
 
     // One transfer function: nothing to combine it with yet, and the dialog says so.

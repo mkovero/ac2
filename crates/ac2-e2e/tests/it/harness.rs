@@ -35,16 +35,18 @@ impl Driver {
             Arc::new(|| {}),
         )?;
         let mut st = AppState::default();
-        let mut prefs = crate::common::grid_ui_prefs();
-        // The tests stop the stimulus between steps and go on reading their transfers;
-        // the one test of the rule turns it on.
-        prefs.stop_transfers_with_stimulus = false;
-        st.set_prefs(prefs);
+        st.set_prefs(crate::common::grid_ui_prefs());
         Ok(Self {
             st,
             keys: Keymap::default(),
             conn,
         })
+    }
+
+    /// Turns off "Stop transfers with the stimulus" (on as shipped) for a test that stops
+    /// the stimulus between its steps and goes on reading the transfer it measures.
+    pub fn keep_transfers_on_stop(&mut self) {
+        self.st.prefs.stop_transfers_with_stimulus = false;
     }
 
     pub fn send(&mut self, m: Msg) {
@@ -302,6 +304,15 @@ pub fn noise(cli: &Cli) -> R<ac2_client::StimulusLease> {
 /// app.
 pub fn measuring() -> R<(SimDaemon, Driver)> {
     let (daemon, mut d) = connected()?;
+    measure_from_empty(&mut d)?;
+    Ok((daemon, d))
+}
+
+/// [`measuring`] for a test that stops the stimulus between its steps and goes on reading
+/// its transfer: [`Driver::keep_transfers_on_stop`] first.
+pub fn measuring_kept() -> R<(SimDaemon, Driver)> {
+    let (daemon, mut d) = connected()?;
+    d.keep_transfers_on_stop();
     measure_from_empty(&mut d)?;
     Ok((daemon, d))
 }

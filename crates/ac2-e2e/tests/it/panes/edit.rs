@@ -1,7 +1,7 @@
 //! Zoom, hide and delete the selected measurement, a remembered level axis, and export and
 //! subtract of the selected stored trace.
 
-use crate::harness::{Driver, R, connected, measure_from_empty, measuring};
+use crate::harness::{Driver, R, connected, measure_from_empty, measuring, measuring_kept};
 use ac2_proto::model::MeasKind;
 use ac2_proto::topic::{Stream, Topic};
 use ac2_scene::theme::Theme;
@@ -19,7 +19,7 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     use ac2_proto::units::TraceId;
     use ac2_scene::trace::TraceKey;
     use ac2_ui::state::PaneKind;
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let tf = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
 
     // Two captures, their data fetched.
@@ -236,7 +236,7 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
 #[test]
 fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     use ac2_ui::state::{DeleteTarget, PaneKind};
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let first = d.st.selected_meas().cloned().ok_or("measurement")?;
 
     // A second transfer measurement from the palette's dialog, as it comes.
@@ -483,7 +483,7 @@ fn retype(d: &mut Driver, text: &str) {
 /// selected trace and the next shown one.
 #[test]
 fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
-    let (daemon, mut d) = measuring()?;
+    let (daemon, mut d) = measuring_kept()?;
     d.key("Ctrl+1");
     d.until("slot 1", |s| s.slots()[0].is_some())?;
     let a = d.st.slots()[0].map(|t| t.id).ok_or("slot 1")?;

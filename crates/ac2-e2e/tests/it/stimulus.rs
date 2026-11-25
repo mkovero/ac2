@@ -1,8 +1,7 @@
 //! The stimulus and audio state: banners, following the view, output routes and max level.
 
 use super::harness::{
-    Driver, NAME, R, arm_new_sweep, connected, first_transfer, measure_from_empty, measuring,
-    sweep_count,
+    Driver, NAME, R, arm_new_sweep, connected, first_transfer, measure_from_empty, sweep_count,
 };
 use ac2_client::{ClientConfig, Endpoints};
 use ac2_proto::topic::Stream;
@@ -472,15 +471,27 @@ fn settings_pages() -> R {
     Ok(())
 }
 
-/// The keys that start the stimulus stop it: armed and fired, Space stops it, and the
-/// transfer measuring against the loopback stops with it, in one toast.
+/// With the setting as shipped: a stop of the playing noise stops the transfer measuring
+/// against the loopback; S starts it again and the noise fired again feeds it; Space, the
+/// key that started the stimulus, stops it and the transfer with it, in one toast.
 #[test]
 fn space_stops_the_stimulus_and_the_loopback_transfer() -> R {
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = connected()?;
+    // `measure_from_empty` plays and stops the noise: the transfer stops with it, as shipped.
+    measure_from_empty(&mut d)?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
-    assert!(d.st.meas(m.id).is_some_and(|x| x.running));
-    d.st.prefs.stop_transfers_with_stimulus = true;
+    d.until("the transfer stopped with the stimulus", |s| {
+        s.meas(m.id).is_some_and(|x| !x.running)
+    })?;
+    // S starts it again; the noise armed and fired, it measures.
+    d.key("Alt+1");
+    d.key("S");
+    d.until("measuring again", |s| {
+        s.meas(m.id).is_some_and(|x| x.running)
+    })?;
     d.arm()?;
+    d.play()?;
+    d.tf_frames(m.id, 336)?;
     d.play()?;
     d.key("Space");
     d.until("the stimulus and the transfer stopped", |s| {

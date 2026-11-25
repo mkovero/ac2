@@ -1,6 +1,6 @@
 //! The alignment aid from an empty daemon: two transfer curves aligned in their overlap.
 
-use super::harness::{R, measuring};
+use super::harness::{R, measuring_kept};
 use ac2_proto::model::{MathExpr, MeasKind};
 use ac2_scene::theme::Theme;
 use ac2_ui::forms::{FieldId, FormKind};
@@ -24,7 +24,7 @@ fn readout(s: &AppState) -> Option<ac2_scene::align::Readout> {
 /// polarity, the two adding fully.
 #[test]
 fn alignment_from_an_empty_daemon() -> R {
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let live = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
     d.tf_frames(live, 336)?;
     d.key("Ctrl+1");

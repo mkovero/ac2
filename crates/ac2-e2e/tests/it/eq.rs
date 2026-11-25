@@ -3,7 +3,7 @@
 //! prediction assumes is in, B / Shift+B bypass, P predicts a capture, M + M marks the set
 //! as in the console and the live prediction turns into `no change`.
 
-use super::harness::{R, measuring};
+use super::harness::{R, measuring_kept};
 use ac2_proto::model::{EqShape, MeasKind, Measurement, Operand};
 use ac2_proto::units::MeasId;
 use ac2_scene::theme::Theme;
@@ -59,7 +59,7 @@ fn has_legend(s: &AppState, line: &str) -> bool {
 
 #[test]
 fn eq_editor_from_an_empty_daemon() -> R {
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     let live = Operand::Meas { meas: m.id };
 

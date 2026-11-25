@@ -3,7 +3,9 @@
 //! pane its own meter only.
 
 use super::new_spectrum;
-use crate::harness::{Driver, NAME, R, connected, measure_from_empty, measuring, scene_texts};
+use crate::harness::{
+    Driver, NAME, R, connected, measure_from_empty, measuring, measuring_kept, scene_texts,
+};
 use ac2_proto::model::{MeasKind, TraceOwner};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, TraceId};
@@ -219,7 +221,7 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
 /// nothing of it and says to make a measurement.
 #[test]
 fn a_transfer_pane_does_not_draw_imported_from_an_empty_daemon() -> R {
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let tf =
         d.st.selected_meas()
             .map(|m| m.id)

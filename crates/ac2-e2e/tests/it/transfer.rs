@@ -1,7 +1,8 @@
 //! Transfer measurements from the app: starting, stopping, the IR pane and delay changes.
 
 use super::harness::{
-    Driver, NAME, R, connected, measure_from_empty, measuring, sweep_from_the_dialog,
+    Driver, NAME, R, connected, measure_from_empty, measuring, measuring_kept,
+    sweep_from_the_dialog,
 };
 use ac2_e2e::{Setup, sim_daemon};
 use ac2_proto::FrameData;
@@ -156,7 +157,7 @@ fn no_reference(s: &AppState) -> Option<String> {
 #[test]
 fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
     use ac2_ui::state::PaneKind;
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
 
@@ -212,7 +213,7 @@ fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
 fn the_ir_pane_zooms_pans_and_reads_from_the_mouse() -> R {
     use ac2_scene::view::IrPane;
     use ac2_ui::state::IrNavMsg;
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     // The transfer measurement dropped on the IR pane.
     let tf = d.st.selected_meas().map(|m| m.id).ok_or("the transfer")?;
     d.key("Alt+3");
@@ -296,7 +297,7 @@ fn the_ir_pane_zooms_pans_and_reads_from_the_mouse() -> R {
 /// delay to the microsecond.
 #[test]
 fn delay_nudges_from_the_keys_keep_the_curve() -> R {
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     // The level typed there stays: arm and fire.
     d.arm()?;
@@ -697,7 +698,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
 #[test]
 fn a_typed_delay_moves_only_its_live_curve() -> R {
     use ac2_scene::trace::TraceKey;
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     d.key("Alt+1");
     let running = |s: &AppState| {

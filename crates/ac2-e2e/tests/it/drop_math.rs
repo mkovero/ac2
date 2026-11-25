@@ -1,6 +1,6 @@
 //! A curve's row dropped onto another's makes a math trace, from an empty daemon.
 
-use super::harness::{R, measuring};
+use super::harness::{R, measuring_kept};
 use ac2_proto::model::{MathExpr, MathOp, MeasKind, Operand, TraceKind, TraceOwner};
 use ac2_scene::meas_list::TreeKey;
 use ac2_ui::forms::FormKind;
@@ -12,7 +12,7 @@ use ac2_ui::state::{DragItem, DragMsg, Msg, Overlay};
 /// math trace under the same measurement.
 #[test]
 fn a_loudness_shift_dropped_on_a_capture_makes_its_math_trace() -> R {
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     let m = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
     let owner = TraceOwner::Meas { meas: m };
 

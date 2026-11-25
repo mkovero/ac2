@@ -139,7 +139,7 @@ fn top_bar_never_overlaps() -> R {
             .daemon()
             .is_some_and(|s| s.generator.armed && s.generator.owner_local)
     });
-    for width in [2400.0, 1600.0, 1290.0, 1100.0, 900.0, 760.0, 640.0] {
+    for width in [2400.0, 1600.0, 1290.0, 1100.0, 900.0, 760.0, 640.0, 520.0] {
         h.set_size(egui::vec2(width, 800.0));
         for _ in 0..3 {
             h.step();
@@ -168,8 +168,13 @@ fn top_bar_never_overlaps() -> R {
             }
         }
         if width <= 640.0 {
-            // Narrow: the key hints have given their room to the line.
+            // Narrow: the key hints have given their room to the line, and the stimulus is
+            // down to its state word beside the stop.
             assert!(!has("commands"), "{width} px: {labels:?}");
+            assert!(
+                labels.iter().any(|(t, _)| t == "ARMED"),
+                "{width} px: {labels:?}"
+            );
         }
         for (i, (a, ra)) in labels.iter().enumerate() {
             assert!(

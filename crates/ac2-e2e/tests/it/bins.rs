@@ -1,7 +1,7 @@
 //! A transfer at `bins` from the app: a pane zoomed into the top octave on a wide plot
 //! receives the full-rate stage's own bins and draws its curve through them.
 
-use super::harness::{R, measuring};
+use super::harness::{R, measuring_kept};
 use ac2_proto::FrameData;
 use ac2_proto::model::{MeasKind, Measurement, Resolution, TransferResolution};
 use ac2_proto::topic::Topic;
@@ -19,7 +19,7 @@ fn resolution(s: &AppState) -> Option<TransferResolution> {
 
 #[test]
 fn a_zoom_into_the_top_octave_draws_the_full_rate_bins() -> R {
-    let (_daemon, mut d) = measuring()?;
+    let (_daemon, mut d) = measuring_kept()?;
     // The simulated rig's noise: a reference to average on.
     d.arm()?;
     d.play()?;
@@ -79,7 +79,7 @@ fn a_math_of_live_bins_draws_its_bins() -> R {
     use ac2_proto::model::{MathConfig, MathDomain, Operand, TraceOwner};
     use ac2_proto::{Command, ReplyBody};
     use ac2_scene::trace::TraceKey;
-    let (daemon, mut d) = measuring()?;
+    let (daemon, mut d) = measuring_kept()?;
     d.arm()?;
     d.play()?;
     let pane = d.st.lead(PaneKind::Transfer).ok_or("a transfer pane")?;
