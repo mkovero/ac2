@@ -112,7 +112,7 @@ fn state_of(j: LeqJudgement) -> CueState {
         LeqJudgement::NoLimit | LeqJudgement::Ok => CueState::Ok,
         LeqJudgement::Near => CueState::Near,
         LeqJudgement::Over => CueState::Over,
-        LeqJudgement::NotCalibrated => CueState::Fault,
+        LeqJudgement::NotCalibrated | LeqJudgement::CantTell => CueState::Fault,
     }
 }
 

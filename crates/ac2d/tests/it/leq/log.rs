@@ -175,7 +175,11 @@ async fn a_long_log_in_pages_and_its_history() {
     let t0 = 1_790_000_000_000_000_000;
     let rows: Vec<SplLogRow> = (0..n)
         .map(|k| SplLogRow {
+            second: k,
+            run: 0,
             start: WallNs(t0 + k * 1_000_000_000),
+            clock: ac2_proto::model::LogClock::Synced,
+            gap: (k == 0).then_some(ac2_proto::model::LogGap::Known),
             measured: Seconds(1.0),
             laeq: Dbfs(-30.0 - (k % 10) as f64),
             lceq: Dbfs(-28.0),
@@ -208,9 +212,12 @@ async fn a_long_log_in_pages_and_its_history() {
                     name: "FOH SPL".into(),
                     input: 1,
                     mic: None,
+                    zone: "UTC".into(),
+                    started: WallNs(t0),
                 },
                 rows: rows.clone(),
                 bands: Vec::new(),
+                mark: None,
             }],
             traces: Vec::new(),
             walks: Vec::new(),
@@ -285,7 +292,12 @@ async fn a_long_log_in_pages_and_its_history() {
     let (first, until) = (rows[0].start, WallNs(rows[rows.len() - 1].start.0 + sec));
     assert_eq!((hist.log_start, hist.log_until), (Some(first), Some(until)));
 
-    let range = |from: WallNs, to: WallNs, step_s: u32| {
+    assert_eq!(
+        (hist.first_second, hist.last_second),
+        (Some(0), Some(n - 1))
+    );
+
+    let range = |from: u64, to: u64, step_s: u32| {
         let c = &c;
         async move {
             c.call(Command::SplHistoryGet {
@@ -299,27 +311,26 @@ async fn a_long_log_in_pages_and_its_history() {
             })
         }
     };
-    // The log's first seconds, one by one: the range reaches the first row.
-    let start = range(WallNs(first.0 - sec), WallNs(first.0 + 600 * sec), 1)
-        .await
-        .unwrap();
+    // The log's first seconds, one by one, by index: the range reaches the first row.
+    let start = range(0, 599, 1).await.unwrap();
     assert_eq!(start.at.len(), 600);
+    assert_eq!(start.second, (0..600).collect::<Vec<u64>>());
     assert_eq!(start.at[0].0, first.0 + sec);
     assert_eq!(
         (start.log_start, start.log_until),
         (Some(first), Some(until))
     );
-    // The whole log at a minute a point: the highest second of each bucket.
-    let whole = range(WallNs(first.0 - sec), until, 60).await.unwrap();
+    // The whole log at a minute a point: the highest second of each bucket of 60 indices.
+    let whole = range(0, n - 1, 60).await.unwrap();
     assert_eq!(whole.step_s, 60);
-    assert!(whole.at.len() >= n as usize / 60, "{}", whole.at.len());
-    assert!(whole.at.iter().all(|t| t.0 % (60 * sec) == 0));
-    for (k, end) in whole.at.iter().enumerate() {
+    assert_eq!(whole.at.len(), (n as usize).div_ceil(60));
+    assert!(whole.second.iter().all(|s| s % 60 == 59 || *s == n - 1));
+    for (k, newest) in whole.second.iter().enumerate() {
         let inside: Vec<f32> = hist
-            .at
+            .second
             .iter()
             .zip(&hist.leq[0])
-            .filter(|(t, _)| t.0 > end.0 - 60 * sec && t.0 <= end.0)
+            .filter(|(s, _)| *s / 60 == newest / 60)
             .map(|(_, l)| *l)
             .collect();
         // Buckets wholly within the 4 h the newest-seconds history covers.
@@ -329,8 +340,10 @@ async fn a_long_log_in_pages_and_its_history() {
         }
     }
     // More points than a reply carries: refused, naming the limit.
-    let e = range(first, until, 1).await.unwrap_err();
+    let e = range(0, n - 1, 1).await.unwrap_err();
     assert!(e.to_string().contains("at most 14400"), "{e}");
+    // A range ending before it starts: refused.
+    assert!(range(10, 9, 1).await.is_err());
     tokio::task::spawn_blocking(move || h.shutdown())
         .await
         .unwrap();

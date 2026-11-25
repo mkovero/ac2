@@ -71,6 +71,7 @@ impl Store {
                 // clock already stated.
                 clocks: Clocks {
                     system: crate::sysclock::read(),
+                    rtc: crate::hostclock::rtc(),
                     capture: None,
                     stamp_map: None,
                 },

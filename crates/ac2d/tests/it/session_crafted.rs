@@ -78,7 +78,11 @@ fn a_session_with_crafted_logs_or_trace_data_refuses_to_load() {
     };
     let (spl_id, tf_id) = (id_of("spl"), id_of("transfer"));
     let row = |k: u64, laeq: f64| SplLogRow {
+        second: k,
+        run: 0,
         start: WallNs(1_790_000_000_000_000_000 + k * 1_000_000_000),
+        clock: ac2_proto::model::LogClock::Synced,
+        gap: (k == 0).then_some(ac2_proto::model::LogGap::Known),
         measured: Seconds(1.0),
         laeq: Dbfs(laeq),
         lceq: Dbfs(-23.25),
@@ -95,6 +99,8 @@ fn a_session_with_crafted_logs_or_trace_data_refuses_to_load() {
                 name: "FOH".into(),
                 input: 0,
                 mic: None,
+                zone: "UTC".into(),
+                started: WallNs(1_790_000_000_000_000_000),
             },
             &[row(0, -25.0), row(1, laeq)],
         )

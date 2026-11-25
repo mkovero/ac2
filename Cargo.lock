@@ -284,6 +284,7 @@ dependencies = [
  "clap",
  "ctrlc",
  "getrandom 0.3.4",
+ "iana-time-zone",
  "if-addrs",
  "jack",
  "libc",
@@ -298,6 +299,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

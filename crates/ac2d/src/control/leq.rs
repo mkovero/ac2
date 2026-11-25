@@ -23,8 +23,6 @@ use crate::leq_log::{self, LeqLog};
 use crate::route::Peer;
 use crate::util::{internal, invalid, missing, wall_ns};
 
-const NS: u64 = 1_000_000_000;
-
 impl Control {
     fn spl_config(&self, id: MeasId) -> Option<(String, ac2_proto::model::SplConfig)> {
         self.store
@@ -136,7 +134,7 @@ impl Control {
                 .unwrap_or_default(),
             peak_judgements: PeakQuantity::ALL
                 .map(|q| entity.map_or(LeqJudgement::NoLimit, |l| l.peaks.get(q).judgement)),
-            local: self.s.local_clock,
+            host: self.clocks.host.clone(),
         }
     }
 
@@ -292,13 +290,14 @@ impl Control {
                 leq_history::history(meas, &config.leq, &rows, from_log_start, seconds)
             }
             HistorySpan::Range { from, to, step_s } => {
-                if step_s == 0 || to.0 <= from.0 {
+                if step_s == 0 || to < from {
                     return Err(invalid(
-                        "spl.history_get range: `to` must be after `from` and `step_s` at \
-                         least 1",
+                        "spl.history_get range: `to` must not be before `from` and `step_s` \
+                         at least 1",
                     ));
                 }
-                let points = (to.0 - from.0).div_ceil(u64::from(step_s) * NS);
+                let step = u64::from(step_s);
+                let points = to / step - from / step + 1;
                 if points > u64::from(SplHistory::MAX_POINTS) {
                     return Err(invalid(format!(
                         "spl.history_get range: {points} points of {step_s} s, at most \
@@ -307,9 +306,9 @@ impl Control {
                     )));
                 }
                 // The first second wanted is computed over the longest window before it.
-                let back = leq_history::rows_needed(&config.leq, 0) as u64 * NS;
+                let back = leq_history::rows_needed(&config.leq, 0) as u64;
                 let (rows, from_log_start) = match log {
-                    Some(l) => leq_log::lock(l).rows_between(from.0.saturating_sub(back), to.0),
+                    Some(l) => leq_log::lock(l).rows_in(from.saturating_sub(back), to),
                     None => (Vec::new(), true),
                 };
                 leq_history::range_history(
@@ -321,7 +320,10 @@ impl Control {
                 )
             }
         };
-        (h.log_start, h.log_until) = (extent.map(|e| e.0), extent.map(|e| e.1));
+        h.first_second = extent.map(|e| e.first);
+        h.last_second = extent.map(|e| e.last);
+        h.log_start = extent.map(|e| e.start);
+        h.log_until = extent.map(|e| e.until);
         Ok(ReplyBody::SplHistory(Box::new(h)))
     }
 
@@ -409,6 +411,8 @@ impl Control {
                         name,
                         input: config.input,
                         mic,
+                        zone: st.rig.zone.label(),
+                        started: leq_log::lock(log).started(),
                     },
                     log,
                 ))
@@ -428,6 +432,7 @@ impl Control {
                     info,
                     rows: l.rows(),
                     bands: l.band_rows(),
+                    mark: l.exact_mark(),
                 }
             })
             .collect()

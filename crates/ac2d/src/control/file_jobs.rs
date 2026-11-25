@@ -30,8 +30,8 @@
 //! - A load, new or recover commits only onto the working state it began on: when the
 //!   content or its saved standing changed meanwhile, it is refused (`conflict`, nothing
 //!   changed) and the client asks again (the unsaved-changes guard then sees the edits).
-//! - A salvage only adds traces: it imports what its worker read onto the state as it is
-//!   when the read comes back.
+//! - A salvage only adds traces and new SPL meters holding salvaged logs: it imports what
+//!   its worker read onto the state as it is when the read comes back.
 //! - A retry of the request still pending never reaches here: the request's reservation
 //!   (`Dedup::admit`) attaches it, and the one result answers every copy.
 

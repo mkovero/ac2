@@ -81,6 +81,7 @@ impl Control {
                 artnet_target: saved.artnet_target,
                 artnet_fade: saved.artnet_fade,
                 levels: saved.levels,
+                zone: crate::hostclock::zone(s.local_clock, crate::util::wall_ns()),
                 ..Default::default()
             })
             .with_peers(saved.peers.clone())
@@ -100,6 +101,7 @@ impl Control {
         let dedup = Dedup::new(s.dedup);
         let rigm = rig_meas::RigMeas::new(&saved, s.rig_logs.as_deref());
         let stored_ceiling = saved.ceiling_dbfs;
+        let rtc = store.state().clocks.rtc;
         let mut c = Self {
             store,
             cal,
@@ -129,7 +131,7 @@ impl Control {
                 seq: 0,
                 due: Instant::now(),
             },
-            clocks: clocks::ClockWatch::new(s.system_clock.read()),
+            clocks: clocks::ClockWatch::new(s.system_clock.read(), rtc, s.local_clock),
             refusals: crate::refusals::Refusals::default(),
             damaged,
             notify: if s.systemd_notify {

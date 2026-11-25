@@ -545,7 +545,11 @@ fn spl() -> Spl {
             to_control,
             judgements: Vec::new(),
             peak_judgements: [ac2_proto::model::LeqJudgement::NoLimit; 2],
-            local: crate::config::LocalClock::Host,
+            host: std::sync::Arc::new(crate::hostclock::HostClock::new(
+                ac2_proto::model::SystemClock::NotStated,
+                true,
+                crate::config::LocalClock::Host,
+            )),
         },
     )
     .expect("spl")

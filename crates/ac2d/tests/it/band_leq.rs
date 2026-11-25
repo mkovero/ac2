@@ -37,7 +37,8 @@ async fn connect(h: &Handle) -> Client {
 /// A clock whose local time of day is `at_s` (s after midnight) now.
 fn clock_at(at_s: u32) -> LocalClock {
     let now = (wall_now_ns() / 1_000_000_000 % 86_400) as i64;
-    let east = (i64::from(at_s) - now).rem_euclid(86_400);
+    // Within ±12 h, as a zone's offset is: the band log refuses one beyond ±18 h.
+    let east = (i64::from(at_s) - now + 43_200).rem_euclid(86_400) - 43_200;
     LocalClock::FixedOffset {
         east_s: east as i32,
     }
@@ -255,7 +256,7 @@ async fn slow_two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_mo
     let hz: Vec<f64> = f.meta.windows.iter().map(|w| w.band.0).collect();
     assert_eq!(hz, [40.0, 50.0, 63.0, 80.0, 63.0]);
     assert_eq!(f.leq.len(), 5);
-    assert_eq!(f.meta.windows[Z40].period, BandPeriod::Day);
+    assert_eq!(f.meta.windows[Z40].period, Some(BandPeriod::Day));
     assert_eq!(f.meta.windows[A63W].weighting, Weighting::A);
     // No transfer: the limits apply at the mic as typed.
     assert_eq!(f.meta.limits_from, BandLimitPlace::AtMic);
@@ -373,7 +374,7 @@ async fn slow_two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_mo
         toned.iter().any(|l| (l - level).abs() < 0.3),
         "logged 63 Hz levels {toned:?}"
     );
-    assert!(rows.iter().all(|r| r.period == BandPeriod::Day));
+    assert!(rows.iter().all(|r| r.period == Some(BandPeriod::Day)));
     assert!(rows.iter().all(|r| r.levels.len() == BAND_COUNT));
 
     // The preset again: one LZeq window on 20 … 200 Hz, judged at the mic.
@@ -670,16 +671,16 @@ async fn slow_the_night_limits_take_over_at_22() {
     c.call(Command::MeasStart { meas: M }).await.unwrap();
     c.subscribe(Subscription::Meas(M)).unwrap();
     let f = band_until(&c, "a day frame", |f| f.meta.windows[0].elapsed.0 >= 1.0).await;
-    assert_eq!(f.meta.windows[0].period, BandPeriod::Day);
+    assert_eq!(f.meta.windows[0].period, Some(BandPeriod::Day));
     assert_eq!(b63(&f).1, Some(47.0));
     // The headroom looks past the horizon (2 s) before the windows turn.
     let f = band_until(&c, "night ahead", |f| {
-        f.meta.windows[0].period_after_horizon == BandPeriod::Night
+        f.meta.windows[0].period_after_horizon == Some(BandPeriod::Night)
     })
     .await;
-    assert_eq!(f.meta.windows[0].period, BandPeriod::Day);
+    assert_eq!(f.meta.windows[0].period, Some(BandPeriod::Day));
     let f = band_until(&c, "night", |f| {
-        f.meta.windows[0].period == BandPeriod::Night
+        f.meta.windows[0].period == Some(BandPeriod::Night)
     })
     .await;
     assert_eq!(b63(&f).1, Some(42.0));
@@ -696,16 +697,16 @@ async fn slow_the_night_limits_take_over_at_22() {
     .unwrap();
     let s = ac2_traces::session::load(&path).unwrap();
     let rows = &s.spl_logs[0].bands;
-    assert!(rows.iter().any(|r| r.period == BandPeriod::Day));
-    assert!(rows.iter().any(|r| r.period == BandPeriod::Night));
+    assert!(rows.iter().any(|r| r.period == Some(BandPeriod::Day)));
+    assert!(rows.iter().any(|r| r.period == Some(BandPeriod::Night)));
     let first_night = rows
         .iter()
-        .position(|r| r.period == BandPeriod::Night)
+        .position(|r| r.period == Some(BandPeriod::Night))
         .unwrap();
     assert!(
         rows[first_night..]
             .iter()
-            .all(|r| r.period == BandPeriod::Night)
+            .all(|r| r.period == Some(BandPeriod::Night))
     );
     tokio::task::spawn_blocking(move || h.shutdown())
         .await

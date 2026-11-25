@@ -239,6 +239,7 @@ fn entry(s: &Shown) -> Shown {
 fn clocks(own_ppm: f64) -> Clocks {
     Clocks {
         system: SystemClock::Synced { maxerror_us: 100 },
+        rtc: true,
         capture: Some(DeviceClock {
             device: DeviceId("fake".into()),
             rate: SampleClock::Measured {

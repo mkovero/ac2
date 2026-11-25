@@ -421,10 +421,7 @@ impl Control {
             }
         };
         for l in data.spl_logs {
-            self.set_spl_log(
-                l.info.meas,
-                crate::leq_log::LeqLog::from_rows(l.rows, l.bands),
-            );
+            self.set_spl_log(l.info.meas, crate::leq_log::LeqLog::restored(l));
         }
         for sm in saved {
             let grid_id = grids.remove(&sm.id).map(|g| self.register_grid(g));
