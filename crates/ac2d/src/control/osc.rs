@@ -320,14 +320,15 @@ impl Cues {
         self.sender.status()
     }
 
-    /// The universe the current states make (HTP over their levels).
-    pub(crate) fn frame(&self) -> [u8; DMX_CHANNELS] {
+    /// The universe the current states make (HTP over their levels), and which channels
+    /// jump to their level.
+    pub(crate) fn frame(&self) -> ([u8; DMX_CHANNELS], [bool; DMX_CHANNELS]) {
         dmx_htp(self.entries.iter().map(|e| e.cue.dmx(e.state)))
     }
 
     /// The universe every cue's `ok` levels make: the clean-shutdown frame.
     pub(crate) fn ok_frame(&self) -> [u8; DMX_CHANNELS] {
-        dmx_htp(self.entries.iter().map(|e| e.cue.dmx(CueState::Ok)))
+        dmx_htp(self.entries.iter().map(|e| e.cue.dmx(CueState::Ok))).0
     }
 }
 
@@ -379,7 +380,7 @@ impl Control {
             self.rig.osc.next_repeat = Some(Instant::now() + REPEAT);
         }
         let cues = self.rig.osc.rig_cues();
-        let dmx = dmx_nonzero(&self.rig.osc.frame());
+        let dmx = dmx_nonzero(&self.rig.osc.frame().0);
         let cur = &self.store.state().rig;
         if cues != cur.cues || dmx != cur.dmx {
             let mut rig = cur.clone();

@@ -177,6 +177,7 @@ mod tests {
         DmxSet {
             channel: DmxChannel::new(channel).expect("valid"),
             value,
+            snap: false,
         }
     }
 

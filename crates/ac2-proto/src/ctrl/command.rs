@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::grid::GridId;
 use crate::model::{
     ArtnetTarget, AverageMethod, BackendKind, Ballistic, CalRef, ClientRole, ColourFamily,
-    CorrelationWindow, DelayPick, DelayReference, DeviceId, DmxSet, ExportFormat, FinderBand,
+    CorrelationWindow, DelayPick, DelayReference, DeviceId, DmxLevel, ExportFormat, FinderBand,
     GeneratorDesired, InputSetup, MeasConfig, MicCurveId, NetBind, OscMessage, OutputSetup,
     OwnedTraces, Pair, PaneLayout, PlanSpec, PreviewInput, RecordRequest, RecordingRef, ReplayPace,
     RigPeer, SessionRef, SimFitRequest, SimMapRequest, SimRequest, SplLogWhich, StreamConfig,
@@ -205,14 +205,14 @@ pub enum Command {
         /// Fade time.
         seconds: Seconds,
     },
-    /// Send one frame with these levels (every other channel 0) to the Art-Net target now,
-    /// to find a fixture's channels (setup). The cue frame comes back once the test has been
-    /// held a few seconds, or at once when a cue changes state. Refused (`invalid`) without
-    /// a target.
+    /// Send one frame with these levels merged over the cue frame (each channel at the
+    /// higher of the two) to the Art-Net target now, to find a fixture's channels while the
+    /// cue lights stay. The cue frame comes back after a few seconds, or at once when a cue
+    /// changes state. Refused (`invalid`) without a target.
     #[serde(rename = "artnet.test")]
     ArtnetTest {
         /// Levels.
-        channels: Vec<DmxSet>,
+        channels: Vec<DmxLevel>,
     },
     /// Whether the daemon reopens the last stream's device capture-only when it starts,
     /// so the rig measurements meter with no client connected (`rig.monitor_at_start`).

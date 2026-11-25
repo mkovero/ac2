@@ -6,7 +6,8 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use ac2_proto::model::{
-    ARTNET_PORT, ArtnetFade, ArtnetTarget, DmxSet, PortAddress, Rig, dmx_list_text, parse_dmx_list,
+    ARTNET_PORT, ArtnetFade, ArtnetTarget, DmxEntry, DmxLevel, DmxSet, PortAddress, Rig,
+    dmx_list_text, parse_dmx_list,
 };
 
 /// The Rig monitor page's Art-Net rows.
@@ -119,7 +120,7 @@ pub fn fade_toast(f: ArtnetFade) -> String {
 }
 
 /// A test frame's levels as typed: at least one `channel=value`.
-pub fn parse_test(text: &str) -> Result<Vec<DmxSet>, String> {
+pub fn parse_test(text: &str) -> Result<Vec<DmxLevel>, String> {
     let l = parse_dmx_list(text).map_err(|e| e.to_string())?;
     if l.is_empty() {
         return Err(format!("type levels to send, like {DEFAULT_TEST}"));
@@ -132,8 +133,8 @@ pub fn parse_cue(text: &str) -> Result<Vec<DmxSet>, String> {
     parse_dmx_list(text).map_err(|e| e.to_string())
 }
 
-/// A cue state's levels in their field: `12=255 13=0`, empty for none.
-pub fn cue_text(l: &[DmxSet]) -> String {
+/// Levels in their field: `12=255 13=0!`, empty for none.
+pub fn cue_text<T: DmxEntry>(l: &[T]) -> String {
     dmx_list_text(l)
 }
 

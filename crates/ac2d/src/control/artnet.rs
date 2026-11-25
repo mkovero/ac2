@@ -8,13 +8,16 @@
 //!
 //! A changed cue frame fades in over the rig's `artnet_fade`: every channel moves from the
 //! level last output to its new level in perceived-brightness steps, a frame every
-//! [`FADE_STEP`]. A test frame, the cue frame coming back after it and the shutdown frame
-//! jump: they are for looking at a fixture or for leaving it settled.
+//! [`FADE_STEP`]; a channel whose winning level is a snap (`12=255!`) jumps there instead,
+//! as a strobe, a relay or a warning lamp switches. A test frame, the cue frame coming back
+//! after it and the shutdown frame jump: they are for looking at a fixture or for leaving it
+//! settled. A test frame is merged over the cue frame, so the cue lights stay up while one
+//! fixture is found.
 
 use std::time::{Duration, Instant};
 
 use ac2_proto::event::Change;
-use ac2_proto::model::{ArtnetFade, ArtnetTarget, DMX_CHANNELS, DmxSet, OutputStatus, dmx_htp};
+use ac2_proto::model::{ArtnetFade, ArtnetTarget, DMX_CHANNELS, DmxLevel, OutputStatus};
 use ac2_proto::units::{Rev, Seconds};
 use ac2_proto::{ProtoError, ReplyBody};
 
@@ -57,11 +60,13 @@ pub(crate) fn fade_level(from: u8, to: u8, k: f64) -> u8 {
     v.round().clamp(0.0, 255.0) as u8
 }
 
-/// A fade in progress: from the frame output when it began to the cue frame.
+/// A fade in progress: from the frame output when it began to the cue frame; the channels
+/// in `snap` are at their end from the start.
 #[derive(Debug, Clone, Copy)]
 struct Fade {
     from: [u8; DMX_CHANNELS],
     to: [u8; DMX_CHANNELS],
+    snap: [bool; DMX_CHANNELS],
     start: Instant,
     length: Duration,
 }
@@ -76,7 +81,11 @@ impl Fade {
         let k = t.as_secs_f64() / self.length.as_secs_f64();
         let mut f = [0u8; DMX_CHANNELS];
         for (i, v) in f.iter_mut().enumerate() {
-            *v = fade_level(self.from[i], self.to[i], k);
+            *v = if self.snap[i] {
+                self.to[i]
+            } else {
+                fade_level(self.from[i], self.to[i], k)
+            };
         }
         (f, false)
     }
@@ -101,6 +110,8 @@ pub(crate) struct Universe {
     sender: ArtnetSender,
     /// The cue frame as last made, to tell when it changes.
     cue_frame: [u8; DMX_CHANNELS],
+    /// The cue frame's channels that jump to their level.
+    cue_snap: [bool; DMX_CHANNELS],
     /// The frame last sent (cue or test); `None`: nothing since the target was set.
     sent: Option<[u8; DMX_CHANNELS]>,
     /// While a test frame holds.
@@ -120,6 +131,7 @@ impl Default for Universe {
         Self {
             sender: ArtnetSender::default(),
             cue_frame: [0; DMX_CHANNELS],
+            cue_snap: [false; DMX_CHANNELS],
             sent: None,
             test_until: None,
             after_test: false,
@@ -177,22 +189,33 @@ impl Universe {
     }
 
     /// Moves the output to the cue frame: a fade of `length` from what is output now, or a
-    /// jump when there is no fade, nothing has been sent yet or a test frame is out.
+    /// jump when there is no fade, nothing has been sent yet, a test frame is out or every
+    /// channel that changes snaps.
     fn go_to_cue(&mut self, target: ArtnetTarget, length: Duration, now: Instant) {
         let to = self.cue_frame;
+        let snap = self.cue_snap;
         let from = self.output(now);
         let after_test = std::mem::take(&mut self.after_test);
+        let fades =
+            |from: &[u8; DMX_CHANNELS]| (0..DMX_CHANNELS).any(|i| from[i] != to[i] && !snap[i]);
         match from {
-            Some(from) if !length.is_zero() && !after_test && from != to => {
+            Some(from) if !length.is_zero() && !after_test && fades(&from) => {
                 self.fade = Some(Fade {
                     from,
                     to,
+                    snap,
                     start: now,
                     length,
                 });
-                // The first step goes out one step from now: at `now` the fade is still
-                // at the frame already on the wire.
-                self.next_keepalive = Some(now + FADE_STEP);
+                if (0..DMX_CHANNELS).any(|i| snap[i] && from[i] != to[i]) {
+                    // The snapping channels jump now, the rest start their fade.
+                    let f = self.fade.map_or(to, |f| f.at(now).0);
+                    let _ = self.send(target, f, now);
+                } else {
+                    // The first step goes out one step from now: at `now` the fade is still
+                    // at the frame already on the wire.
+                    self.next_keepalive = Some(now + FADE_STEP);
+                }
             }
             _ => {
                 // Counted and kept in the status; nothing else to do with a lost datagram.
@@ -206,12 +229,13 @@ impl Control {
     /// Takes the cue frame the current states make and sends it when it changed (or the
     /// target has not had a frame yet). A changed cue frame ends a test hold at once.
     pub(super) fn artnet_sync(&mut self, now: Instant) {
-        let frame = self.rig.osc.frame();
+        let (frame, snap) = self.rig.osc.frame();
         let u = &mut self.rig.artnet;
         if frame != u.cue_frame {
             u.cue_frame = frame;
             u.test_until = None;
         }
+        u.cue_snap = snap;
         if u.test_until.is_some_and(|t| t <= now) {
             u.test_until = None;
         }
@@ -347,8 +371,9 @@ impl Control {
         Ok(ReplyBody::Ack { rev })
     }
 
-    /// `artnet.test`.
-    pub(super) fn artnet_test(&mut self, channels: &[DmxSet]) -> Result<ReplyBody, ProtoError> {
+    /// `artnet.test`: `channels` merged over the cue frame, each channel at the higher of
+    /// the two, so a lamp the cues hold up stays up while a fixture is found.
+    pub(super) fn artnet_test(&mut self, channels: &[DmxLevel]) -> Result<ReplyBody, ProtoError> {
         let Some(target) = self.store.state().rig.artnet_target else {
             return Err(invalid("no Art-Net target is set (artnet.target)"));
         };
@@ -360,7 +385,11 @@ impl Control {
             return Err(invalid(format!("channel {} is listed twice", d.channel)));
         }
         let now = Instant::now();
-        let frame = dmx_htp([channels]);
+        let mut frame = self.rig.artnet.cue_frame;
+        for d in channels {
+            let slot = &mut frame[d.channel.index()];
+            *slot = (*slot).max(d.value);
+        }
         let r = self.rig.artnet.snap(target, frame, now);
         self.rig.artnet.test_until = Some(now + TEST_HOLD);
         self.rig.artnet.after_test = true;
@@ -448,6 +477,37 @@ mod tests {
         u.go_to_cue(target, Duration::from_secs(1), t1);
         assert!(u.fade.is_none() && !u.after_test);
         assert_eq!(u.sent, Some(u.cue_frame));
+    }
+
+    #[test]
+    fn a_snapping_channel_jumps_while_the_rest_fade() {
+        let target = ArtnetTarget {
+            addr: "127.0.0.1:9".parse().expect("test value"),
+            universe: ac2_proto::model::PortAddress::new(0).expect("test value"),
+        };
+        let t0 = Instant::now();
+        let mut u = Universe::default();
+        u.go_to_cue(target, Duration::from_secs(1), t0);
+        // Channel 1 snaps on, channel 2 fades on: the jump goes out at once.
+        u.cue_frame[0] = 255;
+        u.cue_snap[0] = true;
+        u.cue_frame[1] = 200;
+        u.go_to_cue(target, Duration::from_secs(1), t0);
+        let fade = u.fade.expect("fading");
+        let sent = u.sent.expect("sent");
+        assert_eq!((sent[0], sent[1]), (255, 0));
+        assert_eq!(u.next_keepalive, Some(t0 + FADE_STEP));
+        let (mid, _) = fade.at(t0 + Duration::from_millis(500));
+        assert_eq!(mid[0], 255);
+        assert!(mid[1] > 0 && mid[1] < 200);
+        // Only snapping channels change: the frame jumps, no fade.
+        u.fade = None;
+        u.sent = Some(u.cue_frame);
+        u.cue_frame[0] = 0;
+        u.go_to_cue(target, Duration::from_secs(1), t0);
+        assert!(u.fade.is_none());
+        assert_eq!(u.sent.map(|f| (f[0], f[1])), Some((0, 200)));
+        assert_eq!(u.next_keepalive, Some(t0 + KEEPALIVE));
     }
 
     #[test]

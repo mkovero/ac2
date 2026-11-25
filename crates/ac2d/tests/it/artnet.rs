@@ -87,7 +87,7 @@ impl Node {
     }
 }
 
-fn levels(text: &str) -> Vec<ac2_proto::model::DmxSet> {
+fn levels<T: ac2_proto::model::DmxEntry>(text: &str) -> Vec<T> {
     parse_dmx_list(text).unwrap()
 }
 
@@ -245,6 +245,16 @@ async fn the_universe_follows_the_cues_and_keeps_alive() {
     });
     rig_dmx_until(&c, "20=255 30=99").await;
 
+    // A test frame merges over the cue frame: the cue lights stay, each channel at the
+    // higher of the two levels.
+    c.call(Command::ArtnetTest {
+        channels: levels("12=255 30=50"),
+    })
+    .await
+    .unwrap();
+    let f = node.until("the test over the cues", |f| f.ch(12) == 255);
+    assert_eq!((f.ch(20), f.ch(30)), (255, 99));
+
     // Sent again every second while nothing changes.
     let f0 = node.until("a keepalive", |f| f.ch(30) == 99);
     let f1 = node.until("the next keepalive", |f| f.ch(30) == 99);
@@ -317,7 +327,8 @@ async fn targets_and_tests_are_checked() {
     })
     .await
     .unwrap();
-    let dup = vec![levels("5=1")[0], levels("5=2")[0]];
+    let one = |t: &str| levels::<ac2_proto::model::DmxLevel>(t)[0];
+    let dup = vec![one("5=1"), one("5=2")];
     let e = c
         .call(Command::ArtnetTest { channels: dup })
         .await
@@ -402,9 +413,15 @@ async fn a_cue_change_fades_and_a_zero_fade_jumps() {
         "{took:?}"
     );
 
+    // A snapping level jumps past the fade: its first frame is at the level.
+    rig_dmx_until(&c, "20=255").await;
+    create(&c, meter("C", None, cue("", "", "", "50=255!"))).await;
+    let f = node.until("C's fault", |f| f.ch(50) > 0);
+    assert_eq!((f.ch(50), f.ch(20)), (255, 255));
+
     // No fade: the next change is one frame at its level. The fault's levels moved the rig's
     // rev; the fade is set on that one.
-    rig_dmx_until(&c, "20=255").await;
+    rig_dmx_until(&c, "20=255 50=255").await;
     c.call(Command::ArtnetFade {
         base: rig_rev(&c),
         seconds: Seconds(0.0),

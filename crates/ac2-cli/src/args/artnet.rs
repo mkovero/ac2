@@ -3,7 +3,7 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::str::FromStr;
 
-use ac2_proto::model::{ARTNET_PORT, ArtnetFade, DmxSet, PortAddress};
+use ac2_proto::model::{ARTNET_PORT, ArtnetFade, DmxLevel, PortAddress};
 use clap::Subcommand;
 
 use ac2_scene::unit_text::{Time, UnitError};
@@ -27,12 +27,13 @@ pub enum ArtnetCmd {
         /// Seconds (`1.5`) or with a unit (`1.5s`, `500ms`).
         seconds: ArtnetFadeArg,
     },
-    /// Send one frame with these levels (every other channel 0) now, to find a fixture's
-    /// channels. It holds 5 s, then the cues' frame comes back.
+    /// Send one frame with these levels merged over the cues' frame (each channel at the
+    /// higher of the two) now, to find a fixture's channels. It holds 5 s, then the cues'
+    /// frame comes back.
     Test {
         /// `channel=value` (channel 1–512, value 0–255), e.g. `12=255 13=40`.
         #[arg(required = true)]
-        channels: Vec<DmxSet>,
+        channels: Vec<DmxLevel>,
     },
 }
 

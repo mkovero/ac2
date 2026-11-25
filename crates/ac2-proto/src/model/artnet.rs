@@ -63,7 +63,7 @@ impl fmt::Display for DmxChannel {
     }
 }
 
-/// One channel's level.
+/// One channel's level in a cue state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DmxSet {
@@ -71,9 +71,23 @@ pub struct DmxSet {
     pub channel: DmxChannel,
     /// Level, 0–255.
     pub value: u8,
+    /// The channel jumps to this level when it takes it, past the rig's fade: a strobe, a
+    /// relay or a warning lamp has to switch, not glide. Written `12=255!`.
+    pub snap: bool,
 }
 
-/// Why text is not a [`DmxSet`].
+/// One channel's level in a frame: what is output, or what a test frame holds (a test frame
+/// always jumps, so it says nothing about fading).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DmxLevel {
+    /// Channel.
+    pub channel: DmxChannel,
+    /// Level, 0–255.
+    pub value: u8,
+}
+
+/// Why text is not a [`DmxSet`] or a [`DmxLevel`].
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DmxSetError {
     /// No `=`.
@@ -85,11 +99,14 @@ pub enum DmxSetError {
     /// The value is not 0–255.
     #[error("{0:?}: the value is a number 0–255")]
     Value(String),
+    /// A `!` (jump) where every level jumps anyway.
+    #[error("{0:?}: a test frame always jumps; leave out the !")]
+    Snap(String),
 }
 
 impl FromStr for DmxSet {
     type Err = DmxSetError;
-    /// `channel=value`, e.g. `12=255`.
+    /// `channel=value`, e.g. `12=255`; `12=255!` jumps.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (c, v) = s
             .split_once('=')
@@ -100,30 +117,80 @@ impl FromStr for DmxSet {
             .ok()
             .and_then(|n| DmxChannel::new(n).ok())
             .ok_or_else(|| DmxSetError::Channel(s.into()))?;
-        let value = v
-            .trim()
-            .parse::<u8>()
-            .map_err(|_| DmxSetError::Value(s.into()))?;
-        Ok(Self { channel, value })
+        let v = v.trim();
+        let (v, snap) = match v.strip_suffix('!') {
+            Some(v) => (v.trim_end(), true),
+            None => (v, false),
+        };
+        let value = v.parse::<u8>().map_err(|_| DmxSetError::Value(s.into()))?;
+        Ok(Self {
+            channel,
+            value,
+            snap,
+        })
     }
 }
 
 impl fmt::Display for DmxSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}={}", self.channel, self.value)?;
+        if self.snap {
+            f.write_str("!")?;
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for DmxLevel {
+    type Err = DmxSetError;
+    /// `channel=value`, e.g. `12=255`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let d: DmxSet = s.parse()?;
+        if d.snap {
+            return Err(DmxSetError::Snap(s.into()));
+        }
+        Ok(Self {
+            channel: d.channel,
+            value: d.value,
+        })
+    }
+}
+
+impl fmt::Display for DmxLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}={}", self.channel, self.value)
     }
 }
 
-/// Parses a space- or comma-separated list of `channel=value`, e.g. `12=255 13=0`. A
-/// channel listed twice is refused: which of the two levels was meant is a guess.
-pub fn parse_dmx_list(s: &str) -> Result<Vec<DmxSet>, DmxSetError> {
-    let mut out: Vec<DmxSet> = Vec::new();
+/// A channel's place in a list of levels.
+pub trait DmxEntry: FromStr<Err = DmxSetError> + fmt::Display {
+    /// The channel it sets.
+    fn channel(&self) -> DmxChannel;
+}
+
+impl DmxEntry for DmxSet {
+    fn channel(&self) -> DmxChannel {
+        self.channel
+    }
+}
+
+impl DmxEntry for DmxLevel {
+    fn channel(&self) -> DmxChannel {
+        self.channel
+    }
+}
+
+/// Parses a space- or comma-separated list of `channel=value`, e.g. `12=255 13=0` (a cue
+/// state's [`DmxSet`]s also `12=255!`). A channel listed twice is refused: which of the two
+/// levels was meant is a guess.
+pub fn parse_dmx_list<T: DmxEntry>(s: &str) -> Result<Vec<T>, DmxSetError> {
+    let mut out: Vec<T> = Vec::new();
     for item in s.split([' ', ',', '\t']).filter(|t| !t.is_empty()) {
-        let d: DmxSet = item.parse()?;
-        if out.iter().any(|x| x.channel == d.channel) {
+        let d: T = item.parse()?;
+        if out.iter().any(|x| x.channel() == d.channel()) {
             return Err(DmxSetError::Shape(format!(
                 "channel {} is listed twice in {s:?}",
-                d.channel
+                d.channel()
             )));
         }
         out.push(d);
@@ -131,36 +198,44 @@ pub fn parse_dmx_list(s: &str) -> Result<Vec<DmxSet>, DmxSetError> {
     Ok(out)
 }
 
-/// `sets` as text, e.g. `12=255 13=0`.
-pub fn dmx_list_text(sets: &[DmxSet]) -> String {
-    sets.iter()
-        .map(DmxSet::to_string)
-        .collect::<Vec<_>>()
-        .join(" ")
+/// `sets` as text, e.g. `12=255 13=0!`.
+pub fn dmx_list_text<T: DmxEntry>(sets: &[T]) -> String {
+    sets.iter().map(T::to_string).collect::<Vec<_>>().join(" ")
 }
 
 /// The universe the lists make: each channel at the highest level any list gives it (HTP,
-/// as lighting consoles merge sources), 0 where none lists it.
-pub fn dmx_htp<'a>(lists: impl IntoIterator<Item = &'a [DmxSet]>) -> [u8; DMX_CHANNELS] {
+/// as lighting consoles merge sources), 0 where none lists it; and whether it jumps there:
+/// a channel jumps when a set at its winning level says so.
+pub fn dmx_htp<'a>(
+    lists: impl IntoIterator<Item = &'a [DmxSet]>,
+) -> ([u8; DMX_CHANNELS], [bool; DMX_CHANNELS]) {
     let mut frame = [0u8; DMX_CHANNELS];
+    let mut snap = [false; DMX_CHANNELS];
+    let mut listed = [false; DMX_CHANNELS];
     for list in lists {
         for d in list {
-            let slot = &mut frame[d.channel.index()];
-            *slot = (*slot).max(d.value);
+            let i = d.channel.index();
+            if !listed[i] || d.value > frame[i] {
+                frame[i] = d.value;
+                snap[i] = d.snap;
+            } else if d.value == frame[i] {
+                snap[i] |= d.snap;
+            }
+            listed[i] = true;
         }
     }
-    frame
+    (frame, snap)
 }
 
 /// The channels of `frame` above 0, in channel order.
-pub fn dmx_nonzero(frame: &[u8; DMX_CHANNELS]) -> Vec<DmxSet> {
+pub fn dmx_nonzero(frame: &[u8; DMX_CHANNELS]) -> Vec<DmxLevel> {
     frame
         .iter()
         .enumerate()
         .filter(|(_, v)| **v > 0)
         .filter_map(|(i, v)| {
             let channel = DmxChannel::new(u16::try_from(i + 1).ok()?).ok()?;
-            Some(DmxSet { channel, value: *v })
+            Some(DmxLevel { channel, value: *v })
         })
         .collect()
 }
@@ -412,10 +487,19 @@ mod tests {
         );
     }
 
+    fn set(channel: u16, value: u8, snap: bool) -> DmxSet {
+        DmxSet {
+            channel: ch(channel),
+            value,
+            snap,
+        }
+    }
+
     #[test]
     fn sets_parse_and_print() {
-        let l = parse_dmx_list("12=255 13=0,14=40").expect("valid");
-        assert_eq!(dmx_list_text(&l), "12=255 13=0 14=40");
+        let l: Vec<DmxSet> = parse_dmx_list("12=255 13=0!,14=40").expect("valid");
+        assert_eq!(l[1], set(13, 0, true));
+        assert_eq!(dmx_list_text(&l), "12=255 13=0! 14=40");
         assert!(matches!("12".parse::<DmxSet>(), Err(DmxSetError::Shape(_))));
         assert!(matches!(
             "0=1".parse::<DmxSet>(),
@@ -425,43 +509,39 @@ mod tests {
             "1=256".parse::<DmxSet>(),
             Err(DmxSetError::Value(_))
         ));
-        assert!(parse_dmx_list("1=2 1=3").is_err());
-        assert_eq!(parse_dmx_list("").expect("valid"), []);
+        assert!(matches!(
+            "1=!".parse::<DmxSet>(),
+            Err(DmxSetError::Value(_))
+        ));
+        assert!(parse_dmx_list::<DmxSet>("1=2 1=3").is_err());
+        assert_eq!(parse_dmx_list::<DmxSet>("").expect("valid"), []);
+        let l: Vec<DmxLevel> = parse_dmx_list("12=255 13=0").expect("valid");
+        assert_eq!(dmx_list_text(&l), "12=255 13=0");
+        assert!(matches!(
+            parse_dmx_list::<DmxLevel>("12=255!"),
+            Err(DmxSetError::Snap(_))
+        ));
     }
 
     #[test]
     fn htp_takes_the_highest_level_and_zero_elsewhere() {
-        let a = [
-            DmxSet {
-                channel: ch(12),
-                value: 255,
-            },
-            DmxSet {
-                channel: ch(13),
-                value: 10,
-            },
-        ];
+        let a = [set(12, 255, false), set(13, 10, true), set(20, 0, true)];
         let b = [
-            DmxSet {
-                channel: ch(12),
-                value: 0,
-            },
-            DmxSet {
-                channel: ch(13),
-                value: 40,
-            },
-            DmxSet {
-                channel: ch(512),
-                value: 1,
-            },
+            set(12, 0, true),
+            set(13, 40, false),
+            set(512, 1, false),
+            set(20, 0, false),
         ];
-        let f = dmx_htp([&a[..], &b[..]]);
+        let (f, snap) = dmx_htp([&a[..], &b[..]]);
         assert_eq!(f[11], 255);
         assert_eq!(f[12], 40);
         assert_eq!(f[511], 1);
         assert_eq!(f.iter().filter(|v| **v > 0).count(), 3);
         assert_eq!(dmx_list_text(&dmx_nonzero(&f)), "12=255 13=40 512=1");
-        assert_eq!(dmx_htp([]), [0u8; DMX_CHANNELS]);
+        // The winning level's set decides the jump; at a tie, any set that jumps does.
+        assert!(!snap[11] && !snap[12] && snap[19]);
+        assert_eq!(snap.iter().filter(|s| **s).count(), 1);
+        assert_eq!(dmx_htp([]), ([0u8; DMX_CHANNELS], [false; DMX_CHANNELS]));
     }
 
     #[test]

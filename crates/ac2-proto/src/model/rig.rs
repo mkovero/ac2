@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
-use super::{ArtnetFade, ArtnetTarget, DmxSet, LevelsSettings, RigCue};
+use super::{ArtnetFade, ArtnetTarget, DmxLevel, LevelsSettings, RigCue};
 use crate::units::{Rev, WallNs};
 
 /// How sending to one kind of receiver (OSC, Art-Net) fares.
@@ -49,7 +49,7 @@ pub struct Rig {
     pub artnet: OutputStatus,
     /// The cue universe's channels above 0, in channel order: what the cues' current states
     /// make (whether or not a target is set).
-    pub dmx: Vec<DmxSet>,
+    pub dmx: Vec<DmxLevel>,
     /// Every cued subject's state.
     pub cues: Vec<RigCue>,
     /// State files the daemon found damaged when it started (a power cut, a full disk, a
@@ -165,7 +165,7 @@ mod tests {
                 sent: 9,
                 last_error: None,
             },
-            dmx: vec![DmxSet {
+            dmx: vec![DmxLevel {
                 channel: DmxChannel::new(12).expect("valid"),
                 value: 255,
             }],
