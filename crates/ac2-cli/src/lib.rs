@@ -139,8 +139,29 @@ pub async fn run_reporting(cli: &Cli, out: &mut Out<'_>, err: &mut dyn Write) ->
     }
 }
 
+/// Stack of the thread the whole CLI runs on. Windows gives the main thread 1 MiB, and an
+/// unoptimised build's command-dispatch future (every command's state in one frame) plus clap's
+/// parse overflows it; 8 MiB is what Linux and macOS give the main thread anyway.
+const CLI_STACK: usize = 8 * 1024 * 1024;
+
 /// Process entry point.
 pub fn main_entry() -> ExitCode {
+    let entry = std::thread::Builder::new()
+        .name("ac2".into())
+        .stack_size(CLI_STACK)
+        .spawn(entry);
+    match entry.map(|t| t.join()) {
+        Ok(Ok(code)) => code,
+        // The panic has already been printed by the hook on the CLI thread.
+        Ok(Err(_)) => ExitCode::from(101),
+        Err(e) => {
+            eprintln!("ac2: cannot start: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn entry() -> ExitCode {
     let cli = Cli::parse();
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
