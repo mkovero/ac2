@@ -900,8 +900,8 @@ fn line_calibration_from_the_calibrations_view() {
         meta: ac2_proto::frame::StreamLevelsMeta {
             channels: vec![0, 1],
             ballistic: Default::default(),
-            pair_levels: vec![],
-            loudness: vec![],
+            pairs: vec![],
+            sources: vec![],
         },
         peak: vec![-6.0, -1.0],
         rms: vec![-9.0, -12.0],
@@ -910,6 +910,8 @@ fn line_calibration_from_the_calibrations_view() {
         true_peak: vec![f32::NEG_INFINITY; 2],
         max: vec![f32::NEG_INFINITY; 2],
         overs: vec![0; 2],
+        pair_levels: vec![],
+        loudness: vec![],
     });
     let f = TopicFrame {
         topic: data.topic(),
@@ -921,6 +923,7 @@ fn line_calibration_from_the_calibrations_view() {
         since_new: std::time::Duration::ZERO,
         age: Some(0.0),
         stale: false,
+        broken: false,
     };
     latest.frames.insert(f.topic.to_string().into(), f);
     t.st.rig.data = Some(Arc::new(crate::conn::DataSnapshot {

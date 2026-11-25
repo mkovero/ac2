@@ -8,7 +8,7 @@
 //! absolute scale only (LUFS, LU for the range): ac2 has no relative (EBU Mode) readout, so
 //! nothing here is worded as one.
 
-use ac2_proto::frame::{LoudnessSource, SourceLoudness};
+use ac2_proto::frame::{LoudnessSource, LoudnessSourceMeta, SourceLoudness};
 use ac2_proto::units::WallNs;
 
 use super::{ProgrammeInput, Resolved};
@@ -55,7 +55,9 @@ pub struct LoudnessFacts<'a> {
     pub pairs: &'a [NamedPair],
     pub captured: &'a [u16],
     /// The latest levels frame's sources; empty with no frame.
-    pub sources: &'a [SourceLoudness],
+    pub sources: &'a [LoudnessSourceMeta],
+    /// Their loudness in that frame, one per source in its order.
+    pub loudness: &'a [SourceLoudness],
     /// Whether an input is declared a mic (undeclared inputs are).
     pub is_mic: &'a dyn Fn(u16) -> bool,
     /// What a captured input is called in the pane (its bar's label).
@@ -72,6 +74,14 @@ pub struct LoudnessFacts<'a> {
     pub reset_key: Option<&'a str>,
 }
 
+impl LoudnessFacts<'_> {
+    /// The frame's reading of `source` and when it was last reset, if it carries it.
+    pub fn reading(&self, source: LoudnessSource) -> Option<(&SourceLoudness, WallNs)> {
+        let i = self.sources.iter().position(|s| s.source == source)?;
+        Some((self.loudness.get(i)?, self.sources[i].since))
+    }
+}
+
 impl std::fmt::Debug for LoudnessFacts<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LoudnessFacts")
@@ -79,6 +89,7 @@ impl std::fmt::Debug for LoudnessFacts<'_> {
             .field("pairs", &self.pairs)
             .field("captured", &self.captured)
             .field("sources", &self.sources)
+            .field("loudness", &self.loudness)
             .field("reset_key", &self.reset_key)
             .finish_non_exhaustive()
     }
@@ -180,8 +191,10 @@ pub fn plate_readout(resolved: &[Resolved], f: &LoudnessFacts<'_>) -> Option<Lou
         return None;
     }
     let title = source_name(first, f);
-    Some(match f.sources.iter().find(|l| l.source == first) {
-        Some(l) => LoudnessReadout::of(title, l, since_text(&(f.clock)(l.since), f.reset_key)),
+    Some(match f.reading(first) {
+        Some((l, since)) => {
+            LoudnessReadout::of(title, l, since_text(&(f.clock)(since), f.reset_key))
+        }
         None => LoudnessReadout::empty(title),
     })
 }

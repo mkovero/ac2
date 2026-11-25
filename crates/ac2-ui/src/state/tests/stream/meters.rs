@@ -19,6 +19,7 @@ fn input_meters_follow_the_dialog() {
         since_new: std::time::Duration::ZERO,
         age: Some(0.0),
         stale: false,
+        broken: false,
     };
     let mut latest = Latest::default();
     for f in [
@@ -26,8 +27,8 @@ fn input_meters_follow_the_dialog() {
             meta: ac2_proto::frame::StreamLevelsMeta {
                 channels: vec![0, 1],
                 ballistic: Default::default(),
-                pair_levels: vec![],
-                loudness: vec![],
+                pairs: vec![],
+                sources: vec![],
             },
             peak: vec![-10.0, -30.0],
             rms: vec![-20.0, -40.0],
@@ -36,6 +37,8 @@ fn input_meters_follow_the_dialog() {
             true_peak: vec![f32::NEG_INFINITY; 2],
             max: vec![f32::NEG_INFINITY; 2],
             overs: vec![0; 2],
+            pair_levels: vec![],
+            loudness: vec![],
         })),
         frame(FrameData::PreviewLevels(PreviewLevelsFrame {
             meta: PreviewLevelsMeta {
@@ -45,8 +48,7 @@ fn input_meters_follow_the_dialog() {
                 inputs: vec![],
                 pairs: vec![],
                 ballistic: Default::default(),
-                pair_levels: vec![],
-                loudness: vec![],
+                sources: vec![],
             },
             peak: vec![-6.0, f32::NEG_INFINITY, -50.0, -50.0],
             rms: vec![-12.0, f32::NEG_INFINITY, -60.0, -60.0],
@@ -55,6 +57,8 @@ fn input_meters_follow_the_dialog() {
             true_peak: vec![f32::NEG_INFINITY; 4],
             max: vec![f32::NEG_INFINITY; 4],
             overs: vec![0; 4],
+            pair_levels: vec![],
+            loudness: vec![],
         })),
     ] {
         latest.frames.insert(f.topic.to_string().into(), f);
@@ -151,8 +155,8 @@ fn sidebar_meters_name_every_stream_input_by_role() {
         meta: ac2_proto::frame::StreamLevelsMeta {
             channels: vec![0, 1],
             ballistic: Default::default(),
-            pair_levels: vec![],
-            loudness: vec![],
+            pairs: vec![],
+            sources: vec![],
         },
         peak: vec![-10.0, -1.0],
         rms: vec![-20.0, -12.0],
@@ -161,6 +165,8 @@ fn sidebar_meters_name_every_stream_input_by_role() {
         true_peak: vec![f32::NEG_INFINITY; 2],
         max: vec![f32::NEG_INFINITY; 2],
         overs: vec![0; 2],
+        pair_levels: vec![],
+        loudness: vec![],
     });
     let f = TopicFrame {
         topic: data.topic(),
@@ -172,6 +178,7 @@ fn sidebar_meters_name_every_stream_input_by_role() {
         since_new: std::time::Duration::ZERO,
         age: Some(0.0),
         stale: false,
+        broken: false,
     };
     latest.frames.insert(f.topic.to_string().into(), f);
     t.st.rig.data = Some(Arc::new(crate::conn::DataSnapshot {

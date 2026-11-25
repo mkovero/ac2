@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use ac2_client::{Client, Latest, MirrorView};
+use ac2_client::{Client, Latest, MirrorView, TopicFrame};
 use ac2_proto::model::MeasKind;
 use ac2_proto::units::MeasId;
 use ac2_proto::{FrameData, Stream, Subscription, Topic};
@@ -239,9 +239,17 @@ pub(crate) fn now_wall() -> ac2_proto::units::WallNs {
     )
 }
 
-fn age_text(age: Option<f64>, stale: bool) -> String {
-    let a = age.map_or_else(|| format::NO_VALUE.to_owned(), format::age);
-    if stale { format!("{a} STALE") } else { a }
+/// The frame's age, `STALE` when it is, and why when a frame after it was lost: the values
+/// shown are then the last ones received whole, until the keyframe asked for arrives.
+fn age_text(tf: &TopicFrame) -> String {
+    let a = tf
+        .age
+        .map_or_else(|| format::NO_VALUE.to_owned(), format::age);
+    match (tf.stale, tf.broken) {
+        (_, true) => format!("{a} STALE (frame lost, awaiting keyframe)"),
+        (true, false) => format!("{a} STALE"),
+        (false, false) => a,
+    }
 }
 
 fn now_secs_key(latest: &Latest, topic: &Topic) -> Vec<u64> {
@@ -316,7 +324,7 @@ pub async fn spl(
             lines.push(format!(
                 "integrated {}   age {}",
                 format::duration(m.duration.0),
-                age_text(tf.age, tf.stale)
+                age_text(tf)
             ));
             // Every level above includes the measuring-position correction: said, never
             // left to be guessed.
@@ -342,6 +350,7 @@ pub async fn spl(
                     "seq": tf.frame.stamp.seq,
                     "age_s": tf.age,
                     "stale": tf.stale,
+                    "broken": tf.broken,
                     "responding": latest.responding,
                     "spl": m,
                     "mic": mic,
@@ -443,7 +452,7 @@ pub async fn timing(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
                 ac2_scene::format::dbfs(w.stimulus.0),
             ));
         }
-        lines.push(format!("age {}", age_text(tf.age, tf.stale)));
+        lines.push(format!("age {}", age_text(tf)));
         View {
             lines,
             json: json!({
@@ -451,6 +460,7 @@ pub async fn timing(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
                 "seq": tf.frame.stamp.seq,
                 "age_s": tf.age,
                 "stale": tf.stale,
+                "broken": tf.broken,
                 "responding": latest.responding,
                 "timing": t,
             }),
@@ -506,7 +516,7 @@ pub async fn meas_list(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
                 output::meas_kind(&m.config.kind),
                 output::yes(m.running),
                 topic.to_string(),
-                tf.map_or_else(|| format::NO_VALUE.to_owned(), |t| age_text(t.age, t.stale)),
+                tf.map_or_else(|| format::NO_VALUE.to_owned(), age_text),
             ]);
             rows.push(json!({
                 "id": m.id,
@@ -516,6 +526,7 @@ pub async fn meas_list(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
                 "seq": tf.map(|t| t.frame.stamp.seq),
                 "age_s": tf.and_then(|t| t.age),
                 "stale": tf.map(|t| t.stale),
+                "broken": tf.map(|t| t.broken),
             }));
         }
         lines.extend(t.to_string().lines().map(str::to_owned));

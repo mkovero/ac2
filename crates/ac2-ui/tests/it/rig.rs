@@ -255,6 +255,7 @@ impl Inner {
                     since_new: Duration::ZERO,
                     age: Some(0.0),
                     stale: false,
+                    broken: false,
                 },
             );
         }

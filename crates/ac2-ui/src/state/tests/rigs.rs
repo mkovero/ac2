@@ -53,8 +53,8 @@ fn levels(ppm: f32) -> ConnEvent {
         meta: ac2_proto::frame::StreamLevelsMeta {
             channels: vec![0, 1],
             ballistic: Default::default(),
-            pair_levels: vec![],
-            loudness: vec![],
+            pairs: vec![],
+            sources: vec![],
         },
         peak: vec![ppm; 2],
         rms: vec![ppm; 2],
@@ -63,6 +63,8 @@ fn levels(ppm: f32) -> ConnEvent {
         true_peak: vec![f32::NEG_INFINITY; 2],
         max: vec![f32::NEG_INFINITY; 2],
         overs: vec![0; 2],
+        pair_levels: vec![],
+        loudness: vec![],
     });
     let f = TopicFrame {
         topic: data.topic(),
@@ -74,6 +76,7 @@ fn levels(ppm: f32) -> ConnEvent {
         since_new: std::time::Duration::ZERO,
         age: Some(0.0),
         stale: false,
+        broken: false,
     };
     let mut latest = Latest::default();
     latest.frames.insert(f.topic.to_string().into(), f);
@@ -118,6 +121,7 @@ fn spectrum_at(seq: u64, level: f32) -> ConnEvent {
         since_new: std::time::Duration::ZERO,
         age: Some(0.0),
         stale: false,
+        broken: false,
     };
     let mut latest = Latest::default();
     latest.frames.insert(f.topic.to_string().into(), f);

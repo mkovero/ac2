@@ -98,7 +98,7 @@ pub async fn leq(
                 corrected
                     .as_ref()
                     .map_or_else(String::new, |c| format!(" · {c}")),
-                age_text(tf.age, tf.stale)
+                age_text(tf)
             );
             lines.push(head.clone());
             let run = f
@@ -225,6 +225,7 @@ pub async fn leq(
                     "seq": tf.frame.stamp.seq,
                     "age_s": tf.age,
                     "stale": tf.stale,
+                    "broken": tf.broken,
                     "responding": latest.responding,
                     "scale": f.meta.scale,
                     "cal": f.meta.cal,

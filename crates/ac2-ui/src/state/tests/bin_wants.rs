@@ -76,6 +76,7 @@ fn frames(t: &mut T, bins: bool, stage: Option<u8>) {
             since_new: std::time::Duration::ZERO,
             age: Some(0.0),
             stale: false,
+            broken: false,
         };
         latest.frames.insert(f.topic.to_string().into(), f);
     }
@@ -308,6 +309,7 @@ fn laid_out(ids: &[u32]) -> ConnEvent {
             since_new: std::time::Duration::ZERO,
             age: Some(0.0),
             stale: false,
+            broken: false,
         };
         latest.frames.insert(f.topic.to_string().into(), f);
     }

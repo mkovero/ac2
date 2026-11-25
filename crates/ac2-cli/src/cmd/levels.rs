@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 
 use ac2_client::{Client, expect_body};
 use ac2_proto::cal;
-use ac2_proto::frame::{ClipFlags, FrameData, LoudnessSource, SourceLoudness, StreamLevelsFrame};
+use ac2_proto::frame::{
+    ClipFlags, FrameData, LoudnessSource, LoudnessSourceMeta, SourceLoudness, StreamLevelsFrame,
+};
 use ac2_proto::model::{Ballistic, LevelsSettings, PairSide, Rig, State};
 use ac2_proto::topic::Topic;
 use ac2_proto::units::WallNs;
@@ -115,19 +117,26 @@ async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
         .collect();
     let pairs: Vec<serde_json::Value> = f
         .meta
-        .pair_levels
+        .pairs
         .iter()
-        .map(|p| {
+        .zip(&f.pair_levels)
+        .map(|(p, l)| {
             json!({
                 "left": u32::from(p.left) + 1,
                 "right": u32::from(p.right) + 1,
-                "correlation": p.correlation,
-                "quiet": p.quiet,
+                "correlation": l.correlation,
+                "quiet": l.quiet,
                 "window": st.rig.levels.correlation_window,
             })
         })
         .collect();
-    let loudness: Vec<serde_json::Value> = f.meta.loudness.iter().map(loudness_json).collect();
+    let loudness: Vec<serde_json::Value> = f
+        .meta
+        .sources
+        .iter()
+        .zip(&f.loudness)
+        .map(|(m, l)| loudness_json(m, l))
+        .collect();
     out.emit(
         &json!({
             "settings": st.rig.levels,
@@ -162,11 +171,15 @@ async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
                 ]);
             }
             let mut s = t.to_string();
-            if !f.meta.pair_levels.is_empty() {
+            if !f.meta.pairs.is_empty() {
                 let mut p = table(&["pair", "correlation", "window"]);
-                for pl in &f.meta.pair_levels {
+                for (pair, pl) in f.meta.pairs.iter().zip(&f.pair_levels) {
                     p.add_row([
-                        format!("{} · {}", u32::from(pl.left) + 1, u32::from(pl.right) + 1),
+                        format!(
+                            "{} · {}",
+                            u32::from(pair.left) + 1,
+                            u32::from(pair.right) + 1
+                        ),
                         correlation_text(pl.correlation, pl.quiet),
                         st.rig.levels.correlation_window.text().to_owned(),
                     ]);
@@ -174,10 +187,11 @@ async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
                 s.push('\n');
                 s.push_str(&p.to_string());
             }
-            if !f.meta.loudness.is_empty() {
+            if !f.meta.sources.is_empty() {
                 s.push('\n');
                 s.push_str(&loudness_table(
-                    &f.meta.loudness,
+                    &f.meta.sources,
+                    &f.loudness,
                     f.meta.ballistic,
                     captured_at,
                 ));
@@ -205,7 +219,12 @@ fn ballistic_of(st: &State, f: &StreamLevelsFrame, ch: u16) -> Ballistic {
 /// The loudness table: one row per source, the readouts as the Programme pane words them.
 /// Under a loudness ballistic the window the bars read is marked, since the input table above
 /// it then reads each input's true peak.
-fn loudness_table(sources: &[SourceLoudness], ballistic: Ballistic, captured_at: WallNs) -> String {
+fn loudness_table(
+    sources: &[LoudnessSourceMeta],
+    loudness: &[SourceLoudness],
+    ballistic: Ballistic,
+    captured_at: WallNs,
+) -> String {
     let (mom, short) = window_heads(ballistic);
     let mut t = table(&[
         "source",
@@ -218,10 +237,10 @@ fn loudness_table(sources: &[SourceLoudness], ballistic: Ballistic, captured_at:
         "TP max",
         "since",
     ]);
-    for l in sources {
+    for (m, l) in sources.iter().zip(loudness) {
         let lufs = |v: f64| level_text(v, "LUFS");
         t.add_row([
-            source_name(&l.source),
+            source_name(&m.source),
             lufs(l.momentary.0),
             lufs(l.short_term.0),
             l.integrated
@@ -230,7 +249,7 @@ fn loudness_table(sources: &[SourceLoudness], ballistic: Ballistic, captured_at:
             lufs(l.max_momentary.0),
             lufs(l.max_short_term.0),
             level_text(l.max_true_peak.0, "dBTP"),
-            ac2_scene::time::local_clock(l.since, captured_at, local_offset_s),
+            ac2_scene::time::local_clock(m.since, captured_at, local_offset_s),
         ]);
     }
     t.to_string()
@@ -271,8 +290,8 @@ fn source_name(s: &LoudnessSource) -> String {
     }
 }
 
-fn loudness_json(l: &SourceLoudness) -> serde_json::Value {
-    let source = match l.source {
+fn loudness_json(m: &LoudnessSourceMeta, l: &SourceLoudness) -> serde_json::Value {
+    let source = match m.source {
         LoudnessSource::Pair { left, right } => json!({
             "type": "pair",
             "left": u32::from(left) + 1,
@@ -293,7 +312,7 @@ fn loudness_json(l: &SourceLoudness) -> serde_json::Value {
         "max_short_term": level_json(l.max_short_term.0),
         "max_true_peak": level_json(l.max_true_peak.0),
         "duration": l.duration.0,
-        "since": l.since,
+        "since": m.since,
     })
 }
 
@@ -434,19 +453,19 @@ mod tests {
     fn the_loudness_table_marks_the_bars_window() {
         let f = frame(Ballistic::ShortTerm, vec![0, 1, 2]);
         let at = WallNs(1_790_000_000_000_000_000);
-        let t = loudness_table(&f.meta.loudness, Ballistic::ShortTerm, at);
+        let t = loudness_table(&f.meta.sources, &f.loudness, Ballistic::ShortTerm, at);
         assert!(
             t.contains("Short (bars)") && !t.contains("Mom (bars)"),
             "{t}"
         );
-        let t = loudness_table(&f.meta.loudness, Ballistic::Momentary, at);
+        let t = loudness_table(&f.meta.sources, &f.loudness, Ballistic::Momentary, at);
         assert!(
             t.contains("Mom (bars)") && !t.contains("Short (bars)"),
             "{t}"
         );
         for b in Ballistic::PEAK {
             assert!(
-                !loudness_table(&f.meta.loudness, b, at).contains("(bars)"),
+                !loudness_table(&f.meta.sources, &f.loudness, b, at).contains("(bars)"),
                 "{b:?}"
             );
         }

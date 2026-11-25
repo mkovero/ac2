@@ -673,6 +673,7 @@ pub(super) fn spl_data(seq: u64, at_ms: u64, level: f64, tw: TimeWeighting, rev:
         since_new: std::time::Duration::ZERO,
         age: Some(0.0),
         stale: false,
+        broken: false,
     };
     let mut latest = Latest::default();
     latest.frames.insert(f.topic.to_string().into(), f);

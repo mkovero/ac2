@@ -83,6 +83,7 @@ fn frames(t: &mut T, meas: &[(u32, f32)], seq: u64, incarnation: u64) {
             since_new: std::time::Duration::ZERO,
             age: Some(0.0),
             stale: false,
+            broken: false,
         };
         latest.frames.insert(f.topic.to_string().into(), f);
     }

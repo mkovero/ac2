@@ -117,7 +117,7 @@ fn the_column_heads_name_their_units() {
 
 fn floor_pane(reading: f64, target: f64) -> ProgrammePane {
     let mut rig = Rig::new();
-    rig.sources[0].short_term = Lufs(reading);
+    rig.loudness[0].short_term = Lufs(reading);
     let mut p = rig.pane(&[2, 3], Ballistic::ShortTerm);
     p.loudness_target = target;
     p

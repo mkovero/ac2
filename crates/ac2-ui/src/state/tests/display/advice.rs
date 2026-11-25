@@ -29,8 +29,8 @@ fn feed(t: &mut T, now_s: f64, coh: f32, ref_peak: f32, meas_rms: f32) {
             meta: ac2_proto::frame::StreamLevelsMeta {
                 channels: vec![0, 1],
                 ballistic: Default::default(),
-                pair_levels: vec![],
-                loudness: vec![],
+                pairs: vec![],
+                sources: vec![],
             },
             peak: vec![ref_peak, meas_rms + 12.0],
             rms: vec![ref_peak - 12.0, meas_rms],
@@ -39,6 +39,8 @@ fn feed(t: &mut T, now_s: f64, coh: f32, ref_peak: f32, meas_rms: f32) {
             true_peak: vec![f32::NEG_INFINITY; 2],
             max: vec![f32::NEG_INFINITY; 2],
             overs: vec![0; 2],
+            pair_levels: vec![],
+            loudness: vec![],
         }),
     };
     for f in [f, meters] {
@@ -49,6 +51,7 @@ fn feed(t: &mut T, now_s: f64, coh: f32, ref_peak: f32, meas_rms: f32) {
             since_new: std::time::Duration::ZERO,
             age: Some(0.0),
             stale: false,
+            broken: false,
         };
         latest.frames.insert(f.topic.to_string().into(), f);
     }
