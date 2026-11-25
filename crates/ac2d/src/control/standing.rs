@@ -11,7 +11,7 @@ use ac2_proto::units::{RigId, Seconds, WallNs};
 
 use crate::remote::peer_clock::{Evidence, same_kind};
 use crate::remote::standing::Absent;
-use crate::remote::standing_verdict::{StandingWatch, late};
+use crate::remote::standing_verdict::{Shown, StandingWatch, late};
 use crate::util::wall_ns;
 
 use super::Control;
@@ -92,6 +92,7 @@ impl Control {
             };
             let figures = (shown.ppm, shown.span);
             let name = src.map_or_else(|| p.name.clone(), |s| s.name.clone());
+            log_raw(&name, &shown);
             let clock = standing_clock(
                 &mut self.remote.standing_shown,
                 p.rig,
@@ -121,6 +122,26 @@ impl Control {
         self.remote.standing_watches.retain(|rig, _| kept(rig));
         self.remote.standing_shown.retain(|rig, _| kept(rig));
         out
+    }
+}
+
+/// What the hold was given, logged as it happens: the judge's relation when it changes
+/// kind, the minutes as they close. Once a minute or on a change, so bounded by itself; with
+/// the shown relation's log it tells a verdict held back from one the evidence withheld.
+fn log_raw(name: &str, shown: &Shown) {
+    if let Some(raw) = &shown.raw_changed {
+        tracing::info!("clocks with {name} from levels, judged before the hold: {raw:?}");
+    }
+    if let Some(c) = &shown.closed {
+        let cross = c.cross.map_or("thin".into(), |p| format!("{p:+.2} ppm"));
+        let worst = c.worst.map_or("none settled".into(), |l| {
+            format!("rig {} {:+.2} ppm", l.rig, l.ppm)
+        });
+        tracing::debug!(
+            "clocks with {name} from levels: minute closed at {cross}, worst own line {worst}, \
+             judged {:?}",
+            c.raw
+        );
     }
 }
 

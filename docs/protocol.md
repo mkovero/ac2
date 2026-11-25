@@ -2431,8 +2431,9 @@ The kind a topic carries (§5.3 `kind`, and the `meta` key):
 | `ka` | `ka` |
 | `evt`, `audio/<channel>` | none (not a frame of §5.2) |
 
-`source/levels` is formed while a session is open whether or not anyone subscribes, at the
-meter rate, and sent only to connections admitted as a rig; anyone else subscribing to it
+`source/levels` is formed while a session is open whether or not anyone subscribes, at half
+the meter rate (15 a second; peaks, true peaks and clips the highest over the two meter
+intervals a frame spans, RMS their mean power), and sent only to connections admitted as a rig; anyone else subscribing to it
 receives nothing. A paired rig subscribes it whenever its link is up, with or without remote
 inputs: each frame's `mark` (§5.4) pairs with this rig's own capture at the same system
 time, and that pairing over a minute is the clock relation in `remote.standing` (§4.1).

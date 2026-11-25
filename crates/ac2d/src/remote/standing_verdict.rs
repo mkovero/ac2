@@ -17,7 +17,8 @@
 //!   spread; never *measuring* for ever.
 //!
 //! Each minute keeps both of its facts: the cross-rig figure it closed at, and the worst
-//! either rig's own line read while it was open. It is beyond when either is beyond
+//! either rig's own line read while it was open, of the lines stated a whole window
+//! ([`LINE_SETTLED`]). It is beyond when either is beyond
 //! [`BOUND_PPM`]; a count begins at a minute beyond and ends at two minutes in a row with
 //! both below [`ENTER_PPM`], or at ten all within the rule: the gap between the two bounds
 //! keeps a figure that sits at the rule from leaving and re-entering agreement every
@@ -44,7 +45,7 @@ use std::time::Duration;
 use ac2_proto::model::{CantTellReason, MinuteCount, NotLockedReason, PeerRelation};
 use ac2_proto::units::{RigId, Seconds, WallNs};
 
-use super::peer_clock::{BOUND_PPM, Evidence, judge, own_line};
+use super::peer_clock::{BOUND_PPM, Evidence, judge, own_line, same_kind};
 use super::standing::{Minutes, StandingReport};
 use super::{MAX_LINK_OFFSET_S, link_offset};
 
@@ -87,6 +88,13 @@ pub(crate) const FIGURE_STEP: f64 = 1.0;
 const SINCE_STEP_NS: u64 = 2_000_000_000;
 /// A closed minute's figure is a fit over this, s.
 const MINUTE_S: f64 = 60.0;
+/// A rig's own line classes a minute only once it has been stated this long without a
+/// break. The line is a fit over the last minute of the stream; until a whole window has
+/// passed since it was first stated, every reading still spans the stream's first seconds,
+/// whatever the device and its stamps did while starting, so a line that reads beyond the
+/// rule then and settles within it is the start, not a rate. Through the judge such a
+/// reading still withholds agreement; it only starts no count.
+const LINE_SETTLED: Duration = Duration::from_secs(60);
 
 /// How far past the link offset the marks arrive, s: the one in force when set (`set`),
 /// else the longest any link may run, since the operator may need that much and this rig
@@ -100,9 +108,9 @@ pub(crate) fn late(r: &StandingReport, set: Option<f64>) -> Option<f64> {
 
 /// A rig's own line: its sample clock against its system clock, ppm.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct Line {
-    pub(super) rig: RigId,
-    pub(super) ppm: f64,
+pub(crate) struct Line {
+    pub(crate) rig: RigId,
+    pub(crate) ppm: f64,
 }
 
 /// A closed minute: the cross-rig figure it closed at (hundredths, as shown), and the worst
@@ -602,6 +610,13 @@ pub(crate) struct StandingWatch {
     late: Persist,
     ahead: Persist,
     since: Option<WallNs>,
+    /// Since when each rig's own line has been stated measured, time since the daemon's
+    /// start.
+    stated: Vec<(RigId, Duration)>,
+    /// The last report the judge could not tell from: the marks counted begin after it.
+    stopped: Option<Duration>,
+    /// The judge's relation at the last report.
+    raw: Option<PeerRelation>,
 }
 
 /// What a standing entry shows: figures to 0.01 ppm, whole seconds and whole milliseconds,
@@ -614,6 +629,19 @@ pub(crate) struct Shown {
     pub(crate) counting: Option<MinuteCount>,
     /// When the marks counted now began, this rig's wall time.
     pub(crate) marks_since: Option<WallNs>,
+    /// The judge's relation, before any hold, when it changed kind at this report.
+    pub(crate) raw_changed: Option<PeerRelation>,
+    /// A minute that closed at this report.
+    pub(crate) closed: Option<Closed>,
+}
+
+/// A minute as it closed, for the log: its cross-rig figure (`None`: thin), the worst own
+/// line that classed it and the judge's relation then.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Closed {
+    pub(crate) cross: Option<f64>,
+    pub(crate) worst: Option<Line>,
+    pub(crate) raw: PeerRelation,
 }
 
 impl StandingWatch {
@@ -624,7 +652,42 @@ impl StandingWatch {
             late: Persist::default(),
             ahead: Persist::default(),
             since: None,
+            stated: Vec::new(),
+            stopped: None,
+            raw: None,
         }
+    }
+
+    /// The worse of the two rigs' own lines that have been stated for [`LINE_SETTLED`];
+    /// `restart`: the minutes start a new series, and every line's time starts with it.
+    fn settled_line(&mut self, e: &Evidence<'_>, restart: bool, now: Duration) -> Option<Line> {
+        if restart {
+            self.stated.clear();
+        }
+        let mut worst: Option<Line> = None;
+        // A rig whose clocks are not heard keeps its time: nothing says its line broke.
+        for (rig, c) in [Some(e.ours), e.theirs.1.map(|c| (e.theirs.0, c))]
+            .into_iter()
+            .flatten()
+        {
+            let Ok(Some(ppm)) = own_line(rig, c) else {
+                self.stated.retain(|(r, _)| *r != rig);
+                continue;
+            };
+            let since = match self.stated.iter().find(|(r, _)| *r == rig) {
+                Some((_, t)) => *t,
+                None => {
+                    self.stated.push((rig, now));
+                    now
+                }
+            };
+            if now.saturating_sub(since) >= LINE_SETTLED
+                && worst.is_none_or(|w| ppm.abs() > w.ppm.abs())
+            {
+                worst = Some(Line { rig, ppm });
+            }
+        }
+        worst
     }
 
     /// Judges `e` (its `late` and `disagree` before persistence) at `now` (time since the
@@ -638,28 +701,56 @@ impl StandingWatch {
     ) -> Shown {
         e.late = self.late.update(e.late, now);
         e.disagree = self.ahead.update(e.disagree, now);
-        let lines = [Some(e.ours), e.theirs.1.map(|c| (e.theirs.0, c))];
-        let line = lines
-            .into_iter()
-            .flatten()
-            .filter_map(|(rig, c)| {
-                Some(Line {
-                    rig,
-                    ppm: own_line(rig, c).ok()??,
-                })
-            })
-            .max_by(|a, b| a.ppm.abs().total_cmp(&b.ppm.abs()));
+        let event = Event::of(&mut self.seen, minutes);
+        let line = self.settled_line(&e, event == Event::Restart, now);
+        let judged = quantise(judge(&e));
+        let raw = Raw::of(judged);
+        let raw_changed = self
+            .raw
+            .replace(judged)
+            .is_none_or(|was| !same_kind(&was, &judged))
+            .then_some(judged);
+        let closed = match event {
+            Event::Close(cross) => Some(Closed {
+                cross: cross.map(hundredths),
+                // As the hold folds it, this report's line with the minute's.
+                worst: [
+                    self.hold.worst,
+                    line.map(|l| Line {
+                        ppm: hundredths(l.ppm),
+                        ..l
+                    }),
+                ]
+                .into_iter()
+                .flatten()
+                .max_by(|a, b| a.ppm.abs().total_cmp(&b.ppm.abs())),
+                raw: judged,
+            }),
+            _ => None,
+        };
         let input = Input {
-            raw: Raw::of(judge(&e)),
-            event: Event::of(&mut self.seen, minutes),
+            raw,
+            event,
             live: e.long,
             line,
             now,
         };
         let relation = self.hold.step(input);
+        // What the judge cannot tell from drops the count and the open minute: the marks
+        // counted begin after it, though the windows kept them.
+        if matches!(raw, Raw::Stop(_)) {
+            self.stopped = Some(now);
+        }
+        let counted = e
+            .streaming_for
+            .filter(|_| !matches!(raw, Raw::Stop(_)))
+            .map(|d| match self.stopped {
+                Some(t) => d.min(now.saturating_sub(t)),
+                None => d,
+            });
         // Kept through a gap in the reports: marks that come back to the same count land on
         // the same time and do not move it.
-        if let Some(d) = e.streaming_for {
+        if let Some(d) = counted {
             self.since = Some(place_since(self.since, wall, d));
         }
         let figure = self.hold.figure;
@@ -668,7 +759,9 @@ impl StandingWatch {
             ppm: figure.map(|f| f.0),
             span: figure.map(|f| Seconds(f.1)),
             counting: self.hold.counting(),
-            marks_since: e.streaming_for.and(self.since),
+            marks_since: counted.and(self.since),
+            raw_changed,
+            closed,
         }
     }
 }

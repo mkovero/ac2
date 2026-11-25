@@ -25,15 +25,16 @@ use std::time::{Duration, Instant};
 
 use ac2_core::clock_map::StampLine;
 use ac2_core::clock_rate::RateWindow;
-use ac2_proto::frame::{FrameStamp, METER_FPS, SourceLevelsFrame};
+use ac2_proto::frame::{FrameStamp, SourceLevelsFrame};
 use ac2_proto::units::{DaemonIncarnation, SessionEpoch};
 
 use super::join::{CROSS_LONG_S, CROSS_SHORT_S, CROSS_STEP_S};
+use crate::jobs::meters::source_period;
 
-/// A mark waits up to one meter period for its frame beside the link offset's transit and
-/// periods; the late side allows it.
-fn meter_period_s() -> f64 {
-    1.0 / f64::from(METER_FPS)
+/// A mark waits up to one `source/levels` period for its frame beside the link offset's
+/// transit and periods; the late side allows it.
+fn source_period_s() -> f64 {
+    source_period().as_secs_f64()
 }
 
 /// This rig's own mark is taken as gone this long after the fan-out last wrote it (it
@@ -44,7 +45,7 @@ const LOCAL_STALE: Duration = Duration::from_secs(1);
 /// timing.
 pub(crate) const LAPSED: Duration = Duration::from_secs(2);
 /// Marks this far apart by their own sample index or system time leave a hole in the
-/// evidence: frames come 30 a second, so this is some sixty missing, not a late one.
+/// evidence: frames come 15 a second, so this is some thirty missing, not a late one.
 const HOLE_S: f64 = 2.0;
 /// A hole this long, s, is a whole minute missing.
 const LONG_HOLE_S: f64 = 60.0;
@@ -138,7 +139,7 @@ pub(crate) struct StandingReport {
     /// ahead by at least this, s.
     pub(crate) ahead: Option<f64>,
     /// The least age of the marks over a second, s, and what the link offset in force may
-    /// leave beside it (this rig's hand-off lag, a period of jitter, a meter period); the
+    /// leave beside it (this rig's hand-off lag, a period of jitter, a frame period); the
     /// device periods (ours, theirs), s, for the default link offset.
     pub(crate) least_age: Option<f64>,
     pub(crate) allow: f64,
@@ -394,7 +395,7 @@ impl StandingFeed {
                 .map(|(s, l)| l.saturating_duration_since(s)),
             ahead: (settled && greatest < -slack).then(|| -greatest - slack),
             least_age: settled.then(|| ages().fold(f64::INFINITY, f64::min)),
-            allow: slack + meter_period_s(),
+            allow: slack + source_period_s(),
             periods: self.periods,
             minutes: fed.then_some(self.minutes),
             absent,

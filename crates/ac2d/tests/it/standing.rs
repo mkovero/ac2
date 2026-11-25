@@ -4,12 +4,12 @@
 
 use std::time::{Duration, Instant};
 
-use ac2_audio::fake::{FakeDrive, Pace};
+use ac2_audio::fake::{FakeDrive, Pace, StartStampError};
 use ac2_audio::{FakeBackend, FakeConfig};
 use ac2_proto::frame::FrameData;
 use ac2_proto::model::{
-    CantTellReason, NotLockedReason, PeerRelation, RemoteLink, RemoteState, RigPeer, SessionConfig,
-    StandingRig,
+    CantTellReason, NotLockedReason, PeerRelation, RemoteLink, RemoteState, RigPeer, SampleClock,
+    SessionConfig, StandingRig,
 };
 use ac2_proto::units::{RigId, WallNs};
 use ac2_proto::{Command, Topic};
@@ -34,11 +34,18 @@ struct Rigs {
 /// Rig A paired with rig B, which admits it; both sessions open at `rate_b` on B, and no
 /// remote input anywhere.
 fn rigs(rate_b: u32) -> Rigs {
+    rigs_with(rate_b, None)
+}
+
+/// [`rigs`], B's capture stamps off by `start` over its stream's first seconds. B's session
+/// then opens a few seconds before A's, so the marks pair only after that error is gone:
+/// B's own line is fitted over it, the cross-rig figure is not.
+fn rigs_with(rate_b: u32, start: Option<StartStampError>) -> Rigs {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let app = KeyPair::generate().unwrap();
     let a_keys = KeyPair::generate().unwrap();
-    let b = if rate_b == FS {
+    let b = if rate_b == FS && start.is_none() {
         rig(dir.path(), "rig-b", &app, None)
     } else {
         let backend = FakeBackend::new(FakeConfig {
@@ -47,6 +54,7 @@ fn rigs(rate_b: u32) -> Rigs {
             inputs: 2,
             outputs: 2,
             drive: FakeDrive::Thread(Pace::Realtime),
+            start_stamp_error: start,
             ..FakeConfig::default()
         })
         .unwrap();
@@ -57,6 +65,9 @@ fn rigs(rate_b: u32) -> Rigs {
     let (mut cb, b_id) = client(&ctx, &b, &app);
     let (mut ca, a_id) = client(&ctx, &a, &app);
     cb.ok(Command::SessionOpen { config: at(rate_b) });
+    if start.is_some() {
+        std::thread::sleep(Duration::from_secs(3));
+    }
     ca.ok(Command::SessionOpen { config: at(FS) });
     cb.ok(Command::AuthAdmitRig {
         key: a_keys.public.to_z85(),
@@ -278,6 +289,43 @@ fn slow_marks_alone_agree_after_a_minute() {
         );
         std::thread::sleep(Duration::from_millis(500));
     }
+    t.a.shutdown();
+    t.b.shutdown();
+}
+
+/// B's stamps start 4 ms late and settle with a 0.5 s time constant, as a stamp filter
+/// does at a stream's start: B's own line reads some 4 ppm at its first statements, fitted
+/// over that start, and within the rule a window later. The first verdict still comes about
+/// a minute in, with no count: a line that young classes no minute.
+#[test]
+fn slow_a_start_up_stamp_error_still_agrees_in_about_a_minute() {
+    let mut t = rigs_with(
+        FS,
+        Some(StartStampError {
+            offset_ns: 4e6,
+            decay_s: 0.5,
+        }),
+    );
+    let t0 = Instant::now();
+    let mut beyond = false;
+    loop {
+        let own = t.cb.state().clocks.capture.map(|c| c.rate);
+        beyond |= matches!(own, Some(SampleClock::Measured { ppm, .. }) if ppm.abs() > 2.0);
+        let r = remote(&mut t.ca);
+        let s = standing(&r);
+        assert_eq!(s.and_then(|s| s.counting), None, "{r:#?}");
+        if s.is_some_and(|s| s.clock.relation == PeerRelation::Agree) {
+            assert!(marks_for(&r) < 90.0, "{r:#?}");
+            break;
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(150),
+            "no agreement: {r:#?}"
+        );
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    // The error did reach B's own line.
+    assert!(beyond);
     t.a.shutdown();
     t.b.shutdown();
 }

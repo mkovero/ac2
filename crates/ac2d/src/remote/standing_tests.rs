@@ -16,7 +16,7 @@ const RATE: u32 = 48_000;
 const SYS0: u64 = 1_790_000_000_000_000_000;
 /// The other rig's sample index runs this far ahead of this rig's.
 const AHEAD: f64 = 123_456.0;
-const FPS: f64 = 30.0;
+const FPS: f64 = 15.0;
 /// This rig's device period, frames.
 const PERIOD: u32 = 64;
 const MINUTE: f64 = 60.0;
@@ -37,8 +37,10 @@ struct Rigs {
     ours: SessionEpoch,
     marks: bool,
     local: bool,
-    /// The other rig's own sample clock against its system clock, as it states it, ppm.
+    /// The other rig's own sample clock against its system clock, as it states it, ppm,
+    /// from `own_from` s; measuring before.
     own_ppm: f64,
+    own_from: f64,
     feed: StandingFeed,
     watch: StandingWatch,
 }
@@ -58,6 +60,7 @@ impl Rigs {
             marks: true,
             local: true,
             own_ppm: 0.0,
+            own_from: 0.0,
             feed: StandingFeed::new(),
             watch: StandingWatch::new(),
         }
@@ -137,7 +140,7 @@ impl Rigs {
         (stamp, f)
     }
 
-    /// Frames at 30 a second over `from..to` s, each arriving 5 ms after its capture.
+    /// Frames at 15 a second, the `source/levels` rate, over `from..to` s, each arriving 5 ms after its capture.
     fn run(&mut self, from: f64, to: f64) {
         self.run_checking(from, to, |_, _, _| {});
     }
@@ -173,7 +176,13 @@ impl Rigs {
 
     /// The report at `t` as the control thread judges it, with no link offset set.
     fn judge(&mut self, r: &StandingReport, t: f64) -> Shown {
-        let (ours, theirs) = (clocks(0.0), clocks(self.own_ppm));
+        let mut theirs = clocks(self.own_ppm);
+        if t < self.own_from
+            && let Some(c) = theirs.capture.as_mut()
+        {
+            c.rate = SampleClock::Measuring;
+        }
+        let ours = clocks(0.0);
         let fed = Some(r).filter(|r| r.absent.is_none());
         let e = Evidence {
             ours: (RigId(1), &ours),
@@ -211,6 +220,15 @@ impl Rigs {
     fn shown(&mut self, t: f64) -> PeerRelation {
         let rep = self.report(t);
         self.judge(&rep, t).relation
+    }
+}
+
+/// What the entry shows of `s`, without what only the log reads.
+fn entry(s: &Shown) -> Shown {
+    Shown {
+        raw_changed: None,
+        closed: None,
+        ..s.clone()
     }
 }
 
@@ -284,6 +302,61 @@ fn marks_alone_agree_once_the_first_minute_closes_within() {
     assert!(rep.marks_for.unwrap() >= Duration::from_secs(60));
     assert_eq!(rep.levels.unwrap().meta.channels, vec![0, 1]);
     assert_eq!(r.shown(61.0), PeerRelation::Agree);
+}
+
+/// A line first stated over windows that still hold the stream's start: beyond the rule
+/// at the first close, within soon after. It withholds agreement while beyond and starts
+/// no count.
+#[test]
+fn a_young_own_line_beyond_the_rule_starts_no_count() {
+    let mut r = Rigs::new(0.0);
+    r.own_from = 55.0;
+    r.own_ppm = 2.6;
+    let mut agreed = None;
+    r.run_checking(0.0, 70.0, |t, _, shown| {
+        assert_eq!(shown.counting, None, "{t} s");
+        assert_eq!(shown.relation, PeerRelation::Measuring, "{t} s");
+    });
+    r.own_ppm = 0.4;
+    r.run_checking(70.0, 200.0, |t, _, shown| {
+        assert_eq!(shown.counting, None, "{t} s");
+        if shown.relation == PeerRelation::Agree {
+            agreed.get_or_insert(t);
+        } else {
+            assert!(agreed.is_none(), "{t} s: {shown:?}");
+        }
+    });
+    // Three agreeing reports after the line came within, not two more minutes.
+    assert!(agreed.is_some_and(|t| t < 75.0), "{agreed:?}");
+}
+
+/// The same line beyond once it has been stated a whole window classes the minute.
+#[test]
+fn a_settled_own_line_beyond_the_rule_counts() {
+    let mut r = Rigs::new(0.0);
+    r.own_from = 55.0;
+    r.own_ppm = 0.4;
+    r.run(0.0, 130.0);
+    assert_eq!(r.shown(130.0), PeerRelation::Agree);
+    r.own_ppm = 2.6;
+    let mut close = None;
+    r.run_checking(130.0, 190.0, |_, _, shown| {
+        if shown.closed.is_some() {
+            close.get_or_insert(shown.clone());
+        }
+    });
+    let shown = close.unwrap();
+    assert_eq!(shown.relation, PeerRelation::Measuring);
+    assert_eq!(
+        shown.counting,
+        Some(MinuteCount {
+            beyond: 1,
+            counted: 1,
+            needed: HOLD_MINUTES as u32
+        })
+    );
+    let worst = shown.closed.unwrap().worst.unwrap();
+    assert_eq!((worst.rig, worst.ppm), (RigId(2), 2.6));
 }
 
 #[test]
@@ -416,11 +489,11 @@ fn a_noisy_steady_pair_shows_the_same_entry_between_minute_closes() {
             && let Some((was, at)) = &before
             && *at == closed
         {
-            assert_eq!(was, shown, "{t} s");
+            assert_eq!(*was, entry(shown), "{t} s");
         } else if t > 65.0 {
             moved += 1;
         }
-        before = Some((shown.clone(), closed));
+        before = Some((entry(shown), closed));
     });
     // At most once a minute.
     assert!(moved <= 6, "{moved}");
@@ -514,8 +587,8 @@ fn a_short_hole_drops_the_open_minute_and_keeps_the_count() {
 
 #[test]
 fn a_hole_is_long_past_a_minute_of_the_marks_own_time() {
-    // The last frame before the hole is number 3749; the next comes 59.9 or 60.1 s later.
-    let resume = |s: f64| (3749.0 + s * FPS) / FPS;
+    // The last frame before the hole is number 1874; the next comes 59.9 or 60.1 s later.
+    let resume = |s: f64| (1874.0 + s * FPS) / FPS;
     for (missing, holes) in [(59.9, 0), (60.1, 1)] {
         let mut r = Rigs::new(0.0);
         r.run(0.0, 125.0);
@@ -531,7 +604,7 @@ fn a_repeated_mark_is_skipped_and_one_stepping_back_is_a_hole() {
     r.run(0.0, 65.0);
     let before = r.report(65.0);
     // The frame after the newest carries the newest's mark again.
-    let (_, f) = r.frame(64.0 + 29.0 / FPS);
+    let (_, f) = r.frame(64.0 + 14.0 / FPS);
     let newest = f.meta.mark.unwrap();
     r.one(65.0, |m| *m = newest);
     r.run(65.0 + 1.0 / FPS, 66.0);
@@ -681,7 +754,7 @@ fn a_steady_pair_shows_the_same_entry_second_after_second() {
     let mut seen = Vec::new();
     r.run_checking(0.0, 180.0, |t, _, shown| {
         if t > 65.0 {
-            seen.push(shown.clone());
+            seen.push(entry(shown));
         }
     });
     assert!(seen.iter().all(|s| *s == seen[0]), "{:?}", seen[0]);
@@ -725,4 +798,40 @@ fn a_local_mark_lapses_when_the_stream_stops_writing_it() {
     assert!(c.get(r.at(1.5)).is_none());
     c.set(None);
     assert!(c.get(r.at(0.1)).is_none());
+}
+
+/// A spell the judge cannot tell from drops the count and the minute open then; the marks
+/// counted begin after it too, though the windows kept them.
+#[test]
+fn the_marks_counted_begin_again_after_a_spell_the_judge_cannot_tell_from() {
+    let mut w = StandingWatch::new();
+    let (good, theirs) = (clocks(0.0), clocks(0.0));
+    let mut unsynced = clocks(0.0);
+    unsynced.system = SystemClock::Unsynced { maxerror_us: 100 };
+    let s = Duration::from_secs;
+    let mut at = |t: u64, ours: &Clocks| {
+        let e = Evidence {
+            ours: (RigId(1), ours),
+            theirs: (RigId(2), Some(&theirs)),
+            capture_stamps: true,
+            long: Some((0.1, 60.0)),
+            short: Some((0.1, 40.0)),
+            streaming_for: Some(s(t)),
+            disagree: None,
+            late: None,
+            absent: CantTellReason::NoMarks,
+            other_rate: None,
+        };
+        w.update(e, None, s(t), WallNs(SYS0 + t * 1_000_000_000))
+    };
+    for t in 0..300 {
+        at(t, &good);
+    }
+    assert_eq!(at(300, &good).marks_since, Some(WallNs(SYS0)));
+    for t in 301..310 {
+        assert_eq!(at(t, &unsynced).marks_since, None, "{t} s");
+    }
+    let after = Some(WallNs(SYS0 + 309 * 1_000_000_000));
+    assert_eq!(at(311, &good).marks_since, after);
+    assert_eq!(at(500, &good).marks_since, after);
 }
