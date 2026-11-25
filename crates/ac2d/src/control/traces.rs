@@ -16,7 +16,7 @@ use ac2_proto::model::{
     TraceKind, TraceMeta, TraceMicCurve, TraceOwner, TracePosition, TraceSource, TransferIr,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, TransferId, WallNs};
-use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
+use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ImportProblem, ProtoError, ReplyBody};
 use ac2_traces::columns::{Columns, StoredTrace};
 use ac2_traces::meta;
 use ac2_traces::mic::{self, MicCurveError};
@@ -649,8 +649,10 @@ impl Control {
         self.derived(name, source, d, &refs, smoothing)
     }
 
-    /// `trace.import` of a complete upload, used up whatever the outcome: a salvage imports
-    /// file after file, and a refused one must not hold one of the few transfer slots.
+    /// `trace.import` of a complete upload, used up whatever the outcome, except a refusal
+    /// the client answers with other options (`pick_channel`, `bad_options`): it retries on
+    /// the same upload, or ends it with `file.upload_abort`. The readers take the file
+    /// whole, so it is read into memory here.
     pub(super) fn trace_import(
         &mut self,
         client: &Peer,
@@ -660,9 +662,23 @@ impl Control {
         ir: Option<IrImport>,
         owner: TraceOwner,
     ) -> Result<ReplyBody, ProtoError> {
-        let (file, content) = self.transfers.take_upload(client, transfer)?;
+        let (file, content) = self.transfers.upload_bytes(client, transfer)?;
         let file_name = super::transfer::client_file(&file);
-        self.import_trace_file(file_name, format, role, ir, &content, owner)
+        let r = self.import_trace_file(file_name, format, role, ir, &content, owner);
+        let retry = matches!(
+            &r,
+            Err(ProtoError {
+                detail: Some(ErrorDetail::Import {
+                    problem: ImportProblem::PickChannel | ImportProblem::BadOptions,
+                    ..
+                }),
+                ..
+            })
+        );
+        if !retry {
+            self.transfers.remove(transfer);
+        }
+        r
     }
 
     /// The file `file_name` read as a new trace.
@@ -849,7 +865,7 @@ impl Control {
                     .map_err(|e| invalid(format!("{}: {e}", t.meta.edit.name)))?,
             ),
         };
-        self.offer_download(client, file_name, data, None)
+        self.offer_download(client, file_name, &data)
     }
 }
 

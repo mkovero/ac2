@@ -151,7 +151,7 @@ impl Control {
             replay_marks: None,
             working: working::Persist::untitled(),
             replaced_working: None,
-            transfers: transfer::Transfers::new(s.transfer_lifetime),
+            transfers: transfer::Transfers::new(s.transfers.clone()),
             file_jobs: file_jobs::FileJobs::default(),
             sims: sim::Sims::default(),
             remote: remote::RemoteCtl::new(),

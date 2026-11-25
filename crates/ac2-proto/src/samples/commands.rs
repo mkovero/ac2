@@ -494,6 +494,21 @@ pub fn commands() -> Vec<Command> {
         Command::AuthRevokeRig {
             rig_id: crate::units::RigId(0x7075_7075),
         },
+        Command::FileUploadAbort {
+            transfer: TransferId(3),
+        },
+        Command::FileDelete {
+            name: "thursday soundcheck".into(),
+        },
+        Command::FileRename {
+            name: "friday show".into(),
+            to: "friday show final".into(),
+        },
+        Command::RecDelete {
+            recording: RecordingRef::Name {
+                name: "rec-2026-11-25T20-14-03Z".into(),
+            },
+        },
     ])
     .collect()
 }

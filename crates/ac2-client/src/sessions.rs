@@ -2,7 +2,8 @@
 //! another host (`docs/design/sessions.md`): a session folder or `.ac2session` archive is
 //! read here and uploaded in chunks; the working state (or a named session) is downloaded
 //! in chunks, checked against its SHA-256 and written here. A trace export comes down the
-//! same way, and a trace import goes up the same way.
+//! same way, and a trace import goes up the same way. Saved sessions are deleted and
+//! renamed by name, recordings deleted by reference.
 //!
 //! Used by the CLI and the app alike, so both move sessions the same way.
 
@@ -10,10 +11,11 @@ use std::path::{Path, PathBuf};
 
 use ac2_archive::{ArchiveError, MAX_ARCHIVE_BYTES};
 use ac2_proto::model::{
-    ExportFormat, ImportFormat, ImportRole, IrImport, SessionRef, TraceMeta, TraceOwner, Transfer,
+    ExportFormat, ImportFormat, ImportRole, IrImport, RecordingRef, SessionFile, SessionRef,
+    TraceMeta, TraceOwner, Transfer,
 };
 use ac2_proto::units::{Blob, TraceId, TransferId};
-use ac2_proto::{Command, ReplyBody, TraceImportArgs};
+use ac2_proto::{Command, ErrorDetail, ImportProblem, ReplyBody, TraceImportArgs};
 
 use crate::{Client, ClientError, expect_body};
 
@@ -90,7 +92,8 @@ pub async fn upload(
 }
 
 /// Uploads `bytes` as `file` (the client's name for it) in chunks; returns the complete
-/// upload.
+/// upload. One that fails part way is ended, so it holds none of the client's two
+/// transfer slots.
 pub async fn upload_file(
     c: &Client,
     file: String,
@@ -110,12 +113,19 @@ pub async fn upload_file(
     // An empty file cannot be valid, but the daemon says so, not this loop.
     while offset < bytes.len() {
         let end = (offset + step).min(bytes.len());
-        c.call(Command::FileUploadChunk {
-            transfer: t.transfer,
-            offset: offset as u64,
-            data: Blob(bytes[offset..end].to_vec()),
-        })
-        .await?;
+        let sent = c
+            .call(Command::FileUploadChunk {
+                transfer: t.transfer,
+                offset: offset as u64,
+                data: Blob(bytes[offset..end].to_vec()),
+            })
+            .await;
+        if let Err(e) = sent {
+            // The daemon may have dropped it already (disk full, damage): then this is
+            // `not_found`, and either way the slot is free.
+            let _ = upload_abort(c, t.transfer).await;
+            return Err(e);
+        }
         offset = end;
         progress(offset as u64, bytes.len() as u64);
     }
@@ -136,18 +146,38 @@ pub async fn download(
     Ok((t, data))
 }
 
-/// Imports `content` (the file `file_name`) as a trace: uploaded in chunks, then read by
-/// `trace.import`, so a file of any size up to the upload limit arrives.
-pub async fn import_trace(
+/// `file.upload_abort`: ends an upload the client gives up on, its spool file with it.
+pub async fn upload_abort(c: &Client, transfer: TransferId) -> Result<(), ClientError> {
+    c.call(Command::FileUploadAbort { transfer }).await?;
+    Ok(())
+}
+
+/// Whether the daemon kept the upload of a refused `trace.import`, for a retry with other
+/// options on the same transfer.
+pub fn import_kept_upload(e: &ClientError) -> bool {
+    matches!(
+        e,
+        ClientError::Daemon(p) if matches!(
+            p.detail,
+            Some(ErrorDetail::Import {
+                problem: ImportProblem::PickChannel | ImportProblem::BadOptions,
+                ..
+            })
+        )
+    )
+}
+
+/// `trace.import` of upload `transfer`. Refused with `pick_channel` or `bad_options`
+/// ([`import_kept_upload`]), the upload stays for a retry with other options; the caller
+/// ends it with [`upload_abort`] when it gives up.
+pub async fn import_upload(
     c: &Client,
-    file_name: String,
-    content: &[u8],
+    transfer: TransferId,
     format: ImportFormat,
     role: ImportRole,
     ir: Option<IrImport>,
     owner: TraceOwner,
 ) -> Result<TraceMeta, ClientError> {
-    let transfer = upload_file(c, file_name, content, |_, _| {}).await?;
     let r = c
         .call(Command::TraceImport(TraceImportArgs {
             transfer,
@@ -158,6 +188,54 @@ pub async fn import_trace(
         }))
         .await?;
     expect_body!("trace.import", r, ReplyBody::Trace(t) => t)
+}
+
+/// Imports `content` (the file `file_name`) as a trace: uploaded in chunks, then read by
+/// `trace.import`, so a file of any size up to the upload limit arrives. One try: an
+/// upload the daemon kept for a retry is ended.
+pub async fn import_trace(
+    c: &Client,
+    file_name: String,
+    content: &[u8],
+    format: ImportFormat,
+    role: ImportRole,
+    ir: Option<IrImport>,
+    owner: TraceOwner,
+) -> Result<TraceMeta, ClientError> {
+    let transfer = upload_file(c, file_name, content, |_, _| {}).await?;
+    let r = import_upload(c, transfer, format, role, ir, owner).await;
+    if let Err(e) = &r
+        && import_kept_upload(e)
+    {
+        let _ = upload_abort(c, transfer).await;
+    }
+    r
+}
+
+/// `file.delete`: removes the saved session `name` from the daemon's session directory.
+pub async fn delete(c: &Client, name: &str) -> Result<(), ClientError> {
+    c.call(Command::FileDelete {
+        name: name.to_owned(),
+    })
+    .await?;
+    Ok(())
+}
+
+/// `file.rename`: the saved session `name` named `to`; never replaces one.
+pub async fn rename(c: &Client, name: &str, to: &str) -> Result<SessionFile, ClientError> {
+    let r = c
+        .call(Command::FileRename {
+            name: name.to_owned(),
+            to: to.to_owned(),
+        })
+        .await?;
+    expect_body!("file.rename", r, ReplyBody::SessionFile(f) => f)
+}
+
+/// `rec.delete`: removes a recording's audio and sidecar.
+pub async fn rec_delete(c: &Client, recording: RecordingRef) -> Result<(), ClientError> {
+    c.call(Command::RecDelete { recording }).await?;
+    Ok(())
 }
 
 /// Exports `trace` as `format`: its suggested file name and content. The daemon offers the

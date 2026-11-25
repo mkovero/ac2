@@ -64,12 +64,10 @@ pub enum Command {
     /// Close the preview.
     #[serde(rename = "stream.preview_stop")]
     StreamPreviewStop,
-    /// Open a device's driver control panel on the daemon's machine (ASIO: where pro
-    /// interfaces set their rate, buffer size, clock and routing). Answered once the driver
-    /// has shown it, or after a short wait while a modal panel stays open. A change there
-    /// may reset the open stream: it reopens at the driver's new settings
-    /// (`StopCause::DriverReset`, `OpenStream::driver_change`). Refused (`unsupported`)
-    /// by backends without one.
+    /// Open a device's driver control panel on the daemon's machine (ASIO: rate, buffer,
+    /// clock, routing). Answered once shown, or after a short wait while a modal panel stays
+    /// open. A change there may reopen the stream at the driver's new settings
+    /// (`StopCause::DriverReset`, `OpenStream::driver_change`). `unsupported` without one.
     #[serde(rename = "stream.control_panel")]
     StreamControlPanel {
         /// Backend.
@@ -110,10 +108,9 @@ pub enum Command {
     StreamStatus,
     /// Set the kind (and a mic's name and active curve) of the listed inputs (others
     /// unchanged) and the pairs among all inputs (the whole list). A chosen curve must be
-    /// stored for the row's mic (unless the row is unchanged). Refused by name: a pair of
-    /// two kinds, of an input twice, of an input with itself, or of an input the
-    /// open stream does not capture; a row's `pair` side is set from the pair list. Last
-    /// write wins.
+    /// stored for the row's mic (unless the row is unchanged). Refused by name: a pair of two
+    /// kinds, of an input twice or with itself, or of an input the stream does not capture;
+    /// a row's `pair` side is set from the pair list. Last write wins.
     #[serde(rename = "stream.inputs")]
     StreamInputs {
         /// Rows to upsert, one per channel.
@@ -226,12 +223,11 @@ pub enum Command {
         /// On or off.
         on: bool,
     },
-    /// Set the rig's programme-meter settings (`rig.levels`): the ballistic the bars read,
-    /// the correlator window, the over threshold, the correlation gate and the loudness
-    /// target; a field `None` keeps its value. The daemon runs every detector and every
-    /// source's loudness all the time, so a change reads a settled value at once. A threshold
-    /// outside −20 … +6 dBTP, a gate outside −120 … 0 dBFS or a target outside −36 … −5 LUFS,
-    /// or any not finite, is refused (`invalid`). Kept by the daemon across restarts.
+    /// Set the rig's programme-meter settings (`rig.levels`): bar ballistic, correlator
+    /// window, over threshold, correlation gate, loudness target; `None` keeps a value. Every
+    /// detector runs all the time, so a change reads settled at once. A threshold outside
+    /// −20 … +6 dBTP, a gate outside −120 … 0 dBFS, a target outside −36 … −5 LUFS, or any
+    /// not finite, is `invalid`. Kept by the daemon across restarts.
     #[serde(rename = "levels.set")]
     LevelsSet {
         /// The `rig.rev` the edit was made on; another is refused with `conflict`.
@@ -523,12 +519,10 @@ pub enum Command {
         /// The curve.
         curve: MicCurveId,
     },
-    /// Calibrate a line input: the operator feeds the input a steady tone and measures
-    /// `volts` (RMS) at the input; the daemon measures the tone's level `L` the way
-    /// `cal.spl_electrical` does (refused without signal, clipped or not steady yet) and
-    /// stores `V_FS = volts / 10^(L/20)`, the volts at 0 dBFS, under the open stream's
-    /// input device. On a `line` input only: a mic reads dB SPL and a digital feed has no
-    /// volt.
+    /// Calibrate a line input: the operator feeds it a steady tone and measures `volts`
+    /// (RMS) there; the daemon reads the tone's level `L` as `cal.spl_electrical` does
+    /// (refused without signal, clipped or unsteady) and stores `V_FS = volts / 10^(L/20)`
+    /// under the open stream's input device. A `line` input only.
     #[serde(rename = "cal.line")]
     CalLine {
         /// Input channel.
@@ -583,9 +577,8 @@ pub enum Command {
     /// Computes a transfer per band from the meter's mic to the place the band limits are
     /// for (`docs/design/band-leq.md`, *The transfer*) from the band levels of a steady test
     /// signal at FOH and at the place (`at_place`), and the place's background with the
-    /// system silent, and stores it in the band
-    /// meter of `meas` (which must have one); the reply is the updated measurement. The
-    /// levels come from band logs over a span or as typed values.
+    /// system silent, and stores it in the band meter of `meas` (which must have one); the
+    /// reply is the updated measurement. Levels come from band logs or as typed values.
     #[serde(rename = "spl.band_transfer")]
     SplBandTransfer {
         /// SPL meter whose band meter gets the transfer.
@@ -690,8 +683,10 @@ pub enum Command {
     /// Sessions in the daemon's session directory.
     #[serde(rename = "file.list")]
     FileList,
-    /// Start uploading a file of at most 64 MiB: a session archive (`.ac2session`) for
-    /// `file.import`, `file.load` or `file.salvage`, or a trace file for `trace.import`.
+    /// Start uploading a file of at most 1 GiB, spooled to the daemon's disk: a session
+    /// archive (`.ac2session`) for `file.import`, `file.load` or `file.salvage`, or a trace
+    /// file for `trace.import`. `refused` when the disk would keep less than 1 GiB free or
+    /// the client's (2, a viewer's 1) or the daemon's (8) transfers are all under way.
     #[serde(rename = "file.upload_begin")]
     FileUploadBegin {
         /// The archive (or session folder) as the client names it: its path on the
@@ -723,6 +718,17 @@ pub enum Command {
         /// Replace an existing session.
         overwrite: bool,
     },
+    /// Drop an upload not yet used up: its spool file is deleted, its slot freed (`ack`).
+    #[serde(rename = "file.upload_abort")]
+    FileUploadAbort { transfer: TransferId },
+    /// Delete the saved session `name` (`ack`); refused while another file operation runs
+    /// and for the session the working state belongs to.
+    #[serde(rename = "file.delete")]
+    FileDelete { name: String },
+    /// Rename the saved session `name` to `to` (replies its `session_file`); never replaces
+    /// one. The working state's origin follows. Refused while another file operation runs.
+    #[serde(rename = "file.rename")]
+    FileRename { name: String, to: String },
     /// Pack a session archive to download: the working state (`None`) or a saved session.
     #[serde(rename = "file.download_begin")]
     FileDownloadBegin {
@@ -737,9 +743,8 @@ pub enum Command {
         /// Where it starts.
         offset: u64,
     },
-    /// Done with a download. `saved_as`: the client wrote the working state's archive to
-    /// that file, which the working state then belongs to (clean, unless it changed since
-    /// `file.download_begin`).
+    /// Done with a download. `saved_as`: the client wrote the working state's archive to that
+    /// file, which the working state then belongs to (clean unless changed since begun).
     #[serde(rename = "file.download_end")]
     FileDownloadEnd {
         /// Download.
@@ -770,15 +775,12 @@ pub enum Command {
     },
 
     // -- walk ---------------------------------------------------------------------------
-    /// Start a spatial walk through `points` of plan `plan` (the session's copy when it holds
-    /// one, else the library's, copied into the session). A live walk's `meas` are the
-    /// transfer measurements that capture at the points, one per mic, each on its own
-    /// measurement input; a sweep walk's `meas` is its one sweep measurement, whose
-    /// measurement inputs are the mics (at most [`crate::model::WalkState::MAX_MICS`] either
-    /// way). The points are grouped into steps that place every mic once, each step's mics
-    /// carried least from the previous one (`ac2_room::steps`). The walk goes to its first
-    /// step: a live walk's measurements' averages are reset and their delay tracking turned
-    /// on (a sweep has neither: its run at a step is the capture).
+    /// Start a spatial walk through `points` of plan `plan` (the session's copy, else the
+    /// library's, copied in). A live walk's `meas` are its transfer measurements, one per mic
+    /// on its own input; a sweep walk's is its one sweep measurement, whose inputs are the
+    /// mics (at most [`crate::model::WalkState::MAX_MICS`]). The points are grouped into steps
+    /// placing every mic once, mics carried least between steps (`ac2_room::steps`). At the
+    /// first step a live walk's averages reset and delay tracking turns on.
     #[serde(rename = "walk.new")]
     WalkNew {
         /// Walk name.
@@ -814,13 +816,11 @@ pub enum Command {
         /// Step index.
         step: u16,
     },
-    /// Capture at every pending point of the current step in one step, each by its mic's
-    /// measurement, each trace named *<point> · <mic>* and carrying its position, and go to the
-    /// next step with a pending point. Before a measurement is ready (averages full, no delay move
-    /// since they restarted, no arrival to pick, no fault) its trace records `captured_unsettled`.
-    /// The walk's average is made at the second capture and follows every capture, redo and skip. A
-    /// sweep walk refuses it: its capture is a run of its sweep measurement (`sweep.run`, under the
-    /// stimulus lease), which records every standing mic at its point.
+    /// Capture every pending point of the current step by its mic's measurement (trace
+    /// *<point> · <mic>* with its position), then go to the next step with a pending point. A
+    /// measurement not ready (averages full, no delay move since restart, no arrival to pick,
+    /// no fault) marks its trace `captured_unsettled`. The walk's average follows from the
+    /// second capture. A sweep walk refuses it: its capture is a `sweep.run`.
     #[serde(rename = "walk.capture")]
     WalkCapture {
         /// The walk.
@@ -908,6 +908,10 @@ pub enum Command {
     /// Recordings in the daemon's recording directory.
     #[serde(rename = "rec.list")]
     RecList,
+    /// Delete a recording, its audio file and sidecar (`ack`); refused while it is being
+    /// recorded or replayed.
+    #[serde(rename = "rec.delete")]
+    RecDelete { recording: RecordingRef },
     /// How the daemon serves clients (`ServerInfo`) and who may connect.
     #[serde(rename = "server.info")]
     ServerInfo,

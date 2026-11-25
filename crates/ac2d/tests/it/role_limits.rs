@@ -24,7 +24,8 @@ use common::*;
 
 const T: Duration = Duration::from_secs(10);
 
-/// A network-mode daemon with an operator `laptop` and viewers `phone`, `tablet`, `watch`.
+/// A network-mode daemon with an operator `laptop` and viewers `phone`, `tablet`, `watch`,
+/// `kiosk`, `wall`.
 struct Rig {
     h: Handle,
     dir: PathBuf,
@@ -32,6 +33,8 @@ struct Rig {
     phone: KeyPair,
     tablet: KeyPair,
     watch: KeyPair,
+    kiosk: KeyPair,
+    wall: KeyPair,
 }
 
 fn start_with(
@@ -40,11 +43,18 @@ fn start_with(
     tweak: impl FnOnce(&mut DaemonConfig),
 ) -> Rig {
     init_log();
-    let [laptop, phone, tablet, watch] = std::array::from_fn(|_| KeyPair::generate().unwrap());
+    let [laptop, phone, tablet, watch, kiosk, wall] =
+        std::array::from_fn(|_| KeyPair::generate().unwrap());
     let mut keys = AuthorizedKeys::new();
     keys.insert("laptop", laptop.public, Role::Operator)
         .unwrap();
-    for (n, k) in [("phone", &phone), ("tablet", &tablet), ("watch", &watch)] {
+    for (n, k) in [
+        ("phone", &phone),
+        ("tablet", &tablet),
+        ("watch", &watch),
+        ("kiosk", &kiosk),
+        ("wall", &wall),
+    ] {
         keys.insert(n, k.public, Role::Viewer).unwrap();
     }
     let security = NetworkSecurity {
@@ -63,6 +73,8 @@ fn start_with(
         phone,
         tablet,
         watch,
+        kiosk,
+        wall,
     }
 }
 
@@ -203,11 +215,16 @@ fn a_viewer_holds_one_transfer_and_viewers_half() {
         Ok(ac2_proto::ReplyBody::Transfer(_))
     ));
 
-    // The phone holds one; the tablet a second; the watch finds the viewers' share taken.
-    let mut tablet = rig.ctrl(&rig.tablet);
-    tablet.transfer(export(trace));
-    let mut watch = rig.ctrl(&rig.watch);
-    let e = refused(watch.call(export(trace)));
+    // The phone holds one, three more viewers one each; the wall finds the viewers' share
+    // taken.
+    let mut held = Vec::new();
+    for k in [&rig.tablet, &rig.watch, &rig.kiosk] {
+        let mut c = rig.ctrl(k);
+        c.transfer(export(trace));
+        held.push(c);
+    }
+    let mut wall = rig.ctrl(&rig.wall);
+    let e = refused(wall.call(export(trace)));
     assert!(e.msg.contains("viewers"), "{e:?}");
     // An operator still has room.
     let mut laptop = rig.ctrl(&rig.laptop);
@@ -229,15 +246,22 @@ async fn a_viewer_syncs_a_big_state_with_every_transfer_slot_taken() {
             plan: big_plan(&format!("big {i}"), UNDER_EVENT_BOUND),
         });
     }
-    // The viewers' share held by the phone and the tablet, the rest by the operator.
+    // The viewers' share held by four viewers, the rest by the operator and the host's
+    // clients (two each, a peer's share).
     let mut phone = rig.ctrl(&rig.phone);
     phone.transfer(working_download());
-    let mut tablet = rig.ctrl(&rig.tablet);
-    tablet.transfer(working_download());
+    let mut held = Vec::new();
+    for k in [&rig.tablet, &rig.watch, &rig.kiosk] {
+        let mut c = rig.ctrl(k);
+        c.transfer(working_download());
+        held.push(c);
+    }
     let mut laptop = rig.ctrl(&rig.laptop);
     laptop.transfer(working_download());
     laptop.transfer(working_download());
-    let e = refused(host.call(working_download()));
+    host.transfer(working_download());
+    host.transfer(working_download());
+    let e = refused(rig.local().call(working_download()));
     assert!(e.msg.contains("transfers are under way"), "{e:?}");
 
     // The phone, holding its one transfer, is sent the state as a transfer all the same.
@@ -268,7 +292,9 @@ async fn a_viewer_syncs_a_big_state_with_every_transfer_slot_taken() {
 fn a_transfer_ends_at_its_lifetime_however_busy() {
     let dir = tempfile::tempdir().unwrap();
     let lifetime = Duration::from_millis(800);
-    let rig = start_with(dir.path(), manual_rig(), |c| c.transfer_lifetime = lifetime);
+    let rig = start_with(dir.path(), manual_rig(), |c| {
+        c.transfers.lifetime = lifetime
+    });
     let mut host = rig.local();
     let trace = import_fixture(
         &mut host,
@@ -559,7 +585,7 @@ fn a_network_client_reads_no_host_paths() {
     assert_eq!(seen.recordings, Recordings::Kept);
     assert_eq!(
         laptop.server(Command::ServerInfo).network.authorized.len(),
-        4
+        6
     );
     assert!(matches!(
         host.server(Command::ServerInfo).recordings,
@@ -614,5 +640,60 @@ fn a_writable_client_list_admits_no_one() {
             .any(|d| d.kind == StateFile::AuthorizedClients && d.reason.contains("writable")),
         "{damaged:?}"
     );
+    rig.h.shutdown();
+}
+
+/// Deleting and renaming are an operator's: a viewer is refused as view-only, and a
+/// network operator's renamed session reads by its base name only.
+#[test]
+fn a_viewer_deletes_nothing_and_an_operator_reads_base_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let rig = start(dir.path());
+    let mut host = rig.local();
+    host.ok(Command::FileSave {
+        session: SessionRef::Name {
+            name: "friday".into(),
+        },
+        overwrite: false,
+    });
+    host.ok(Command::FileNew { discard: true });
+    let mut phone = rig.ctrl(&rig.phone);
+    for cmd in [
+        Command::FileDelete {
+            name: "friday".into(),
+        },
+        Command::FileRename {
+            name: "friday".into(),
+            to: "x".into(),
+        },
+        Command::FileUploadAbort {
+            transfer: TransferId(1),
+        },
+        Command::RecDelete {
+            recording: ac2_proto::model::RecordingRef::Name { name: "x".into() },
+        },
+    ] {
+        let e = refused(phone.call(cmd));
+        assert_eq!(e.detail, Some(ac2_proto::ErrorDetail::ViewOnly), "{e:?}");
+    }
+    let mut laptop = rig.ctrl(&rig.laptop);
+    let f = match laptop
+        .call(Command::FileRename {
+            name: "friday".into(),
+            to: "friday show".into(),
+        })
+        .unwrap()
+    {
+        ac2_proto::ReplyBody::SessionFile(f) => f,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(f.path, "friday show");
+    assert!(rig.sessions().join("friday show/session.json").is_file());
+    laptop
+        .call(Command::FileDelete {
+            name: "friday show".into(),
+        })
+        .unwrap();
+    assert!(!rig.sessions().join("friday show").exists());
     rig.h.shutdown();
 }

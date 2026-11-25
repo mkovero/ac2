@@ -79,8 +79,8 @@ impl Control {
 
     /// A viewer key holds one transfer at a time, its download still being packed
     /// included, and viewers together hold at most [`MAX_VIEWER_TRANSFERS`]: transfers are
-    /// held in memory and capped for the whole daemon, and viewers must not be able to
-    /// crowd an operator's out.
+    /// capped for the whole daemon, and viewers must not be able to crowd an operator's
+    /// out.
     pub(super) fn viewer_transfer_gate(
         &mut self,
         peer: &Peer,

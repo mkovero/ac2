@@ -23,7 +23,7 @@ use crate::route::Peer;
 
 /// A client as the audit names it: its id and the pair it came in on, since a network
 /// key's name may read like a local client's id.
-fn describe(p: &Peer) -> String {
+pub(super) fn describe(p: &Peer) -> String {
     match p.curve() {
         None => format!("{} (local)", p.id().0),
         Some((name, key)) => format!("{name} (network, key {})", key.fingerprint()),

@@ -23,6 +23,7 @@ use ac2_traces::session::{
 
 use super::file_jobs::{Cancel, FileDone, Pending, ReplaceFrom, ReplaceRead, Work};
 use super::load_check::check_session;
+use super::transfer::UploadSource;
 use super::{Control, delay_samples};
 use crate::route::Peer;
 use crate::util::{internal, invalid, missing, perr, perr_detail, refused, wall_ns};
@@ -226,16 +227,19 @@ impl Control {
         self.guard_unsaved(discard)?;
         let (from, src) = match r {
             SessionRef::Upload { transfer } => {
-                let (file, bytes) = self.transfers.upload(client, *transfer)?;
-                let src = (file, bytes.to_vec());
+                let (file, archive) = self.transfers.claim(client, *transfer)?;
                 let stage = self.stage_path("upload");
                 (
                     ReplaceFrom::Upload {
                         transfer: *transfer,
-                        file: src.0,
+                        file,
                         stage: stage.clone(),
                     },
-                    Source::Upload(stage, src.1),
+                    Source::Upload(UploadSource {
+                        archive,
+                        stage,
+                        disk: self.unpack_disk(),
+                    }),
                 )
             }
             _ => {
@@ -375,11 +379,13 @@ impl Control {
     ) -> Result<(Pending, Work), ProtoError> {
         let (transfer, src) = match r {
             SessionRef::Upload { transfer } => {
-                let bytes = self.transfers.upload(client, *transfer)?.1.to_vec();
-                (
-                    Some(*transfer),
-                    Source::Upload(self.stage_path("upload"), bytes),
-                )
+                let archive = self.transfers.claim(client, *transfer)?.1;
+                let src = UploadSource {
+                    archive,
+                    stage: self.stage_path("upload"),
+                    disk: self.unpack_disk(),
+                };
+                (Some(*transfer), Source::Upload(src))
             }
             _ => (None, Source::Dir(self.session_path(client, r)?.1)),
         };
@@ -669,7 +675,7 @@ impl Control {
 pub(super) enum Source {
     Dir(PathBuf),
     /// An upload's archive, unpacked into the staging directory first.
-    Upload(PathBuf, Vec<u8>),
+    Upload(UploadSource),
     Empty,
 }
 
@@ -721,10 +727,9 @@ impl Source {
     fn read_traces(self) -> Result<SalvageRead, ProtoError> {
         match self {
             Self::Dir(dir) => read_traces(&dir),
-            Self::Upload(stage, bytes) => {
-                let r =
-                    super::transfer::unpack_into(&bytes, &stage).and_then(|()| read_traces(&stage));
-                super::transfer::remove_dir(&stage);
+            Self::Upload(src) => {
+                let r = src.unpack().and_then(|()| read_traces(&src.stage));
+                super::transfer::remove_dir(&src.stage);
                 r
             }
             Self::Empty => Err(internal("nothing to salvage")),
@@ -741,10 +746,9 @@ impl Source {
         };
         match self {
             Self::Dir(dir) => read_dir(&dir),
-            Self::Upload(stage, bytes) => {
-                let r =
-                    super::transfer::unpack_into(&bytes, &stage).and_then(|()| read_dir(&stage));
-                super::transfer::remove_dir(&stage);
+            Self::Upload(src) => {
+                let r = src.unpack().and_then(|()| read_dir(&src.stage));
+                super::transfer::remove_dir(&src.stage);
                 r
             }
             Self::Empty => Ok((

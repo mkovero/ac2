@@ -887,6 +887,14 @@ def requests():
         req(107, "dynamics.envelope", {"trace": 14, "input": 4, "step": 0}),
         req(108, "rig.unpair", {"rig_id": 0x6B657475}),
         req(109, "auth.revoke_rig", {"rig_id": 0x70757075}),
+        req(110, "file.upload_abort", {"transfer": 3}),
+        req(111, "file.delete", {"name": "thursday soundcheck"}),
+        req(112, "file.rename", {"name": "friday show", "to": "friday show final"}),
+        req(
+            113,
+            "rec.delete",
+            {"recording": {"type": "name", "name": "rec-2026-11-25T20-14-03Z"}},
+        ),
     ]
 
 

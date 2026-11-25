@@ -290,13 +290,17 @@ impl Control {
             | Command::FileSalvage { .. }
             | Command::FileUploadBegin { .. }
             | Command::FileUploadChunk { .. }
+            | Command::FileUploadAbort { .. }
             | Command::FileImport { .. }
+            | Command::FileDelete { .. }
+            | Command::FileRename { .. }
             | Command::FileDownloadBegin { .. }
             | Command::FileDownloadChunk { .. }
             | Command::FileDownloadEnd { .. }
             | Command::RecStart { .. }
             | Command::RecStop
             | Command::RecList
+            | Command::RecDelete { .. }
             | Command::StreamReplay { .. }
             | Command::ServerInfo
             | Command::ServerNetwork { .. }
