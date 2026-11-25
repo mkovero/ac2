@@ -62,12 +62,9 @@ fn held_panel() -> (ac2d::Handle, Arc<AtomicUsize>, Sender<()>) {
         opened: Arc::clone(&opened),
         close: Mutex::new(rx),
     };
-    let h = Daemon::start(DaemonConfig::new(
-        Arc::new(backend),
-        inproc("dedup-panel"),
-        -10.0,
-    ))
-    .unwrap();
+    let mut cfg = DaemonConfig::new(Arc::new(backend), inproc("dedup-panel"), -10.0);
+    cfg.session_dir = crate::common::test_sessions();
+    let h = Daemon::start(cfg).unwrap();
     (h, opened, close)
 }
 

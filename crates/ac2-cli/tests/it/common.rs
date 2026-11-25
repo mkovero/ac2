@@ -14,6 +14,14 @@ use clap::Parser;
 use serde_json::Value;
 
 /// A pair of its own, so tests running side by side never share a daemon.
+/// A session directory inside the build's scratch space, never the user's: a daemon clears
+/// its session directory's staging folder at start, which on the user's directory would
+/// take a running daemon's spooled uploads with it.
+pub fn test_sessions() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("sessions-{}", std::process::id()))
+}
+
 pub fn local() -> Listen {
     Listen::apart()
 }
@@ -28,6 +36,7 @@ pub fn rig_on(
     cfg: impl FnOnce(&mut DaemonConfig),
 ) -> (Handle, Endpoints) {
     let mut config = DaemonConfig::new(backend, local(), -10.0);
+    config.session_dir = test_sessions();
     cfg(&mut config);
     let h = Daemon::start(config).unwrap();
     let ep = Endpoints {

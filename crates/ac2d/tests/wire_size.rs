@@ -229,6 +229,9 @@ fn run(meas: &[MeasConfig], seconds: f64) -> Sizes {
 fn run_with(setup: &Setup<'_>, seconds: f64) -> (Sizes, Option<Starved>) {
     init_log();
     let mut config = DaemonConfig::new(Arc::new(noisy_rig()), local_ipc(), -10.0);
+    // Never the user's session directory: a daemon clears its staging folder at start.
+    config.session_dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("sessions-{}", std::process::id()));
     if let Some(fps) = setup.fps {
         config.publish_fps = fps;
     }

@@ -42,6 +42,9 @@ pub(crate) fn rig(
     let d = dir.join(name);
     let listen = ac2_e2e::local_pair(&d);
     let mut cfg = ac2d::DaemonConfig::new(std::sync::Arc::clone(&device), listen, -10.0);
+    // Never the user's session directory: a daemon clears its staging folder at start.
+    cfg.session_dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("sessions-{}", std::process::id()));
     on_loopback(&mut cfg, &d, app, keys)?;
     cfg.backends = vec![device];
     cfg.name = name.into();

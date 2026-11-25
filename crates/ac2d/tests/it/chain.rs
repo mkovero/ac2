@@ -45,6 +45,7 @@ fn noisy_rig() -> FakeBackend {
 fn start(name: &str) -> (Handle, Client) {
     init_log();
     let mut config = DaemonConfig::new(Arc::new(noisy_rig()), inproc(name), -10.0);
+    config.session_dir = crate::common::test_sessions();
     config.publish_fps = 60;
     let h = Daemon::start(config).unwrap();
     let mut c = Client::connect(h.context(), h.ctrl_endpoint());
