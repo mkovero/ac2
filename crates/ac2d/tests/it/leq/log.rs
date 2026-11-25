@@ -348,3 +348,113 @@ async fn a_long_log_in_pages_and_its_history() {
         .await
         .unwrap();
 }
+
+/// A loaded log whose newest run started after an unknown gap, its mark from this boot (as
+/// after a restart on the same boot): the new run's gap is known, yet the windows still
+/// start at the unknown gap, never reaching the loud seconds of unknown age before it.
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn windows_never_reach_across_an_unknown_gap_of_a_loaded_log() {
+    use ac2_proto::model::{LogClock, LogGap, SplLogRow};
+    use ac2_proto::units::WallNs;
+    use ac2_traces::log_mark::{Anchor, LogMark};
+    use ac2_traces::session::{SavedMeasurement, SavedSplLog, Session};
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let h = Daemon::start(steady_config(realtime_rig(), local_ipc())).unwrap();
+    let c = connect(&h).await;
+    let t0 = 1_790_000_000_000_000_000;
+    // Run 0: 30 loud seconds; run 1, after an unknown gap: 10 quiet seconds.
+    let row = |second: u64, run: u32, level: f64, gap: Option<LogGap>| SplLogRow {
+        second,
+        run,
+        start: WallNs(t0 + second * 1_000_000_000),
+        clock: LogClock::Unsynced,
+        gap,
+        measured: Seconds(1.0),
+        laeq: Dbfs(level),
+        lceq: Dbfs(level),
+        lzeq: Dbfs(level),
+        lcpeak: Dbfs(level + 3.0),
+        lafmax: Dbfs(level + 1.0),
+        sensitivity: None,
+        position: None,
+    };
+    let rows: Vec<SplLogRow> = (0..30)
+        .map(|k| row(k, 0, -6.0, (k == 0).then_some(LogGap::Known)))
+        .chain((31..41).map(|k| row(k, 1, -70.0, (k == 31).then_some(LogGap::Unknown))))
+        .collect();
+    // The boot clock (suspend included) now, as the daemon reads it.
+    let uptime = std::fs::read_to_string("/proc/uptime").unwrap();
+    let up_s: f64 = uptime.split_whitespace().next().unwrap().parse().unwrap();
+    let boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+    let mark = LogMark::new(
+        1,
+        Anchor {
+            boot_id: boot_id.trim().to_owned(),
+            run: 1,
+            second: 40,
+            boot_ms: (up_s * 1000.0) as u64,
+        },
+    );
+    let path = dir.path().join("gap");
+    ac2_traces::session::save(
+        &path,
+        &Session {
+            saved_at: WallNs(t0),
+            measurements: vec![SavedMeasurement {
+                id: M,
+                config: meter(vec![window(60.0, None)]),
+                running: false,
+                delay: None,
+                colour: None,
+                layout: None,
+                offset: ac2_proto::units::Db(0.0),
+                eq: Vec::new(),
+                next_run: 2,
+            }],
+            spl_logs: vec![SavedSplLog {
+                info: ac2_proto::spl_log::SplLogInfo {
+                    meas: M,
+                    name: "FOH SPL".into(),
+                    input: 1,
+                    mic: None,
+                    zone: "UTC".into(),
+                    started: WallNs(t0),
+                },
+                rows,
+                bands: Vec::new(),
+                mark: Some(mark),
+            }],
+            traces: Vec::new(),
+            walks: Vec::new(),
+            plans: Vec::new(),
+            remote_inputs: Vec::new(),
+        },
+    )
+    .unwrap();
+    c.call(Command::FileLoad {
+        session: SessionRef::Path {
+            path: path.to_string_lossy().into_owned(),
+        },
+        discard: true,
+    })
+    .await
+    .unwrap();
+    c.call(Command::StreamOpen {
+        config: stream(false),
+    })
+    .await
+    .unwrap();
+    c.call(Command::MeasStart { meas: M }).await.unwrap();
+    c.subscribe(Subscription::Meas(M)).unwrap();
+    let f = leq_until(&c, "the new run", |f| f.meta.logged > 40).await;
+    // Across the gap the 30 s at -6 dBFS would put the minute near -9 dBFS.
+    assert!(f.leq[0] < -40.0, "{:?}", f.leq);
+    // The new run's gap is known: the restart's seconds are counted off the boot clock.
+    let p = page(&c, 40).await;
+    assert_eq!(p.rows[0].gap, Some(LogGap::Known), "{:?}", p.rows);
+    tokio::task::spawn_blocking(move || h.shutdown())
+        .await
+        .unwrap();
+}

@@ -26,6 +26,13 @@ use super::{LeqLog, NS, started_now};
 pub(crate) const RESERVE_S: u64 = 600;
 /// Seconds before the index reaches the stored reservation that the next one is asked for.
 pub(crate) const RESERVE_LEAD_S: u64 = 60;
+/// Seconds between attempts while the mark's writes fail.
+pub(crate) const RETRY_S: u64 = 10;
+/// Most rows of each log held for their run's anchor. A write thread that never reports
+/// (a hung disk) must not hold rows and memory without end; serving them unanchored could
+/// hand a second out twice after a power cut, so the oldest held row is dropped instead:
+/// the log shows a gap there.
+pub(crate) const MAX_HELD: usize = RESERVE_S as usize;
 
 /// Wakes the log's write thread to write the mark asked for.
 #[derive(Clone)]
@@ -96,14 +103,18 @@ pub(crate) struct Runs {
     pub(super) floor: u64,
     /// Above every row held and every index issued.
     next_free: u64,
-    /// The index the stored mark reserves up to (or the one whose write failed: the next
-    /// attempt comes with the next reservation).
+    /// The index the stored mark reserves up to; a write that failed leaves it as it was.
     reserved: Option<u64>,
+    /// After a failed write: the index from which the next attempt is made, so a failing
+    /// disk is not written every second.
+    retry_from: Option<u64>,
     want: Option<LogMark>,
     /// A run whose anchor is awaited: rows wait in `held`.
     awaiting: Option<u32>,
     held: Vec<SplLogRow>,
     held_bands: Vec<BandLogRow>,
+    /// Held rows are being dropped ([`MAX_HELD`]).
+    dropping: bool,
     last_spl_run: Option<u32>,
     last_band_run: Option<u32>,
     /// The write thread keeping this log on disk: while it does, a run's first rows wait
@@ -266,7 +277,8 @@ impl LeqLog {
             boot_ms,
         });
         r.next_free = r.next_free.max(second + 1);
-        let due = r.reserved.is_none_or(|res| second + RESERVE_LEAD_S >= res);
+        let due = r.reserved.is_none_or(|res| second + RESERVE_LEAD_S >= res)
+            && r.retry_from.is_none_or(|t| second >= t);
         if r.waker.is_some() && r.want.is_none() && r.awaiting.is_none() && due {
             let m = r.mark_at(run, second + RESERVE_S, boot_ms + RESERVE_S * 1000);
             r.ask(m);
@@ -280,6 +292,14 @@ impl LeqLog {
         r.gap = (runs.last_spl_run != Some(r.run)).then(|| runs.gap_of(r.run));
         runs.last_spl_run = Some(r.run);
         if runs.awaiting.is_some() {
+            if runs.held.len() >= MAX_HELD {
+                let gone = runs.held.remove(0);
+                // The run's gap stays on its first row kept.
+                if let Some(next) = runs.held.first_mut().filter(|n| n.run == gone.run) {
+                    next.gap = next.gap.or(gone.gap);
+                }
+                runs.note_dropped();
+            }
             runs.held.push(r);
         } else {
             self.push(r);
@@ -292,6 +312,13 @@ impl LeqLog {
         r.gap = (runs.last_band_run != Some(r.run)).then(|| runs.gap_of(r.run));
         runs.last_band_run = Some(r.run);
         if runs.awaiting.is_some() {
+            if runs.held_bands.len() >= MAX_HELD {
+                let gone = runs.held_bands.remove(0);
+                if let Some(next) = runs.held_bands.first_mut().filter(|n| n.run == gone.run) {
+                    next.gap = next.gap.or(gone.gap);
+                }
+                runs.note_dropped();
+            }
             runs.held_bands.push(r);
         } else {
             self.push_band(r);
@@ -300,6 +327,7 @@ impl LeqLog {
 
     fn release(&mut self) {
         self.runs.awaiting = None;
+        self.runs.dropping = false;
         for r in std::mem::take(&mut self.runs.held) {
             self.push(r);
         }
@@ -328,13 +356,15 @@ impl LeqLog {
         self.runs.want.take()
     }
 
-    /// The write thread wrote `m` (or could not, `Err`): its reservation stands (or is
-    /// retried with the next), and rows waiting for its run's anchor are served.
+    /// The write thread wrote `m` (or could not, `Err`): its reservation stands (or the
+    /// stored one stays, and the write is tried again [`RETRY_S`] later), and rows waiting
+    /// for its run's anchor are served.
     pub(crate) fn mark_written(&mut self, meas: MeasId, m: &LogMark, result: Result<(), String>) {
         let r = &mut self.runs;
-        r.reserved = Some(m.anchor.second);
         match result {
             Ok(()) => {
+                r.reserved = Some(m.anchor.second);
+                r.retry_from = None;
                 if r.failing {
                     tracing::info!("SPL meter {meas}: the log's high-water mark is written again");
                 }
@@ -349,6 +379,7 @@ impl LeqLog {
                     );
                 }
                 r.failing = true;
+                r.retry_from = Some(r.next_free + RETRY_S);
             }
         }
         if r.awaiting.is_some_and(|a| a <= m.anchor.run) {
@@ -393,6 +424,17 @@ impl LeqLog {
 }
 
 impl Runs {
+    /// A held row was dropped: said once per wait.
+    fn note_dropped(&mut self) {
+        if !self.dropping {
+            self.dropping = true;
+            tracing::warn!(
+                "an SPL log's run anchor is still not written after {MAX_HELD} s: the oldest \
+                 rows waiting for it are dropped, leaving a gap in the log"
+            );
+        }
+    }
+
     fn gap_of(&self, run: u32) -> LogGap {
         match self.open {
             Some((r, g)) if r == run => g,
@@ -421,6 +463,22 @@ pub(super) fn restore(log: &mut LeqLog, meas: MeasId, mark: Option<LogMark>) {
     };
     log.runs.last_spl_run = log.rows.back().map(|r| r.run);
     log.runs.last_band_run = log.bands.back().map(|r| r.run);
+    // A level from before an unknown gap is of unknown age: the windows of every later
+    // run, in this process too, start at the newest such gap.
+    let spl_gap = log
+        .rows
+        .iter()
+        .rev()
+        .find(|r| r.gap == Some(LogGap::Unknown));
+    let band_gap = log
+        .bands
+        .iter()
+        .rev()
+        .find(|r| r.gap == Some(LogGap::Unknown));
+    log.runs.floor = spl_gap
+        .map(|r| r.second)
+        .max(band_gap.map(|r| r.second))
+        .unwrap_or(0);
     let mut started = log.started;
     log.runs.restore(meas, mark, last, &mut started);
     log.started = started;

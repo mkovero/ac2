@@ -13,7 +13,7 @@ use ac2_traces::session::SavedSplLog;
 
 use super::super::tests::row;
 use super::super::{LeqLog, NS};
-use super::{RESERVE_S, RunClock, RunStart, Waker};
+use super::{MAX_HELD, RESERVE_S, RETRY_S, RunClock, RunStart, Waker};
 
 const BOOT: &str = "boot-a";
 /// 2026-11-25T12:00:00Z.
@@ -176,6 +176,53 @@ fn rows_wait_for_their_runs_anchor() {
     // The exact mark after a clean stop is the last index issued.
     log.issue(s.run, 0, 11_000);
     assert_eq!(log.exact_mark().expect("a mark").anchor.second, 0);
+}
+
+/// A mark whose write failed reserves nothing: the write is asked for again [`RETRY_S`]
+/// seconds on (not every second, nor only near a reservation never stored), and once one
+/// is written its reservation stands.
+#[test]
+fn a_failed_mark_write_is_retried_not_taken_as_written() {
+    let mut log = LeqLog::default();
+    log.attach(Waker(Arc::new(|| {})));
+    let s = log.begin_run(&now(BOOT, 10_000, T0, LogClock::Synced));
+    let m = log.take_want().expect("anchor asked for");
+    log.mark_written(MeasId(1), &m, Err("disk full".into()));
+    for k in 0..RETRY_S {
+        log.issue(s.run, k, 11_000 + k * 1000);
+        assert!(log.take_want().is_none(), "asked again at second {k}");
+    }
+    log.issue(s.run, RETRY_S, 11_000 + RETRY_S * 1000);
+    let m = log.take_want().expect("retried");
+    assert_eq!(m.anchor.second, RETRY_S + RESERVE_S);
+    log.mark_written(MeasId(1), &m, Ok(()));
+    log.issue(s.run, RETRY_S + 1, 12_000 + RETRY_S * 1000);
+    assert!(log.take_want().is_none(), "the written reservation stands");
+}
+
+/// A write thread that never reports holds at most [`MAX_HELD`] rows: the oldest go, so
+/// nothing is served unanchored, and the newest are served once the anchor is written.
+#[test]
+fn rows_held_for_an_anchor_never_written_are_bounded() {
+    let mut log = LeqLog::default();
+    log.attach(Waker(Arc::new(|| {})));
+    let s = log.begin_run(&now(BOOT, 10_000, T0, LogClock::Synced));
+    let n = MAX_HELD as u64 + 5;
+    for k in 0..n {
+        log.push_row(SplLogRow {
+            second: k,
+            run: s.run,
+            ..row((T0 + k) * NS, -30.0)
+        });
+    }
+    assert!(log.rows().is_empty(), "nothing served unanchored");
+    assert_eq!(log.runs.held.len(), MAX_HELD);
+    let m = log.take_want().expect("anchor asked for");
+    log.mark_written(MeasId(1), &m, Ok(()));
+    let rows = log.rows();
+    assert_eq!(rows.len(), MAX_HELD);
+    assert_eq!((rows[0].second, rows[MAX_HELD - 1].second), (5, n - 1));
+    assert_eq!(rows[0].gap, Some(LogGap::Known), "the run's gap kept");
 }
 
 /// Rows logged before the clock synchronised are re-stamped from their distance to the
