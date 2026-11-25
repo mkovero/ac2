@@ -14,13 +14,14 @@ use ac2_proto::units::{MeasId, WallNs};
 use ac2_scene::banner::{Status, no_delay_estimate};
 use ac2_scene::distortion::{DistortionScene, SweepView, distortion_scene, sweep_ir_scene};
 use ac2_scene::grid::{GridColumns, columns};
-use ac2_scene::ir::{IrScene, ir_scene};
+use ac2_scene::ir::IrScene;
+use ac2_scene::ir::overlay::{IrCurve, ir_overlay_scene};
 use ac2_scene::math::MathStatus;
 use ac2_scene::primitives::Viewport;
 use ac2_scene::tf::{TfScene, transfer_scene};
 use ac2_scene::theme::Theme;
 use ac2_scene::time::{ClockOffset, Freshness};
-use ac2_scene::trace::{TfTrace, TimeBase};
+use ac2_scene::trace::{TfTrace, TimeBase, TraceKey};
 
 use crate::state::{AppState, PaneId, PaneKind};
 
@@ -559,9 +560,9 @@ fn with_transfer<R>(
 /// The IR of the transfer measurement pane `pane` shows, under the banners of its transfer
 /// stream (protection flags, audio stopped, daemon silence), tagged as its transfer curve
 /// is: a stopped measurement keeps its last IR, tagged `stopped`, as its response is kept.
-/// Without its IR frame, or without a transfer measurement, an empty plot that says why.
-/// While the selected trace is a stored transfer trace with an IR that the pane's transfer
-/// group draws ([`AppState::stored_ir`]), that IR instead, named as its legend row is.
+/// Over it, the IR of every stored trace the pane's magnitude view draws, in the same order
+/// and colours, with a legend of them (a trace without an IR listed `no IR`); the cursor
+/// reads the selected curve, else the first. With no IR at all, an empty plot that says why.
 pub fn ir(
     st: &AppState,
     pane: PaneId,
@@ -578,10 +579,31 @@ pub fn ir(
     };
     // A stored trace is no live stream: none of the measurement's banners apply to it.
     let idle = || status(st, &[], None, now);
-    if let Some(d) = st.stored_ir(Some(pane))
-        && let Some(s) = ac2_scene::ir::stored_ir_scene(
-            d,
-            st.curve_colours(theme).trace(d.meta.id),
+    let stored = stored_irs(st, pane);
+    let stored_curves = |theme: &Theme| -> Vec<IrCurve<'_>> {
+        let colours = st.curve_colours(theme);
+        stored
+            .iter()
+            .map(|(d, f)| IrCurve {
+                key: TraceKey::Stored(d.meta.id),
+                name: d.meta.edit.name.clone(),
+                // As the magnitude view's row: compared first, then what the trace is.
+                tags: st
+                    .trace_compared_on(PaneKind::Transfer, &d.meta, pane)
+                    .then(|| ac2_scene::trace::COMPARED.to_owned())
+                    .into_iter()
+                    .chain(eq_curve_tags(st, &d.meta))
+                    .collect(),
+                frame: f.as_ref(),
+                color: colours.trace(d.meta.id),
+                freshness: None,
+                selected: st.rig.selected_trace == Some(d.meta.id),
+            })
+            .collect()
+    };
+    let Some(m) = st.pane_meas(pane) else {
+        if let Some(s) = ir_overlay_scene(
+            &stored_curves(theme),
             &ac2_scene::ir::IrCtx {
                 status: &idle(),
                 view: &view,
@@ -589,11 +611,10 @@ pub fn ir(
                 style,
                 size,
             },
-        )
-    {
-        return s;
-    }
-    let Some(m) = st.pane_meas(pane) else {
+            None,
+        ) {
+            return s;
+        }
         // The pane's hint box, when one is up in its centre, already says what to do; and
         // without a daemon there is nothing to make a measurement on (the plot stays
         // empty, as the magnitude view's does).
@@ -618,29 +639,48 @@ pub fn ir(
     let status = status(st, &shown, Some(m), now);
     // A stopped measurement's last IR is its final result, as its last response is: it
     // stays drawn, and its freshness tags it stopped.
-    if let Some(ir) = ir.filter(|_| !st.meas_hidden(m))
-        && let FrameData::Ir(f) = &ir.frame.data
-    {
-        let ctx = ac2_scene::ir::IrCtx {
-            status: &status,
-            view: &view,
-            axes: &view.ir.axes,
-            style,
-            size,
-        };
-        let color = meas_color(st, theme, m.id);
-        let fresh = Some(freshness(st, ir));
-        return match st.cross_rig(m.id) {
-            Some((x, r, ours)) => ac2_scene::ir::ir_scene_between(
-                f,
-                color,
-                fresh,
-                &ctx,
-                &ours,
-                &ac2_scene::between_rigs::name_of(r, x.rig),
-            ),
-            None => ir_scene(f, color, fresh, &ctx),
-        };
+    let live = ir
+        .filter(|_| !st.meas_hidden(m))
+        .and_then(|ir| match &ir.frame.data {
+            FrameData::Ir(f) => Some(IrCurve {
+                key: TraceKey::Live(m.id),
+                name: m.config.name.clone(),
+                tags: eq_prediction_note(st, m)
+                    .or_else(|| {
+                        tf.and_then(|tf| math_status(st, m, &tf.frame.data))
+                            .map(|a| a.tag())
+                    })
+                    .into_iter()
+                    .collect(),
+                frame: Some(f),
+                color: meas_color(st, theme, m.id),
+                freshness: Some(freshness(st, ir)),
+                selected: false,
+            }),
+            _ => None,
+        });
+    let has_live = live.is_some();
+    let curves: Vec<IrCurve<'_>> = live.into_iter().chain(stored_curves(theme)).collect();
+    // The measurement's banners say what its live curve is; a view of stored IRs alone
+    // has none.
+    let shown_status = if has_live { status.clone() } else { idle() };
+    let ctx = ac2_scene::ir::IrCtx {
+        status: &shown_status,
+        view: &view,
+        axes: &view.ir.axes,
+        style,
+        size,
+    };
+    let between = st
+        .cross_rig(m.id)
+        .filter(|_| has_live)
+        .map(|(x, r, ours)| (ours, ac2_scene::between_rigs::name_of(r, x.rig)));
+    if let Some(s) = ir_overlay_scene(
+        &curves,
+        &ctx,
+        between.as_ref().map(|(a, b)| (a.as_str(), b.as_str())),
+    ) {
+        return s;
     }
     let hidden = st.meas_hidden(m);
     let why = if hidden {
@@ -674,6 +714,52 @@ pub fn ir(
         style,
         size,
     )
+}
+
+/// The stored traces the transfer pane `pane`'s magnitude view draws, in its legend's order
+/// (the lead's group first, then group by group in the tree's order; within a group by
+/// order), each with its IR as a frame when it was captured with one.
+fn stored_irs(
+    st: &AppState,
+    pane: PaneId,
+) -> Vec<(
+    &Arc<ac2_proto::model::TraceData>,
+    Option<ac2_proto::frame::IrFrame>,
+)> {
+    let shows = st.pane_meas(pane);
+    let ms = st.measurements();
+    let groups = ac2_scene::meas_list::group_order(&ms);
+    let lead = pane_tf(st, pane).map(|m| match &m.config.kind {
+        ac2_proto::model::MeasKind::Math { config } => config.owner,
+        _ => ac2_proto::model::TraceOwner::Meas { meas: m.id },
+    });
+    let rank = |g: ac2_proto::model::TraceOwner| {
+        if Some(g) == lead {
+            0
+        } else {
+            1 + groups.iter().position(|x| *x == g).unwrap_or(groups.len())
+        }
+    };
+    let mut v: Vec<_> = st
+        .rig
+        .traces
+        .values()
+        .map(|(t, _)| t)
+        .filter(|t| {
+            st.on_pane(PaneKind::Transfer, &t.meta, shows)
+                || st.trace_compared_on(PaneKind::Transfer, &t.meta, pane)
+        })
+        .collect();
+    v.sort_by_key(|t| {
+        (
+            rank(ac2_scene::meas_list::group_of(&t.meta, &ms)),
+            t.meta.edit.order,
+            t.meta.id,
+        )
+    });
+    v.into_iter()
+        .map(|t| (t, ac2_scene::ir::stored_frame(t)))
+        .collect()
 }
 
 /// What the sweep pane draws.

@@ -25,6 +25,7 @@ mod duplicate;
 mod dynamics;
 mod eq;
 mod harness;
+mod ir_overlay;
 mod keep;
 mod link;
 mod math;

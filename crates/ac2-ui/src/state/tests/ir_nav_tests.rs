@@ -321,7 +321,7 @@ fn stored_tf(id: u32, name: &str, ir: Option<TransferIr>) -> (TraceMeta, Arc<Tra
 
 /// A stopped transfer measurement's IR views keep its last IR, as its response view keeps
 /// its last curve: drawn, tagged `stopped`, the title saying it, the IR keys acting on it;
-/// a selected capture's stored IR shows instead. Started again, the tag is gone.
+/// a selected capture's stored IR leads instead. Started again, the tag is gone.
 #[test]
 fn a_stopped_measurement_keeps_its_last_ir() {
     let mut t = T::new();
@@ -366,7 +366,10 @@ fn a_stopped_measurement_keeps_its_last_ir() {
         let etc = t.st.view_for(pane).ir.mode == ac2_scene::view::IrMode::Etc;
         assert_eq!(sc.note.is_some(), etc, "{:?}", sc.note);
         assert_eq!(sc.tag.as_deref(), Some("stopped"));
-        assert_eq!(sc.scene.layers[1].polylines.len(), usize::from(!etc));
+        let live = crate::scenes::meas_color(&t.st, &theme, MeasId(1));
+        let lines = sc.scene.layers[1].polylines.iter();
+        let live_lines = lines.filter(|p| p.stroke.color == live).count();
+        assert_eq!(live_lines, usize::from(!etc));
         assert!(sc.banners.is_empty(), "{:?}", sc.banners);
         assert!(caption(&t).contains("Main L stopped"), "{}", caption(&t));
         assert!(t.st.ir_frame_of(IrPane::Live).is_some());
@@ -394,10 +397,11 @@ fn a_stopped_measurement_keeps_its_last_ir() {
     assert!(!caption(&t).contains("stopped"), "{}", caption(&t));
 }
 
-/// The selected stored transfer trace's IR replaces the live one in the transfer IR view:
-/// its 64 samples in the trace's colour, tagged with the trace's name, time zero at its
-/// delay, no live banners; Home and the cursor act on it. A trace captured without an IR, or none
-/// selected, leaves the view on the live IR.
+/// The transfer IR view draws the IR of every shown stored transfer trace over the live
+/// one, each in its colour, with a legend of them all; a trace captured without an IR is
+/// listed `no IR`. The selected trace with an IR leads: tagged with its name, time zero at
+/// its delay, no live banners; Home and the cursor act on it. A trace without an IR, or
+/// none selected, leaves the live IR leading.
 #[test]
 fn the_transfer_ir_view_shows_the_selected_stored_ir() {
     let mut t = T::new();
@@ -426,19 +430,29 @@ fn the_transfer_ir_view_shows_the_selected_stored_ir() {
     t.conn(ConnEvent::Trace(bd, grid));
     let theme = Theme::dark();
     let scene = |t: &T| crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now());
-    // The curve: the longest polyline (axes and grid lines have two points).
-    let curve = |s: &ac2_scene::ir::IrScene| {
+    let trace_colour = t.st.curve_colours(&theme).trace(TraceId(5));
+    let live_colour = crate::scenes::meas_color(&t.st, &theme, MeasId(1));
+    // A curve: the polyline in its colour.
+    let line = |s: &ac2_scene::ir::IrScene, c| {
         s.scene
             .layers
             .iter()
             .flat_map(|l| &l.polylines)
-            .max_by_key(|p| p.points.len())
+            .find(|p| p.stroke.color == c)
             .cloned()
-            .expect("curve")
     };
     let live = scene(&t);
-    assert_eq!(curve(&live).points.len(), 21);
+    assert_eq!(line(&live, live_colour).expect("live").points.len(), 21);
+    assert_eq!(line(&live, trace_colour).expect("stored").points.len(), 64);
     assert_eq!(live.tag, None);
+    let rows: Vec<&str> = live.legend.iter().map(|e| e.text.as_str()).collect();
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    assert!(
+        rows[0].starts_with("Main L") && !rows[0].contains("pre EQ"),
+        "{rows:?}"
+    );
+    assert_eq!(rows[1..], ["Main L pre EQ", "Main L old · no IR"]);
+    assert!(live.legend[2].stale && live.legend_box.is_some());
 
     t.st.select_trace(TraceId(5));
     let s = scene(&t);
@@ -449,13 +463,8 @@ fn the_transfer_ir_view_shows_the_selected_stored_ir() {
         s.origin
     );
     assert!(s.banners.is_empty());
-    let c = curve(&s);
-    assert_eq!(c.points.len(), 64);
-    assert_eq!(
-        c.stroke.color,
-        t.st.curve_colours(&theme).trace(TraceId(5)),
-        "the trace's colour, as its legend row"
-    );
+    assert_eq!(line(&s, trace_colour).expect("stored").points.len(), 64);
+    assert!(s.legend[1].selected);
     let labels: Vec<String> = s
         .scene
         .layers
@@ -476,10 +485,14 @@ fn the_transfer_ir_view_shows_the_selected_stored_ir() {
     assert!((axes(&t, IrPane::Live).cursor_ms.expect("on") - mid_ms).abs() <= 0.5 / 48.0 + 1e-9);
     assert!(scene(&t).cursor.is_some());
 
-    // A trace without an IR, or none selected: the live IR.
+    // A trace without an IR, or none selected: the live IR leads.
     t.st.select_trace(TraceId(6));
-    assert_eq!(curve(&scene(&t)).points.len(), 21);
-    t.st.set_selected_trace(None);
-    assert_eq!(curve(&scene(&t)).points.len(), 21);
     assert_eq!(scene(&t).tag, None);
+    assert!(scene(&t).legend[2].selected);
+    t.st.set_selected_trace(None);
+    assert_eq!(scene(&t).tag, None);
+    assert_eq!(
+        line(&scene(&t), live_colour).expect("live").points.len(),
+        21
+    );
 }

@@ -165,6 +165,8 @@ fn build_scene(
         PaneKind::Transfer if view.shows_ir() => {
             let s = scenes::ir(st, id, &app.keymap, theme, vp, now);
             plates = s.plates();
+            legend = s.legend_box.clone();
+            legend_hits = s.legend_hits.clone();
             // Navigation needs an IR: the empty pane's axes only frame its reason.
             let ir = st
                 .ir_extent(IrPane::Live)

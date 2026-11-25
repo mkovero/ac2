@@ -1184,8 +1184,9 @@ linear amplitude, dB re its peak, or energy-time curve (**Shift+G** from magnitu
 the ETC in one step). Coherence is always a view of its own; Settings › Display can also
 draw it over the magnitude. A stopped measurement keeps its last IR, tagged `stopped`, as
 its other views keep the last curve: the daemon sends a transfer's final curve and IR as it
-stops, so an IR view opened after the stop (or an app connected later) shows them too; a
-selected capture's stored IR shows instead.
+stops, so an IR view opened after the stop (or an app connected later) shows them too. The
+stored traces the magnitude view draws are drawn over it with their own IRs
+([A stored IR](#the-impulse-response-view)).
 The keys that act on the measurement work in these views as in the others: **S**, **R**,
 **X** / **Shift+X** (find the delay), **D**, **Y**, **,** / **.** and their Ctrl / Alt forms.
 The keys that read or dress the frequency plot do nothing here (smoothing **K**, peaks
@@ -1655,8 +1656,8 @@ The transfer pane's IR views and the sweep pane's IR views share keys and mouse 
   size](#moving-the-plates-and-their-text-size)). **T** hides the cursor and its plate with
   the axis labels.
 - Transfer and sweep IR views keep their own zoom and cursor; the log / ETC ranges are in
-  `ui.toml` (`[ir_levels]`: `transfer`, `sweep`). A selected transfer trace's stored IR is drawn on the
-  transfer IR view ([The impulse-response view](#the-impulse-response-view)).
+  `ui.toml` (`[ir_levels]`: `transfer`, `sweep`). The stored transfer traces the pane draws have their IRs drawn
+  over the live one in the transfer IR view ([The impulse-response view](#the-impulse-response-view)).
 
 The sweep's response & distortion view uses the frequency keys of the other panes, its
 level axis in dB or %; its cursor reads the fundamental, each harmonic and THD.
@@ -2701,12 +2702,16 @@ the loopback`), `no signal: …`; a pane whose pick is no transfer measurement s
 transfer measurement — Ctrl+M makes one`.
 
 **A stored IR.** A transfer capture keeps the IR shown at that moment (every sample, t = 0
-at the trace's inserted delay), unless there was none (no reference). **Select** the trace
-and the IR view draws its IR in the trace's colour, labelled as its legend row:
-`t = 0 at inserted delay 12.50 ms · 4.29 m @ 20 °C · pre-EQ`. It goes back to the live IR
-when the trace is deselected or has no IR (an average, a math capture, a text import). Only
-a trace drawn in the pane (its lead's group, or one ticked in with **C**) is picked up. The IR travels with the
-trace in sessions, autosave and ac2 CSV exports.
+at the trace's inserted delay), unless there was none (no reference). The IR views draw the
+IR of every stored trace the magnitude view draws (its lead's group, and those ticked in with
+**C**) over the live IR, each in the trace's colour, with a legend of the same rows in the
+same order as the magnitude view's. A trace without an IR (an average, a math capture, a
+text import, an EQ curve) keeps its row, dimmed and tagged `no IR`. Each curve's t = 0 is its
+own inserted delay, whatever its sample rate, so their arrivals line up. The cursor and the
+time origin follow the **selected** trace when it has an IR, labelled as its legend row:
+`t = 0 at inserted delay 12.50 ms · 4.29 m @ 20 °C · pre-EQ`; else the live IR (or the first
+trace's, with no live IR). The IR travels with the trace in sessions, autosave and ac2 CSV
+exports.
 
 ## The measurement tree
 

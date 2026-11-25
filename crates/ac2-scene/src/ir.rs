@@ -46,14 +46,26 @@ pub struct IrScene {
     /// Simulated reflections marked over a sweep's measured response
     /// ([`crate::room::sim_marks`]); `None` when none are drawn.
     pub sim: Option<crate::room::sim_marks::SimMarks>,
+    /// The legend's rows when the view draws several curves ([`overlay::ir_overlay_scene`]),
+    /// as drawn; empty with one curve.
+    pub legend: Vec<crate::tf::LegendEntry>,
+    /// The legend plate, when drawn.
+    pub legend_box: Option<crate::legend::LegendBox>,
+    /// Where each shown legend row is, for a click to select its curve.
+    pub legend_hits: Vec<crate::legend::LegendHit>,
 }
 
 impl IrScene {
     /// The plates the operator moves.
     pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
-        self.readout_box.into_iter().collect()
+        self.readout_box
+            .into_iter()
+            .chain(self.legend_box.as_ref().map(|b| b.plate))
+            .collect()
     }
 }
+
+pub mod overlay;
 
 /// What the IR cursor reads: the sample nearest its time, as the view draws it.
 #[derive(Clone, Debug, PartialEq)]
@@ -201,7 +213,7 @@ pub fn ir_scene(
     ctx: &IrCtx,
 ) -> IrScene {
     let tag = freshness.and_then(|f| f.tag());
-    draw(frame, color, freshness, tag, ctx, None)
+    draw(frame, color, freshness, tag, ctx, None, &Extra::default())
 }
 
 /// [`ir_scene`] of a transfer function across two rigs, `ours` and `theirs` their names: its
@@ -216,7 +228,15 @@ pub fn ir_scene_between(
     theirs: &str,
 ) -> IrScene {
     let tag = freshness.and_then(|f| f.tag());
-    draw(frame, color, freshness, tag, ctx, Some((ours, theirs)))
+    draw(
+        frame,
+        color,
+        freshness,
+        tag,
+        ctx,
+        Some((ours, theirs)),
+        &Extra::default(),
+    )
 }
 
 /// A stored transfer trace's impulse response as an IR frame: the samples it was captured
@@ -242,7 +262,7 @@ pub fn stored_frame(d: &TraceData) -> Option<IrFrame> {
 pub fn stored_ir_scene(d: &TraceData, color: Color, ctx: &IrCtx) -> Option<IrScene> {
     let frame = stored_frame(d)?;
     let tag = Some(d.meta.edit.name.clone());
-    Some(draw(&frame, color, None, tag, ctx, None))
+    Some(draw(&frame, color, None, tag, ctx, None, &Extra::default()))
 }
 
 /// Points above which an IR line is drawn [`per_pixel`]: a live IR (4096 points) is drawn
@@ -287,6 +307,15 @@ fn per_pixel(xs: &[f32], ys: &[f32]) -> (Vec<f32>, Vec<f32>) {
     (ox, oy)
 }
 
+/// What a view of several curves draws beside its lead's: their lines, each in its colour
+/// (dimmed when stale), and the legend naming every curve, the lead's among them.
+#[derive(Default)]
+struct Extra<'a> {
+    lines: Vec<(&'a IrFrame, Color, bool)>,
+    legend: Vec<(crate::tf::LegendEntry, Color)>,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn draw(
     frame: &IrFrame,
     color: Color,
@@ -294,6 +323,7 @@ fn draw(
     tag: Option<String>,
     ctx: &IrCtx,
     between: Option<(&str, &str)>,
+    extra: &Extra<'_>,
 ) -> IrScene {
     let &IrCtx {
         status,
@@ -311,7 +341,17 @@ fn draw(
     let trange = time_range(frame, axes);
     let x_axis = axis::linear_axis(trange, plot.x, plot.right(), "ms");
     let values = ir_values(frame, mode);
-    let yrange = y_range(frame, mode, axes);
+    // The automatic amplitude fits every curve drawn, not only the lead's.
+    let yrange = match (mode, axes.amplitude.filter(Range::is_valid)) {
+        (IrMode::Linear, None) => extra
+            .lines
+            .iter()
+            .fold(auto_amplitude(frame), |r, (f, ..)| {
+                let o = auto_amplitude(f);
+                Range::new(r.lo.min(o.lo), r.hi.max(o.hi))
+            }),
+        _ => y_range(frame, mode, axes),
+    };
     let title = title(mode).to_string();
     let y_unit = if mode == IrMode::Linear { "FS" } else { "dB" };
     let y_axis = axis::linear_axis(yrange, plot.bottom(), plot.y, y_unit);
@@ -369,6 +409,34 @@ fn draw(
         None => Some("no impulse energy".to_string()),
         Some(_) => None,
     };
+    // Another curve's samples on the same time axis (ms re its own inserted delay), under
+    // the lead's line, in its own colour.
+    for (f, col, stale) in &extra.lines {
+        let Some(v) = ir_values(f, mode) else {
+            continue;
+        };
+        let xs: Vec<f32> = times_ms(f).iter().map(|x| xm.to_px(*x)).collect();
+        let ys: Vec<f32> = v
+            .iter()
+            .map(|y| match mode {
+                IrMode::Linear => ym.to_px(*y),
+                _ if y.is_nan() => ym.to_px(yrange.lo),
+                _ => ym.to_px(y.max(yrange.lo)),
+            })
+            .collect();
+        let (xs, ys) = if xs.len() > THIN_ABOVE {
+            per_pixel(&xs, &ys)
+        } else {
+            (xs, ys)
+        };
+        let (points, _) = gapped(&xs, &ys, None, |_, _| false);
+        let dim = if *stale { theme.stale_alpha } else { 1.0 };
+        c.data.polylines.push(Polyline::clipped(
+            points,
+            Stroke::solid(col.with_alpha(dim), (theme.trace_width * 0.75).max(1.0)),
+            plot,
+        ));
+    }
     if let Some(v) = &values {
         let xs: Vec<f32> = t.iter().map(|x| xm.to_px(*x)).collect();
         // Log views: points below the axis sit on its floor instead of vanishing, so the
@@ -425,6 +493,33 @@ fn draw(
             theme,
         )
     });
+    let (legend_box, legend_hits) = if extra.legend.is_empty() {
+        (None, Vec::new())
+    } else {
+        let entries: Vec<crate::tf::LegendEntry> =
+            extra.legend.iter().map(|(e, _)| e.clone()).collect();
+        let styles: Vec<crate::legend::RowStyle> = extra
+            .legend
+            .iter()
+            .map(|(e, col)| crate::legend::RowStyle {
+                color: *col,
+                dim: e.stale,
+                selected: e.selected,
+            })
+            .collect();
+        let top = origin_y + 2.8 * theme.small_font_size;
+        let area = Rect::new(plot.x, top, plot.w, (plot.bottom() - top).max(1.0));
+        crate::legend::legend_plate(
+            &mut c.overlay,
+            &entries,
+            &styles,
+            &[],
+            view,
+            area,
+            plot,
+            theme,
+        )
+    };
     if let Some(n) = &note {
         c.overlay.labels.push(label(
             n.clone(),
@@ -449,6 +544,9 @@ fn draw(
         cursor,
         readout_box,
         sim: None,
+        legend: extra.legend.iter().map(|(e, _)| e.clone()).collect(),
+        legend_box,
+        legend_hits,
     }
 }
 
@@ -577,6 +675,9 @@ pub fn missing_scene(
         cursor: None,
         readout_box: None,
         sim: None,
+        legend: Vec::new(),
+        legend_box: None,
+        legend_hits: Vec::new(),
     }
 }
 
