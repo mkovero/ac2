@@ -327,6 +327,16 @@ pub(crate) async fn session(
             let l = expect_body!("file.list", r, ReplyBody::Sessions(l) => l)?;
             out.emit(&l, || output::sessions(&l))?;
         }
+        SessionCmd::Delete { name } => {
+            sessions::delete(c, name).await?;
+            out.emit(&json!({ "deleted": name }), || {
+                format!("deleted session {name}")
+            })?;
+        }
+        SessionCmd::Rename { name, to } => {
+            let f = sessions::rename(c, name, to).await?;
+            emit_file(out, &f, format!("renamed session {name} to {}", f.name))?;
+        }
     }
     Ok(())
 }

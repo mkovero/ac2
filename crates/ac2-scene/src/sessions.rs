@@ -240,6 +240,30 @@ pub fn replace_question(
     }
 }
 
+/// Answer index of [`delete_question`] that deletes.
+pub const DELETE: usize = 0;
+
+/// Asked before a saved session is deleted from the daemon; Cancel is the default.
+pub fn delete_question(name: &str) -> Question {
+    Question {
+        title: format!("Delete session {name}?"),
+        lines: vec![format!(
+            "{name} is removed from the daemon's session directory; it cannot be brought back."
+        )],
+        answers: vec!["Delete".to_owned(), "Cancel".to_owned()],
+    }
+}
+
+/// `deleted session friday`.
+pub fn deleted_toast(name: &str) -> String {
+    format!("deleted session {name}")
+}
+
+/// `renamed session friday to friday show`.
+pub fn renamed_toast(from: &str, to: &str) -> String {
+    format!("renamed session {from} to {to}")
+}
+
 /// Answer index of [`salvage_question`] that imports.
 pub const SALVAGE: usize = 0;
 
@@ -365,6 +389,8 @@ pub enum DialogPage {
     Browse,
     /// A name typed for Save as (`export: false`) or an export file.
     Name { export: bool },
+    /// A saved session's new name.
+    Rename,
 }
 
 /// The page's buttons, in one row of equal buttons: the confirming verb first and the way
@@ -375,13 +401,16 @@ pub fn page_buttons(p: DialogPage) -> &'static [&'static str] {
         DialogPage::Browse => &["Places", "Back"],
         DialogPage::Name { export: false } => &["Save", "Cancel"],
         DialogPage::Name { export: true } => &["Export", "Cancel"],
+        DialogPage::Rename => &["Rename", "Cancel"],
     }
 }
 
 /// The key hint under the page.
 pub fn page_hint(p: DialogPage) -> &'static str {
     match p {
-        DialogPage::Main => "↑↓ choose · Enter opens · Esc closes",
+        DialogPage::Main => {
+            "↑↓ choose · Enter opens · F2 renames · Delete deletes a daemon session · Esc closes"
+        }
         DialogPage::Browse => "↑↓ choose · Enter opens · Backspace: up a folder · Esc: back",
         DialogPage::Name { export: false } => {
             "type the name · Enter saves · Backspace erases · Esc: back"
@@ -389,6 +418,7 @@ pub fn page_hint(p: DialogPage) -> &'static str {
         DialogPage::Name { export: true } => {
             "type the name · Enter exports · Backspace erases · Esc: back"
         }
+        DialogPage::Rename => "type the new name · Enter renames · Backspace erases · Esc: back",
     }
 }
 

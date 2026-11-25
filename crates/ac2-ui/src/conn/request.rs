@@ -678,6 +678,14 @@ pub(super) async fn session_step(
                 salvage: expect_body!("file.salvage", r, ReplyBody::Salvage(s) => s)?,
             }
         }
+        S::Delete { name } => {
+            ac2_client::sessions::delete(c, name).await?;
+            D::Deleted { name: name.clone() }
+        }
+        S::Rename { name, to } => D::Renamed {
+            from: name.clone(),
+            file: ac2_client::sessions::rename(c, name, to).await?,
+        },
         S::Quit => D::Quit,
     })
 }

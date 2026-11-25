@@ -75,4 +75,18 @@ pub enum SessionCmd {
     },
     /// Saved sessions in the daemon's session directory.
     List,
+    /// Delete a saved session from the daemon's session directory, by name. The open
+    /// session is not deleted (save it under another name or start a new one first).
+    Delete {
+        /// Session name.
+        name: String,
+    },
+    /// Rename a saved session; never replaces another. The open session keeps belonging
+    /// to it under the new name.
+    Rename {
+        /// Session name.
+        name: String,
+        /// New name.
+        to: String,
+    },
 }

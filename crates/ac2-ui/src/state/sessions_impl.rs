@@ -1,7 +1,8 @@
 //! The Sessions dialog's reducer (`docs/design/sessions.md`): its keys and clicks, the
 //! questions before unsaved changes are replaced (Save / Discard / Cancel), before another
-//! session is overwritten and after an old-format session is refused, and what a finished
-//! job does (toasts, the recents, the audio settings after New, quitting).
+//! session is overwritten, before a daemon session is deleted and after an old-format
+//! session is refused, and what a finished job does (toasts, the recents, the audio
+//! settings after New, quitting).
 
 use ac2_proto::model::{SessionOrigin, SessionRef, WorkingSession};
 use ac2_proto::units::WallNs;
@@ -226,9 +227,14 @@ impl AppState {
         };
         match &mut d.page {
             Page::Main => {
+                let i = d.selected;
+                let plain = !chord.command && !chord.alt && !chord.shift;
                 if chord.key == Key::Enter {
-                    let i = d.selected;
                     self.sessions_row(i, out);
+                } else if plain && chord.key == Key::F2 {
+                    self.rename_row(i);
+                } else if plain && chord.key == Key::Delete {
+                    self.delete_row(i);
                 } else {
                     step(&mut d.selected, n_main);
                 }
@@ -267,7 +273,48 @@ impl AppState {
                 n.error = None;
             }
             Some(Page::Browse(b)) => b.up(),
+            // As Delete: Mac keyboards and many laptops have none.
+            Some(Page::Main) => {
+                if let Some(i) = self.sessions_dialog().map(|d| d.selected) {
+                    self.delete_row(i);
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// The daemon session row `i` names, if it names one: only those rename and delete.
+    fn daemon_row(&self, i: usize) -> Option<String> {
+        let d = self.sessions_dialog()?;
+        if d.busy.is_some() {
+            return None;
+        }
+        match self.sessions_rows(wall_now()).get(i).map(|r| &r.action) {
+            Some(Action::Recent(Source::Daemon(SessionRef::Name { name }))) => Some(name.clone()),
+            _ => None,
+        }
+    }
+
+    /// F2 on a row: a daemon session's new name typed.
+    fn rename_row(&mut self, i: usize) {
+        match self.daemon_row(i) {
+            Some(from) => self.set_page(Page::Name(NameEntry {
+                text: from.clone(),
+                purpose: NamePurpose::Rename { from },
+                error: None,
+            })),
+            None => self.warn("only a session on the daemon is renamed here"),
+        }
+    }
+
+    /// Delete on a row: a daemon session deleted, asked first.
+    fn delete_row(&mut self, i: usize) {
+        match self.daemon_row(i) {
+            Some(name) => {
+                let q = text::delete_question(&name);
+                self.ask(ChoicePurpose::DeleteSession { name }, q, 1);
+            }
+            None => self.warn("only a session on the daemon is deleted here"),
         }
     }
 
@@ -424,6 +471,10 @@ impl AppState {
                 s.extend(then.iter().cloned());
                 s
             }
+            NamePurpose::Rename { from } => vec![SessionStep::Rename {
+                name: from.clone(),
+                to: name,
+            }],
             NamePurpose::ExportAs { dir } => {
                 let path = crate::sessions::export_path(dir, &name);
                 if path.exists() && n.error.as_deref() != Some(EXISTS) {
@@ -509,6 +560,9 @@ impl AppState {
             ChoicePurpose::Salvage { from } if i == text::SALVAGE => {
                 self.run_job(vec![SessionStep::Salvage { from }], out);
             }
+            ChoicePurpose::DeleteSession { name } if i == text::DELETE => {
+                self.run_job(vec![SessionStep::Delete { name }], out);
+            }
             _ => {}
         }
     }
@@ -547,6 +601,8 @@ impl AppState {
     pub(super) fn session_outcome(&mut self, o: SessionOutcome, out: &mut Vec<Request>) {
         let now = wall_now();
         let mut new = false;
+        // A delete or rename keeps the dialog, its list read again.
+        let mut relist = false;
         for d in o.done {
             match d {
                 SessionDone::Saved(f) => self.toast(text::saved_toast(&f)),
@@ -591,10 +647,19 @@ impl AppState {
                 SessionDone::Salvaged { name, salvage } => {
                     self.toast(text::salvage_toast(&name, &salvage));
                 }
+                SessionDone::Deleted { name } => {
+                    self.toast(text::deleted_toast(&name));
+                    relist = true;
+                }
+                SessionDone::Renamed { from, file } => {
+                    self.toast(text::renamed_toast(&from, &file.name));
+                    relist = true;
+                }
                 SessionDone::Quit => self.quit = true,
             }
         }
         match o.failed {
+            None if relist => self.open_sessions(Page::Main, out),
             None => {
                 if self.sessions_dialog().is_some() {
                     self.overlay = Overlay::None;
@@ -649,6 +714,14 @@ impl AppState {
             (SessionStep::Open { from, .. }, _, Some(ErrorCode::Unsupported)) => {
                 let q = text::salvage_question(&from.name(), None);
                 self.ask(ChoicePurpose::Salvage { from: from.clone() }, q, 1);
+            }
+            // Said under the name typed, which can be changed and sent again.
+            (SessionStep::Rename { .. }, _, _)
+                if matches!(self.sessions_dialog().map(|d| &d.page), Some(Page::Name(_))) =>
+            {
+                if let Some(Page::Name(n)) = self.sessions_dialog_mut().map(|d| &mut d.page) {
+                    n.error = Some(error);
+                }
             }
             _ => self.fault(format!("session: {error}")),
         }

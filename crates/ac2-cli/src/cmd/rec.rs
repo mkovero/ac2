@@ -60,6 +60,14 @@ pub(crate) async fn run(cli: &Cli, cmd: &RecCmd, out: &mut Out<'_>) -> Result<()
             let l = expect_body!("rec.list", r, ReplyBody::Recordings(l) => l)?;
             out.emit(&l, || output::recordings(&l))?;
         }
+        RecCmd::Delete { recording } => {
+            let c = connect(cli, false).await?;
+            let r = recording_ref(recording, is_local(cli))?;
+            ac2_client::sessions::rec_delete(&c, r.clone()).await?;
+            out.emit(&serde_json::json!({ "deleted": r }), || {
+                format!("deleted recording {recording}")
+            })?;
+        }
     }
     Ok(())
 }
