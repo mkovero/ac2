@@ -12,7 +12,7 @@ use ac2_audio::fake::{FakeDrive, FakeFault, FakePath};
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_proto::frame::{FrameData, LoudnessSource, SourceLoudness, StreamLevelsFrame};
 use ac2_proto::model::{GeneratorDesired, GeneratorSettings, InputKind, InputSetup, Pair, Signal};
-use ac2_proto::units::{Dbfs, Hz};
+use ac2_proto::units::{Dbfs, Hz, WallNs};
 use ac2_proto::{Command, Subscription};
 use ac2d::{Daemon, Handle};
 use common::*;
@@ -145,11 +145,14 @@ impl Rig {
 }
 
 fn source(f: &StreamLevelsFrame, s: LoudnessSource) -> SourceLoudness {
-    *f.meta
-        .loudness
-        .iter()
-        .find(|l| l.source == s)
-        .unwrap_or_else(|| panic!("no source {s:?} in {:?}", f.meta.loudness))
+    *f.source(s)
+        .unwrap_or_else(|| panic!("no source {s:?} in {:?}", f.meta.sources))
+        .1
+}
+
+/// When `s` was last reset.
+fn since(f: &StreamLevelsFrame, s: LoudnessSource) -> WallNs {
+    f.source(s).expect("a source").0.since
 }
 
 fn near(what: &str, got: f64, want: f64, tol: f64) {
@@ -177,7 +180,7 @@ fn a_calibration_tone_reads_its_level_on_a_pair_and_3_lu_lower_mono() {
     r.seconds(4.0);
     let f = r.now();
     let metered = (r.d.blocks() - reset_at) as f64 * f64::from(BLOCK) / f64::from(FS);
-    let sources: Vec<_> = f.meta.loudness.iter().map(|l| l.source).collect();
+    let sources: Vec<_> = f.meta.sources.iter().map(|l| l.source).collect();
     assert_eq!(sources, [PAIR, MONO], "pairs first, then unpaired; no mic");
     let p = source(&f, PAIR);
     near("pair integrated", p.integrated.unwrap().0, -18.0, 0.1);
@@ -189,7 +192,7 @@ fn a_calibration_tone_reads_its_level_on_a_pair_and_3_lu_lower_mono() {
     near("pair range", p.range.unwrap().0, 0.0, 0.1);
     near("pair duration", p.duration.0, metered, 0.011);
     assert!(
-        p.since.0 + 1_000_000_000 >= before,
+        since(&f, PAIR).0 + 1_000_000_000 >= before,
         "since is the reset's time"
     );
     let m = source(&f, MONO);
@@ -204,7 +207,8 @@ fn a_reset_restarts_the_sources_of_its_inputs_and_momentary_keeps_reading() {
     let mut r = open("loudness-reset", tone_rig(FS, Vec::new()), FS, true);
     r.seconds(2.0);
     let f = r.now();
-    let (p0, m0) = (source(&f, PAIR), source(&f, MONO));
+    let p0 = source(&f, PAIR);
+    let (p0_since, m0_since) = (since(&f, PAIR), since(&f, MONO));
     assert!(p0.integrated.is_some() && p0.duration.0 > 1.5, "{p0:?}");
     std::thread::sleep(Duration::from_millis(5));
     r.c.ok(Command::LevelsReset { channels: vec![1] });
@@ -213,7 +217,7 @@ fn a_reset_restarts_the_sources_of_its_inputs_and_momentary_keeps_reading() {
     r.seconds(0.2);
     let f = r.now();
     let (p, m) = (source(&f, PAIR), source(&f, MONO));
-    assert!(p.since.0 > p0.since.0, "the pair restarted: {p:?}");
+    assert!(since(&f, PAIR).0 > p0_since.0, "the pair restarted: {p:?}");
     assert!(p.duration.0 < 0.35, "{p:?}");
     assert_eq!(p.integrated, None, "no gating block yet after the reset");
     assert_eq!(
@@ -222,7 +226,7 @@ fn a_reset_restarts_the_sources_of_its_inputs_and_momentary_keeps_reading() {
         "no window wholly after the reset"
     );
     near("pair momentary across the reset", p.momentary.0, -18.0, 0.1);
-    assert_eq!(m.since, m0.since, "input 2 was not reset");
+    assert_eq!(since(&f, MONO), m0_since, "input 2 was not reset");
     assert!(m.duration.0 > p0.duration.0, "{m:?}");
     assert!(m.integrated.is_some());
     r.seconds(1.0);
@@ -288,6 +292,6 @@ fn no_loudness_sources_at_an_unsupported_rate() {
     r.seconds(0.5);
     let f = r.now();
     assert_eq!(f.meta.channels, [0, 1, 2, 3]);
-    assert_eq!(f.meta.pair_levels.len(), 1);
-    assert!(f.meta.loudness.is_empty(), "{:?}", f.meta.loudness);
+    assert_eq!(f.meta.pairs.len(), 1);
+    assert!(f.meta.sources.is_empty(), "{:?}", f.meta.sources);
 }

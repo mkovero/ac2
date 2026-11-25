@@ -18,7 +18,9 @@ use ac2_core::ppm::{QuasiPeak, QuasiPeakSpec, TruePeak, Vu, dbtp};
 use ac2_core::protection::peak_dbfs;
 use ac2_core::stereo::{Correlator, GonioPicker, Side};
 use ac2_proto::cal;
-use ac2_proto::frame::{GONIO_POINTS, GonioFrame, GonioPair, PairLevels, SourceLoudness};
+use ac2_proto::frame::{
+    GONIO_POINTS, GonioFrame, GonioPair, LoudnessSourceMeta, MeterPair, PairLevels, SourceLoudness,
+};
 use ac2_proto::model::{
     Ballistic, DeviceId, InputSetup, LevelsSettings, LineCalEntry, Pair, PairSide,
 };
@@ -385,7 +387,9 @@ impl Programme {
             true_peak: Vec::with_capacity(self.inputs.len()),
             max: Vec::with_capacity(self.inputs.len()),
             overs: Vec::with_capacity(self.inputs.len()),
+            pairs: Vec::with_capacity(self.pairs.len()),
             pair_levels: Vec::with_capacity(self.pairs.len()),
+            sources: self.loudness.sources(),
             loudness: self.loudness(),
             gonio: points.then(|| GonioFrame {
                 pairs: Vec::with_capacity(self.pairs.len()),
@@ -409,9 +413,11 @@ impl Programme {
         }
         for p in &mut self.pairs {
             let c = p.corr.reading(gate);
-            out.pair_levels.push(PairLevels {
+            out.pairs.push(MeterPair {
                 left: p.left,
                 right: p.right,
+            });
+            out.pair_levels.push(PairLevels {
                 correlation: c.r,
                 quiet: c.quiet.map(|s| match s {
                     Side::Left => PairSide::Left,
@@ -456,7 +462,11 @@ pub(crate) struct Readings {
     pub(crate) true_peak: Vec<f32>,
     pub(crate) max: Vec<f32>,
     pub(crate) overs: Vec<u32>,
+    /// The metered pairs, and their readings one per pair.
+    pub(crate) pairs: Vec<MeterPair>,
     pub(crate) pair_levels: Vec<PairLevels>,
+    /// The loudness sources, and their readings one per source.
+    pub(crate) sources: Vec<LoudnessSourceMeta>,
     pub(crate) loudness: Vec<SourceLoudness>,
     pub(crate) gonio: Option<GonioFrame>,
 }
@@ -575,7 +585,7 @@ mod tests {
     fn a_redeclaration_keeps_the_sources_that_did_not_change() {
         use ac2_proto::frame::LoudnessSource::{Input as In, Pair as P};
         let (mut m, p) = programme(LevelsSettings::default());
-        let source = |r: &Readings| r.loudness.iter().map(|l| l.source).collect::<Vec<_>>();
+        let source = |r: &Readings| r.sources.iter().map(|l| l.source).collect::<Vec<_>>();
         // Undeclared inputs are mics: no loudness.
         assert!(m.take(false).loudness.is_empty());
         p.lock().expect("policy").declare(&[line(0), line(1)], &[]);
@@ -694,16 +704,17 @@ mod tests {
         run(&mut m, 100);
         let r = m.take(false);
         assert_eq!(r.pair_levels.len(), 1);
-        assert_eq!((r.pair_levels[0].left, r.pair_levels[0].right), (3, 5));
+        assert_eq!((r.pairs[0].left, r.pairs[0].right), (3, 5));
         assert_eq!(r.pair_levels[0].quiet, Some(PairSide::Right));
         assert_eq!(r.pair_levels[0].correlation, None);
         assert!((r.true_peak[1] + 20.0).abs() < 0.2, "{:?}", r.true_peak);
         assert_eq!(r.true_peak[2], f32::NEG_INFINITY);
-        let sources: Vec<_> = r.loudness.iter().map(|l| l.source).collect();
+        let sources: Vec<_> = r.sources.iter().map(|l| l.source).collect();
         assert_eq!(sources, [P { left: 3, right: 5 }, In { channel: 2 }]);
         // One side of a pair carries a −20 dBFS sine: its mean square is the single
         // channel's, 3 dB under the same tone on both sides.
         let (pl, il) = (r.loudness[0], r.loudness[1]);
+        let (pl_since, il_since) = (r.sources[0].since, r.sources[1].since);
         assert!((pl.max_true_peak.0 + 20.0).abs() < 0.2, "{pl:?}");
         assert!((pl.momentary.0 + 23.01).abs() < 0.1, "{pl:?}");
         assert!((il.momentary.0 + 23.01).abs() < 0.1, "{il:?}");
@@ -715,10 +726,10 @@ mod tests {
         run(&mut m, 10);
         let r = m.take(false);
         let (p2, i2) = (r.loudness[0], r.loudness[1]);
-        assert!(p2.since.0 > pl.since.0, "{p2:?}");
+        assert!(r.sources[0].since.0 > pl_since.0, "{p2:?}");
         assert!(p2.duration.0 <= 0.1 + 1e-9, "{p2:?}");
         assert_eq!(p2.integrated, None, "{p2:?}");
-        assert_eq!(i2.since, il.since);
+        assert_eq!(r.sources[1].since, il_since);
         assert!((i2.duration.0 - 1.1).abs() < 1e-9, "{i2:?}");
         assert!(i2.integrated.is_some());
     }

@@ -6,7 +6,7 @@
 use ac2_core::loudness::{LoudnessMeter, supports_rate};
 use ac2_core::ppm::dbtp;
 use ac2_proto::cal;
-use ac2_proto::frame::{LoudnessSource, SourceLoudness};
+use ac2_proto::frame::{LoudnessSource, LoudnessSourceMeta, SourceLoudness};
 use ac2_proto::model::{InputSetup, Pair};
 use ac2_proto::units::{Db, Dbtp, Lufs, Seconds, WallNs};
 
@@ -118,13 +118,23 @@ impl Loudness {
         }
     }
 
+    /// Every source with when it was last reset; the sources of [`Self::readings`], in order.
+    pub(super) fn sources(&self) -> Vec<LoudnessSourceMeta> {
+        self.sources
+            .iter()
+            .map(|s| LoudnessSourceMeta {
+                source: s.source,
+                since: WallNs(s.since),
+            })
+            .collect()
+    }
+
     pub(super) fn readings(&self) -> Vec<SourceLoudness> {
         self.sources
             .iter()
             .map(|s| {
                 let r = s.meter.reading();
                 SourceLoudness {
-                    source: s.source,
                     momentary: Lufs(r.momentary),
                     short_term: Lufs(r.short_term),
                     integrated: r.integrated.map(Lufs),
@@ -133,7 +143,6 @@ impl Loudness {
                     max_short_term: Lufs(r.max_short_term),
                     max_true_peak: Dbtp(f64::from(dbtp(s.max_true_peak))),
                     duration: Seconds(r.duration_samples as f64 / self.sample_rate),
-                    since: WallNs(s.since),
                 }
             })
             .collect()

@@ -126,8 +126,8 @@ impl Rigs {
             meta: SourceLevelsMeta {
                 channels: vec![0, 1],
                 ballistic: Ballistic::Type1,
-                pair_levels: Vec::new(),
-                loudness: Vec::new(),
+                pairs: Vec::new(),
+                sources: Vec::new(),
                 sample_rate_hz: self.theirs_rate,
                 mark,
             },
@@ -138,6 +138,8 @@ impl Rigs {
             true_peak: vec![-19.0; 2],
             max: vec![-10.0; 2],
             overs: vec![0; 2],
+            pair_levels: Vec::new(),
+            loudness: Vec::new(),
         };
         (stamp, f)
     }

@@ -270,11 +270,9 @@ fn window_lufs(g: &[f64], end: usize, window: usize) -> f64 {
 }
 
 fn source(f: &StreamLevelsFrame, s: LoudnessSource) -> SourceLoudness {
-    *f.meta
-        .loudness
-        .iter()
-        .find(|l| l.source == s)
-        .unwrap_or_else(|| panic!("no source {s:?} in {:?}", f.meta.loudness))
+    *f.source(s)
+        .unwrap_or_else(|| panic!("no source {s:?} in {:?}", f.meta.sources))
+        .1
 }
 
 fn near(what: &str, got: f64, want: f64, tol: f64) {
