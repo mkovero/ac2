@@ -261,20 +261,44 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> SessionError + '_ {
     }
 }
 
-/// Checks a session name (one directory level under the session directory).
+/// Checks a session name (one directory level under the session directory): letters,
+/// digits, ` `, `-`, `_`, `.`, not starting with `.` (so never `..` or hidden) and not
+/// ending in `.` or a space. The same everywhere, so a session named on Linux moves to
+/// Windows: Windows drops a trailing dot (`show.` would be `show`) and reserves its device
+/// names (`CON`, `NUL`, `COM1`, … with any extension).
 pub fn validate_name(name: &str) -> Result<(), SessionError> {
     let ok = !name.is_empty()
         && name.len() <= 128
         && !name.starts_with('.')
+        && !name.ends_with('.')
         && name.trim() == name
         && name
             .chars()
-            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'));
+            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
+        && !windows_device(name);
     if ok {
         Ok(())
     } else {
         Err(SessionError::BadName(name.to_owned()))
     }
+}
+
+/// Whether `name` is a Windows device name, which no file there may take whatever its
+/// extension (`nul.csv` too).
+fn windows_device(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim_end();
+    let upper = stem.to_ascii_uppercase();
+    matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"].iter().any(|p| {
+        upper.strip_prefix(p).is_some_and(|d| {
+            matches!(
+                d,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    })
 }
 
 /// Writes `bytes` to `path` atomically: a temporary file in the same directory, synced,
