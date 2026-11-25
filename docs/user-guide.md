@@ -388,7 +388,9 @@ arrives in bursts on …*) with the device and buffer to change.
 
 In the app's connect dialog, *Simulated rig (no audio)* starts ready to measure (audio I/O
 open, a transfer measurement "demo" running) and stops with the app; *This computer* reaches
-this computer's `ac2d` as it is (one the app starts has no stream).
+this computer's `ac2d` as it is (one the app starts has no stream). A session saved by name
+on the simulated rig lives in a folder of its own that goes when it stops: it never lands
+among your sessions (export it to keep it).
 Whenever the app connects to a daemon with no audio I/O open, the **Sessions** dialog
 (**Alt+S**) opens once; a daemon with audio open (a rig, the Pi kiosk) opens nothing. Its
 *New session* opens Settings on the Audio I/O page, headed *New session — Audio I/O*, with the
@@ -3421,7 +3423,9 @@ Backspace goes up a folder; Esc goes back or closes.
 
 `<session>` is a name, a folder on the daemon's machine, or an `.ac2session` file here (sent
 in checked chunks). `new` and `load` with unsaved changes are refused (exit code 4) unless
-`--discard`. A network client never names folders on the daemon's machine.
+`--discard`. A network client never names folders on the daemon's machine. An `import
+--force` cut short by a power cut, after the old session was moved aside and before the new
+one was in place, leaves the old one: the daemon puts it back as it starts.
 
 **Salvaging an older session.** After an update that changes the session format, the daemon
 sets its old autosave aside as `autosave.vN` and starts empty. `ac2 session salvage <folder
@@ -4125,7 +4129,10 @@ wall time as the clock read it with what that clock rested on (`synced`, `unsync
 `derived`: corrected once the clock synchronised, `not_stated`), and on a run's first row
 whether the time since the run before is `known` or `unknown`. The levels are measured
 seconds: a wall clock stepped back or a power cut changes the times beside them, never their
-order. The header names the zone the meter's host was in.
+order. The header names the zone the meter's host was in. No Leq window reaches back across
+an `unknown`: after it the windows start over, and they stay so through later restarts.
+Should the disk stop answering, the log holds the last 10 minutes of rows until the meter
+can mark them on disk; older ones are dropped and the log shows a gap there.
 
 The app writes the same CSV on the computer it runs on: palette (Ctrl+K) **Export Leq log…**
 (CSV, on this computer) for the focused (or only) SPL meter, with an editable name such

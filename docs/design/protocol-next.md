@@ -909,6 +909,39 @@ or it boots without its meter and refuses every network client.
    run and disarms the generator, for whoever sends it (§3). Recommendation: keep it; a
    viewer who hears sound it should not may end all of it, and the operator re-arms.
 
+## Decided in review
+
+1. **Where a daemon given no session directory saves.** `DaemonConfig::new` names no real
+   directory: a daemon given none (the app's simulated rig, `ac2d --ephemeral`, every
+   in-process test daemon) makes one of its own under the system temp dir, closed to other
+   users, and removes it when it stops. Only a daemon that keeps state (`ac2d` without
+   `--ephemeral`) uses the user's session directory, so only it clears that directory's
+   staging at start. An ephemeral daemon's log and audit trail stay in the log directory as
+   `ac2d-sim.log` and `ac2d-sim-audit.log`, files of their own; it takes no lock, keeps no
+   key, rig id, calibration store, rig settings, autosave, recordings or plans. No `ac2`
+   command runs a daemon in its own process (`ac2 selftest duplex` opens the audio
+   directly); the CLI's in-process daemons are its tests, which get the temp directory too.
+2. **Rows held for an anchor the write thread never reports** (§7, a hung disk): at most
+   600 per log (a reservation's length) are held; past that the oldest held row is dropped,
+   its run's gap moving to the first row kept, and the log shows a gap there. Serving them
+   without the anchor could hand a second out twice after a power cut; dropping never does.
+   Live levels and the windows go on meanwhile; the drop is logged once per wait.
+3. **A mark write that fails** reserves nothing: the reservation stored before stands, and
+   the write is tried again 10 s on (not every second), until one is written.
+4. **Windows after an unknown gap.** The floor below which no window reaches is restored
+   with the log: the newest row whose gap is `unknown`. A restart that knows its own gap
+   (same boot, trusted clocks) never makes a level from before an earlier unknown gap recent.
+5. **The loopback burst** is cut by whatever stops the stimulus (`gen.stop`, a lease
+   released, expired or taken over, the global maximum lowered, a session loaded), and a
+   burst whose requester no longer holds the lease never shows as firing.
+6. **A session half replaced by `file.import`** (a stop between parking the old one and
+   renaming the new one in) is put back at the next start when its name is still free.
+7. **A delay set to the value it holds** moves neither its `rev` nor drops a stopped
+   transfer's kept result.
+8. **File names inside a session archive** follow the rule session names follow: no Windows
+   device name, no `:`, no trailing dot or space (`ac2_archive::windows_device` is the one
+   device-name rule).
+
 ## Finding map
 
 | id | section |
