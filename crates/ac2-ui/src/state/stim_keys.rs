@@ -2,29 +2,39 @@
 //!
 //! The key that started something stops it: while this app's stimulus plays (or a fire
 //! is on its way) Space and Enter stop it as Esc does, and while it is armed Space
-//! disarms it. A stop is only ever easier to reach this way; arming and firing stay two
-//! separate keys, and auto-repeat never reaches these keys ([`crate::app`]), so a held
-//! Space that stopped never arms again.
+//! disarms it. A stop is only ever easier to reach this way: arming and firing stay two
+//! separate keys, and while a stop is on its way Space and Enter do nothing, so a key
+//! pressed twice (or held, whether or not the platform flags the repeat) that stopped the
+//! sound never starts it again.
 
 use super::*;
+use ac2_scene::stim_item::StimState;
 
-/// This app's stimulus on the rig shown, as Space and Enter read it.
+/// This app's stimulus on the rig shown, as Space, Enter and the bar read it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum OwnStim {
+pub enum OwnStim {
     /// Nothing of this app's armed or playing (another client's may be).
     Idle,
     Arming,
     Armed,
-    /// Fire requested or playing.
+    /// The generator's noise or sine, fire requested or playing.
     Playing,
+    /// A sweep or dynamics run, fire requested or playing: a second Enter or Space must
+    /// not discard what a first one started, so only Esc ends it.
+    Run,
     Stopping,
 }
 
 impl AppState {
-    pub(super) fn own_stim(&self) -> OwnStim {
+    pub fn own_stim(&self) -> OwnStim {
+        let run_planned = self.rig.sweep.plan.is_some() || self.rig.dynamics_run.plan.is_some();
+        if self.rig.sweep.run.is_some() || self.rig.dynamics_run.run.is_some() {
+            return OwnStim::Run;
+        }
         match self.rig.stimulus.phase {
             StimPhase::Arming => OwnStim::Arming,
             StimPhase::Armed => OwnStim::Armed,
+            StimPhase::FireRequested | StimPhase::Firing if run_planned => OwnStim::Run,
             StimPhase::FireRequested | StimPhase::Firing => OwnStim::Playing,
             StimPhase::Stopping => OwnStim::Stopping,
             // A lease this client holds that the local phase has not caught up with (the
@@ -48,25 +58,54 @@ impl AppState {
         }
     }
 
+    /// The stimulus of the rig shown as the top bar states it; `None` before the daemon's
+    /// state is mirrored. The mirrored generator is the truth, but for this app's stop in
+    /// flight: the mirror says it plays until the stop lands, and the keys do nothing
+    /// meanwhile, so the bar says `STOPPING…` and offers no key.
+    pub fn stim_state(&self) -> Option<StimState> {
+        let g = &self.daemon()?.generator;
+        Some(match ((g.armed, g.firing), self.rig.stimulus.phase) {
+            (_, StimPhase::Stopping) => StimState::Stopping,
+            ((_, true), _) => StimState::Firing,
+            ((true, false), StimPhase::FireRequested) => StimState::FirePending,
+            ((true, false), _) => StimState::Armed,
+            (_, StimPhase::Arming) => StimState::Arming,
+            _ => StimState::Off,
+        })
+    }
+
     /// Space: stops this app's stimulus while it plays, disarms it while it is armed, else
-    /// arms what the focused view plays. While an arm is on its way it does nothing (Esc
-    /// still stops): a quick second Space is the arm's own key pressed twice, not a stop.
+    /// arms what the focused view plays. While an arm, a stop or a run is on its way it does
+    /// nothing (Esc still stops): a quick second Space is the first one pressed twice, and
+    /// must neither stop what it armed nor arm what it stopped.
     pub(super) fn space_key(&mut self, keymap: &Keymap, out: &mut Vec<Request>) {
         match self.own_stim() {
             OwnStim::Armed | OwnStim::Playing => self.stop_stimulus_here(out),
-            OwnStim::Arming => {}
-            OwnStim::Idle | OwnStim::Stopping => self.space(false, keymap, out),
+            OwnStim::Arming | OwnStim::Run | OwnStim::Stopping => {}
+            OwnStim::Idle => self.space(false, keymap, out),
         }
     }
 
-    /// Enter: stops this app's stimulus while it plays or a fire is on its way; `false`
-    /// when it leaves Enter its other meaning (firing what is armed).
-    pub(super) fn enter_stops(&mut self, out: &mut Vec<Request>) -> bool {
-        if self.own_stim() == OwnStim::Playing {
-            self.stop_stimulus_here(out);
-            true
-        } else {
-            false
+    /// Enter: fires what is armed, stops this app's noise or sine while it plays; nothing
+    /// while an arm, a stop or a run is on its way.
+    pub(super) fn enter_key(&mut self, out: &mut Vec<Request>) {
+        match self.own_stim() {
+            OwnStim::Playing => self.stop_stimulus_here(out),
+            OwnStim::Armed if self.rig.dynamics_run.plan.is_some() => self.fire_dynamics(out),
+            OwnStim::Armed if self.rig.sweep.plan.is_some() => self.fire_sweep(out),
+            OwnStim::Armed => {
+                self.sync_generator_signal();
+                if let Some(settings) = self.rig.stimulus.settings() {
+                    self.rig.stimulus.phase = StimPhase::FireRequested;
+                    out.push(Request::StimSet(GeneratorDesired {
+                        settings,
+                        armed: true,
+                        firing: true,
+                    }));
+                }
+            }
+            OwnStim::Idle => self.warn("not armed: Space arms first"),
+            OwnStim::Arming | OwnStim::Run | OwnStim::Stopping => {}
         }
     }
 
@@ -75,14 +114,12 @@ impl AppState {
     /// while it plays, with the preference on, the stop takes the transfers measuring
     /// against the loopback with it once it lands.
     pub(super) fn stop_stimulus_here(&mut self, out: &mut Vec<Request>) {
-        self.rig.stimulus.arm_after_stop = false;
         self.rig.sweep.arm_after_stop = false;
         if self.stimulus_live() {
-            let playing = matches!(
-                self.rig.stimulus.phase,
-                StimPhase::FireRequested | StimPhase::Firing
-            ) || self.daemon().is_some_and(|s| s.generator.firing);
-            self.rig.stimulus.stop_transfers = playing && self.prefs.stop_transfers_with_stimulus;
+            // Only this app's own noise or sine: another client's stimulus feeds measurements
+            // this app did not start it for, and an aborted run was never their signal.
+            self.rig.stimulus.stop_transfers =
+                self.own_stim() == OwnStim::Playing && self.prefs.stop_transfers_with_stimulus;
             self.rig.stimulus.phase = StimPhase::Stopping;
             out.push(Request::StimStop);
         }
@@ -117,7 +154,7 @@ impl AppState {
             // The toast names them all at once; each reply says only a refusal.
             out.push(Request::Act {
                 cmd: Command::MeasStop { meas: *meas },
-                done: String::new(),
+                done: None,
                 failed: format!("{name} not stopped"),
             });
         }

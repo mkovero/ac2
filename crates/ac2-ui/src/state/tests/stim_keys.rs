@@ -70,23 +70,99 @@ fn space_and_enter_in_every_phase() {
     }
 }
 
-/// A second Space pressed (not held) while a stop is on its way queues an arm, as before;
-/// Enter there never fires or arms.
+/// While a stop is on its way Space and Enter do nothing: a second press of the key that
+/// stopped the sound queues no arm, and nothing arms or fires once the stop lands.
 #[test]
-fn space_while_stopping_arms_only_after_the_stop() {
+fn a_stop_in_flight_takes_no_key() {
+    let no_start = |r: &[Request]| {
+        !r.iter()
+            .any(|x| matches!(x, Request::StimArm { .. } | Request::StimSet(_)))
+    };
+    // Firing: Space stops, Space again does nothing; once stopped, Enter only says so.
     let mut t = T::new();
     play(&mut t, true);
     assert!(only_stop(&t.key("Space")));
     assert!(t.key("Space").is_empty());
-    assert!(t.st.rig.stimulus.arm_after_stop);
-    // Esc drops the queued arm.
-    t.key("Escape");
-    assert!(!t.st.rig.stimulus.arm_after_stop);
+    assert!(t.key("Enter").is_empty());
     let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert!(no_start(&r), "{r:?}");
+    let r = t.key("Enter");
+    assert!(no_start(&r), "{r:?}");
+    assert!(t.last_toast().contains("not armed"));
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
+    // Armed: Space disarms, Space again does nothing; it stays disarmed.
+    let mut t = T::new();
+    play(&mut t, false);
+    assert!(only_stop(&t.key("Space")));
+    assert!(t.key("Space").is_empty());
+    let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert!(no_start(&r), "{r:?}");
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
+}
+
+/// Presses that arrive as fresh ones (a platform that does not flag its auto-repeat):
+/// exactly one stop, never an arm.
+#[test]
+fn fresh_repeats_of_a_stop_key_stop_once() {
+    for key in ["Space", "Enter"] {
+        let mut t = T::new();
+        play(&mut t, true);
+        let r: Vec<Request> = (0..6).flat_map(|_| t.key(key)).collect();
+        assert!(only_stop(&r), "{key}: {r:?}");
+    }
+}
+
+/// The daemon's generator as this client's lease shows it.
+fn mirror_mine(t: &mut T, armed: bool, firing: bool) {
+    t.remirror(|s| {
+        s.generator.owner = Some(ClientId("c1".into()));
+        s.generator.armed = armed;
+        s.generator.firing = firing;
+    });
+}
+
+/// The bar says `STOPPING…` (no keys) while this app's stop is on its way, though the
+/// daemon still says it plays or is armed.
+#[test]
+fn the_bar_says_stopping_while_the_stop_is_in_flight() {
+    use ac2_scene::stim_item::StimState;
+    for fire in [true, false] {
+        let mut t = T::new();
+        play(&mut t, fire);
+        mirror_mine(&mut t, true, fire);
+        let live = if fire {
+            StimState::Firing
+        } else {
+            StimState::Armed
+        };
+        assert_eq!(t.st.stim_state(), Some(live));
+        t.key("Space");
+        assert_eq!(t.st.stim_state(), Some(StimState::Stopping), "fire {fire}");
+        assert_eq!(t.st.own_stim(), crate::state::OwnStim::Stopping);
+    }
+}
+
+/// A lease the mirror shows as this client's while the local phase is idle (a reconnect):
+/// the bar offers Enter fires, and Enter fires; playing, Enter stops.
+#[test]
+fn the_keys_follow_a_lease_the_mirror_shows() {
+    use ac2_scene::stim_item::StimState;
+    let mut t = T::new();
+    t.pink_at(-20.0);
+    mirror_mine(&mut t, true, false);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.stim_state(), Some(StimState::Armed));
+    let r = t.key("Enter");
     assert!(
-        !r.iter().any(|x| matches!(x, Request::StimArm { .. })),
-        "{r:?}"
+        matches!(r.as_slice(), [Request::StimSet(d)] if d.firing),
+        "{r:?} {}",
+        t.last_toast()
     );
+    let mut t = T::new();
+    t.pink_at(-20.0);
+    mirror_mine(&mut t, true, true);
+    assert_eq!(t.st.stim_state(), Some(StimState::Firing));
+    assert!(only_stop(&t.key("Enter")));
 }
 
 /// The prompt opens on the level set: typing starts from an empty line.
@@ -190,13 +266,12 @@ fn an_own_stop_while_playing_stops_the_loopback_transfers() {
             "stimulus stopped · Main L, TF 2 stopped",
             "{key}"
         );
-        // Their replies add nothing: the toast said it.
-        let n = t.st.toasts.list.len();
-        t.conn(ConnEvent::Reply {
-            what: String::new(),
-            result: Ok(()),
-        });
-        assert_eq!(t.st.toasts.list.len(), n);
+        // Their replies add nothing on success: the toast said it.
+        assert!(
+            r.iter()
+                .all(|x| !matches!(x, Request::Act { done: Some(_), .. })),
+            "{key}"
+        );
     }
     // The palette's stop too.
     let mut t = T::new();
@@ -273,6 +348,24 @@ fn s_and_the_stop_rule_do_not_ping_pong() {
     assert!(r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
     let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     assert!(meas_stops(&r).is_empty(), "{r:?}");
+}
+
+/// Another client's stimulus: Esc and Shift+Esc stop it, but none of this app's transfers.
+#[test]
+fn another_clients_stimulus_stops_but_takes_no_transfer() {
+    for key in ["Escape", "Shift+Escape"] {
+        let mut t = T::new();
+        with_transfers(&mut t);
+        t.remirror(|s| {
+            s.generator.owner = Some(ClientId("c2".into()));
+            s.generator.armed = true;
+            s.generator.firing = true;
+        });
+        let r = t.key(key);
+        assert!(only_stop(&r), "{key}: {r:?}");
+        let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+        assert!(meas_stops(&r).is_empty(), "{key}: {r:?}");
+    }
 }
 
 fn settings_of(t: &T) -> &crate::settings::Settings {

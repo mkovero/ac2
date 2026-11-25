@@ -76,6 +76,41 @@ pub fn above_max(max: Dbfs) -> String {
     format!("above the max level {}", format::dbfs(max.0))
 }
 
+/// The level row's Enter with nothing typed.
+pub const LEVEL_WANTED: &str = "type a level in dBFS (e.g. -30), then Enter";
+
+/// What a dynamics measurement louder than the max level needs before it runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BurstFix {
+    /// Made from its form: only the max level can change.
+    RaiseMax,
+    /// Run from its view: the max level, or the measurement.
+    RaiseMaxOrEdit,
+}
+
+/// A dynamics measurement whose loudest burst is above the max level, refused.
+pub fn burst_above_max(name: &str, top: f64, max: Dbfs, fix: BurstFix) -> String {
+    let fix = match fix {
+        BurstFix::RaiseMax => "raise the max level before running it",
+        BurstFix::RaiseMaxOrEdit => "raise the max level or edit it",
+    };
+    format!(
+        "{name}'s loudest burst {} is above the max level {}: {fix}",
+        format::dbfs(top),
+        format::dbfs(max.0)
+    )
+}
+
+/// A sweep measurement whose level is above the max level, refused.
+pub fn sweep_above_max(name: &str, level: Dbfs, max: Dbfs) -> String {
+    format!(
+        "{name}'s level {} is above the max level {}: edit it (palette: edit the selected \
+         measurement)",
+        format::dbfs(level.0),
+        format::dbfs(max.0)
+    )
+}
+
 /// A level step that cannot go higher.
 pub fn at_max(max: f64) -> String {
     format!("at the max level {}", format::dbfs(max))
@@ -131,6 +166,24 @@ mod tests {
         assert_eq!(level_prompt_title(None), "Stimulus level (dBFS)");
         assert_eq!(above_max(Dbfs(-40.0)), "above the max level −40.0 dBFS");
         assert_eq!(at_max(-40.0), "at the max level −40.0 dBFS");
+    }
+
+    #[test]
+    fn measurements_above_the_max_say_what_to_change() {
+        assert_eq!(
+            burst_above_max("Dyn", -6.0, Dbfs(-10.0), BurstFix::RaiseMax),
+            "Dyn's loudest burst −6.0 dBFS is above the max level −10.0 dBFS: raise the max \
+             level before running it"
+        );
+        assert!(
+            burst_above_max("Dyn", -6.0, Dbfs(-10.0), BurstFix::RaiseMaxOrEdit)
+                .ends_with(": raise the max level or edit it")
+        );
+        assert_eq!(
+            sweep_above_max("Sweep 1", Dbfs(-6.0), Dbfs(-10.0)),
+            "Sweep 1's level −6.0 dBFS is above the max level −10.0 dBFS: edit it (palette: \
+             edit the selected measurement)"
+        );
     }
 
     #[test]

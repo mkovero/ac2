@@ -354,24 +354,7 @@ impl AppState {
 
             C::StimulusArm => self.space_key(keymap, out),
             C::StimulusTakeOver => self.space(true, keymap, out),
-            C::StimulusFire if self.enter_stops(out) => {}
-            C::StimulusFire => match self.rig.stimulus.phase {
-                StimPhase::Armed if self.rig.dynamics_run.plan.is_some() => self.fire_dynamics(out),
-                StimPhase::Armed if self.rig.sweep.plan.is_some() => self.fire_sweep(out),
-                StimPhase::Armed => {
-                    self.sync_generator_signal();
-                    if let Some(settings) = self.rig.stimulus.settings() {
-                        self.rig.stimulus.phase = StimPhase::FireRequested;
-                        out.push(Request::StimSet(GeneratorDesired {
-                            settings,
-                            armed: true,
-                            firing: true,
-                        }));
-                    }
-                }
-                StimPhase::Idle => self.warn("not armed: Space arms first"),
-                _ => {}
-            },
+            C::StimulusFire => self.enter_key(out),
             C::StimulusStop | C::StopAnywhere => self.stop_stimulus_here(out),
             C::LevelUp => self.step_level(1.0, out),
             C::LevelDown => self.step_level(-1.0, out),

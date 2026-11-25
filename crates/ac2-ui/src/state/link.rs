@@ -132,16 +132,6 @@ impl AppState {
                     .map(|m| m.config.name.clone())
                     .collect();
                 self.rig.choice.meas_seen.extend(seen);
-                // The daemon disarmed the generator when the audio stopped; an arm queued
-                // behind a stop must not follow it into a session that is reopening.
-                if self.rig.stimulus.arm_after_stop
-                    && self.daemon().is_some_and(|s| s.session.stopped.is_some())
-                {
-                    self.rig.stimulus.arm_after_stop = false;
-                    self.warn(
-                        "not armed: the audio stopped; the daemon is reopening the audio I/O",
-                    );
-                }
                 let ids: Vec<MeasId> = self.measurements().iter().map(|m| m.id).collect();
                 if let Some(p) = self.rig.pending.select
                     && ids.contains(&p)
@@ -351,8 +341,6 @@ impl AppState {
                     s.cal.reply(&what, &result);
                 }
                 match result {
-                    // A reply whose news an earlier toast already gave.
-                    Ok(()) if what.is_empty() => {}
                     Ok(()) => self.toast(what),
                     Err(e) => self.fault(format!("{what}: {e}")),
                 }
@@ -439,110 +427,6 @@ impl AppState {
                     Command::DelayInsert { meas, pick },
                     format!("{name}: {what}"),
                 );
-            }
-        }
-    }
-
-    pub(super) fn stim_event(&mut self, s: StimEvent, out: &mut Vec<Request>) {
-        match s {
-            StimEvent::Armed => {
-                self.rig.stimulus.phase = StimPhase::Armed;
-                if self.rig.due.armed_with.take() != self.rig.stimulus.settings() {
-                    self.resend_stimulus(out);
-                }
-                let d = self.rig.stimulus.describe();
-                if let Some(p) = &self.rig.dynamics_run.plan {
-                    self.toast(format!(
-                        "armed: {d} · Enter plays the run of {} · Esc stops",
-                        p.name
-                    ));
-                } else if self.rig.sweep.plan.is_some() {
-                    self.toast(format!("armed: {d} · Enter plays the sweep · Esc stops"));
-                } else {
-                    self.toast(format!("armed: {d} · Enter fires · Esc stops"));
-                }
-            }
-            StimEvent::DynamicsStarted(run) => {
-                self.rig.stimulus.phase = StimPhase::Firing;
-                self.rig.dynamics_run.run = Some(run.id);
-                self.rig.dynamics_run.seen = Some(run.status.clone());
-                self.toast(format!(
-                    "dynamics run playing: {} · at most {} · Esc stops (and discards it)",
-                    run.name,
-                    format::duration(run.longest.0)
-                ));
-            }
-            StimEvent::SweepStarted(run) => {
-                self.rig.stimulus.phase = StimPhase::Firing;
-                self.rig.sweep.run = Some(run.id);
-                self.rig.sweep.seen = Some(run.status.clone());
-                self.toast(format!(
-                    "sweep playing: {} × {} s · Esc stops (and discards it)",
-                    run.repeats,
-                    format::fixed(run.sweep_duration.0 + run.post_roll.0, 1)
-                ));
-            }
-            StimEvent::Set { firing } => {
-                if self.rig.stimulus.phase != StimPhase::Stopping {
-                    self.rig.stimulus.phase = if firing {
-                        StimPhase::Firing
-                    } else {
-                        StimPhase::Armed
-                    };
-                }
-            }
-            StimEvent::Stopped => {
-                self.rig.stimulus.phase = StimPhase::Idle;
-                let announced = std::mem::take(&mut self.rig.stimulus.stop_announced);
-                let transfers = self.stop_loopback_transfers(out);
-                if !transfers.is_empty() {
-                    self.toast(ac2_scene::stim_rows::stopped_with(&transfers));
-                }
-                if std::mem::take(&mut self.rig.stimulus.arm_after_stop)
-                    && !self.rig.sweep.arm_after_stop
-                {
-                    self.arm_after_stopped(out);
-                }
-                let releasing = std::mem::take(&mut self.rig.sweep.releasing);
-                let pending = std::mem::take(&mut self.rig.sweep.arm_after_stop);
-                match self.rig.sweep.plan.take() {
-                    Some(plan) if pending => self.arm_sweep(plan, false, out),
-                    plan => {
-                        self.rig.sweep.plan = plan;
-                        self.end_sweep_mode();
-                        if !releasing && !announced && transfers.is_empty() {
-                            self.toast(ac2_scene::stim_rows::stopped_with(&[]));
-                        }
-                    }
-                }
-            }
-            StimEvent::Lost(msg) => {
-                self.rig.stimulus.phase = StimPhase::Idle;
-                self.rig.stimulus.arm_after_stop = false;
-                self.rig.stimulus.stop_announced = false;
-                self.rig.stimulus.stop_transfers = false;
-                self.rig.sweep.releasing = false;
-                self.rig.sweep.arm_after_stop = false;
-                self.end_sweep_mode();
-                self.fault(format!("stimulus lease lost: {msg}"));
-            }
-            StimEvent::Failed(msg) => {
-                self.rig.sweep.releasing = false;
-                self.rig.stimulus.arm_after_stop = false;
-                self.rig.stimulus.stop_announced = false;
-                self.rig.stimulus.stop_transfers = false;
-                if std::mem::take(&mut self.rig.sweep.arm_after_stop) {
-                    self.end_sweep_mode();
-                }
-                self.rig.stimulus.phase = match self.rig.stimulus.phase {
-                    StimPhase::Arming => StimPhase::Idle,
-                    StimPhase::FireRequested => StimPhase::Armed,
-                    // A failed stop leaves the truth to the mirror; the daemon's lease
-                    // expiry fades the output out if this client cannot reach it.
-                    StimPhase::Stopping => StimPhase::Idle,
-                    p => p,
-                };
-                self.fault(format!("stimulus: {msg}"));
             }
         }
     }
@@ -923,7 +807,9 @@ impl RigState {
         self.conn = conn;
         // A new connection holds no lease.
         self.stimulus.phase = StimPhase::Idle;
-        self.stimulus.arm_after_stop = false;
+        // Nor is a stop of this app's on its way to take transfers with it or be announced.
+        self.stimulus.stop_transfers = false;
+        self.stimulus.stop_announced = false;
         // Nor has it rebuilt any history: the log may have moved on meanwhile.
         self.leq.logs.clear();
         self.forget_layout_calls();
@@ -951,7 +837,9 @@ impl RigState {
         self.mirror = None;
         self.data = None;
         self.stimulus.phase = StimPhase::Idle;
-        self.stimulus.arm_after_stop = false;
+        // Nor is a stop of this app's on its way to take transfers with it or be announced.
+        self.stimulus.stop_transfers = false;
+        self.stimulus.stop_announced = false;
     }
 
     /// Drops what is kept by an id the mirror no longer lists: live edits, folds, fetched

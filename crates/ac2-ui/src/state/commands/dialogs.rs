@@ -592,12 +592,11 @@ fn above_ceiling(config: &ac2_proto::model::MeasConfig, ceiling: Option<Dbfs>) -
     let top = d.bursts.iter().map(|b| b.0).reduce(f64::max)?;
     let c = ceiling?;
     (top > c.0).then(|| {
-        format!(
-            "{}'s loudest burst {} is above the max level {}: raise the max level before \
-             running it",
-            config.name,
-            ac2_scene::format::dbfs(top),
-            ac2_scene::format::dbfs(c.0)
+        ac2_scene::stim_rows::burst_above_max(
+            &config.name,
+            top,
+            c,
+            ac2_scene::stim_rows::BurstFix::RaiseMax,
         )
     })
 }

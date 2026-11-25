@@ -222,7 +222,11 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                     .await
                     .map(|(_, warnings)| send_warnings(&o, warnings))
                     .map_err(|e| e.to_string());
-                let what = if result.is_ok() { done } else { failed };
+                let what = match (&result, done) {
+                    (Ok(()), None) => return,
+                    (Ok(()), Some(done)) => done,
+                    (Err(_), _) => failed,
+                };
                 o.send(ConnEvent::Reply { what, result });
             });
         }

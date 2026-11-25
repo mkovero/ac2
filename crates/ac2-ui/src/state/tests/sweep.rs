@@ -375,7 +375,7 @@ fn the_sweep_dialog_offers_fine_lf_harmonics() {
 }
 
 #[test]
-fn a_sweep_submitted_during_a_stop_arms_after_it() {
+fn space_on_the_sweep_view_during_a_stop_waits_for_it() {
     let mut t = T::new();
     t.pink_at(-30.0);
     let r = t.key("Space");
@@ -387,20 +387,18 @@ fn a_sweep_submitted_during_a_stop_arms_after_it() {
 
     t.conn(mirror(sweep_state()));
     t.go(PaneKind::Distortion);
+    // Nothing armed into the lease being released, nor queued behind its stop.
+    assert!(t.key("Space").is_empty());
+    assert!(t.st.rig.sweep.plan.is_none());
+    assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
     let r = t.key("Space");
-    assert!(
-        !r.iter().any(|x| matches!(x, Request::StimArm { .. })),
-        "nothing armed into the lease being released: {r:?}"
-    );
-    assert!(t.st.rig.sweep.plan.is_some());
-    let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     let settings = r
         .iter()
         .find_map(|x| match x {
             Request::StimArm { settings, .. } => Some(settings.clone()),
             _ => None,
         })
-        .unwrap_or_else(|| panic!("no arm after the stop: {r:?}"));
+        .unwrap_or_else(|| panic!("no arm once stopped: {r:?}"));
     assert!(matches!(settings.signal, Signal::Ess { .. }));
     assert_eq!(settings.level, Dbfs(-50.0));
     assert_eq!(t.st.rig.stimulus.phase, StimPhase::Arming);
@@ -622,9 +620,10 @@ fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
     let r = t.conn(mirror(s));
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(8)));
-    // Space while that stop is on its way: the re-sweep arms once it has landed.
+    // Space while that stop is on its way does nothing; once it has landed, it re-sweeps.
     assert!(t.key("Space").is_empty());
-    let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
+    let r = t.key("Space");
     assert!(
         r.iter().any(|x| matches!(
             x,
@@ -847,5 +846,39 @@ fn shift_b_steps_the_spectrograph_span() {
     assert_eq!(
         t.st.kind_modes(PaneKind::Spectrum).spectrum,
         SpectrumMode::Spectrum
+    );
+}
+
+/// A sweep run, fire requested or playing: Space and Enter leave it alone (a double-tapped
+/// Enter never discards it); Esc stops and discards it and stops no transfer.
+#[test]
+fn space_and_enter_leave_a_sweep_run_alone() {
+    let mut t = T::new();
+    sweep_armed(&mut t);
+    let r = t.key("Enter");
+    assert!(matches!(r.as_slice(), [Request::Sweep { .. }]), "{r:?}");
+    assert_eq!(t.st.own_stim(), crate::state::OwnStim::Run);
+    for key in ["Enter", "Space"] {
+        assert!(t.key(key).is_empty(), "fire requested: {key}");
+    }
+    t.conn(ConnEvent::Stimulus(StimEvent::SweepStarted(Box::new(
+        sweep_run(SweepStatus::Playing { repeat: 1 }),
+    ))));
+    for key in ["Enter", "Space"] {
+        assert!(t.key(key).is_empty(), "playing: {key}");
+    }
+    let r = t.key("Escape");
+    assert!(r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
+    assert!(!t.st.rig.stimulus.stop_transfers);
+    let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert!(
+        !r.iter().any(|x| matches!(
+            x,
+            Request::Act {
+                cmd: Command::MeasStop { .. },
+                ..
+            }
+        )),
+        "{r:?}"
     );
 }

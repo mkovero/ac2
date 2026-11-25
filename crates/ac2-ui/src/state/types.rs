@@ -306,10 +306,6 @@ pub struct Stimulus {
     /// Zero-based output channels.
     pub outputs: Vec<u16>,
     pub phase: StimPhase,
-    /// Space came while a stop was still on its way: the stimulus arms once that stop has
-    /// landed (not into the lease the stop is releasing). Any stop, a lost or failed lease,
-    /// a closed window and a new connection drop it.
-    pub arm_after_stop: bool,
     /// The stop in flight went out with a measurement stop whose reply already says the
     /// stimulus stopped: its own "stimulus stopped" would say it twice.
     pub stop_announced: bool,
@@ -327,7 +323,6 @@ impl Default for Stimulus {
             sine: ac2_scene::stimulus::DEFAULT_SINE,
             outputs: vec![0],
             phase: StimPhase::Idle,
-            arm_after_stop: false,
             stop_announced: false,
             stop_transfers: false,
         }

@@ -210,11 +210,12 @@ pub enum StimEvent {
 pub enum Request {
     /// A command whose reply only matters as success / failure.
     Call { cmd: Command, what: String },
-    /// As [`Request::Call`], with words for each outcome: `done` once it is done, `failed`
-    /// (then the daemon's words) when refused, so a refusal never reads as done.
+    /// As [`Request::Call`], with words for each outcome: `done` once it is done (`None`:
+    /// an earlier toast already said it, so success says nothing), `failed` (then the
+    /// daemon's words) when refused, so a refusal never reads as done.
     Act {
         cmd: Command,
-        done: String,
+        done: Option<String>,
         failed: String,
     },
     /// Acquire the lease (taking it over with `force`) and arm with `settings`.

@@ -566,10 +566,7 @@ impl Form {
         if let Some(c) = ceiling
             && level > c.0
         {
-            return Err(format!(
-                "above the max level {} dBFS",
-                ac2_scene::format::fixed(c.0, 1)
-            ));
+            return Err(ac2_scene::stim_rows::above_max(c));
         }
         // A sweep's edges in Hz: `20`, `20 Hz`, `20k`, `1.5 kHz`.
         let from = in_field::<Freq>(self.text(FieldId::From), "hz")?.0.0;

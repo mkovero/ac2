@@ -169,12 +169,11 @@ impl AppState {
         if let Some(c) = self.ceiling()
             && top > c.0
         {
-            self.warn(format!(
-                "{}'s loudest burst {} is above the max level {}: raise the max level or \
-                 edit it",
-                m.config.name,
-                format::dbfs(top),
-                format::dbfs(c.0)
+            self.warn(ac2_scene::stim_rows::burst_above_max(
+                &m.config.name,
+                top,
+                c,
+                ac2_scene::stim_rows::BurstFix::RaiseMaxOrEdit,
             ));
             return;
         }

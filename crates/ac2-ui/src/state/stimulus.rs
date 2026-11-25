@@ -235,10 +235,11 @@ impl AppState {
         }
     }
 
-    /// Space: arms what the focused view plays (the sweep view a re-sweep, the others the
-    /// generator). Armed with the other kind and still silent, Space re-sets the armed
-    /// stimulus to this view's, so what Enter fires is always what a Space on this view
-    /// chose; a playing stimulus is never changed by it.
+    /// Arms what the focused view plays (the sweep view a re-sweep, the others the
+    /// generator): Space with nothing of this app's armed, or the take-over (`force`) of
+    /// another client's stimulus. A stimulus taken over armed with the other kind and still
+    /// silent is re-set to this view's, so what Enter fires is what this view plays; a
+    /// playing stimulus is never changed by it.
     pub(super) fn space(&mut self, force: bool, keymap: &Keymap, out: &mut Vec<Request>) {
         if self.layout.focus_kind() == PaneKind::Dynamics {
             self.space_dynamics(force, keymap, out);
@@ -283,18 +284,14 @@ impl AppState {
         if let Some(c) = self.ceiling()
             && plan.config.level.0 > c.0
         {
-            self.warn(format!(
-                "{}'s level {} is above the max level {}: edit it (palette: edit the \
-                 selected measurement)",
-                plan.name,
-                format::dbfs(plan.config.level.0),
-                format::dbfs(c.0)
+            self.warn(ac2_scene::stim_rows::sweep_above_max(
+                &plan.name,
+                plan.config.level,
+                c,
             ));
             return;
         }
         let phase = self.rig.stimulus.phase;
-        // A noise queued behind the stop gives way to the sweep this view arms.
-        self.rig.stimulus.arm_after_stop = false;
         self.arm_sweep(plan, force, out);
         match phase {
             StimPhase::Stopping => {
@@ -332,9 +329,8 @@ impl AppState {
                 StimPhase::Armed => {
                     self.end_sweep_mode();
                     self.resend_stimulus(out);
-                    self.toast(format!(
-                        "armed: {} · Enter fires · Esc stops",
-                        self.rig.stimulus.describe()
+                    self.toast(ac2_scene::stim_item::armed_toast(
+                        &self.rig.stimulus.describe(),
                     ));
                     return;
                 }
@@ -392,13 +388,6 @@ impl AppState {
             ));
             return;
         }
-        if self.rig.stimulus.phase == StimPhase::Stopping && !force {
-            if !self.rig.stimulus.arm_after_stop {
-                self.rig.stimulus.arm_after_stop = true;
-                self.toast("stopping… arms once the stop is done (Esc cancels)");
-            }
-            return;
-        }
         if !matches!(self.rig.stimulus.phase, StimPhase::Idle) && !force {
             return;
         }
@@ -407,31 +396,6 @@ impl AppState {
             self.rig.stimulus.phase = StimPhase::Arming;
             self.rig.due.armed_with = Some(settings.clone());
             out.push(Request::StimArm { settings, force });
-        }
-    }
-
-    /// The arm Space asked for while a stop was in flight, now that the stop has landed:
-    /// the same checks as a fresh Space, against the state the stop left.
-    pub(super) fn arm_after_stopped(&mut self, out: &mut Vec<Request>) {
-        if !self.connected() || self.rig.stimulus.phase != StimPhase::Idle {
-            return;
-        }
-        if self.daemon().is_some_and(|s| s.session.open.is_none()) {
-            self.warn("not armed: no audio I/O to play into");
-            return;
-        }
-        if self.daemon().is_some_and(|s| s.session.stopped.is_some()) {
-            self.warn("not armed: the audio stopped; the daemon is reopening the audio I/O");
-            return;
-        }
-        self.sync_generator_signal();
-        if let Some(settings) = self.rig.stimulus.settings() {
-            self.rig.stimulus.phase = StimPhase::Arming;
-            self.rig.due.armed_with = Some(settings.clone());
-            out.push(Request::StimArm {
-                settings,
-                force: false,
-            });
         }
     }
 
@@ -684,7 +648,6 @@ impl AppState {
         if other_running || !self.holds_stimulus() {
             return false;
         }
-        self.rig.stimulus.arm_after_stop = false;
         self.rig.stimulus.phase = StimPhase::Stopping;
         self.rig.stimulus.stop_announced = true;
         // The transfer that asked for this stop is the last one running: nothing is left

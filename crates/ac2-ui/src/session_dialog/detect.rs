@@ -102,10 +102,7 @@ impl SessionDialog {
         if let Some(c) = ceiling
             && level > c.0
         {
-            d.error = Some(format!(
-                "above the max level {} dBFS",
-                format::signed(c.0, 1)
-            ));
+            d.error = Some(ac2_scene::stim_rows::above_max(c));
             return None;
         }
         d.phase = DetectPhase::Running;

@@ -647,7 +647,7 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   reference: it records what Main L (output 1) plays.`), with a line on what it is for.
 - **Detect loopback…** (**D**): asks for a level (no default; your last stimulus level is
   offered), then on **Enter** plays a 0.5 s band-limited noise burst on the stimulus output —
-  under the stimulus lease and the ceiling, faded — and marks the input it returns on as the
+  under the stimulus lease and the max level, faded — and marks the input it returns on as the
   Reference (or says none answered and which came closest).
 - **Stimulus signal** (this app's, like the stimulus outputs; between the channels and
   the max level): one row for a noise, three for a sine, each with a line under it saying
@@ -997,8 +997,10 @@ accident:
   ([Choosing the signal](#choosing-the-signal));
 - **arm** (`Space`) and **fire** (`Enter`) are separate steps; the keys that start it also
   stop it: while it plays (or a fire is on its way) **Space** or **Enter** stops it, and
-  while it is armed **Space** disarms it. A held key never repeats here, so a Space that
-  stopped never arms again. **Esc** stops (with a window open, Esc first closes it),
+  while it is armed **Space** disarms it. While a stop is on its way, Space and Enter do
+  nothing, so a key pressed twice or held after a stop never arms or fires again. During a
+  sweep or dynamics run Space and Enter do nothing either, so a second Enter never discards
+  the run; **Esc** stops it (and discards it). **Esc** stops (with a window open, Esc first closes it),
   **Shift+Esc** stops from anywhere, from any client, and with several rigs held it stops
   every rig's stimulus, not only the one shown;
 - the top bar's right end always shows the stimulus of the rig shown, fixed, never
@@ -1012,7 +1014,8 @@ accident:
   | armed | `ARMED pink −24.0 dBFS → out 1, 2 · Enter fires · Space disarms` |
   | fire requested | `FIRE… pink −24.0 dBFS → out 1, 2 · Space or Enter stops` |
   | playing | `FIRING pink −24.0 dBFS → out 1, 2 · Space or Enter stops` |
-  | stopping | `STOPPING…` |
+  | a sweep or dynamics run playing | `FIRING sweep −30.0 dBFS → out 1 · Esc stops (and discards it)` |
+  | stopping | `STOPPING…` (also while the daemon still says it plays) |
   | another client's | `FIRING pink −24.0 dBFS → out 1, 2 · held by alice` |
 
   followed by **■ Stop stimulus: Shift+Esc** while armed or playing. Off, the hover says
@@ -1020,8 +1023,8 @@ accident:
   arms`), and every rig in the background whose stimulus is armed or playing has a chip in
   the top bar beside the stop: **▶ kettu −24 dBFS** playing, *kettu armed −24 dBFS* armed,
   with *· held by alice* when another client holds it;
-  closing a rig or quitting the app stops and releases what each rig holds, all at once. Space pressed while
-  a stop is finishing arms once it is done (Esc cancels that);
+  closing a rig or quitting the app stops and releases what each rig holds, all at once.
+  Before the rig's state has arrived, and while it is unreachable, the item is not shown;
 - one client holds the stimulus at a time (a refreshed lease); if it disappears the daemon
   fades the output out within 1.5 s;
 - the rig's [system max level](#system-max-level) caps it, never above `ac2d --max-level`

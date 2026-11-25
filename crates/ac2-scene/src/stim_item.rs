@@ -3,6 +3,9 @@
 //!
 //! It never scrolls with the bar's line: the one thing the operator must read before a key
 //! makes a room loud is whether something is armed and what Space and Enter will do now.
+//!
+//! Before the daemon's state is mirrored, and while the rig is unreachable, there is no
+//! item: there is no generator known to state, and a guessed `STIM OFF` could be wrong.
 
 use crate::top_bar::Tone;
 
@@ -22,7 +25,7 @@ pub enum StimState {
 }
 
 impl StimState {
-    /// The state's word, as the bar has always badged it.
+    /// The state's word, in capitals so it reads apart from the line beside it.
     pub fn badge(self) -> &'static str {
         match self {
             StimState::Off => "STIM OFF",
@@ -54,6 +57,9 @@ pub struct StimInputs<'a> {
     pub off_keys: Option<&'a str>,
     /// The stimulus keys reach the stimulus: no window has them.
     pub keys: bool,
+    /// A sweep or dynamics run plays or is about to: a second Space or Enter must not
+    /// discard it, so only Esc ends it.
+    pub run: bool,
     /// More than one rig: the rig shown, by name, so the keys are read as acting on it.
     pub rig: Option<&'a str>,
     /// The long form of what Space or Enter starts next, for the hover.
@@ -119,6 +125,14 @@ impl StimItem {
 pub const ARMED_KEYS: &str = "Enter fires · Space disarms";
 /// Playing or about to: what the keys do.
 pub const PLAYING_KEYS: &str = "Space or Enter stops";
+/// The toast once the noise or sine is armed, with the keys the bar offers:
+/// `armed: pink −20.0 dBFS → out 1 · Enter fires · Space disarms`.
+pub fn armed_toast(plays: &str) -> String {
+    format!("armed: {plays} · {ARMED_KEYS}")
+}
+
+/// A sweep or dynamics run playing or about to: what ends it.
+pub const RUN_KEYS: &str = "Esc stops (and discards it)";
 
 /// The item for `i`.
 pub fn stim_item(i: &StimInputs<'_>) -> StimItem {
@@ -145,6 +159,7 @@ pub fn stim_item(i: &StimInputs<'_>) -> StimItem {
         // stop stands beside it.
         (_, Some(_), _) | (_, _, false) | (StimState::Stopping | StimState::Arming, ..) => None,
         (StimState::Armed, ..) => Some(ARMED_KEYS.to_owned()),
+        (StimState::FirePending | StimState::Firing, ..) if i.run => Some(RUN_KEYS.to_owned()),
         (StimState::FirePending | StimState::Firing, ..) => Some(PLAYING_KEYS.to_owned()),
     };
     let mut hover = Vec::new();
@@ -177,6 +192,7 @@ mod tests {
             held_by: None,
             off_keys: Some("Space arms"),
             keys: true,
+            run: false,
             rig: None,
             next_long: None,
             tip: "L types the level",
@@ -304,5 +320,28 @@ mod tests {
         let off = stim_item(&at(StimState::Off));
         assert_eq!(off.narrowed(3).text(), "STIM OFF");
         assert_eq!(off.narrowed(3).hover, off.hover);
+    }
+
+    #[test]
+    fn the_arm_toast_offers_the_bars_keys() {
+        assert_eq!(
+            armed_toast("pink −20.0 dBFS → out 1"),
+            "armed: pink −20.0 dBFS → out 1 · Enter fires · Space disarms"
+        );
+    }
+
+    /// A run says Esc: Space and Enter leave it alone.
+    #[test]
+    fn a_run_says_esc_stops_it() {
+        let mut i = at(StimState::Firing);
+        i.run = true;
+        assert_eq!(
+            text(i),
+            "FIRING pink −20.0 dBFS → out 1, 2 · Esc stops (and discards it)"
+        );
+        i.state = StimState::FirePending;
+        assert!(text(i).ends_with(" · Esc stops (and discards it)"));
+        i.state = StimState::Armed;
+        assert!(text(i).ends_with(" · Enter fires · Space disarms"));
     }
 }

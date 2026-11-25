@@ -53,7 +53,7 @@ impl AppState {
         };
         let text = s.signal.text.trim().to_owned();
         let r = if text.is_empty() {
-            Err("type a level in dBFS (e.g. -30), then Enter".to_owned())
+            Err(ac2_scene::stim_rows::LEVEL_WANTED.to_owned())
         } else {
             self.set_level_text(&text, out)
         };

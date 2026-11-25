@@ -337,7 +337,7 @@ impl AppState {
         };
         let list = |lister: &Source, peer: &Source| Request::Act {
             cmd: Command::RigPair { peer: peer.peer() },
-            done: words::listed_toast(&lister.name, &peer.name),
+            done: Some(words::listed_toast(&lister.name, &peer.name)),
             failed: words::not_listed(&lister.name, &peer.name),
         };
         // Admissions first: a listing whose admission is not there yet only retries.
@@ -407,7 +407,7 @@ impl AppState {
         }
         let unlist = |lister: &str, drop: RigId, peer: &str| Request::Act {
             cmd: Command::RigUnpair { rig: drop },
-            done: words::unlisted_toast(lister, peer),
+            done: Some(words::unlisted_toast(lister, peer)),
             failed: words::not_unlisted(lister, peer),
         };
         // By the rig's identity, so an app authorized under the same name keeps its key.

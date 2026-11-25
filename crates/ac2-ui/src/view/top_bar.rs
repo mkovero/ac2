@@ -6,12 +6,12 @@ use std::time::Instant;
 use ac2_scene::autosave::AutosaveTone;
 use ac2_scene::format;
 use ac2_scene::recording::RecordingTone;
-use ac2_scene::stim_item::{StimInputs, StimItem, StimState};
+use ac2_scene::stim_item::{StimInputs, StimItem};
 use ac2_scene::top_bar::{Bar, BarAudio, BarInputs, BarLink, BarSession, Note, Place, Tone};
 
 use crate::app::App;
 use crate::keys::{CommandId, STOP_ANYWHERE, Scope};
-use crate::state::{ConnState, StimPhase};
+use crate::state::ConnState;
 
 /// The first key of a global command, as shown in the bar.
 pub(super) fn key_hint(app: &App, c: CommandId) -> String {
@@ -45,15 +45,7 @@ impl App {
         let held_by = generator.owner.as_ref().filter(|_| !mine).map(|o| {
             ac2_scene::stimulus::holder(o, generator.owner_local, &st.rig_name(st.active()))
         });
-        // The mirrored generator is the truth; the local phase only adds "requested".
-        let state = match ((generator.armed, generator.firing), st.rig.stimulus.phase) {
-            ((_, true), _) => StimState::Firing,
-            ((true, false), StimPhase::FireRequested) => StimState::FirePending,
-            ((true, false), _) => StimState::Armed,
-            (_, StimPhase::Arming) => StimState::Arming,
-            (_, StimPhase::Stopping) => StimState::Stopping,
-            _ => StimState::Off,
-        };
+        let state = st.stim_state()?;
         let level = st.rig.stimulus.level.map_or_else(
             || "no level".to_string(),
             |l| format!("{} dBFS", format::signed(l.0, 1)),
@@ -79,6 +71,7 @@ impl App {
             held_by: held_by.as_deref(),
             off_keys: next.as_ref().map(|(_, short)| short.as_str()),
             keys: st.overlay == crate::state::Overlay::None,
+            run: st.own_stim() == crate::state::OwnStim::Run,
             rig: rig.as_deref(),
             next_long: next.as_ref().map(|(long, _)| long.as_str()),
             tip: &tip,

@@ -92,56 +92,32 @@ fn arm_fire_level_stop() {
 /// lease is being released), and the stimulus arms once the stop has landed. A failed
 /// stop, a lost lease, another stop, a closed window or a lost connection drop the request:
 /// nothing arms behind them.
+/// Space during a stop does nothing, and nothing arms when the stop lands, fails or the
+/// link drops: a second press of the key that stopped the sound never starts it again.
 #[test]
-fn space_during_a_stop_arms_once_the_stop_lands() {
+fn space_during_a_stop_arms_nothing() {
     let stopping = |t: &mut T| {
         t.pink_at(-20.0);
         t.st.rig.stimulus.phase = StimPhase::Firing;
         let r = t.key("Esc");
         assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
         assert_eq!(t.st.rig.stimulus.phase, StimPhase::Stopping);
-        assert!(
-            t.key("Space").is_empty(),
-            "nothing while the stop is in flight"
-        );
-        assert!(t.last_toast().contains("arms once the stop is done"));
+        assert!(t.key("Space").is_empty());
         assert!(t.key("Space").is_empty());
     };
-    let is_arm = |r: &[Request]| matches!(r, [Request::StimArm { force: false, .. }]);
-
     let mut t = T::new();
     stopping(&mut t);
-    let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
-    assert!(is_arm(&r), "{r:?}");
-    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Arming);
-    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
-    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
-
-    // The stop failed: the lease is in doubt, nothing arms.
-    let mut t = T::new();
-    stopping(&mut t);
-    let r = t.conn(ConnEvent::Stimulus(StimEvent::Failed("timeout".into())));
-    assert!(r.is_empty(), "{r:?}");
+    assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
     assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
-    assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
 
-    // The lease is gone.
     let mut t = T::new();
     stopping(&mut t);
-    t.conn(ConnEvent::Stimulus(StimEvent::Lost("expired".into())));
-    assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
+    assert!(
+        t.conn(ConnEvent::Stimulus(StimEvent::Failed("timeout".into())))
+            .is_empty()
+    );
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
 
-    // Esc, or the stop chord, again: the operator wants it stopped after all.
-    for chord in ["Esc", "Shift+Esc"] {
-        let mut t = T::new();
-        stopping(&mut t);
-        t.key(chord);
-        let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
-        assert!(r.is_empty(), "{chord}: {r:?}");
-        assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
-    }
-
-    // The connection dropped: a new one holds no lease and arms nothing.
     let mut t = T::new();
     stopping(&mut t);
     t.conn(ConnEvent::Failed {
@@ -150,24 +126,6 @@ fn space_during_a_stop_arms_once_the_stop_lands() {
         error: "not responding".into(),
         retry_in: std::time::Duration::from_secs(2),
     });
-    assert!(!t.st.rig.stimulus.arm_after_stop);
-    assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
-
-    // The audio stopped meanwhile: the daemon disarmed it, and nothing arms after the stop.
-    let mut t = T::new();
-    stopping(&mut t);
-    let mut s = daemon_state();
-    s.session.stopped = Some(ac2_proto::model::AudioStopped {
-        since: WallNs(0),
-        cause: ac2_proto::model::StopCause::HostEnded,
-        recovery: ac2_proto::model::Recovery::Opening {
-            attempt: 1,
-            started: WallNs(0),
-        },
-    });
-    t.conn(mirror(s));
-    assert!(!t.st.rig.stimulus.arm_after_stop);
-    assert!(t.last_toast().contains("the audio stopped"));
     assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
 }
 
@@ -798,12 +756,9 @@ fn the_stimulus_never_changes_the_layout() {
         t.key("Escape");
         check(&mut t, "stopping");
         t.key("Space");
-        assert!(t.st.rig.stimulus.arm_after_stop);
-        check(&mut t, "an arm queued behind the stop");
+        check(&mut t, "Space during the stop");
         t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
-        check(&mut t, "stopped, arming again");
-        t.key("Escape");
-        t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+        check(&mut t, "stopped");
         // A sweep running on the daemon: the progress strip is an operation outside full
         // screen; in it, nothing.
         s.sweep = Some(sweep_run(SweepStatus::Playing { repeat: 1 }));

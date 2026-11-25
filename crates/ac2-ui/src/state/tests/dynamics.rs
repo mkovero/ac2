@@ -331,3 +331,40 @@ fn a_failed_run_raises_a_banner_with_the_daemons_reason() {
     );
     assert!(t.st.rig.dynamics_run.run.is_none());
 }
+
+/// A dynamics run, fire requested or playing: Space and Enter leave it alone; Esc stops
+/// and discards it and stops no transfer.
+#[test]
+fn space_and_enter_leave_a_dynamics_run_alone() {
+    let mut t = T::new();
+    t.conn(mirror(with_runs(&[])));
+    t.go(PaneKind::Spectrum);
+    let p = t.st.layout.focus;
+    let v = t.st.layout.view_mut(p).expect("a pane");
+    v.kind = PaneKind::Dynamics;
+    v.meas = Some(MEAS);
+    t.key("Space");
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    let r = t.key("Enter");
+    assert!(
+        r.iter().any(|x| matches!(x, Request::DynamicsRun { .. })),
+        "{r:?}"
+    );
+    for key in ["Enter", "Space"] {
+        assert!(t.key(key).is_empty(), "fire requested: {key}");
+    }
+    let playing = DynamicsStatus::Playing {
+        step: 1,
+        steps: 4,
+        phase: ac2_proto::model::DynamicsPhase::Burst,
+    };
+    t.conn(ConnEvent::Stimulus(StimEvent::DynamicsStarted(Box::new(
+        run(playing),
+    ))));
+    for key in ["Enter", "Space"] {
+        assert!(t.key(key).is_empty(), "playing: {key}");
+    }
+    let r = t.key("Escape");
+    assert!(r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
+    assert!(!t.st.rig.stimulus.stop_transfers);
+}

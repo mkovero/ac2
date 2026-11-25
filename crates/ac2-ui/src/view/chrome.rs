@@ -66,7 +66,7 @@ fn fixed(ui: &mut egui::Ui, text: RichText, hover: Option<&str>) {
 }
 
 /// The stimulus item's parts left to right, each in its colour: the state, who holds it,
-/// the keys; a ` · ` leads every part but the first, and the stop when it follows.
+/// the keys; each part after the state is led by ` · `, so the parts read as one item.
 fn stim_parts(s: &ac2_scene::stim_item::StimItem, ch: &Chrome) -> Vec<egui::WidgetText> {
     let mut state = RichText::new(&s.state).color(super::segment::tone_color(ch, s.tone));
     if s.strong {

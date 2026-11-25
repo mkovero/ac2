@@ -8,14 +8,14 @@ use std::time::{Duration, Instant};
 
 use ac2_plot::Scene;
 use ac2_scene::theme::{Theme, ThemeName};
-use eframe::egui::{self, Event, Key};
+use eframe::egui;
 
 use ac2_proto::topic::Topic;
 
 use crate::conn::{Conn, Target};
 use crate::connect::{Choice, ConnectDialog};
-use crate::keys::{Chord, Keymap};
-use crate::state::{AppState, Msg, Overlay, PaneKind};
+use crate::keys::Keymap;
+use crate::state::{AppState, Msg, PaneKind};
 use crate::{theme, view};
 
 /// How the app was started.
@@ -819,63 +819,9 @@ impl App {
         }
     }
 
-    /// Keyboard and text events → reducer. Handled events are removed so egui widgets never
-    /// also act on them (Space must not click a focused button, Tab must not move focus).
-    fn input(&mut self, ctx: &egui::Context) {
-        let text_overlay = self.state.overlay.takes_text();
-        let events = ctx.input_mut(|i| {
-            let (mine, rest): (Vec<Event>, Vec<Event>) =
-                std::mem::take(&mut i.events).into_iter().partition(|e| {
-                    matches!(e, Event::Key { .. }) || (matches!(e, Event::Text(_)) && text_overlay)
-                });
-            i.events = rest;
-            mine
-        });
-        for e in events {
-            match e {
-                Event::Key {
-                    key,
-                    pressed: true,
-                    repeat,
-                    modifiers,
-                    ..
-                } => {
-                    let open = self.state.overlay != Overlay::None;
-                    let overlay = open && !self.state.overlay.is_reading();
-                    if overlay && key == Key::Backspace {
-                        // Held, it keeps erasing typed text; where Backspace is Delete (the
-                        // delete confirmation), one held press must not open and answer it.
-                        if !repeat || text_overlay {
-                            self.dispatch(Msg::Backspace);
-                        }
-                        continue;
-                    }
-                    if repeat && !repeats(key, modifiers, open) {
-                        continue;
-                    }
-                    self.dispatch(Msg::Key(Chord::from_event(key, modifiers)));
-                }
-                Event::Text(t) => self.dispatch(Msg::Text(t)),
-                _ => {}
-            }
-        }
-    }
-
     pub fn theme(&self) -> Theme {
         self.state.scene_theme()
     }
-}
-
-/// Whether a held `key` acts again on its auto-repeat: only navigation does, never the
-/// stimulus or a toggle, so a held key cannot ramp the level, flicker a mode, or have a
-/// Space that stopped the stimulus arm it again. In an open window (`open`) ↑/↓ and the
-/// page keys only move or scroll it (the window owns them). Ctrl+↑/↓ move the level axis
-/// (never the stimulus level, which is ↑/↓ without Ctrl).
-pub(crate) fn repeats(key: Key, modifiers: egui::Modifiers, open: bool) -> bool {
-    matches!(key, Key::ArrowLeft | Key::ArrowRight)
-        || (open && matches!(key, Key::PageUp | Key::PageDown))
-        || (matches!(key, Key::ArrowUp | Key::ArrowDown)
-            && (open || (modifiers.command && !modifiers.alt)))
 }
 
 /// The panes' texts that change with time alone: the age of each STALE frame and how long
@@ -992,6 +938,9 @@ pub(crate) fn install_fonts(ctx: &egui::Context) {
 }
 
 mod daemons;
+mod key_input;
+#[cfg(test)]
+pub(crate) use key_input::repeats;
 mod frame;
 mod touches;
 use touches::{Touches, data_touches, tick_touches};

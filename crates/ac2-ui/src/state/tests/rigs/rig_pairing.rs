@@ -157,7 +157,7 @@ fn lists(r: &[(RigId, Request)], on: RigId) -> Vec<(RigPeer, String)> {
                 cmd: Command::RigPair { peer },
                 done,
                 ..
-            } if *rig == on => Some((peer.clone(), done.clone())),
+            } if *rig == on => Some((peer.clone(), done.clone().unwrap_or_default())),
             _ => None,
         })
         .collect()
@@ -170,7 +170,7 @@ fn unlists(r: &[(RigId, Request)], on: RigId) -> Vec<(RigId, String)> {
                 cmd: Command::RigUnpair { rig: gone },
                 done,
                 ..
-            } if *rig == on => Some((*gone, done.clone())),
+            } if *rig == on => Some((*gone, done.clone().unwrap_or_default())),
             _ => None,
         })
         .collect()
