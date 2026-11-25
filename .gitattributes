@@ -5,3 +5,6 @@ fixtures/golden/*.bin binary
 fixtures/protocol/WIRE_LOCK -text
 # Mic-curve files as the manufacturer ships them (CRLF, tabs): parsed byte for byte.
 fixtures/mic_curves/* -text
+# The status page's expected text is compared byte for byte with what the CLI prints (LF on
+# every platform); never convert line endings.
+crates/ac2-cli/src/status/golden/*.txt -text
