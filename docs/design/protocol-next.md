@@ -959,8 +959,11 @@ or it boots without its meter and refuses every network client.
    owner, `last_action.client`, an edit's owner and `rig.peers` stay visible to a viewer, who
    is trusted to watch the rig. What §3 bounds per key, a key's data connections join: at
    most 8 at once (an app, a CLI command, reconnects whose old connection has not stalled
-   out); a ninth drops the key's connection heard from longest ago, so a reconnecting client
-   always gets in.
+   out). A ninth takes the place of the key's connection heard from longest ago only when
+   that one has said nothing for 5 s (a live client is heard at least every 3 s), so a
+   reconnect gets in once its old connection fell quiet; while all 8 are live the ninth is
+   refused (left unknown, sent nothing, warned once per key) rather than evicting a live one
+   that would come back and evict another.
 12. **A rejoin's `hello`** that fails is asked again every 500 ms until a welcome comes: the
    role the client shows is the welcome's, and a stale one must not stay.
 13. **Stale socket files.** The daemon holding the instance lock removes the files at its own

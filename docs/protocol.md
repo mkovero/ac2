@@ -3108,8 +3108,10 @@ Credit:
 A connection is dropped (its subscriptions and chains with it) when a send to it fails
 because its connection is gone, or when it holds unacknowledged messages and has sent
 nothing for 60 s, or when it holds more than 4096 subscriptions, or when its network key
-opens a ninth data connection (a key holds at most 8: the one heard from longest ago goes);
-one heard from again after that is sent `rejoin`. `rejoin` comes only
+opens a ninth data connection while that one has said nothing for 5 s (a key holds at most
+8); one heard from again after that is sent `rejoin`. A ninth connection while all 8 of its
+key's have been heard from within 5 s is refused: the daemon keeps no state for it and sends
+it nothing, and its next `window` (after 3 s of silence) is weighed again. `rejoin` comes only
 after the connection sends something, so a client watches for the completed handshake
 (ZMQ socket monitor) and sends `window` and its subscriptions on every reconnect, and also
 after 3 s with nothing read on its data connection (every connection is sent at least a

@@ -64,10 +64,18 @@ pub(crate) const STALLED_AFTER: Duration = Duration::from_secs(60);
 pub(crate) const MAX_SUBSCRIPTIONS: usize = 4096;
 
 /// Most data connections one network key holds at once. One app, a CLI command beside it
-/// and a reconnect or two whose old connection has not stalled out yet; past it the key's
-/// connection heard from longest ago goes, so a reconnecting client always gets in while
-/// a key's holder cannot multiply what [`MAX_SUBSCRIPTIONS`] bounds per connection.
+/// and a reconnect or two whose old connection has not stalled out yet; past it a new
+/// connection takes the place of the key's quietest one only if that one is [`QUIET_AFTER`]
+/// quiet, and is refused otherwise, so a key's holder cannot multiply what
+/// [`MAX_SUBSCRIPTIONS`] bounds per connection.
 pub(crate) const MAX_PEERS_PER_KEY: usize = 8;
+
+/// A connection heard from more recently than this is live and is never pushed out for a
+/// new one. A live client is heard at least every three seconds: it returns credit for the
+/// keepalive it is sent each second, and one reading nothing states its window again after
+/// three silent seconds. Evicting a live one would only bring it back as a new connection
+/// that evicts another, round and round; the margin covers a client's drain cadence.
+pub(crate) const QUIET_AFTER: Duration = Duration::from_secs(5);
 
 /// Longest a peer goes without being sent anything while keepalives are produced.
 pub(crate) const KA_IDLE: Duration = Duration::from_secs(1);
@@ -511,8 +519,11 @@ impl Peers {
             }
         };
         let known = self.map.contains_key(rid.as_slice());
-        if !known && let Some(c) = client {
-            self.make_room(&c.key, &c.name, interest);
+        if !known
+            && let Some(c) = client
+            && !self.make_room(&c.key, &c.name, interest, now)
+        {
+            return;
         }
         if !known {
             match Peer::new(rid, now, client.map(|c| c.key), rig) {
@@ -760,22 +771,37 @@ impl Peers {
     }
 
     /// Room for one more connection of `key`: past [`MAX_PEERS_PER_KEY`], the one of its
-    /// connections heard from longest ago is dropped.
-    fn make_room(&mut self, key: &PublicKey, name: &str, interest: &Interest) {
+    /// connections heard from longest ago is dropped if it is [`QUIET_AFTER`] quiet. False
+    /// when every one is live: the new connection is left unknown, and the client's next
+    /// statement of its window is weighed again.
+    fn make_room(
+        &mut self,
+        key: &PublicKey,
+        name: &str,
+        interest: &Interest,
+        now: Instant,
+    ) -> bool {
         let mine = || self.map.values().filter(|p| p.key.as_ref() == Some(key));
         if mine().count() < MAX_PEERS_PER_KEY {
-            return;
+            return true;
         }
-        let Some(oldest) = mine().min_by_key(|p| p.heard).map(|p| p.rid.to_vec()) else {
-            return;
+        let Some(oldest) = mine().min_by_key(|p| p.heard) else {
+            return true;
         };
-        if self.refusals.first(Some(*key), "too many data connections") {
-            tracing::warn!(
-                "{name} holds {MAX_PEERS_PER_KEY} data connections: its oldest is dropped for \
-                 each new one (repeats at debug)"
-            );
+        if now.saturating_duration_since(oldest.heard) < QUIET_AFTER {
+            if self.refusals.first(Some(*key), "too many data connections") {
+                tracing::warn!(
+                    "{name} holds {MAX_PEERS_PER_KEY} live data connections: a new one is \
+                     refused until one ends (repeats at debug)"
+                );
+            } else {
+                tracing::debug!("{name}: data connection refused, {MAX_PEERS_PER_KEY} are live");
+            }
+            return false;
         }
+        let oldest = oldest.rid.to_vec();
         self.drop_peer(&oldest, interest, "past the data connections of its key");
+        true
     }
 
     fn drop_peer(&mut self, rid: &[u8], interest: &Interest, why: &str) {

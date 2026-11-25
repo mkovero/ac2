@@ -533,6 +533,11 @@ viewer loses the generator then and there (the output fades out, a sweep stops).
 the rig's own computer is always an operator. A new key is best authorized as a viewer, and
 made an operator when it is to drive the rig.
 
+One key holds at most eight live data connections (an app takes one, each CLI command beside
+it one more). A ninth gets no live data until one of the eight ends or has said nothing for
+5 s, and the daemon log says so once per key: give each device its own key rather than
+sharing one.
+
 *Clocks* gives a line per connected rig (named when there are several), what its daemon
 measures and what its OS says, nothing more:
 `clock: +6 ppm against the system clock · system clock synced, OS bound ±3.0 ms`.

@@ -677,9 +677,10 @@ fn a_rig_is_refused_stage_bins() {
     assert_eq!(r.interest.count(&bins.to_bytes()), 0);
 }
 
-/// One network key holds at most [`MAX_PEERS_PER_KEY`] data connections: a new one past
-/// them takes the place of the key's connection heard from longest ago, never another
-/// key's.
+/// One network key holds at most [`MAX_PEERS_PER_KEY`] data connections. While all of
+/// them are live a new one is refused and the held ones keep their subscriptions, however
+/// often it asks; once one has gone [`QUIET_AFTER`] quiet, a new one takes its place,
+/// never another key's.
 #[test]
 fn a_key_holds_a_bounded_number_of_data_connections() {
     let mut r = Rig::new();
@@ -696,10 +697,7 @@ fn a_key_holds_a_bounded_number_of_data_connections() {
     r.client = Some(phone.clone());
     r.admission = Admission::Listed(Role::Viewer);
     let mut held: Vec<Socket> = (0..MAX_PEERS_PER_KEY)
-        .map(|_| {
-            std::thread::sleep(Duration::from_millis(2));
-            r.dealer(DATA_WINDOW_DEFAULT)
-        })
+        .map(|_| r.dealer(DATA_WINDOW_DEFAULT))
         .collect();
     let of = |r: &Rig, k: &CurvePeer| {
         r.peers
@@ -708,21 +706,67 @@ fn a_key_holds_a_bounded_number_of_data_connections() {
             .filter(|p| p.key == Some(k.key))
             .count()
     };
-    assert_eq!(of(&r, &phone), MAX_PEERS_PER_KEY);
-    let first = r.peer(1).rid.to_vec();
+    let held_rids: Vec<Vec<u8>> = r
+        .peers
+        .map
+        .values()
+        .filter(|p| p.key == Some(phone.key))
+        .map(|p| p.rid.to_vec())
+        .collect();
+    assert_eq!(held_rids.len(), MAX_PEERS_PER_KEY);
+    let topic = r.topic.to_bytes();
+    let subscribed = r.interest.count(&topic);
 
+    // A ninth, live, restating its window as a client that hears nothing does.
     let d = r.ctx.socket(SocketType::Dealer).unwrap();
     d.set_linger(Some(Duration::ZERO)).unwrap();
     d.connect(&r.endpoint).unwrap();
+    for _ in 0..3 {
+        up(
+            &d,
+            DataUp::Window {
+                bytes: DATA_WINDOW_DEFAULT,
+            },
+        );
+        up(
+            &d,
+            DataUp::Subscribe {
+                sub: Subscription::Topic(r.topic),
+            },
+        );
+    }
+    // Every request in: the ninth's went before these (the router reads connections in
+    // turn, so a while longer for its last ones).
+    let end = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < end {
+        r.pump();
+    }
+    assert_eq!(of(&r, &phone), MAX_PEERS_PER_KEY);
+    for rid in &held_rids {
+        let p = r.peers.map.get(rid.as_slice());
+        assert!(
+            p.is_some_and(|p| p.subs.len() == 2),
+            "a held connection keeps its subscriptions"
+        );
+    }
+    assert_eq!(r.interest.count(&topic), subscribed);
+
+    // One held connection goes quiet: the ninth's next statement takes its place.
+    let quiet = held_rids[3].clone();
+    let p = r.peers.map.get_mut(quiet.as_slice()).unwrap();
+    p.heard = Instant::now().checked_sub(QUIET_AFTER).unwrap();
     up(
         &d,
         DataUp::Window {
             bytes: DATA_WINDOW_DEFAULT,
         },
     );
-    r.pump_until(|r| !r.peers.map.contains_key(first.as_slice()));
+    r.pump_until(|r| !r.peers.map.contains_key(quiet.as_slice()));
     held.push(d);
     assert_eq!(of(&r, &phone), MAX_PEERS_PER_KEY);
     assert_eq!(of(&r, &other), 1, "another key's connection stays");
     assert_eq!(r.peers.len(), MAX_PEERS_PER_KEY + 1);
+    for rid in held_rids.iter().filter(|r| **r != quiet) {
+        assert!(r.peers.map.contains_key(rid.as_slice()));
+    }
 }
