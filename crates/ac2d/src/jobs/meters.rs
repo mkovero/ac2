@@ -1,4 +1,4 @@
-//! Session input meters: peak, RMS and clip of every captured input while a session is open,
+//! Stream input meters: peak, RMS and clip of every captured input while a stream is open,
 //! whether or not a measurement runs on it, so the operator sees which inputs carry signal
 //! before choosing what to measure. They run on the fan-out thread, from the block
 //! statistics it computes anyway, so they cost no thread and no rescan of the samples. The
@@ -7,8 +7,8 @@
 use std::time::{Duration, Instant};
 
 use ac2_proto::frame::{
-    ClipFlags, FrameData, LevelsMark, METER_FPS, ProtectionFlags, SessionLevelsFrame,
-    SessionLevelsMeta, SourceLevelsFrame, SourceLevelsMeta,
+    ClipFlags, FrameData, LevelsMark, METER_FPS, ProtectionFlags, SourceLevelsFrame,
+    SourceLevelsMeta, StreamLevelsFrame, StreamLevelsMeta,
 };
 use ac2_proto::topic::Topic;
 use ac2_proto::units::Rev;
@@ -135,7 +135,7 @@ struct Held {
     rms: Vec<f32>,
 }
 
-pub(crate) struct SessionLevels {
+pub(crate) struct StreamLevels {
     levels: LevelsMeter,
     /// The remote inputs' meters, from the joined feed (its columns after the local ones).
     remote: Option<LevelsMeter>,
@@ -147,8 +147,8 @@ pub(crate) struct SessionLevels {
     held: SourceHeld,
 }
 
-impl SessionLevels {
-    /// Meters every block channel of a session capturing `input_map`. `early`: how far
+impl StreamLevels {
+    /// Meters every block channel of a stream capturing `input_map`. `early`: how far
     /// ahead of its slot a frame may go, so a wakeup just before a slot takes it.
     pub(crate) fn new(
         input_map: &[u16],
@@ -214,7 +214,7 @@ impl SessionLevels {
         else {
             return;
         };
-        let gonio = e.wants(Topic::SessionGonio);
+        let gonio = e.wants(Topic::StreamGonio);
         let mut r = self.programme.take(gonio);
         // Another rig reads this rig's own inputs only, published whether or not an app
         // watches: its clocks are related to this one's through the mark.
@@ -264,11 +264,11 @@ impl SessionLevels {
             rms.extend(m.rms);
             clip.extend(m.clip);
         }
-        if e.wants(Topic::SessionLevels) {
+        if e.wants(Topic::StreamLevels) {
             e.send(
                 stamp,
-                FrameData::SessionLevels(SessionLevelsFrame {
-                    meta: SessionLevelsMeta {
+                FrameData::StreamLevels(StreamLevelsFrame {
+                    meta: StreamLevelsMeta {
                         channels,
                         ballistic: r.ballistic,
                         pair_levels: r.pair_levels,
@@ -285,7 +285,7 @@ impl SessionLevels {
             );
         }
         if let Some(g) = r.gonio {
-            e.send(stamp, FrameData::SessionGonio(g));
+            e.send(stamp, FrameData::StreamGonio(g));
         }
     }
 }

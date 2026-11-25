@@ -1,4 +1,4 @@
-//! `ac2 levels [set|reset]`: the programme meters and loudness of the open session, their
+//! `ac2 levels [set|reset]`: the programme meters and loudness of the open stream, their
 //! settings and their holds.
 //!
 //! In `--json`, −∞ is the string `"-inf"` (as `spl_log` writes it): JSON has no infinity,
@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use ac2_client::{Client, expect_body};
 use ac2_proto::cal;
-use ac2_proto::frame::{ClipFlags, FrameData, LoudnessSource, SessionLevelsFrame, SourceLoudness};
+use ac2_proto::frame::{ClipFlags, FrameData, LoudnessSource, SourceLoudness, StreamLevelsFrame};
 use ac2_proto::model::{Ballistic, LevelsSettings, PairSide, Rig, State};
 use ac2_proto::topic::Topic;
 use ac2_proto::units::WallNs;
@@ -83,14 +83,14 @@ pub(crate) async fn run(
     }
 }
 
-/// One meter frame of the open session as tables: a row per input, a row per pair, a row
+/// One meter frame of the open stream as tables: a row per input, a row per pair, a row
 /// per loudness source.
 async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
     let st = state(&c).await?;
-    if st.session.open.is_none() {
+    if st.stream.open.is_none() {
         return Err(CliError::Usage(
-            "no session is open: ac2 session open meters the inputs".into(),
+            "no stream is open: ac2 stream open meters the inputs".into(),
         ));
     }
     let (f, captured_at) = one_frame(&c, st.rig.levels.ballistic).await?;
@@ -191,8 +191,8 @@ async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
 /// The ballistic input `ch` reads: the rig's, or the true peak where VU is chosen but not
 /// offered (not a line input with a line calibration) and under a loudness ballistic (the
 /// loudness is the source's, in the loudness table; an input's own column is its peak).
-fn ballistic_of(st: &State, f: &SessionLevelsFrame, ch: u16) -> Ballistic {
-    let device = st.session.open.as_ref().map(|o| &o.input_device);
+fn ballistic_of(st: &State, f: &StreamLevelsFrame, ch: u16) -> Ballistic {
+    let device = st.stream.open.as_ref().map(|o| &o.input_device);
     match (f.meta.ballistic, device) {
         (b, _) if b.is_loudness() => Ballistic::TruePeak,
         (Ballistic::Vu, Some(d)) if !cal::offers_vu(&st.inputs, &st.line_calibrations, d, ch) => {
@@ -312,20 +312,20 @@ pub(crate) fn level_json<T: Into<f64> + serde::Serialize + Copy>(v: T) -> serde_
     }
 }
 
-/// The newest session meter frame metered under `ballistic`, the rig's as just read, and its
+/// The newest stream meter frame metered under `ballistic`, the rig's as just read, and its
 /// capture time (daemon clock). A frame metered before a ballistic change reaches the meter
 /// reads the old type, so it would contradict the settings printed beside it.
 async fn one_frame(
     c: &Client,
     ballistic: Ballistic,
-) -> Result<(SessionLevelsFrame, WallNs), CliError> {
+) -> Result<(StreamLevelsFrame, WallNs), CliError> {
     c.subscribe(Subscription::InputMeters)?;
     let end = Instant::now() + WAIT;
     let mut got = None;
     while Instant::now() < end {
         let latest = c.latest()?;
-        if let Some(l) = latest.get(&Topic::SessionLevels)
-            && let FrameData::SessionLevels(f) = &l.frame.data
+        if let Some(l) = latest.get(&Topic::StreamLevels)
+            && let FrameData::StreamLevels(f) = &l.frame.data
             && f.meta.ballistic == ballistic
         {
             got = Some((f.clone(), l.frame.stamp.capture_wall_ns));
@@ -336,7 +336,7 @@ async fn one_frame(
     let _ = c.unsubscribe(Subscription::InputMeters);
     got.ok_or_else(|| {
         CliError::Usage(format!(
-            "no meter frame in {} s: is the audio running? (ac2 session status)",
+            "no meter frame in {} s: is the audio running? (ac2 stream status)",
             WAIT.as_secs()
         ))
     })
@@ -384,14 +384,14 @@ mod tests {
     use super::*;
     use ac2_proto::samples;
 
-    fn frame(ballistic: Ballistic, channels: Vec<u16>) -> SessionLevelsFrame {
+    fn frame(ballistic: Ballistic, channels: Vec<u16>) -> StreamLevelsFrame {
         let mut f = samples::frames()
             .into_iter()
             .find_map(|f| match f.data {
-                FrameData::SessionLevels(l) => Some(l),
+                FrameData::StreamLevels(l) => Some(l),
                 _ => None,
             })
-            .expect("a session meter frame");
+            .expect("a stream meter frame");
         f.meta.ballistic = ballistic;
         f.meta.channels = channels;
         f
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn an_inputs_column_is_its_true_peak_under_a_loudness_ballistic() {
         let st = samples::state();
-        let device = &st.session.open.as_ref().expect("open").input_device;
+        let device = &st.stream.open.as_ref().expect("open").input_device;
         assert!(cal::offers_vu(&st.inputs, &st.line_calibrations, device, 4));
         assert!(!cal::offers_vu(
             &st.inputs,

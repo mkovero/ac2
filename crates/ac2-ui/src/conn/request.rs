@@ -30,7 +30,7 @@ pub(super) fn request_name(r: &Request) -> String {
         Request::ExportTrace { name, .. } => format!("export {name}"),
         Request::FindDelay { .. } => "delay find".into(),
         Request::Devices => "list devices".into(),
-        Request::OpenSession { what, .. } | Request::RemoteSession { what, .. } => what.clone(),
+        Request::OpenStream { what, .. } | Request::RemoteStream { what, .. } => what.clone(),
         Request::Preview { .. } => "device meters".into(),
         Request::PreviewStop => "close device meters".into(),
         Request::Meters(_) => "meters".into(),
@@ -246,14 +246,14 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
                 let r = c
-                    .call(Command::SessionDevices)
+                    .call(Command::StreamDevices)
                     .await
-                    .and_then(|r| expect_body!("session.devices", r, ReplyBody::Backends(d) => d))
+                    .and_then(|r| expect_body!("stream.devices", r, ReplyBody::Backends(d) => d))
                     .map_err(|e| e.to_string());
                 o.send(ConnEvent::Devices(r));
             });
         }
-        Request::OpenSession {
+        Request::OpenStream {
             config,
             inputs,
             pairs,
@@ -261,7 +261,7 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
         } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
-                match c.call_warned(Command::SessionOpen { config }).await {
+                match c.call_warned(Command::StreamOpen { config }).await {
                     Ok((_, warnings)) => send_warnings(&o, warnings),
                     Err(e) => {
                         o.send(ConnEvent::Reply {
@@ -272,7 +272,7 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                     }
                 }
                 if !inputs.is_empty()
-                    && let Err(e) = c.call(Command::SessionInputs { inputs, pairs }).await
+                    && let Err(e) = c.call(Command::StreamInputs { inputs, pairs }).await
                 {
                     o.send(ConnEvent::Reply {
                         what: format!("{what}, but the mic names were not set"),
@@ -284,10 +284,10 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                     what,
                     result: Ok(()),
                 });
-                o.send(ConnEvent::SessionOpened);
+                o.send(ConnEvent::StreamOpened);
             });
         }
-        Request::RemoteSession { pair, config, what } => {
+        Request::RemoteStream { pair, config, what } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
                 let paired = pair.as_ref().map(|p| p.name.clone());
@@ -300,7 +300,7 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                     });
                     return;
                 }
-                let result = match c.call_warned(Command::SessionOpen { config }).await {
+                let result = match c.call_warned(Command::StreamOpen { config }).await {
                     Ok((_, warnings)) => {
                         send_warnings(&o, warnings);
                         Ok(())
@@ -829,7 +829,7 @@ pub(super) async fn fetch_trace(c: Client, id: TraceId, grid: GridId, out: Out) 
 }
 
 /// Opens, renews and stops the device preview strictly in the order the reducer asked:
-/// closing the session dialog and opening it again sends a stop and then a preview, and a
+/// closing the stream dialog and opening it again sends a stop and then a preview, and a
 /// stop that overtook its preview would close the preview just asked for, leaving the
 /// meters blank until the next renewal.
 pub(super) async fn preview_task(
@@ -846,14 +846,14 @@ pub(super) async fn preview_task(
                 pairs,
             } => {
                 let result = client
-                    .call(Command::SessionPreview {
+                    .call(Command::StreamPreview {
                         backend,
                         device: device.clone(),
                         inputs,
                         pairs,
                     })
                     .await
-                    .and_then(|r| expect_body!("session.preview", r, ReplyBody::Preview(p) => p))
+                    .and_then(|r| expect_body!("stream.preview", r, ReplyBody::Preview(p) => p))
                     .map_err(|e| e.to_string());
                 out.send(ConnEvent::Preview {
                     backend,
@@ -861,9 +861,9 @@ pub(super) async fn preview_task(
                     result,
                 });
             }
-            // A preview the daemon already closed (session open, expiry) is fine.
+            // A preview the daemon already closed (stream open, expiry) is fine.
             _ => {
-                let _ = client.call(Command::SessionPreviewStop).await;
+                let _ = client.call(Command::StreamPreviewStop).await;
             }
         }
     }

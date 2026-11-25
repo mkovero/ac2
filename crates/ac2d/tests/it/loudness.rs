@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use ac2_audio::fake::{FakeDrive, FakeFault, FakePath};
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
-use ac2_proto::frame::{FrameData, LoudnessSource, SessionLevelsFrame, SourceLoudness};
+use ac2_proto::frame::{FrameData, LoudnessSource, SourceLoudness, StreamLevelsFrame};
 use ac2_proto::model::{GeneratorDesired, GeneratorSettings, InputKind, InputSetup, Pair, Signal};
 use ac2_proto::units::{Dbfs, Hz};
 use ac2_proto::{Command, Subscription};
@@ -60,17 +60,17 @@ struct Rig {
     gap: (u64, u64),
 }
 
-/// A session on every input of `backend`: 0+1 a line pair, 2 an unpaired line input, 3
+/// A stream on every input of `backend`: 0+1 a line pair, 2 an unpaired line input, 3
 /// undeclared (a mic). With `tone`, a −18 dBFS 1 kHz sine on both outputs.
 fn open(name: &str, backend: FakeBackend, sample_rate: u32, tone: bool) -> Rig {
     init_log();
     let h = Daemon::start(steady_config(backend.clone(), inproc(name))).unwrap();
     let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
-    let mut cfg = session(false);
+    let mut cfg = stream(false);
     cfg.input_channels = vec![0, 1, 2, 3];
     cfg.sample_rate_hz = Some(sample_rate);
-    c.ok(Command::SessionOpen { config: cfg });
-    c.ok(Command::SessionInputs {
+    c.ok(Command::StreamOpen { config: cfg });
+    c.ok(Command::StreamInputs {
         inputs: vec![line(0), line(1), line(2)],
         pairs: vec![Pair {
             left: 0,
@@ -119,7 +119,7 @@ impl Rig {
         }
     }
 
-    /// One past the newest session sample: the device's blocks plus a gap it skipped.
+    /// One past the newest stream sample: the device's blocks plus a gap it skipped.
     fn end(&self) -> u64 {
         let (at, lost) = self.gap;
         end_sample(&self.d) + if self.d.blocks() > at { lost } else { 0 }
@@ -127,24 +127,24 @@ impl Rig {
 
     /// The meters as of now: one more block after the frame interval, so the fan-out has
     /// a frame due and publishes what it has metered up to that block.
-    fn now(&mut self) -> SessionLevelsFrame {
+    fn now(&mut self) -> StreamLevelsFrame {
         std::thread::sleep(Duration::from_millis(40));
         self.blocks(1);
         let end = self.end();
         let f = self
             .s
             .frame(T, |f| {
-                matches!(f.data, FrameData::SessionLevels(_)) && f.stamp.audio_sample.0 + 1 >= end
+                matches!(f.data, FrameData::StreamLevels(_)) && f.stamp.audio_sample.0 + 1 >= end
             })
             .unwrap_or_else(|| panic!("no meter frame up to sample {end}"));
-        let FrameData::SessionLevels(l) = f.data else {
+        let FrameData::StreamLevels(l) = f.data else {
             unreachable!()
         };
         l
     }
 }
 
-fn source(f: &SessionLevelsFrame, s: LoudnessSource) -> SourceLoudness {
+fn source(f: &StreamLevelsFrame, s: LoudnessSource) -> SourceLoudness {
     *f.meta
         .loudness
         .iter()

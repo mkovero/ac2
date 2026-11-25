@@ -52,7 +52,7 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
         panic!("no dialog: {:?}", t.st.overlay);
     };
     assert_eq!(f.kind, FormKind::Sweep);
-    // Inputs by name, the mic as the measurement, the speaker output. The session declares
+    // Inputs by name, the mic as the measurement, the speaker output. The stream declares
     // no loopback: the reference is not guessed.
     assert_eq!(f.channel(crate::forms::FieldId::Reference), None);
     assert_eq!(f.channel(crate::forms::FieldId::Measurement), Some(1));
@@ -359,8 +359,8 @@ fn the_sweep_dialog_offers_fine_lf_harmonics() {
         config: c.clone(),
         ..sweep_measurement()
     };
-    let (inputs, outputs) = (t.st.session_input_names(), t.st.session_output_names());
-    let e = crate::forms::Form::edit_sweep(&m, t.st.open_session(), &inputs, &outputs)
+    let (inputs, outputs) = (t.st.stream_input_names(), t.st.stream_output_names());
+    let e = crate::forms::Form::edit_sweep(&m, t.st.open_stream(), &inputs, &outputs)
         .expect("edit dialog");
     assert_eq!(
         e.fields

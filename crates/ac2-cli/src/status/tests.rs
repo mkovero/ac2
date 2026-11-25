@@ -3,12 +3,12 @@ use ac2_proto::model::{
     Anchor, AudioStopped, Autosave, BackendKind, CalEntry, CalKey, CalMethod, ClockBasis, Clocks,
     CrossRigTransfer, CurveChoice, DamagedFile, DeviceClock, DeviceId, DeviceSelector, Drift,
     ElectricalConnection, InputSetup, LoopbackRoute, Mic, MicCurveRef, MinuteCount,
-    NotLockedReason, OpenSession, Pair, PairSide, PeerClock, Recovery, RemoteAudio, RemoteRig,
-    RemoteSide, SampleClock, SensitivitySource, SessionConfig, SplCal, StandingRig,
-    StandingSession, StateFile, StopCause, SystemClock,
+    NotLockedReason, OpenStream, Pair, PairSide, PeerClock, Recovery, RemoteAudio, RemoteRig,
+    RemoteSide, SampleClock, SensitivitySource, StreamConfig, SplCal, StandingRig,
+    StandingStream, StateFile, StopCause, SystemClock,
 };
 use ac2_proto::units::{
-    ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, MvPerPa, Rev, RigId, Seconds, SessionEpoch,
+    ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, MvPerPa, Rev, RigId, Seconds, StreamEpoch,
     Volts,
 };
 
@@ -24,7 +24,7 @@ fn welcome(name: &str) -> Welcome {
         server: "ac2d 0.1.0 (build 0.1.0+202486c60e44)".into(),
         client_id: ClientId("local-006b8b4567".into()),
         daemon_incarnation: DaemonIncarnation(0xaf47_6c4a_fd9f_f09b),
-        session_epoch: SessionEpoch(12),
+        stream_epoch: StreamEpoch(12),
         rev: Rev(3274),
         rig_id: RigId(0x26b1_c286_d80b_073e),
         name: name.into(),
@@ -38,7 +38,7 @@ fn utc(_: WallNs) -> i32 {
 fn page(name: &str, st: &State, verbose: bool) -> String {
     text(&Input {
         welcome: &welcome(name),
-        session: &st.session,
+        stream: &st.stream,
         state: st,
         build: Build::Same,
         now: NOW,
@@ -47,9 +47,9 @@ fn page(name: &str, st: &State, verbose: bool) -> String {
     })
 }
 
-fn open_session(input_channels: Vec<u16>, outputs: u16) -> OpenSession {
-    OpenSession {
-        config: SessionConfig {
+fn open_stream(input_channels: Vec<u16>, outputs: u16) -> OpenStream {
+    OpenStream {
+        config: StreamConfig {
             backend: Some(BackendKind::Jack),
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
@@ -179,9 +179,9 @@ fn clock(relation: PeerRelation, ppm: Option<f64>) -> PeerClock {
 /// A rig with nothing remote: the sample state's odds and ends cleared.
 fn lone(input_channels: Vec<u16>) -> State {
     let mut st = ac2_proto::samples::state();
-    st.session = Session {
-        epoch: SessionEpoch(12),
-        open: Some(open_session(input_channels, 6)),
+    st.stream = Stream {
+        epoch: StreamEpoch(12),
+        open: Some(open_stream(input_channels, 6)),
         stopped: None,
     };
     st.timing.drift = Some(Drift {
@@ -236,7 +236,7 @@ fn pupu() -> State {
         rig_name: pi.into(),
         channel: 0,
     };
-    if let Some(o) = &mut st.session.open {
+    if let Some(o) = &mut st.stream.open {
         o.config.remote_inputs = vec![remote];
     }
     let mut input = ac2_proto::samples::remote_state().inputs[0].clone();
@@ -285,7 +285,7 @@ fn pupu() -> State {
                 rig: PI,
                 name: pi.into(),
                 link: RemoteLink::Up,
-                session: Some(StandingSession {
+                stream: Some(StandingStream {
                     sample_rate_hz: 96_000,
                     channels: vec![0],
                 }),
@@ -305,7 +305,7 @@ fn pupu() -> State {
                 rig: KETUNKOLO,
                 name: "ac2 on ketunkolo".into(),
                 link: RemoteLink::Up,
-                session: Some(StandingSession {
+                stream: Some(StandingStream {
                     sample_rate_hz: 96_000,
                     channels: (0..8).collect(),
                 }),
@@ -435,8 +435,8 @@ const LONE_VERBOSE: &str = include_str!("golden/lone_verbose.txt");
 #[test]
 fn a_daemon_with_no_session_open_says_closed() {
     let mut st = lone(vec![]);
-    st.session.open = None;
-    st.session.stopped = None;
+    st.stream.open = None;
+    st.stream.stopped = None;
     let t = page("ac2 on studio", &st, false);
     assert_eq!(
         t,
@@ -451,7 +451,7 @@ fn a_daemon_with_no_session_open_says_closed() {
 #[test]
 fn stopped_audio_failed_autosave_and_damaged_files_are_trouble() {
     let mut st = lone(vec![0]);
-    st.session.stopped = Some(AudioStopped {
+    st.stream.stopped = Some(AudioStopped {
         since: WallNs(NOW.0 - 12 * S),
         cause: StopCause::HostEnded,
         recovery: Recovery::Waiting {
@@ -495,7 +495,7 @@ fn a_stale_local_daemon_says_how_to_restart_it() {
     let st = lone(vec![0]);
     let t = text(&Input {
         welcome: &welcome("pupu"),
-        session: &st.session,
+        stream: &st.stream,
         state: &st,
         build: Build::Stale {
             daemon: "0.1.0+aaaa".into(),

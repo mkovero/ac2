@@ -46,7 +46,7 @@ struct Rig {
     tok: LeaseToken,
 }
 
-/// An empty daemon on `backend`: session with a loopback, pink noise playing.
+/// An empty daemon on `backend`: stream with a loopback, pink noise playing.
 fn start(name: &str, backend: FakeBackend) -> Rig {
     init_log();
     let mut cfg = config(backend.clone(), inproc(name));
@@ -55,8 +55,8 @@ fn start(name: &str, backend: FakeBackend) -> Rig {
     let h = Daemon::start(cfg).unwrap();
     let (mut c, _) = connect(&h, &[]);
     let timing = Sub::connect(h.context(), h.data_endpoint(), &[b"timing", b"evt"]);
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let tok = c.acquire();
     c.ok(Command::GenSet {
@@ -158,7 +158,7 @@ fn stable_clock_shows_no_drift() {
 }
 
 #[test]
-fn fifty_ppm_is_published_and_a_new_session_forgets_it() {
+fn fifty_ppm_is_published_and_a_new_stream_forgets_it() {
     // The fake's DAC runs 50 ppm slow: the loopback offset grows by 2.4 samples per second.
     let mut r = start("drift50", drift_rig(-50.0, vec![]));
     let mut seen = Vec::new();
@@ -178,10 +178,10 @@ fn fifty_ppm_is_published_and_a_new_session_forgets_it() {
     assert!(cd.warning && (cd.ppm - 50.0).abs() < 1.0, "{c:?}");
     assert!(cd.at.0 > 0, "{cd:?}");
 
-    // The clock relation belongs to the stream: a reopened session starts without it.
-    r.c.ok(Command::SessionClose);
-    r.c.ok(Command::SessionOpen {
-        config: session(true),
+    // The clock relation belongs to the stream: a reopened stream starts without it.
+    r.c.ok(Command::StreamClose);
+    r.c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let c = r.committed(|t| t.drift.is_none());
     assert_eq!(c.drift, None, "{c:?}");

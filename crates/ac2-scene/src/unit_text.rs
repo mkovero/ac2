@@ -488,7 +488,7 @@ impl Celsius {
 pub enum DelayAmount {
     /// Seconds.
     Time(Seconds),
-    /// Samples at the session rate, fractions allowed.
+    /// Samples at the stream rate, fractions allowed.
     Samples(f64),
     /// Metres of sound travel.
     Distance(f64),
@@ -517,7 +517,7 @@ impl UnitText for DelayAmount {
 }
 
 impl DelayAmount {
-    /// The delay in seconds, given the session rate (for samples) and air temperature (for
+    /// The delay in seconds, given the stream rate (for samples) and air temperature (for
     /// distance).
     pub fn seconds(self, rate_hz: Option<u32>, temp: Celsius) -> Result<Seconds, UnitError> {
         match self {

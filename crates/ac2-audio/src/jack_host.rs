@@ -436,7 +436,7 @@ impl Backend for JackBackend {
         )?;
 
         // Ports are named by device channel, not stream position, so `in_19` is input 19
-        // in every session and a spare's name does not move when inputs are added.
+        // in every stream and a spare's name does not move when inputs are added.
         let mut in_ports = Vec::with_capacity(request.input_map.len());
         for &dev in &request.input_map {
             in_ports.push(

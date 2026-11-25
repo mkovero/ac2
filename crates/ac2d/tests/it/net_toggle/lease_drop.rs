@@ -47,8 +47,8 @@ async fn cut_network_app_loses_its_lease(cut: Cut) {
     let port = turn_on(&mut Client::connect(&ctx, h.ctrl_endpoint()), &h);
     let local = mirror(&h, "local-test").await;
     local
-        .call(Command::SessionOpen {
-            config: session(false),
+        .call(Command::StreamOpen {
+            config: stream(false),
         })
         .await
         .unwrap();

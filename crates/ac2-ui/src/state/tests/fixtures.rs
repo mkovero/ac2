@@ -1,12 +1,12 @@
-//! Fixtures for the state tests: the session dialog and its devices, sweeps, the mic
+//! Fixtures for the state tests: the stream dialog and its devices, sweeps, the mic
 //! calibration views and SPL meters with their Leq data. `pub(super)`: every area of
 //! `state::tests` reaches them through `super::*`.
 
 use super::*;
 
-pub(super) fn no_session_state() -> State {
+pub(super) fn no_stream_state() -> State {
     let mut s = empty_state();
-    s.session.open = None;
+    s.stream.open = None;
     s
 }
 
@@ -57,10 +57,10 @@ pub(super) fn backends(fake_names: bool) -> Vec<BackendInfo> {
     ]
 }
 
-/// The session model of Settings (its Audio I/O page).
-pub(super) fn dialog(t: &T) -> &SessionDialog {
+/// The stream model of Settings (its Audio I/O page).
+pub(super) fn dialog(t: &T) -> &StreamDialog {
     match t.st.overlay.settings() {
-        Some(s) => &s.session,
+        Some(s) => &s.stream,
         None => panic!("no Settings: {:?}", t.st.overlay),
     }
 }
@@ -79,14 +79,14 @@ pub(super) fn created(r: &[Request]) -> Option<&MeasConfig> {
     })
 }
 
-pub(super) fn opened(r: &[Request]) -> Option<(&SessionConfig, &[InputSetup])> {
+pub(super) fn opened(r: &[Request]) -> Option<(&StreamConfig, &[InputSetup])> {
     r.iter().find_map(|r| match r {
-        Request::OpenSession { config, inputs, .. } => Some((config, inputs.as_slice())),
+        Request::OpenStream { config, inputs, .. } => Some((config, inputs.as_slice())),
         _ => None,
     })
 }
 
-/// Focuses the session dialog row `row` with ↓ from the top.
+/// Focuses the stream dialog row `row` with ↓ from the top.
 /// Moves to `row` by keys: Ctrl+PageUp / PageDown to the Audio I/O page, then ↓.
 pub(super) fn focus(t: &mut T, row: Row) {
     let page = crate::settings::Page::AudioIo;
@@ -105,9 +105,9 @@ pub(super) fn focus(t: &mut T, row: Row) {
     panic!("row {row:?} not reached");
 }
 
-/// Shift+O on a daemon without a session, the simulated rig listed.
+/// Shift+O on a daemon without a stream, the simulated rig listed.
 pub(super) fn open_dialog(t: &mut T, list: Vec<BackendInfo>) -> Vec<Request> {
-    t.conn(mirror(no_session_state()));
+    t.conn(mirror(no_stream_state()));
     let mut r = t.type_key("Shift+O", "O");
     r.extend(t.conn(ConnEvent::Devices(Ok(list))));
     r
@@ -147,7 +147,7 @@ pub(super) fn sweep_meta(id: u32) -> TraceMeta {
             meas_name: "Sweep 1".into(),
             number: 1,
             run: SweepId(4),
-            epoch: SessionEpoch(2),
+            epoch: StreamEpoch(2),
             sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
             level: Dbfs(-50.0),
             repeats: 1,
@@ -214,10 +214,10 @@ pub(super) fn sweep_data(id: u32) -> (Arc<TraceData>, Arc<GridDef>) {
 }
 
 /// The daemon state with MM1 34804 (0° / 90°) on input 2 choosing `curve`, a sensitivity
-/// calibration of it, the session on the simulated rig.
+/// calibration of it, the stream on the simulated rig.
 pub(super) fn mm1_state(curve: CurveChoice) -> State {
     let mut s = daemon_state();
-    if let Some(o) = &mut s.session.open {
+    if let Some(o) = &mut s.stream.open {
         o.backend = BackendKind::Fake;
     }
     s.mics = vec![mm1()];

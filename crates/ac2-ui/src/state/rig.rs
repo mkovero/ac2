@@ -111,7 +111,7 @@ pub struct RigState {
     pub sweep: SweepUi,
     /// Dynamics runs as this client runs them.
     pub dynamics_run: super::dynamics_run::DynamicsRunUi,
-    /// The output device the stimulus outputs belong to (the open session's).
+    /// The output device the stimulus outputs belong to (the open stream's).
     pub(super) stim_device: Option<String>,
     /// Band and observation X / Shift+X run the finder with.
     pub finder: FinderChoice,

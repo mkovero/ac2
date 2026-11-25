@@ -417,7 +417,7 @@ async fn start_running(
     if running.is_empty() {
         return Ok(());
     }
-    let open = state(c).await?.session.open;
+    let open = state(c).await?.stream.open;
     for (row, id, kind) in running {
         let Some(item) = items.get_mut(row) else {
             continue;

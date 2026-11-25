@@ -6,12 +6,12 @@
 use ac2_cli::Cli;
 use ac2_client::{Endpoints, OnDrop};
 use ac2_proto::Command;
-use ac2_proto::model::{GeneratorDesired, GeneratorSettings, LoopbackRoute, SessionConfig, Signal};
+use ac2_proto::model::{GeneratorDesired, GeneratorSettings, LoopbackRoute, Signal, StreamConfig};
 use ac2_proto::units::Dbfs;
 use clap::Parser;
 use serde_json::Value;
 
-use super::common::{ac2, client, rig, session};
+use super::common::{ac2, client, rig, stream};
 
 async fn run(ep: &Endpoints, json: bool, args: &[&str]) -> (i32, String) {
     ac2(ep, json, args).await.text()
@@ -21,13 +21,13 @@ async fn run(ep: &Endpoints, json: bool, args: &[&str]) -> (i32, String) {
 async fn alignment_by_name() {
     let (_h, ep) = rig();
     let c = client(&ep, "align-rig-test").await;
-    c.call(Command::SessionOpen {
-        config: SessionConfig {
+    c.call(Command::StreamOpen {
+        config: StreamConfig {
             loopback: Some(LoopbackRoute {
                 output: 0,
                 input: 0,
             }),
-            ..session(vec![0, 1, 2, 3])
+            ..stream(vec![0, 1, 2, 3])
         },
     })
     .await

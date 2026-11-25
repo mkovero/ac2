@@ -66,15 +66,15 @@ async fn slow_electrical_calibration_end_to_end() {
     let h = start(&store);
     let c = connect(&h).await;
 
-    // No session: refused like cal.spl.
+    // No stream: refused like cal.spl.
     let e = c
         .call(electrical("MM1 34804", 0.015, None, false))
         .await
         .unwrap_err();
     assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
 
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();

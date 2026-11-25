@@ -31,8 +31,8 @@ async fn delay_find_outcome_and_insert() {
     init_log();
     let h = Daemon::start(config(manual_rig(), local_tcp())).unwrap();
     let c = mirror(&h, "ac2-client-test").await;
-    c.call(Command::SessionOpen {
-        config: session(true),
+    c.call(Command::StreamOpen {
+        config: stream(true),
     })
     .await
     .unwrap();
@@ -93,8 +93,8 @@ async fn traces_and_sessions() {
     cfg.session_dir = dir.path().join("sessions");
     let h = Daemon::start(cfg).unwrap();
     let c = mirror(&h, "ac2-client-test").await;
-    c.call(Command::SessionOpen {
-        config: session(true),
+    c.call(Command::StreamOpen {
+        config: stream(true),
     })
     .await
     .unwrap();
@@ -222,7 +222,7 @@ async fn traces_and_sessions() {
     .unwrap();
     mirror_until(&c, Poll::new(T, 20), "loaded state mirrored", |s| {
         (s.traces == saved.traces
-            && s.session.epoch > saved.session.epoch
+            && s.stream.epoch > saved.stream.epoch
             && s.generator.owner.is_none()
             && !s.generator.armed)
             .then_some(())

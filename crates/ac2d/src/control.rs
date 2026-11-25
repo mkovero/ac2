@@ -1,5 +1,5 @@
 //! The control thread: decodes requests, executes commands one at a time against the state
-//! store (serial commits), runs the session and jobs, owns the stimulus lease and emits
+//! store (serial commits), runs the stream and jobs, owns the stimulus lease and emits
 //! keepalives.
 //!
 //! It is a plain thread fed by one channel. Commands are short (job threads do the DSP),
@@ -25,7 +25,7 @@ use ac2_proto::model::{
     TraceSource,
 };
 use ac2_proto::units::{
-    DaemonIncarnation, LeaseToken, MeasId, RequestId, Rev, Seconds, SessionEpoch, SweepId, WallNs,
+    DaemonIncarnation, LeaseToken, MeasId, RequestId, Rev, Seconds, StreamEpoch, SweepId, WallNs,
 };
 use ac2_proto::{ProtoError, ReplyBody};
 use ac2_zmq::Context;
@@ -39,9 +39,9 @@ use crate::jobs::{self, Captured, JobHandle, Probes, Seqs, block_index};
 use crate::outbox::Outbox;
 use crate::preview::Preview;
 use crate::route::{Peer, Route};
-use crate::session::{Limits, Runtime};
 use crate::state::Store;
 use crate::stimulus::{LeaseGate, LeasedSource, SweepTrain};
+use crate::stream::{Limits, Runtime};
 use crate::sweep::Recording;
 use crate::util::invalid;
 
@@ -72,10 +72,10 @@ mod remote;
 mod request;
 pub(crate) mod rig;
 mod rig_meas;
-mod session_ctl;
 mod sim;
 mod standing;
 mod startup;
+mod stream_ctl;
 mod sweeps;
 mod traces;
 mod transfer;
@@ -110,26 +110,26 @@ pub(crate) enum ControlMsg {
         reason: crate::network::NetReason,
     },
     /// The stream of `epoch` reported a configuration change.
-    DeviceChanged { epoch: SessionEpoch },
+    DeviceChanged { epoch: StreamEpoch },
     /// The stream of `epoch` stopped: no audio since `since`, for `cause`.
     AudioStopped {
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         since: WallNs,
         cause: ac2_proto::model::StopCause,
     },
-    /// Reopen attempt `token` of a stopped session finished.
+    /// Reopen attempt `token` of a stopped stream finished.
     Reopened {
         token: u64,
         result: Box<Result<Runtime, ProtoError>>,
     },
-    /// Availability probe `token` of a stopped session's device answered.
+    /// Availability probe `token` of a stopped stream's device answered.
     Probed {
         token: u64,
         presence: ac2_audio::Presence,
     },
     /// The fan-out of `epoch` measured the capture clock.
     SampleClock {
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         rate: ac2_proto::model::SampleClock,
         stamp_map: Option<ac2_proto::model::StampMap>,
     },
@@ -137,7 +137,7 @@ pub(crate) enum ControlMsg {
     Remote(crate::remote::RemoteMsg),
     /// The timing monitor of `epoch` changed state.
     Timing {
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         status: TimingStatus,
     },
     /// A `delay.find` started under `token` finished.
@@ -148,16 +148,16 @@ pub(crate) enum ControlMsg {
     /// Delay tracking of `meas` agreed on a new arrival, in (fractional) samples.
     DelayTracked {
         meas: MeasId,
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         samples: f64,
     },
     /// A transfer function between rigs stopped, relocked, slipped or raised a cue.
     CrossRig {
         meas: MeasId,
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         event: crate::jobs::cross_rig::CrossEvent,
     },
-    /// The `session.devices` enumeration started under `token` finished.
+    /// The `stream.devices` enumeration started under `token` finished.
     Devices {
         token: u64,
         backends: Vec<ac2_proto::model::BackendInfo>,
@@ -165,13 +165,13 @@ pub(crate) enum ControlMsg {
     /// The preview opening under `token` opened or failed (its result waits in its
     /// channel).
     PreviewOpened { token: u64 },
-    /// The `session.control_panel` call started under `token` answered (or is showing a
+    /// The `stream.control_panel` call started under `token` answered (or is showing a
     /// modal panel).
     PanelShown {
         token: u64,
         result: Result<(), ProtoError>,
     },
-    /// A `session.detect_loopback` started under `token` finished.
+    /// A `stream.detect_loopback` started under `token` finished.
     LoopbackDetected {
         token: u64,
         result: Box<Result<LoopbackDetection, ProtoError>>,
@@ -288,7 +288,7 @@ pub(crate) struct Setup {
     pub(crate) cal_store: Option<std::path::PathBuf>,
     /// Autosave directory and whether to restore it at start.
     pub(crate) autosave: Option<crate::config::AutosaveConfig>,
-    /// Where `rec.start` writes and `session.replay` finds recordings by name; `None`:
+    /// Where `rec.start` writes and `stream.replay` finds recordings by name; `None`:
     /// this daemon does not record.
     pub(crate) recording_dir: Option<std::path::PathBuf>,
     /// The plan library's directory; `None`: plans in memory only.
@@ -335,14 +335,14 @@ struct Pending {
     panels: HashMap<u64, PendingReply>,
     /// The `delay.find` runs under way, by token.
     finds: HashMap<u64, PendingFind>,
-    /// The `session.devices` enumeration under way, by token, and every request waiting
+    /// The `stream.devices` enumeration under way, by token, and every request waiting
     /// for it: a driver that hangs in its listing holds one thread, however often asked.
     devices: Option<(u64, Vec<PendingReply>)>,
     /// The preview opening on its own thread.
     preview: Option<PreviewOpening>,
 }
 
-/// A `session.preview` whose device opens on its own thread: every request for the same
+/// A `stream.preview` whose device opens on its own thread: every request for the same
 /// preview meanwhile is answered with it.
 struct PreviewOpening {
     token: u64,
@@ -407,7 +407,7 @@ struct ActiveSweep {
     spec: SweepSpec,
     /// The recorder; gone once the recording is in.
     job: Option<JobHandle>,
-    epoch: SessionEpoch,
+    epoch: StreamEpoch,
     /// One per measurement input, in the run's order.
     inputs: Vec<SweepInput>,
     /// The walk the run records for, and where.
@@ -436,10 +436,10 @@ pub(crate) struct Control {
     store: Store,
     cal: CalStore,
     dedup: Dedup,
-    session: Option<Runtime>,
+    stream: Option<Runtime>,
     /// The health meter keepalives carry.
     health: crate::health::Health,
-    /// The open session's audio stopped and is being reopened; `session` is `None` meanwhile.
+    /// The open stream's audio stopped and is being reopened; `stream` is `None` meanwhile.
     audio_recovery: Option<recovery::Recovery>,
     /// What fed the spare inputs when the daemon last closed a running stream itself,
     /// connected again to each stream it opens: the operator's routing into spare ports
@@ -451,7 +451,7 @@ pub(crate) struct Control {
     /// How spatial averages reach their running members.
     probes: Arc<Probes>,
     timing_job: Option<JobHandle>,
-    /// Capture-only meters of a device before a session opens on it.
+    /// Capture-only meters of a device before a stream opens on it.
     preview: Option<Preview>,
     /// The replies held until a worker reports back.
     pending: Pending,
@@ -485,10 +485,10 @@ pub(crate) struct Control {
     /// The raw capture being written.
     recording: Option<recording::ActiveRecording>,
     rig: RigState,
-    /// What the programme meters of the session and the preview read: `rig.levels`, the
+    /// What the programme meters of the stream and the preview read: `rig.levels`, the
     /// inputs and line calibrations (VU offers), the pairs, the resets.
     levels: crate::jobs::programme::SharedPolicy,
-    /// The recording a replay session plays (`session.replay`).
+    /// The recording a replay stream plays (`stream.replay`).
     replay_backend: Option<Arc<ac2_audio::ReplayBackend>>,
     /// The replayed recording's remote-channel marks, for every open of `replay_backend`.
     replay_marks: Option<Arc<crate::remote::replay::ReplayMarks>>,
@@ -647,10 +647,10 @@ impl Control {
                     self.server_sync();
                 }
                 Ok(ControlMsg::DeviceChanged { epoch }) => {
-                    if self.session.as_ref().is_some_and(|r| r.epoch == epoch) {
+                    if self.stream.as_ref().is_some_and(|r| r.epoch == epoch) {
                         tracing::warn!("device or configuration change: reopening the audio I/O");
                         let routes = self
-                            .session
+                            .stream
                             .as_ref()
                             .map(|r| r.routes.clone())
                             .unwrap_or_default();
@@ -673,7 +673,7 @@ impl Control {
                 }) => self.sample_clock(epoch, rate, stamp_map),
                 Ok(ControlMsg::Remote(m)) => self.remote_msg(m),
                 Ok(ControlMsg::Timing { epoch, status }) => {
-                    if self.session.as_ref().is_some_and(|r| r.epoch == epoch)
+                    if self.stream.as_ref().is_some_and(|r| r.epoch == epoch)
                         && self.store.state().timing != status
                     {
                         self.commit(Change::Timing(status));
@@ -795,7 +795,7 @@ impl Control {
         self.stop_output();
         self.stop_all_jobs();
         self.audio_recovery = None;
-        if let Some(rt) = self.session.take() {
+        if let Some(rt) = self.stream.take() {
             recovery::close_bounded(rt, recovery::CLOSE_BOUND);
         }
         self.flush_file_jobs();
@@ -855,8 +855,8 @@ impl Control {
         ev.rev
     }
 
-    fn epoch(&self) -> SessionEpoch {
-        self.store.state().session.epoch
+    fn epoch(&self) -> StreamEpoch {
+        self.store.state().stream.epoch
     }
 
     fn meas(&self, id: MeasId) -> Result<&Measurement, ProtoError> {

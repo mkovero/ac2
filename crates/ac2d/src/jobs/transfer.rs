@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
-use ac2_proto::units::SessionEpoch;
+use ac2_proto::units::StreamEpoch;
 
 use super::bins::{Shared, StageStreams, send_final};
 use super::cross_rig::{ClockGate, CrossEvent, CrossRig};
@@ -169,7 +169,7 @@ pub(crate) struct Transfer {
     discontinuity_until: u64,
     weak_until: u64,
     finder: Finder,
-    epoch: SessionEpoch,
+    epoch: StreamEpoch,
     to_control: Sender<ControlMsg>,
     grid: LogGrid,
     /// Mic-curve correction per column.

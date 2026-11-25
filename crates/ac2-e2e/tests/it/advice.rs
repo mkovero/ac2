@@ -32,14 +32,14 @@ fn banners(s: &AppState) -> Vec<String> {
 #[test]
 fn a_quiet_stimulus_brings_raise_advice() -> R {
     let (_daemon, mut d) = connected()?;
-    // A session on the simulated rig's roles and a transfer measurement, from the app.
+    // A stream on the simulated rig's roles and a transfer measurement, from the app.
     d.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
     d.until("the device list", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.session.device_info().is_some())
+            .is_some_and(|x| x.stream.device_info().is_some())
     })?;
     d.key("Enter");
     first_transfer(&mut d)?;

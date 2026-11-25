@@ -119,8 +119,8 @@ fn session_save_load_round_trip() {
     // Disarmed, no owner, new epoch; the old lease is gone.
     assert!(!after.generator.armed && !after.generator.firing);
     assert_eq!(after.generator.owner, None);
-    assert!(after.session.epoch > before.session.epoch);
-    assert!(after.session.open.is_some());
+    assert!(after.stream.epoch > before.stream.epoch);
+    assert!(after.stream.open.is_some());
     let e = c
         .call(Command::GenRefresh { lease_token: r.tok })
         .unwrap_err();

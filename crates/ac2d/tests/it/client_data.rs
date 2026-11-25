@@ -38,8 +38,8 @@ impl TfRig {
         let backend: FakeBackend = manual_rig();
         let h = Daemon::start(steady_config(backend.clone(), local_tcp())).unwrap();
         let c = mirror(&h, "ac2-client-test").await;
-        c.call(Command::SessionOpen {
-            config: session(true),
+        c.call(Command::StreamOpen {
+            config: stream(true),
         })
         .await
         .unwrap();

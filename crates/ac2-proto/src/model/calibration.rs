@@ -389,7 +389,7 @@ pub struct InputSetups {
     pub pairs: Vec<Pair>,
 }
 
-/// What an input of a device preview is declared to be (`session.preview`), so a client
+/// What an input of a device preview is declared to be (`stream.preview`), so a client
 /// can label the preview's rows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

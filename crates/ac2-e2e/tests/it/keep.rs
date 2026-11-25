@@ -10,7 +10,7 @@ use ac2_proto::model::{MeasConfig, MeasKind, OwnedTraces};
 use ac2_proto::units::MeasId;
 use ac2_ui::forms::FormKind;
 use ac2_ui::prefs::{PanePrefs, PanesPrefs, UiPrefs};
-use ac2_ui::sim::{demo_measurement, demo_session};
+use ac2_ui::sim::{demo_measurement, demo_stream};
 use ac2_ui::state::{AppState, Msg, Overlay, PaneId, PaneKind, PaneModes, PaneNode};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -158,12 +158,12 @@ fn desk_edits_tf(desk: &mut Driver, kiosk: &mut Driver) -> R {
 /// `FOH SPL` (first) and `TF 1` with three panes of its own (from the desk app), and the
 /// kiosk showing `FOH SPL`.
 fn rig(ep: &Endpoints, cli: &Cli) -> R<(Driver, Driver)> {
-    cli.call(Command::SessionOpen {
-        config: demo_session(),
+    cli.call(Command::StreamOpen {
+        config: demo_stream(),
     })?;
     let mut desk = Driver::connect(ClientConfig::new(ep.clone(), NAME), "local daemon")?;
     desk.synced()?;
-    desk.until("the session", |s| s.open_session().is_some())?;
+    desk.until("the stream", |s| s.open_stream().is_some())?;
     desk.key("Ctrl+K");
     desk.send(Msg::Text("new spl".into()));
     desk.key("Enter");
@@ -261,7 +261,7 @@ fn saved_measurements(s: &AppState) -> Vec<ac2_proto::model::Measurement> {
     s.measurements().into_iter().cloned().collect()
 }
 
-/// `ac2 session open` with the measurements gone meanwhile, then `ac2 session salvage`
+/// `ac2 stream open` with the measurements gone meanwhile, then `ac2 session salvage`
 /// making them again by name. The kiosk shows `FOH SPL` throughout and never takes
 /// `TF 1`'s panes, not even when the desk edits them after.
 #[test]
@@ -272,8 +272,8 @@ fn a_salvaged_session_keeps_the_kiosk_on_its_meter() -> R {
     let (mut desk, mut kiosk) = rig(&ep, &cli)?;
     let saved = saved_measurements(&kiosk.st);
 
-    cli.call(Command::SessionOpen {
-        config: demo_session(),
+    cli.call(Command::StreamOpen {
+        config: demo_stream(),
     })?;
     for m in &saved {
         cli.call(Command::MeasDelete {
@@ -293,7 +293,7 @@ fn a_salvaged_session_keeps_the_kiosk_on_its_meter() -> R {
     Ok(())
 }
 
-/// A daemon swapped in on the same address with nothing in it, `ac2 session open`, then
+/// A daemon swapped in on the same address with nothing in it, `ac2 stream open`, then
 /// `ac2 session salvage`: the measurements come back under their names and ids. The kiosk
 /// is back on `FOH SPL` and never takes `TF 1`'s panes.
 #[test]
@@ -322,8 +322,8 @@ fn a_swapped_daemon_salvaged_keeps_the_kiosk_on_its_meter() -> R {
             .is_some_and(|m| m.synced() && m.incarnation != incarnation)
     })?;
     let cli = Cli::connect(&ep)?;
-    cli.call(Command::SessionOpen {
-        config: demo_session(),
+    cli.call(Command::StreamOpen {
+        config: demo_stream(),
     })?;
     salvage(&cli, &mut desk, &mut kiosk, &saved)?;
     let ids: Vec<MeasId> = kiosk.st.measurements().iter().map(|m| m.id).collect();

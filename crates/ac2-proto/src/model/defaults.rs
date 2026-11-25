@@ -16,11 +16,11 @@ impl LogGridSpec {
     /// the lowest column of a spectrum's grid too).
     pub const TRANSFER_LOWEST_OCTAVE: i64 = -7;
     /// Octave above the highest column of a transfer function's grid, from 1 kHz
-    /// (2⁸ kHz = 256 kHz): above what a 384 kHz session measures.
+    /// (2⁸ kHz = 256 kHz): above what a 384 kHz stream measures.
     pub const TRANSFER_TOP_OCTAVE: i64 = 8;
 
     /// A transfer function's grid at `ppo` points per octave: 7.8 Hz … 256 kHz, the same at
-    /// every sample rate so that traces of any session share it. A session's columns are
+    /// every sample rate so that traces of any stream share it. A stream's columns are
     /// valid up to the band its rate measures.
     pub fn transfer(ppo: u32) -> Self {
         let p = i64::from(ppo);

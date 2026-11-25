@@ -24,7 +24,7 @@ fn mic_curve_file(name: &str) -> String {
 
 /// The sidebar label of input `channel`.
 fn meter_label(s: &AppState, channel: u16) -> String {
-    s.session_inputs()
+    s.stream_inputs()
         .into_iter()
         .find(|r| r.channel == channel)
         .map(|r| r.label)
@@ -32,7 +32,7 @@ fn meter_label(s: &AppState, channel: u16) -> String {
 }
 
 /// A mic's two curves (beyerdynamic MM1, 0° and 90°) from an empty daemon, with the app
-/// alone: name the mic in the session dialog, open, import both curves in the input setup
+/// alone: name the mic in the stream dialog, open, import both curves in the input setup
 /// view, switch 0° ↔ 90° ↔ off there; the sidebar label and the transfer pane's caption
 /// always say which curve is in use.
 #[test]
@@ -46,7 +46,7 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
     d.until("the device list", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.session.device_info().is_some())
+            .is_some_and(|x| x.stream.device_info().is_some())
     })?;
     // The rig's mic is on input 2, below the device rows: N names it.
     for _ in 0..3 {
@@ -57,7 +57,7 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
     d.send(Msg::Text("MM1 34804".into()));
     d.key("Enter");
     d.key("Enter");
-    d.until("the session", |s| s.open_session().is_some())?;
+    d.until("the stream", |s| s.open_stream().is_some())?;
     first_transfer(&mut d)?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     assert_eq!(m.config.name, "Reference → MM1 34804");
@@ -175,7 +175,7 @@ impl Drop for Tone {
 }
 
 /// Electrical calibration (no acoustic calibrator) from an empty daemon with the app
-/// alone: a session from its dialog, an SPL meter from the palette, the mic named and its
+/// alone: a stream from its dialog, an SPL meter from the palette, the mic named and its
 /// curve file (which states 15.0 mV/Pa) imported in the calibrations view, then E on the mic's input:
 /// the dialog offers the data sheet's sensitivity, the operator types the voltage the meter
 /// shows (15 mV) while a steady 1 kHz tone plays, Enter. The SPL meter then reads dB SPL,

@@ -6,7 +6,7 @@
 //! handed to the output, so it hears the linearity check from its start. The job analyses
 //! as the audio arrives and publishes the rests it finds recovered to the programme source;
 //! once the last rest is in, the output is silenced, the generator disarmed, and the trace
-//! stored. Anything that stops the stimulus or the session aborts the run (with the
+//! stored. Anything that stops the stimulus or the stream aborts the run (with the
 //! programme's fade-out) and discards it.
 //!
 //! The source counts its longest rests itself, so the run's length is bounded whatever the
@@ -31,7 +31,7 @@ use ac2_traces::meta;
 use super::{
     CalState, Change, Control, CoreBandLimit, CoreGenerator, CoreSignal, GenAction,
     GeneratorConfig, GeneratorSettings, LeaseToken, LeasedSource, MeasKind, ProtoError, ReplyBody,
-    Seconds, SessionEpoch, TraceKind, TraceMeta, TraceSource, WallNs, block_index, dbfs_to_rms,
+    Seconds, StreamEpoch, TraceKind, TraceMeta, TraceSource, WallNs, block_index, dbfs_to_rms,
     gen_err, jobs,
 };
 use crate::jobs::JobHandle;
@@ -46,7 +46,7 @@ pub(super) struct ActiveDynamics {
     pub(super) run: DynamicsRun,
     meas_name: String,
     number: u32,
-    epoch: SessionEpoch,
+    epoch: StreamEpoch,
     programme: Arc<Programme>,
     /// The job; gone once the run has ended.
     job: Option<JobHandle>,
@@ -115,8 +115,8 @@ impl Control {
                 Some(d.info.steps.iter().map(|s| s.rest.0).collect::<Vec<_>>())
             }
         };
-        let Some(rt) = self.session.as_ref() else {
-            return Err(refused("no open session to play into"));
+        let Some(rt) = self.stream.as_ref() else {
+            return Err(refused("no open stream to play into"));
         };
         let fs = f64::from(rt.sample_rate);
         let programme = Programme::new(
@@ -144,7 +144,7 @@ impl Control {
         let idx = |input: u16, what: &str| {
             block_index(&rt.input_map, input).ok_or_else(|| {
                 invalid(format!(
-                    "{what} input {} is not captured by the session",
+                    "{what} input {} is not captured by the stream",
                     input + 1
                 ))
             })
@@ -164,7 +164,7 @@ impl Control {
             }
             if *o >= rt.output_channels {
                 return Err(invalid(format!(
-                    "output {o} is not an output of the session"
+                    "output {o} is not an output of the stream"
                 )));
             }
         }
@@ -217,8 +217,8 @@ impl Control {
         if let Some(l) = &mut self.out.lease {
             l.deadline = deadline;
         }
-        let Some(rt) = self.session.as_mut() else {
-            return Err(refused("no open session to play into"));
+        let Some(rt) = self.stream.as_mut() else {
+            return Err(refused("no open stream to play into"));
         };
         let play = (|| {
             rt.set_routes(&req.outputs)?;
@@ -389,7 +389,7 @@ impl Control {
     /// with its holder): a run is one shot, and the operator arms again for the next.
     fn end_dynamics_output(&mut self) {
         let job = self.dynamics.as_mut().and_then(|a| a.job.take());
-        if let (Some(job), Some(rt)) = (job, &self.session) {
+        if let (Some(job), Some(rt)) = (job, &self.stream) {
             rt.fanout.detach(job.fanout_id);
         }
         self.stop_output();
@@ -424,7 +424,7 @@ impl Control {
             return;
         }
         let job = self.dynamics.as_mut().and_then(|a| a.job.take());
-        if let (Some(job), Some(rt)) = (job, &self.session) {
+        if let (Some(job), Some(rt)) = (job, &self.stream) {
             rt.fanout.detach(job.fanout_id);
         }
         self.fail_dynamics(reason, msg.to_owned());

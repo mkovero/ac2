@@ -1,7 +1,7 @@
 //! Raw capture files (`docs/design/raw-capture.md`): the captured samples of chosen inputs,
 //! exactly as the device delivered them, in a 32-bit float WAV / RF64 file ([`wav`]), and
 //! beside it a JSON sidecar ([`Sidecar`]) that says what the samples are: the device and
-//! rate, each channel's input, name and role, where the file sits in the session's sample
+//! rate, each channel's input, name and role, where the file sits in the stream's sample
 //! clock, every discontinuity at its sample, what the operator changed while recording
 //! (measurements, generator, inputs, calibrations) and which software wrote it.
 //!
@@ -17,7 +17,7 @@ use ac2_proto::model::{
     BackendKind, CalEntry, CalKey, ClockRelation, DeviceId, DiscontinuityCause, Generator,
     InputSetup, LoopbackRoute, Measurement, RecordingEnd, RecordingFile, RemoteGaps, RemoteInput,
 };
-use ac2_proto::units::{ClientId, MeasId, SampleIndex, Seconds, SessionEpoch, WallNs};
+use ac2_proto::units::{ClientId, MeasId, SampleIndex, Seconds, StreamEpoch, WallNs};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -28,7 +28,7 @@ pub use wav::{WavError, WavInfo, WavReader, WavWriter};
 /// `format` of every sidecar.
 pub const FORMAT: &str = "ac2-raw-capture";
 /// The one sidecar version this build reads and writes.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 /// Sidecar file name suffix.
 pub const SIDECAR_SUFFIX: &str = ".ac2rec.json";
 /// Audio file name suffix.
@@ -50,7 +50,7 @@ pub struct Software {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedChannel {
-    /// Session channel: a device input (zero-based), or a remote input's
+    /// Stream channel: a device input (zero-based), or a remote input's
     /// (`REMOTE_BASE + slot`, with `remote` saying whose).
     pub input: u16,
     /// The other rig's input it was, for a remote input.
@@ -59,7 +59,7 @@ pub struct RecordedChannel {
     pub name: Option<String>,
     /// The mic set on the input when recording started.
     pub mic: Option<String>,
-    /// What the session and its measurements used it for when recording started.
+    /// What the stream and its measurements used it for when recording started.
     pub roles: Vec<ChannelRole>,
 }
 
@@ -67,7 +67,7 @@ pub struct RecordedChannel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChannelRole {
-    /// The session's reference loopback return.
+    /// The stream's reference loopback return.
     Loopback,
     /// Reference input of a transfer measurement.
     Reference {
@@ -98,7 +98,7 @@ pub struct AudioFile {
     pub channels: Vec<RecordedChannel>,
 }
 
-/// The device and session that were recorded.
+/// The device and stream that were recorded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedDevice {
@@ -112,9 +112,9 @@ pub struct RecordedDevice {
     pub buffer_frames: u32,
     /// Clock relation of capture and playback.
     pub clock: ClockRelation,
-    /// Session epoch.
-    pub session_epoch: SessionEpoch,
-    /// The session's reference loopback.
+    /// Stream epoch.
+    pub stream_epoch: StreamEpoch,
+    /// The stream's reference loopback.
     pub loopback: Option<LoopbackRoute>,
 }
 
@@ -122,8 +122,8 @@ pub struct RecordedDevice {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Mark {
-    /// Session sample index.
-    pub session_sample: SampleIndex,
+    /// Stream sample index.
+    pub stream_sample: SampleIndex,
     /// Daemon wall clock, Unix ns.
     pub wall_ns: WallNs,
     /// The same, as UTC text.
@@ -131,10 +131,10 @@ pub struct Mark {
 }
 
 impl Mark {
-    /// A mark at `session_sample`, `wall_ns`.
-    pub fn new(session_sample: u64, wall_ns: u64) -> Self {
+    /// A mark at `stream_sample`, `wall_ns`.
+    pub fn new(stream_sample: u64, wall_ns: u64) -> Self {
         Self {
-            session_sample: SampleIndex(session_sample),
+            stream_sample: SampleIndex(stream_sample),
             wall_ns: WallNs(wall_ns),
             utc: ac2_proto::spl_log::utc_iso(wall_ns),
         }
@@ -145,7 +145,7 @@ impl Mark {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct End {
-    /// One past the last recorded session sample, and when the recording ended.
+    /// One past the last recorded stream sample, and when the recording ended.
     pub at: Mark,
     /// Frames in the audio file.
     pub frames: u64,
@@ -196,7 +196,7 @@ pub enum TimelineChange {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TimelineEntry {
-    /// Newest captured session sample when the daemon committed the change: the change
+    /// Newest captured stream sample when the daemon committed the change: the change
     /// reaches the analyses with the next block they take, within one hand-off.
     pub at_sample: SampleIndex,
     /// The audio file frame of `at_sample` (where it is not recorded: the next one that is).
@@ -213,9 +213,9 @@ pub struct TimelineEntry {
 pub struct Discontinuity {
     /// Audio file frame of the first sample after it.
     pub frame: u64,
-    /// Its session sample.
-    pub session_sample: SampleIndex,
-    /// Session samples missing before it (0: the device reported trouble but its counter
+    /// Its stream sample.
+    pub stream_sample: SampleIndex,
+    /// Stream samples missing before it (0: the device reported trouble but its counter
     /// went on).
     pub lost_frames: u64,
     /// `lost_frames` is estimated from host timestamps, not counted.
@@ -233,8 +233,8 @@ pub struct RemoteGap {
     pub channel: u16,
     /// Audio file frame of its first sample.
     pub frame: u64,
-    /// Its session sample.
-    pub session_sample: SampleIndex,
+    /// Its stream sample.
+    pub stream_sample: SampleIndex,
     /// Samples in it.
     pub frames: u64,
     /// Its samples arrived after they were needed (the link offset was too short), rather
@@ -251,8 +251,8 @@ pub struct RemoteSlip {
     pub channel: u16,
     /// Audio file frame of the first sample after it.
     pub frame: u64,
-    /// Its session sample.
-    pub session_sample: SampleIndex,
+    /// Its stream sample.
+    pub stream_sample: SampleIndex,
     /// By how much.
     pub samples: i64,
 }
@@ -491,7 +491,7 @@ pub fn recover(
                     path: path.clone(),
                     err,
                 })?;
-                let end_sample = session_sample_of(&s, info.frames);
+                let end_sample = stream_sample_of(&s, info.frames);
                 s.discontinuities.retain(|d| d.frame < info.frames);
                 s.remote_slips.retain(|d| d.frame < info.frames);
                 s.remote_gaps.retain(|g| g.frame < info.frames);
@@ -511,18 +511,18 @@ pub fn recover(
         .collect()
 }
 
-/// Session sample of audio file frame `frame` (one past the last frame for the end).
-pub fn session_sample_of(s: &Sidecar, frame: u64) -> u64 {
+/// Stream sample of audio file frame `frame` (one past the last frame for the end).
+pub fn stream_sample_of(s: &Sidecar, frame: u64) -> u64 {
     let lost: u64 = s
         .discontinuities
         .iter()
         .filter(|d| d.frame <= frame)
         .map(|d| d.lost_frames)
         .sum();
-    s.start.session_sample.0 + frame + lost
+    s.start.stream_sample.0 + frame + lost
 }
 
-/// Audio file frame of session sample `sample`: where it was not recorded (lost in a gap),
+/// Audio file frame of stream sample `sample`: where it was not recorded (lost in a gap),
 /// the first recorded frame after it.
 pub fn frame_of(start: u64, discontinuities: &[Discontinuity], sample: u64) -> u64 {
     if sample < start {
@@ -532,12 +532,12 @@ pub fn frame_of(start: u64, discontinuities: &[Discontinuity], sample: u64) -> u
     let mut sample_base = start;
     let mut next_frame = None;
     for d in discontinuities {
-        if d.session_sample.0 > sample {
+        if d.stream_sample.0 > sample {
             next_frame = Some(d.frame);
             break;
         }
         frame_base = d.frame;
-        sample_base = d.session_sample.0;
+        sample_base = d.stream_sample.0;
     }
     let f = frame_base + (sample - sample_base);
     // A sample lost in the gap before the next discontinuity maps to the frame after it.
@@ -616,7 +616,7 @@ pub fn import_wav(src: &Path, dir: &Path, name: &str, now_ns: u64) -> Result<Sid
             output_device: device,
             buffer_frames: 0,
             clock: ClockRelation::Unknown,
-            session_epoch: SessionEpoch(0),
+            stream_epoch: StreamEpoch(0),
             loopback: None,
         },
         start: Mark::new(0, now_ns),

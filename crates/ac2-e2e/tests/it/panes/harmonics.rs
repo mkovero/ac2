@@ -82,9 +82,9 @@ fn a_sine_chosen_at_the_first_arm_is_fired_on_a_bin_of_the_running_spectrum() ->
     })?;
     let fs =
         d.st.daemon()
-            .and_then(|s| s.session.open.as_ref())
+            .and_then(|s| s.stream.open.as_ref())
             .map(|o| f64::from(o.sample_rate_hz))
-            .ok_or("no session")?;
+            .ok_or("no stream")?;
     let running: Vec<SpecResolution> =
         d.st.measurements()
             .iter()

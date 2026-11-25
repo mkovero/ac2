@@ -206,7 +206,7 @@ fn an_output_is_named_for_every_client_on_enter() {
     let r = t.key("Enter");
     let sent = r.iter().find_map(|r| match r {
         Request::Call {
-            cmd: Command::SessionOutputs { outputs },
+            cmd: Command::StreamOutputs { outputs },
             what,
         } => Some((outputs.clone(), what.clone())),
         _ => None,
@@ -241,7 +241,7 @@ fn an_output_is_named_for_every_client_on_enter() {
     }
     let r = t.key("Enter");
     assert!(r.iter().any(|r| matches!(r,
-        Request::Call { cmd: Command::SessionOutputs { outputs }, .. }
+        Request::Call { cmd: Command::StreamOutputs { outputs }, .. }
             if outputs == &[OutputSetup { channel: 0, label: None }])));
 }
 
@@ -660,15 +660,15 @@ fn the_audio_and_channels_are_one_page() {
 /// ↑/↓ walk the device rows, then the inputs, the outputs, the max level row, and wrap.
 #[test]
 fn up_down_walk_device_channels_then_the_max_level() {
-    use crate::session_dialog::Row;
+    use crate::stream_dialog::Row;
     let mut t = T::new();
     t.conn(mirror(with_ceiling(-30.0, -10.0, false)));
     t.type_key("Shift+O", "O");
     t.conn(ConnEvent::Devices(Ok(backends(true))));
-    let rows = settings(&t).session.rows();
+    let rows = settings(&t).stream.rows();
     let (ni, no) = (
-        settings(&t).session.inputs.len(),
-        settings(&t).session.outputs.len(),
+        settings(&t).stream.inputs.len(),
+        settings(&t).stream.outputs.len(),
     );
     assert!(ni > 0 && no > 0);
     let mut want = vec![Row::Backend, Row::Device, Row::OutputDevice];
@@ -678,16 +678,16 @@ fn up_down_walk_device_channels_then_the_max_level() {
     want.extend([Row::Rate, Row::Buffer]);
     assert_eq!(rows, want);
     // Shift+O lands on the input device.
-    assert_eq!(settings(&t).session.focus, Row::Device);
+    assert_eq!(settings(&t).stream.focus, Row::Device);
     assert!(!settings(&t).on_ceiling);
     use ac2_scene::stimulus::SignalRow;
-    // The one row focused: the max level's, a stimulus signal row, else a session row.
+    // The one row focused: the max level's, a stimulus signal row, else a stream row.
     let at = |t: &T| {
         let s = settings(t);
         (
             s.on_ceiling,
             s.signal.focus,
-            (!s.on_ceiling && s.signal.at().is_none()).then_some(s.session.focus),
+            (!s.on_ceiling && s.signal.at().is_none()).then_some(s.stream.focus),
         )
     };
     t.key("ArrowUp");
@@ -746,7 +746,7 @@ fn up_down_walk_device_channels_then_the_max_level() {
 /// The commands that opened either old page open this one on their row.
 #[test]
 fn commands_open_the_page_on_their_row() {
-    use crate::session_dialog::Row;
+    use crate::stream_dialog::Row;
     let mut t = T::new();
     t.st.apply(Msg::Command(CommandId::InputSetup), &t.keys);
     // The device's rows arrive after the page opens: the focus waits for them.
@@ -756,16 +756,16 @@ fn commands_open_the_page_on_their_row() {
     );
     t.conn(ConnEvent::Devices(Ok(backends(true))));
     assert_eq!(page(&t), Page::AudioIo);
-    assert_eq!(settings(&t).session.focus, Row::Input(0));
+    assert_eq!(settings(&t).stream.focus, Row::Input(0));
     assert_eq!(settings(&t).focus_want, None);
     // Shift+O on the open view moves to the input device.
     t.key("Escape");
     t.type_key("Shift+O", "O");
     assert_eq!(page(&t), Page::AudioIo);
-    assert_eq!(settings(&t).session.focus, Row::Device);
+    assert_eq!(settings(&t).stream.focus, Row::Device);
     t.key("Escape");
     t.st.apply(Msg::Command(CommandId::StimulusOutputs), &t.keys);
-    assert!(matches!(settings(&t).session.focus, Row::Output(_)));
+    assert!(matches!(settings(&t).stream.focus, Row::Output(_)));
 }
 
 /// Shift+Tab goes back on every Settings page that Tab walks: the Recording, Display and

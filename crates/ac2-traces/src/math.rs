@@ -7,7 +7,7 @@
 //! # Transfer functions
 //!
 //! Each operand `k` was measured with its own inserted delay `τₖ` removed
-//! (`hₖ = Hₖ·e^{+j2πfτₖ}`). Operands of one session epoch share one time base (decision 8a):
+//! (`hₖ = Hₖ·e^{+j2πfτₖ}`). Operands of one stream epoch share one time base (decision 8a):
 //! their delays are on one clock, so `Hₖ` itself is known and operands can be combined as
 //! the complex values they are.
 //!
@@ -55,7 +55,7 @@ use std::fmt;
 use ac2_core::average::DelayReference;
 use ac2_proto::GridDef;
 use ac2_proto::model::{AverageMethod, MathOp, PhaseBasis};
-use ac2_proto::units::{Seconds, SessionEpoch};
+use ac2_proto::units::{Seconds, StreamEpoch};
 use num_complex::Complex64;
 
 use crate::columns::{Columns, StoredTrace, resample};
@@ -77,9 +77,9 @@ pub struct Input<'a> {
     pub columns: &'a Columns,
     /// The inserted delay its phase was measured with, seconds.
     pub delay: f64,
-    /// The session epoch whose time base its phase is in; `None` for an independent one
+    /// The stream epoch whose time base its phase is in; `None` for an independent one
     /// (an import, a derived trace).
-    pub time_base: Option<SessionEpoch>,
+    pub time_base: Option<StreamEpoch>,
 }
 
 /// A math result.
@@ -354,7 +354,7 @@ fn power_db(p: f64) -> f64 {
     }
 }
 
-/// Every operand in one session epoch's time base.
+/// Every operand in one stream epoch's time base.
 fn shared(inputs: &[Input<'_>]) -> bool {
     let first = inputs.first().and_then(|i| i.time_base);
     first.is_some() && inputs.iter().all(|i| i.time_base == first)

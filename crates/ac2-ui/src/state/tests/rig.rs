@@ -224,7 +224,7 @@ fn reply_warnings_toast_with_meter_names() {
     assert_eq!(
         t.last_toast(),
         format!(
-            "rig SPL meter(s) {name}, 99 stop metering until a session opens again; their \
+            "rig SPL meter(s) {name}, 99 stop metering until a stream opens again; their \
              OSC cues report fault"
         )
     );

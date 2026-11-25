@@ -28,7 +28,7 @@ pub(crate) async fn run(cli: &Cli, cmd: &DynamicsCmd, out: &mut Out<'_>) -> Resu
     }
 }
 
-/// What the run will play at the session's rate: its highest level and its longest run
+/// What the run will play at the stream's rate: its highest level and its longest run
 /// time, for the confirmation at arm.
 struct Plan {
     carrier: f64,
@@ -38,9 +38,9 @@ struct Plan {
 }
 
 fn plan(st: &State, c: &DynamicsConfig, replay: Option<Vec<f64>>) -> Result<Plan, CliError> {
-    let Some(open) = &st.session.open else {
+    let Some(open) = &st.stream.open else {
         return Err(CliError::Usage(
-            "no audio I/O open; open it with `ac2 session open`".into(),
+            "no audio I/O open; open it with `ac2 stream open`".into(),
         ));
     };
     let p = Programme::new(
@@ -441,7 +441,7 @@ mod tests {
     use ac2_audio::fake::{FakeDrive, FakePath};
     use ac2_audio::{FakeBackend, FakeConfig};
     use ac2_client::{ClientConfig, Endpoints};
-    use ac2_proto::model::{DeviceSelector, MeasConfig, SessionConfig};
+    use ac2_proto::model::{DeviceSelector, MeasConfig, StreamConfig};
     use clap::Parser;
 
     use super::*;
@@ -510,8 +510,8 @@ mod tests {
         };
         let c = Client::connect(ClientConfig::new(ep, "dynamics-test")).await?;
         c.wait_synced(Duration::from_secs(5)).await?;
-        c.call(Command::SessionOpen {
-            config: SessionConfig {
+        c.call(Command::StreamOpen {
+            config: StreamConfig {
                 backend: None,
                 input_device: DeviceSelector::Default,
                 output_device: DeviceSelector::Default,

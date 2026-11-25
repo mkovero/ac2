@@ -4,7 +4,7 @@
 //! last pick of each comes one empty row, to add the next in. One play drives every output
 //! and records every input, each input into its own trace.
 
-use ac2_proto::model::{OpenSession, SweepConfig};
+use ac2_proto::model::{OpenStream, SweepConfig};
 
 use super::{Field, FieldId, Form, FormKind, Value};
 
@@ -168,7 +168,7 @@ impl Form {
     /// loopback's output stays among them while the reference is its input: without it the
     /// reference records nothing. Stimulus outputs the session lacks are left out; with none
     /// left the rows stay as they are.
-    pub fn play_on(mut self, open: Option<&OpenSession>, stimulus: &[u16]) -> Self {
+    pub fn play_on(mut self, open: Option<&OpenStream>, stimulus: &[u16]) -> Self {
         let offered: Vec<u16> = match self.field(FieldId::Output).map(|f| &f.value) {
             Some(Value::Channel { channels, .. }) => channels.clone(),
             _ => return self,
@@ -196,7 +196,7 @@ impl Form {
     /// The outputs the dialog's measurement plays on, or why it cannot play: none picked,
     /// or the reference is the loopback's input and the loopback's output is not one of
     /// them (the division by a silent reference gives nothing).
-    pub(super) fn play_outputs(&self, open: Option<&OpenSession>) -> Result<Vec<u16>, String> {
+    pub(super) fn play_outputs(&self, open: Option<&OpenStream>) -> Result<Vec<u16>, String> {
         let outputs = self.sweep_outputs();
         if outputs.is_empty() {
             return Err("no output to play on".into());

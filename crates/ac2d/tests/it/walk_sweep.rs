@@ -68,10 +68,10 @@ fn slow_a_two_mic_sweep_walk_captures_each_step_with_one_run() {
     c.ok(Command::Hello {
         client: "sweep walk test".into(),
     });
-    c.ok(Command::SessionOpen {
-        config: SessionConfig {
+    c.ok(Command::StreamOpen {
+        config: StreamConfig {
             input_channels: vec![0, 1, 2],
-            ..session(true)
+            ..stream(true)
         },
     });
     let mut d = driver(&backend);

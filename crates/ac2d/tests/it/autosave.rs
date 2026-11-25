@@ -48,10 +48,10 @@ fn autosave_event(sub: &Sub, pred: impl Fn(&Autosave) -> bool) -> Autosave {
     }
 }
 
-/// Session open, a running transfer measurement with a result, a capture into slot 1.
+/// Stream open, a running transfer measurement with a result, a capture into slot 1.
 pub(super) fn capture(h: &Handle, backend: &ac2_audio::FakeBackend, c: &mut Client) -> TraceMeta {
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     c.ok(Command::MeasCreate {
         config: transfer("main"),
@@ -219,7 +219,7 @@ fn traces_survive_a_restart() {
         st.traces[0].edit.owner,
         TraceOwner::Meas { meas: MeasId(1) }
     );
-    assert!(st.session.open.is_none(), "no audio I/O is opened");
+    assert!(st.stream.open.is_none(), "no audio I/O is opened");
     assert!(!st.generator.armed && !st.generator.firing);
     assert_eq!(st.generator.owner, None);
     assert_eq!(
@@ -350,8 +350,8 @@ fn slow_a_log_that_cannot_be_written_is_reported_until_it_is() {
     std::fs::write(&blocker, b"").unwrap();
     let (h, _backend) = start("autosave-log-fail", dir.path(), true);
     let (mut c, sub) = connect(&h, &[b"evt"]);
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     c.ok(Command::MeasCreate {
         config: spl("meter", 1),
@@ -457,8 +457,8 @@ fn slow_spl_log_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let (h, backend) = start("autosave-spl", dir.path(), true);
     let (mut c, sub) = connect(&h, &[b"evt"]);
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     c.ok(Command::MeasCreate {
         config: spl("meter", 1),
@@ -516,8 +516,8 @@ fn slow_spl_log_survives_a_restart() {
     // the restart, and the time the daemon was down is a gap.
     let (h, backend) = start("autosave-spl-3", dir.path(), true);
     let (mut c, sub) = connect(&h, &[b"evt", b"d/1/leq"]);
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
     let mut d = driver(&backend);

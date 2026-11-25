@@ -152,7 +152,7 @@ impl LocalHealth {
         self.xruns = match (xruns, self.xruns) {
             (None, _) => None,
             (Some(n), Some((seen, _))) if n > seen => Some((n, Some(now))),
-            // A new session or daemon counts from zero again: no rise.
+            // A new stream or daemon counts from zero again: no rise.
             (Some(n), Some((_, at))) => Some((n, at)),
             (Some(n), None) => Some((n, None)),
         };

@@ -21,7 +21,7 @@ use crate::jobs::math::Held;
 use crate::route::Peer;
 use crate::util::{invalid, missing, refused, wall_ns};
 
-/// The rate a new digital set assumes without a session: the common processor rate.
+/// The rate a new digital set assumes without a stream: the common processor rate.
 const DEFAULT_RATE: f64 = 48_000.0;
 /// Points per octave of a sweep measurement's EQ curve (a transfer's is its own grid).
 const SWEEP_EQ_PPO: u32 = 48;
@@ -209,8 +209,8 @@ impl Control {
             .unwrap_or_default()
     }
 
-    fn session_rate(&self) -> f64 {
-        self.session
+    fn stream_rate(&self) -> f64 {
+        self.stream
             .as_ref()
             .map_or(DEFAULT_RATE, |rt| f64::from(rt.sample_rate))
     }
@@ -271,7 +271,7 @@ impl Control {
                 let body = EqBody {
                     name: name.unwrap_or_else(|| Self::free_eq_name(&m)),
                     realisation: realisation.unwrap_or(EqRealisation::Digital {
-                        rate: Hz(self.session_rate()),
+                        rate: Hz(self.stream_rate()),
                     }),
                     peak_q: peak_q.unwrap_or(PeakQ::HalfGain),
                     enabled: true,

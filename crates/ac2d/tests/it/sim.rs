@@ -1,7 +1,7 @@
 //! Room simulation through the command path: a run on a plan of the library reports its
 //! progress and its result as `sim` events, its T20 (ac2-core's evaluation of the simulated
 //! impulse response) agrees with Eyring where the field is diffuse; refusals carry their
-//! typed reason; `sim.cancel`, a plan change and a session close stop a run.
+//! typed reason; `sim.cancel`, a plan change and a stream close stop a run.
 #![allow(clippy::unwrap_used)]
 
 use crate::common;
@@ -259,7 +259,7 @@ fn long_run(r: &mut Rig) -> SimState {
 }
 
 #[test]
-fn cancel_a_plan_change_and_a_session_close_stop_a_run() {
+fn cancel_a_plan_change_and_a_stream_close_stop_a_run() {
     let mut r = rig("sim-cancel");
     let s = long_run(&mut r);
     assert_eq!(
@@ -291,16 +291,16 @@ fn cancel_a_plan_change_and_a_session_close_stop_a_run() {
         }
     );
 
-    r.c.ok(Command::SessionOpen {
-        config: session(true),
+    r.c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let s = long_run(&mut r);
-    r.c.ok(Command::SessionClose);
+    r.c.ok(Command::StreamClose);
     let end = wait(&r.sub, s.id, |s| !s.active());
     assert_eq!(
         end.status,
         SimStatus::Cancelled {
-            why: SimCancel::SessionClosed
+            why: SimCancel::StreamClosed
         }
     );
     // A new run starts at once.

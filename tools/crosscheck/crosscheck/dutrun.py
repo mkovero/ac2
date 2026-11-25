@@ -226,7 +226,7 @@ def finish(ctx, pname: str, proc: DutProcess) -> dict:
 
 class Patch:
     """ac2's meas and ref inputs and its stimulus outputs onto the DUT for the ac2 stages,
-    and back afterwards. ac2 connects its inputs only at session open, so what was on them
+    and back afterwards. ac2 connects its inputs only at stream open, so what was on them
     is recorded here and put back exactly; its outputs keep their hardware connections (ac2d
     makes those itself whenever its generator routes change)."""
 

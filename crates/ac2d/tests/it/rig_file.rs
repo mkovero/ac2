@@ -63,7 +63,7 @@ fn night_meter() -> MeasConfig {
 struct Seeded {
     meter: MeasConfig,
     target: ArtnetTarget,
-    monitor: SessionConfig,
+    monitor: StreamConfig,
     /// Kept open: the Art-Net frames the daemon sends land here.
     _node: UdpSocket,
 }
@@ -76,13 +76,13 @@ fn seeded() -> Seeded {
             addr: node.local_addr().unwrap(),
             universe: PortAddress::new(0).unwrap(),
         },
-        monitor: session(false),
+        monitor: stream(false),
         _node: node,
     }
 }
 
 /// The format version this build reads.
-const VERSION: u32 = 11;
+const VERSION: u32 = 12;
 
 /// A rig settings file of the current version holding the seeded settings and `meters`.
 fn file_with_meters(s: &Seeded, meters: Value) -> Value {
@@ -93,7 +93,7 @@ fn file_with_meters(s: &Seeded, meters: Value) -> Value {
         "outputs": [{ "channel": 0, "label": "Main L" }, { "channel": 3, "label": "Sub" }],
         "meters": meters,
         "monitor_at_start": true,
-        "monitor_session": s.monitor,
+        "monitor_stream": s.monitor,
         "osc_target": null,
         "artnet_target": s.target,
         "artnet_fade": 2.5,

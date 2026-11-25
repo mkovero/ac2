@@ -141,7 +141,7 @@ pub enum RigCmd {
     /// OSC and Art-Net targets and counters, the universe's lit channels, the monitor at
     /// start, and every rig SPL meter with the state of each of its cues.
     Status,
-    /// With it on, a restarted daemon reopens the last session's device capture-only and
+    /// With it on, a restarted daemon reopens the last stream's device capture-only and
     /// the rig SPL meters meter with no client connected.
     MonitorAtStart {
         /// `on` or `off`.

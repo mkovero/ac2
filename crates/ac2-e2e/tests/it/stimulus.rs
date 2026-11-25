@@ -50,9 +50,9 @@ fn banner_texts(s: &AppState) -> Vec<String> {
         .collect()
 }
 
-/// From an empty daemon on the simulated rig: a session opened from the app; the device
+/// From an empty daemon on the simulated rig: a stream opened from the app; the device
 /// vanishes and AUDIO STOPPED comes up with the attempts to reopen it, and once the device
-/// is back the banner goes and the session is open again — nobody touched the app.
+/// is back the banner goes and the stream is open again — nobody touched the app.
 #[test]
 fn audio_stopped_comes_and_goes_by_itself() -> R {
     let rig = ac2d::fake_rig()?;
@@ -76,17 +76,17 @@ fn audio_stopped_comes_and_goes_by_itself() -> R {
     d.until("the device list", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.session.device_info().is_some())
+            .is_some_and(|x| x.stream.device_info().is_some())
     })?;
     d.key("Enter");
-    d.until("the session", |s| s.open_session().is_some())?;
+    d.until("the stream", |s| s.open_stream().is_some())?;
     // A transfer measurement from the chooser, so a curve is up when the audio stops.
     first_transfer(&mut d)?;
     let meas = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
     d.until("a transfer frame", |s| {
         ac2_ui::scenes::frame(s, meas, Stream::Tf).is_some()
     })?;
-    let epoch = d.st.daemon().ok_or("state")?.session.epoch;
+    let epoch = d.st.daemon().ok_or("state")?.stream.epoch;
     let calm = banner_texts(&d.st);
     assert!(
         !calm.iter().any(|t| t.starts_with("AUDIO STOPPED")),
@@ -110,7 +110,7 @@ fn audio_stopped_comes_and_goes_by_itself() -> R {
         bar.starts_with("audio stopped · reopening (attempt "),
         "{bar:?}"
     );
-    assert!(d.st.open_session().is_some(), "the session stays open");
+    assert!(d.st.open_stream().is_some(), "the stream stays open");
     // Under the banner the curve says the audio stopped, not a STALE age of its own.
     d.until("the legend says the audio stopped", |s| {
         legend_texts(s)
@@ -121,14 +121,14 @@ fn audio_stopped_comes_and_goes_by_itself() -> R {
     assert!(!legend.iter().any(|t| t.contains("STALE")), "{legend:?}");
 
     rig.restore();
-    d.until("the banner gone and the session back", |s| {
+    d.until("the banner gone and the stream back", |s| {
         s.daemon()
-            .is_some_and(|st| st.session.stopped.is_none() && st.session.epoch.0 > epoch.0)
+            .is_some_and(|st| st.stream.stopped.is_none() && st.stream.epoch.0 > epoch.0)
             && !banner_texts(s)
                 .iter()
                 .any(|t| t.starts_with("AUDIO STOPPED"))
     })?;
-    assert!(d.st.open_session().is_some());
+    assert!(d.st.open_stream().is_some());
     drop(d);
     handle.shutdown();
     Ok(())
@@ -287,8 +287,8 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
 /// is refused while armed and needs the typed word; a second client sees the new level.
 #[test]
 fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
-    use ac2_ui::session_dialog::Row;
     use ac2_ui::settings::Page;
+    use ac2_ui::stream_dialog::Row;
     let (daemon, mut d) = connected()?;
     let mut other = Driver::connect(daemon.client_config("second client"), &daemon.describe())?;
     d.synced()?;
@@ -298,9 +298,9 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
     d.until("the Audio I/O page with the device", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.page == Page::AudioIo && x.session.device_info().is_some())
+            .is_some_and(|x| x.page == Page::AudioIo && x.stream.device_info().is_some())
     })?;
-    let focus = |s: &AppState| s.overlay.settings().map(|x| (x.page, x.session.focus));
+    let focus = |s: &AppState| s.overlay.settings().map(|x| (x.page, x.stream.focus));
     assert_eq!(focus(&d.st), Some((Page::AudioIo, Row::Device)));
     // Output device, then the first input.
     for _ in 0..2 {
@@ -328,7 +328,7 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
     d.key("ArrowDown");
     d.key("S");
     d.key("Enter");
-    d.until("the session", |s| s.open_session().is_some())?;
+    d.until("the stream", |s| s.open_stream().is_some())?;
     d.until(
         "the New measurement chooser",
         |s| matches!(&s.overlay, Overlay::Choose(c) if c.purpose == ChoicePurpose::NewMeasurement),
@@ -425,7 +425,7 @@ fn settings_pages() -> R {
     d.until("Audio I/O", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.page == Page::AudioIo && x.session.device_info().is_some())
+            .is_some_and(|x| x.page == Page::AudioIo && x.stream.device_info().is_some())
     })?;
     for (key, page) in [
         ("Alt+4", Page::Recording),

@@ -645,7 +645,7 @@ pub enum IrMissing {
     /// The measurement was stopped before its first IR frame arrived (its last IR stays
     /// drawn, tagged stopped).
     Stopped,
-    /// The session's audio stopped.
+    /// The stream's audio stopped.
     AudioStopped,
     /// Its transfer stream says the reference carries nothing, with this app's stimulus
     /// doing this.

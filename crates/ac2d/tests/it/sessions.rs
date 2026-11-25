@@ -650,7 +650,7 @@ fn a_session_with_values_out_of_range_refuses_to_load() {
         session: named("epoch-last"),
         discard: true,
     });
-    assert_eq!(c.state().session.epoch.0, u32::MAX / 2);
+    assert_eq!(c.state().stream.epoch.0, u32::MAX / 2);
     h.shutdown();
 }
 

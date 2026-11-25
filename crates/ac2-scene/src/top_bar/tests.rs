@@ -2,8 +2,8 @@ use super::*;
 use crate::health::{HealthInputs, UiFrames, health_line};
 use ac2_proto::frame::{AudioHealth, DaemonHealth};
 
-fn session_line(changed: bool) -> SessionLine {
-    SessionLine {
+fn stream_line(changed: bool) -> StreamLine {
+    StreamLine {
         full: "Fireface USB · 96 kHz · 256 frames".into(),
         short: "96 kHz · 256 frames".into(),
         change: changed.then(|| "driver changed from 48 kHz".to_owned()),
@@ -20,8 +20,8 @@ fn health(host: &str) -> HealthLine {
         audio: Some(AudioHealth {
             load: Some(0.0),
             peak: None,
-            session_load: None,
-            session_peak: None,
+            stream_load: None,
+            stream_peak: None,
             xruns: 0,
         }),
     };
@@ -49,8 +49,8 @@ const SAVED: BarSession<'static> = BarSession {
     detail: "Not saved yet.",
 };
 
-/// pupu's daemon on host `ac2pi-0ab1c6`, link fine, a session open and nothing playing.
-fn remote<'a>(line: &'a SessionLine) -> BarInputs<'a> {
+/// pupu's daemon on host `ac2pi-0ab1c6`, link fine, a stream open and nothing playing.
+fn remote<'a>(line: &'a StreamLine) -> BarInputs<'a> {
     BarInputs {
         rig: "pupu",
         place: Place::Remote {
@@ -94,7 +94,7 @@ fn a_host_reads_by_its_mdns_name_without_the_suffix() {
 /// The line of a remote rig in good health: where the daemon runs, the audio settings, the meter, then the session after a rule. The link's dot is on the rig.
 #[test]
 fn a_remote_rig_in_good_health() {
-    let l = session_line(false);
+    let l = stream_line(false);
     let b = bar(&remote(&l));
     assert_eq!(b.rig, "pupu");
     assert_eq!(b.tone, LinkTone::Ok);
@@ -122,7 +122,7 @@ fn a_remote_rig_in_good_health() {
 /// A host named as the rig is not said twice.
 #[test]
 fn a_host_called_as_its_rig_is_only_remote() {
-    let l = session_line(false);
+    let l = stream_line(false);
     let mut i = remote(&l);
     i.place = Place::Remote { host: "Pupu" };
     i.health = None;
@@ -135,7 +135,7 @@ fn a_host_called_as_its_rig_is_only_remote() {
 /// The daemon the app started beside itself is `local`, with one CPU figure.
 #[test]
 fn a_local_daemon() {
-    let l = session_line(false);
+    let l = stream_line(false);
     let mut i = remote(&l);
     i.rig = "ketunkolo";
     i.place = Place::Local;
@@ -157,7 +157,7 @@ fn a_local_daemon() {
 /// The stimulus is never on the scrolling line: it is fixed at the bar's right end.
 #[test]
 fn the_stimulus_is_not_on_the_line() {
-    let l = session_line(false);
+    let l = stream_line(false);
     let b = bar(&remote(&l));
     assert!(!b.text().contains("STIM"), "{}", b.text());
 }
@@ -165,7 +165,7 @@ fn the_stimulus_is_not_on_the_line() {
 /// Link trouble takes the daemon's segment over, in its tone; the session stays.
 #[test]
 fn link_trouble_takes_the_segment_over() {
-    let l = session_line(false);
+    let l = stream_line(false);
     let mut i = remote(&l);
     let mut says = |link| {
         i.link = link;
@@ -255,7 +255,7 @@ fn link_trouble_takes_the_segment_over() {
 /// keep their colour.
 #[test]
 fn the_audio_part_says_what_is_wrong_in_its_tone() {
-    let l = session_line(false);
+    let l = stream_line(false);
     let mut i = remote(&l);
     i.session = None;
     i.health = None;
@@ -280,7 +280,7 @@ fn the_audio_part_says_what_is_wrong_in_its_tone() {
     );
     assert_eq!(b.line[1].tone, Tone::Fault);
 
-    let changed = session_line(true);
+    let changed = stream_line(true);
     i.audio = Some(BarAudio::Open {
         device: "Fireface USB",
         line: &changed,
@@ -300,7 +300,7 @@ fn the_audio_part_says_what_is_wrong_in_its_tone() {
 /// A rig reached at a typed address reads by that address until an advert is seen for it.
 #[test]
 fn a_typed_address_until_an_advert_is_seen() {
-    let l = session_line(false);
+    let l = stream_line(false);
     let mut i = remote(&l);
     i.health = None;
     i.session = None;
@@ -315,7 +315,7 @@ fn a_typed_address_until_an_advert_is_seen() {
 /// What the line says after the session: each note in its tone.
 #[test]
 fn notes_follow_the_session() {
-    let l = session_line(false);
+    let l = stream_line(false);
     let mut i = remote(&l);
     i.health = None;
     i.notes = vec![

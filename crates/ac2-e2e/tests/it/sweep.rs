@@ -13,7 +13,7 @@ use ac2_ui::state::{AppState, ChoicePurpose, Msg, Overlay, StimPhase};
 use std::time::{Duration, Instant};
 
 /// From an empty daemon to a stored sweep using only the app, on the simulated rig whose
-/// "speaker" distorts (H2 −40 dB, H3 −50 dB at −20 dBFS): the session from the dialog,
+/// "speaker" distorts (H2 −40 dB, H3 −50 dB at −20 dBFS): the stream from the dialog,
 /// Shift+S, a typed level, Enter arms, Enter plays, the result opens the distortion pane
 /// with the rig's harmonics, and the stimulus is off again: nothing re-arms after a sweep.
 #[test]
@@ -158,15 +158,15 @@ fn empty_simulated_rig_sweeps_from_the_app() -> R {
     Ok(())
 }
 
-/// Room parameters from the app: from an empty daemon on the simulated rig, the session
+/// Room parameters from the app: from an empty daemon on the simulated rig, the stream
 /// dialog takes the rig's hall mic (in 3) as a second mic, a sweep plays to it with 2 s of
 /// silence after it, and the sweep's impulse response (Shift+I) carries the octave table
 /// with the hall's reverberation time (0.8 s), every string from `ac2_scene::room`.
 #[test]
 fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
     use ac2_ui::forms::FieldId;
-    use ac2_ui::session_dialog::Row;
     use ac2_ui::state::PaneKind;
+    use ac2_ui::stream_dialog::Row;
     let (_daemon, mut d) = connected()?;
     d.synced()?;
     d.key("Shift+O");
@@ -174,16 +174,14 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
     d.until("the meters of the device", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.session.device_info().is_some())
+            .is_some_and(|x| x.stream.device_info().is_some())
             && s.input_meters().len() == 4
     })?;
-    d.send(Msg::Session(ac2_ui::state::SessionMsg::Focus(Row::Input(
-        2,
-    ))));
+    d.send(Msg::Stream(ac2_ui::state::StreamMsg::Focus(Row::Input(2))));
     d.key("M");
     d.key("Enter");
-    d.until("the session", |s| s.open_session().is_some())?;
-    let open = d.st.open_session().cloned().ok_or("session")?;
+    d.until("the stream", |s| s.open_stream().is_some())?;
+    let open = d.st.open_stream().cloned().ok_or("stream")?;
     assert_eq!(open.config.input_channels, vec![0, 1, 2]);
     d.until(
         "the New measurement chooser",
@@ -299,7 +297,7 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
     Ok(())
 }
 
-/// From an empty daemon, using only the app: the session's inputs metered by name and role
+/// From an empty daemon, using only the app: the stream's inputs metered by name and role
 /// in the sidebar, then a set of two sweeps followed on the progress strip, sweep 1 of 2
 /// then 2 of 2, stopped from it: the output stops, the generator is disarmed and the run
 /// is discarded.
@@ -312,12 +310,12 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
 
     // Every captured input, named with its role, metering the rig's signal.
     d.until("the input meters with names", |s| {
-        let rows = s.session_inputs();
+        let rows = s.stream_inputs();
         rows.len() == 2
             && s.rig.devices.is_some()
             && rows.iter().all(|r| r.reading.state != MeterState::NoData)
     })?;
-    let rows = d.st.session_inputs();
+    let rows = d.st.stream_inputs();
     assert!(
         rows[0].label.contains("reference") && rows[0].label.contains("(in 1)"),
         "{}",
@@ -374,7 +372,7 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
         s.rig
             .data
             .as_ref()
-            .and_then(|x| x.latest.get(&Topic::SessionLevels))
+            .and_then(|x| x.latest.get(&Topic::StreamLevels))
             .map_or(0, |f| f.frame.stamp.seq)
     };
     let before = seq(&d.st);

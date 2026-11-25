@@ -26,7 +26,7 @@ pub enum CalCmd {
     /// around nominal level), measure its RMS voltage at the input with a true-RMS meter and
     /// give the volts; the daemon measures the tone's level itself, as `cal electrical`
     /// does (refused while the tone is missing, clipping or not steady yet), and the volts
-    /// at full scale and dBu follow. The input must be declared `line` (`ac2 session inputs
+    /// at full scale and dBu follow. The input must be declared `line` (`ac2 stream inputs
     /// --kind 3=line`): a mic reads dB SPL, a digital feed has no voltage.
     Line(CalLine),
     /// The mic library: import, rename and delete a mic's curves.
@@ -96,13 +96,13 @@ pub struct CalRm {
     #[arg(long)]
     pub input: Channel,
     /// Mic name of the sensitivity calibration (default: the input's mic name in the
-    /// session's input setup).
+    /// stream's input setup).
     #[arg(long, conflicts_with = "line")]
     pub mic: Option<String>,
     /// The input's line calibration (dBu of 0 dBFS) instead of a sensitivity calibration.
     #[arg(long)]
     pub line: bool,
-    /// Capture device of the calibration (default: the open session's; without a session,
+    /// Capture device of the calibration (default: the open stream's; without a stream,
     /// the one device holding a calibration for this input).
     #[arg(long, value_name = "ID")]
     pub device: Option<String>,
@@ -160,7 +160,7 @@ pub struct CalElectrical {
     #[arg(long, value_name = "DB")]
     pub uncertainty: Option<Gain>,
     /// Mic name the calibration is bound to (default: the input's mic name in the
-    /// session's input setup); it also becomes the input's mic name.
+    /// stream's input setup); it also becomes the input's mic name.
     #[arg(long)]
     pub mic: Option<String>,
     /// Replace an acoustic calibration of this input and mic (a calibrator reading is the
@@ -182,7 +182,7 @@ pub struct CalSpl {
     #[arg(long, default_value = "1khz")]
     pub freq: Freq,
     /// Mic name the calibration is bound to (default: the input's mic name in the
-    /// session's input setup); it also becomes the input's mic name.
+    /// stream's input setup); it also becomes the input's mic name.
     #[arg(long)]
     pub mic: Option<String>,
 }

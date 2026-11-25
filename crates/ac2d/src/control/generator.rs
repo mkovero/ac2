@@ -83,10 +83,10 @@ impl Control {
     pub(super) fn stop_output(&mut self) {
         self.out.gate.close();
         let sounding = self
-            .session
+            .stream
             .as_ref()
             .is_some_and(|rt| rt.gen_handle.state() != OutputState::Silent);
-        if let Some(rt) = &self.session {
+        if let Some(rt) = &self.stream {
             rt.gen_handle.stop();
         }
         if sounding {
@@ -288,15 +288,15 @@ impl Control {
             return Err(invalid("no output channels"));
         }
         let signal = conv::signal(st.signal).ok_or_else(|| invalid("invalid signal"))?;
-        if let Some(rt) = &self.session
+        if let Some(rt) = &self.stream
             && let Some(o) = st.outputs.iter().find(|o| **o >= rt.output_channels)
         {
             return Err(invalid(format!(
-                "output {o} is not an output of the session"
+                "output {o} is not an output of the stream"
             )));
         }
-        if desired.firing && self.session.is_none() {
-            return Err(refused("no open session to emit on"));
+        if desired.firing && self.stream.is_none() {
+            return Err(refused("no open stream to emit on"));
         }
         if desired.firing && self.pending.detecting.is_some() {
             return Err(refused(
@@ -324,11 +324,11 @@ impl Control {
         }
         let prev = self.store.state().generator.clone();
 
-        // The stream carries every session output: arming routes the generator (and
-        // connects the chosen outputs) without reopening it, so the session, its jobs and
+        // The stream carries every stream output: arming routes the generator (and
+        // connects the chosen outputs) without reopening it, so the stream, its jobs and
         // every port connection stay as they are.
         if desired.armed
-            && let Some(rt) = self.session.as_mut()
+            && let Some(rt) = self.stream.as_mut()
         {
             rt.set_routes(&st.outputs)?;
         }
@@ -338,7 +338,7 @@ impl Control {
                 signal: st.signal,
                 band: st.band,
             };
-            let rt = self.session.as_mut().ok_or_else(|| refused("no session"))?;
+            let rt = self.stream.as_mut().ok_or_else(|| refused("no stream"))?;
             if self.out.source != Some(key) || self.out.level.is_none() {
                 let g = CoreGenerator::new(&GeneratorConfig {
                     signal,

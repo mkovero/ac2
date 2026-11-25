@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use ac2_client::{Latest, TopicFrame};
-use ac2_proto::frame::{ClipFlags, SessionLevelsFrame};
+use ac2_proto::frame::{ClipFlags, StreamLevelsFrame};
 use ac2_proto::topic::Stream;
 use ac2_proto::units::MeasId;
 use ac2_proto::{Frame, FrameData};
@@ -16,8 +16,8 @@ fn frame(topic: Topic, seq: u64, peak: f32, stale: bool) -> TopicFrame {
         topic,
         frame: Arc::new(Frame {
             stamp,
-            data: FrameData::SessionLevels(SessionLevelsFrame {
-                meta: ac2_proto::frame::SessionLevelsMeta {
+            data: FrameData::StreamLevels(StreamLevelsFrame {
+                meta: ac2_proto::frame::StreamLevelsMeta {
                     channels: vec![0],
                     ballistic: Default::default(),
                     pair_levels: vec![],
@@ -71,12 +71,12 @@ fn new_frames_touch_the_panes_that_draw_them() {
     let old = snap(&[
         frame(tf, 1, -10.0, false),
         frame(spl, 1, -10.0, false),
-        frame(Topic::SessionLevels, 1, -10.0, false),
+        frame(Topic::StreamLevels, 1, -10.0, false),
     ]);
     let same = snap(&[
         frame(tf, 2, -10.0, false),
         frame(spl, 2, -10.0, false),
-        frame(Topic::SessionLevels, 2, -11.0, false),
+        frame(Topic::StreamLevels, 2, -11.0, false),
     ]);
     assert_eq!(
         data_touches(Some(&old), Some(&same)),
@@ -85,7 +85,7 @@ fn new_frames_touch_the_panes_that_draw_them() {
     let tf_new = snap(&[
         frame(tf, 2, -12.0, false),
         frame(spl, 1, -10.0, false),
-        frame(Topic::SessionLevels, 1, -10.0, false),
+        frame(Topic::StreamLevels, 1, -10.0, false),
     ]);
     assert_eq!(
         data_touches(Some(&old), Some(&tf_new)),
@@ -94,7 +94,7 @@ fn new_frames_touch_the_panes_that_draw_them() {
     let spl_stale = snap(&[
         frame(tf, 1, -10.0, false),
         frame(spl, 1, -10.0, true),
-        frame(Topic::SessionLevels, 1, -10.0, false),
+        frame(Topic::StreamLevels, 1, -10.0, false),
     ]);
     assert_eq!(
         data_touches(Some(&old), Some(&spl_stale)),

@@ -36,7 +36,7 @@ pub(crate) async fn run(cli: &Cli, cmd: &DaemonCmd, out: &mut Out<'_>) -> Result
 
 fn status_json(
     c: &Client,
-    session: &ac2_proto::model::Session,
+    stream: &ac2_proto::model::Stream,
     st: &ac2_proto::model::State,
     local: bool,
 ) -> serde_json::Value {
@@ -54,9 +54,9 @@ fn status_json(
         "stale": if local { matches.map(|m| !m) } else { None },
         "client_id": w.client_id,
         "daemon_incarnation": format!("{:016x}", w.daemon_incarnation.0),
-        "session_epoch": w.session_epoch,
+        "stream_epoch": w.stream_epoch,
         "rev": w.rev,
-        "session": session,
+        "stream": stream,
         "timing": st.timing,
         "clocks": st.clocks,
         "remote": st.remote,
@@ -67,7 +67,7 @@ fn status_json(
 
 fn status_text(
     c: &Client,
-    session: &ac2_proto::model::Session,
+    stream: &ac2_proto::model::Stream,
     st: &ac2_proto::model::State,
     local: bool,
     verbose: bool,
@@ -87,7 +87,7 @@ fn status_text(
     };
     crate::status::text(&crate::status::Input {
         welcome: &w,
-        session,
+        stream,
         state: st,
         build,
         now: crate::watch::now_wall(),
@@ -98,12 +98,12 @@ fn status_text(
 
 pub(crate) async fn status(cli: &Cli, verbose: bool, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
-    let r = c.call(Command::SessionStatus).await?;
-    let session = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
+    let r = c.call(Command::StreamStatus).await?;
+    let stream = expect_body!("stream.status", r, ReplyBody::Stream(s) => s)?;
     let st = super::state(&c).await?;
     let local = is_local(cli);
-    out.emit(&status_json(&c, &session, &st, local), || {
-        status_text(&c, &session, &st, local, verbose)
+    out.emit(&status_json(&c, &stream, &st, local), || {
+        status_text(&c, &stream, &st, local, verbose)
     })?;
     Ok(())
 }
@@ -165,16 +165,16 @@ pub fn find_ac2d() -> Option<PathBuf> {
 async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
     local_only(cli, "start")?;
     if let Some(c) = probe(cli).await {
-        let r = c.call(Command::SessionStatus).await?;
-        let session = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
+        let r = c.call(Command::StreamStatus).await?;
+        let stream = expect_body!("stream.status", r, ReplyBody::Stream(s) => s)?;
         let st = super::state(&c).await?;
-        let mut j = status_json(&c, &session, &st, true);
+        let mut j = status_json(&c, &stream, &st, true);
         j["started"] = json!(false);
         j["already_running"] = json!(true);
         out.emit(&j, || {
             format!(
                 "already running\n{}",
-                status_text(&c, &session, &st, true, false)
+                status_text(&c, &stream, &st, true, false)
             )
         })?;
         return Ok(());
@@ -240,17 +240,17 @@ async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
-    let r = c.call(Command::SessionStatus).await?;
-    let session = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
+    let r = c.call(Command::StreamStatus).await?;
+    let stream = expect_body!("stream.status", r, ReplyBody::Stream(s) => s)?;
     let st = super::state(&c).await?;
-    let mut j = status_json(&c, &session, &st, true);
+    let mut j = status_json(&c, &stream, &st, true);
     if lost_lock {
         j["started"] = json!(false);
         j["already_running"] = json!(true);
         out.emit(&j, || {
             format!(
                 "another ac2d is running for this user\n{}",
-                status_text(&c, &session, &st, true, false)
+                status_text(&c, &stream, &st, true, false)
             )
         })?;
         return Ok(());
@@ -262,7 +262,7 @@ async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
         format!(
             "started {} (pid {pid})\n{}",
             exe.display(),
-            status_text(&c, &session, &st, true, false)
+            status_text(&c, &stream, &st, true, false)
         )
     })?;
     Ok(())
@@ -275,7 +275,7 @@ fn signal_terminate(pid: u32) -> Result<(), CliError> {
         .status();
     // A detached console process has no window to receive taskkill's close request, so
     // Windows can only end it forcefully; `stop` has already faded the output out and
-    // closed the session through the daemon itself.
+    // closed the stream through the daemon itself.
     // taskkill reports success on stdout, which would corrupt `--json` output.
     #[cfg(windows)]
     let st = std::process::Command::new("taskkill")
@@ -315,7 +315,7 @@ async fn stop(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
         // The forced end below skips the daemon's own shutdown, so do its safety part
         // first: stop (fade out) any stimulus, then close the stream.
         let _ = c.call(Command::GenStop).await;
-        let _ = c.call(Command::SessionClose).await;
+        let _ = c.call(Command::StreamClose).await;
     }
     signal_terminate(pid)?;
     let deadline = Instant::now() + Duration::from_secs(10);

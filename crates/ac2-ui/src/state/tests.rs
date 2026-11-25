@@ -13,7 +13,7 @@ use super::*;
 use crate::conn::{ConnEvent, Request, StimEvent};
 use crate::keys::{Chord, Keymap};
 use crate::prefs::KindPref;
-use crate::session_dialog::{RoleKey, Row, SessionDialog};
+use crate::stream_dialog::{RoleKey, Row, StreamDialog};
 
 #[path = "../../tests/it/recorded.rs"]
 mod recorded;
@@ -81,8 +81,8 @@ fn spectrum() -> MeasKind {
 fn daemon_state() -> State {
     let mut s = empty_state();
     s.measurements = vec![meas(2, "Sub", spectrum()), meas(1, "Main L", transfer())];
-    s.session.open = Some(OpenSession {
-        config: SessionConfig {
+    s.stream.open = Some(OpenStream {
+        config: StreamConfig {
             backend: None,
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
@@ -121,7 +121,7 @@ fn mirror_of(state: State, incarnation: u64, me: Option<&str>) -> ConnEvent {
         client_id: me.map(|m| ClientId(m.into())),
         phase: Phase::Live,
         incarnation: Some(DaemonIncarnation(incarnation)),
-        session_epoch: Some(SessionEpoch(2)),
+        stream_epoch: Some(StreamEpoch(2)),
         rev: Rev(10),
         state: Some(Arc::new(state)),
         last_ka: Some(Instant::now()),
@@ -555,7 +555,7 @@ fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
         source: TraceSource::Captured {
             meas: MeasId(1),
             meas_name: "Main L".into(),
-            epoch: SessionEpoch(epoch),
+            epoch: StreamEpoch(epoch),
             at_sample: SampleIndex(0),
         },
         grid_id: ac2_proto::GridId(1),
@@ -775,7 +775,7 @@ mod traces;
 
 mod inputs;
 
-mod session;
+mod stream;
 
 mod sessions;
 

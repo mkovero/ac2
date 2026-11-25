@@ -1,5 +1,5 @@
 //! Feeds each running transfer measurement's headroom advice ([`ac2_scene::advice`]) from
-//! what already arrives: the session's input meters (reference peak, measurement RMS), the
+//! what already arrives: the stream's input meters (reference peak, measurement RMS), the
 //! transfer frame (coherence, protection flags) and the mirrored generator (level and the
 //! system max level). Reads only; no level is ever changed from here.
 
@@ -23,13 +23,13 @@ impl RigState {
         let settings = f.advice;
         let meters = d
             .latest
-            .get(&Topic::SessionLevels)
+            .get(&Topic::StreamLevels)
             .filter(|f| !f.stale)
             .and_then(|f| match &f.frame.data {
-                FrameData::SessionLevels(l) => Some(l),
+                FrameData::StreamLevels(l) => Some(l),
                 _ => None,
             });
-        let level = |input: u16, of: fn(&ac2_proto::frame::SessionLevelsFrame) -> &[f32]| {
+        let level = |input: u16, of: fn(&ac2_proto::frame::StreamLevelsFrame) -> &[f32]| {
             let l = meters?;
             let i = l.meta.channels.iter().position(|c| *c == input)?;
             of(l)

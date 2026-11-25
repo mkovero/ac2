@@ -12,7 +12,7 @@ pub use crate::network::{NetBind, NetListen, NetPort, NetworkChoice};
 /// Everything [`crate::Daemon::start`] needs.
 #[derive(Clone)]
 pub struct DaemonConfig {
-    /// The audio backends offered, the default one (used when `session.open` names none)
+    /// The audio backends offered, the default one (used when `stream.open` names none)
     /// first. Chosen explicitly by the caller: there is no default and no fallback (a fake
     /// device must never stand in for a missing real one). See [`crate::backends`].
     pub backends: Vec<Arc<dyn Backend>>,
@@ -60,7 +60,7 @@ pub struct DaemonConfig {
     /// Autosave of the measurements and traces; `None` keeps them in memory only.
     pub autosave: Option<AutosaveConfig>,
     /// Where raw capture files are written (`rec.start`) and found by name
-    /// (`session.replay`); unfinished ones found there at start are finished as
+    /// (`stream.replay`); unfinished ones found there at start are finished as
     /// interrupted. `None`: this daemon does not record.
     pub recording_dir: Option<PathBuf>,
     /// The plan library's directory (`plan.*`); `None` keeps plans in memory only.

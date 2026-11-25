@@ -109,7 +109,7 @@ fn trace(id: u32) -> StoredTrace {
         meas_name: "Studer".into(),
         run: DynamicsId(1),
         number: 1,
-        epoch: SessionEpoch(3),
+        epoch: StreamEpoch(3),
     };
     StoredTrace {
         meta: meta(id, source, 0.0, TraceKind::Dynamics, &grid),

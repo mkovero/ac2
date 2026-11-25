@@ -13,7 +13,7 @@ use ac2_ui::forms::FormKind;
 use ac2_ui::state::{AppState, Msg, Overlay, PaneKind};
 use std::time::{Duration, Instant};
 
-/// From an empty daemon, using the app: a session, an SPL meter from the palette (the mic,
+/// From an empty daemon, using the app: a stream, an SPL meter from the palette (the mic,
 /// calibrated as `ac2 cal spl` would): the meter's id.
 fn spl_meter_from_an_empty_daemon() -> R<(SimDaemon, Driver, Cli, MeasId)> {
     let daemon = sim_daemon(Setup::Empty)?;

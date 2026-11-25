@@ -47,10 +47,10 @@ fn pupu(t: &T) -> &RigState {
 /// A levels frame of inputs 0 and 1 at `ppm` dBFS.
 fn levels(ppm: f32) -> ConnEvent {
     use ac2_client::{Latest, TopicFrame};
-    use ac2_proto::frame::{ClipFlags, SessionLevelsFrame};
+    use ac2_proto::frame::{ClipFlags, StreamLevelsFrame};
     use ac2_proto::{Frame, FrameData};
-    let data = FrameData::SessionLevels(SessionLevelsFrame {
-        meta: ac2_proto::frame::SessionLevelsMeta {
+    let data = FrameData::StreamLevels(StreamLevelsFrame {
+        meta: ac2_proto::frame::StreamLevelsMeta {
             channels: vec![0, 1],
             ballistic: Default::default(),
             pair_levels: vec![],
@@ -287,7 +287,9 @@ fn requests_name_their_rig() {
     };
     assert_eq!(
         topics(PUPU),
-        [spl(Stream::Spl), spl(Stream::Leq)].into_iter().collect()
+        [spl(ac2_proto::Stream::Spl), spl(ac2_proto::Stream::Leq)]
+            .into_iter()
+            .collect()
     );
     assert_eq!(topics(RIG), t.st.wanted_topics());
     assert!(t.st.sync_link().is_empty(), "sent once");
@@ -335,7 +337,7 @@ fn a_window_remembers_its_rig() {
     assert_eq!(t.st.window_rig, None);
 }
 
-/// Stimulus outputs and session choices are remembered per rig: the same device id on
+/// Stimulus outputs and stream choices are remembered per rig: the same device id on
 /// another rig is another device.
 #[test]
 fn devices_are_remembered_per_rig() {
@@ -576,7 +578,7 @@ fn a_connected_rig_is_remembered() {
     assert!(t.st.prefs_dirty);
 }
 
-/// Each rig's link is asked for its input meters while that rig's session is open, which
+/// Each rig's link is asked for its input meters while that rig's stream is open, which
 /// rig is shown or not: the Inputs list shows the shown rig's, and a switch neither turns
 /// another rig's meters off nor asks them of the wrong link.
 #[test]
@@ -596,7 +598,7 @@ fn input_meters_follow_each_rig_through_switches() {
     for (id, name, state) in [
         (RIG, "test rig", with_spl()),
         (PUPU, "pupu", with_spl()),
-        (BARE, "bare", no_session_state()),
+        (BARE, "bare", no_stream_state()),
     ] {
         let slot = if id == RIG {
             t.st.rig.slot

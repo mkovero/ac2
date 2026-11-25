@@ -8,7 +8,7 @@
 //! this consumer alone, the next block arrives with a jump in its sample index, and the
 //! jump is written into the sidecar as a `recorder_behind` discontinuity. Nothing is ever
 //! spliced silently: the file holds only captured frames, and every place where captured
-//! frames do not follow each other is listed with its session sample and the samples lost.
+//! frames do not follow each other is listed with its stream sample and the samples lost.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
@@ -36,7 +36,7 @@ const PROGRESS_S: u64 = 1;
 
 /// What control sends the recorder besides audio.
 pub(crate) enum RecordCmd {
-    /// A configuration change committed at session sample `at_sample`.
+    /// A configuration change committed at stream sample `at_sample`.
     Note {
         at_sample: u64,
         wall_ns: u64,
@@ -50,7 +50,7 @@ pub(crate) enum RecordCmd {
 /// job has stopped.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Progress {
-    /// Session sample of the file's first frame, once a block has arrived.
+    /// Stream sample of the file's first frame, once a block has arrived.
     pub(crate) start_sample: Option<u64>,
     pub(crate) frames: u64,
     pub(crate) bytes: u64,
@@ -75,7 +75,7 @@ pub(crate) struct Recorder {
     max_frames: u64,
     max_bytes_frames: Option<u64>,
     buf: Vec<f32>,
-    /// One past the last session sample written.
+    /// One past the last stream sample written.
     expected: Option<u64>,
     reported: u64,
     end_reason: Option<RecordingEnd>,
@@ -141,7 +141,7 @@ impl Recorder {
                     wall_ns,
                     change,
                 }) => {
-                    let start = self.sidecar.start.session_sample.0;
+                    let start = self.sidecar.start.stream_sample.0;
                     let frame = raw::frame_of(start, &self.sidecar.discontinuities, at_sample);
                     self.sidecar.timeline.push(TimelineEntry {
                         at_sample: SampleIndex(at_sample),
@@ -189,10 +189,10 @@ impl Recorder {
             },
         };
         if self.expected.is_none() {
-            // Nothing arrived: the file starts where the session stood.
-            self.sidecar.start = Mark::new(self.sidecar.start.session_sample.0, wall_ns());
+            // Nothing arrived: the file starts where the stream stood.
+            self.sidecar.start = Mark::new(self.sidecar.start.stream_sample.0, wall_ns());
         }
-        let end_sample = raw::session_sample_of(&self.sidecar, frames);
+        let end_sample = raw::stream_sample_of(&self.sidecar, frames);
         self.sidecar.end = Some(End {
             at: Mark::new(end_sample, wall_ns()),
             frames,
@@ -245,7 +245,7 @@ impl Recorder {
         }
         self.sidecar.discontinuities.push(Discontinuity {
             frame: self.frames(),
-            session_sample: SampleIndex(b.start_sample),
+            stream_sample: SampleIndex(b.start_sample),
             lost_frames: b.start_sample.saturating_sub(expected),
             estimated: b.flags.contains(BlockFlags::GAP_ESTIMATED),
             causes,
@@ -265,7 +265,7 @@ impl Recorder {
                 self.sidecar.remote_slips.push(RemoteSlip {
                     channel,
                     frame: base,
-                    session_sample: SampleIndex(b.start_sample),
+                    stream_sample: SampleIndex(b.start_sample),
                     samples: m.slip,
                 });
             }
@@ -275,7 +275,7 @@ impl Recorder {
                     continue;
                 }
                 let frame = base + u64::from(r.start);
-                let session_sample = b.start_sample + u64::from(r.start);
+                let stream_sample = b.start_sample + u64::from(r.start);
                 let frames = u64::from(end - r.start);
                 let last = self
                     .sidecar
@@ -286,7 +286,7 @@ impl Recorder {
                 match last {
                     Some(g)
                         if g.frame + g.frames == frame
-                            && g.session_sample.0 + g.frames == session_sample
+                            && g.stream_sample.0 + g.frames == stream_sample
                             && g.late == m.late =>
                     {
                         g.frames += frames;
@@ -294,7 +294,7 @@ impl Recorder {
                     _ => self.sidecar.remote_gaps.push(RemoteGap {
                         channel,
                         frame,
-                        session_sample: SampleIndex(session_sample),
+                        stream_sample: SampleIndex(stream_sample),
                         frames,
                         late: m.late,
                     }),
@@ -384,7 +384,7 @@ impl Analysis for Recorder {
 
 impl Drop for Recorder {
     fn drop(&mut self) {
-        // Stopped by control (`rec.stop`, the session closing, the daemon shutting down):
+        // Stopped by control (`rec.stop`, the stream closing, the daemon shutting down):
         // control sent the reason first.
         self.drain_cmds();
         let r = self

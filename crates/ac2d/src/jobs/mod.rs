@@ -1,7 +1,7 @@
 //! Measurement jobs: one thread each, fed by the capture fan-out, publishing frames into the
 //! I/O thread's latest slots.
 //!
-//! A job's lifetime follows commands (`meas.start/stop`, session open/close), never
+//! A job's lifetime follows commands (`meas.start/stop`, stream open/close), never
 //! subscriptions. Subscriptions decide what is built and sent: a result nobody receives is
 //! neither formed nor encoded, and one that has not changed since it was last sent is only
 //! re-sent now and then to keep it fresh ([`Pace`]). Every job publishes at most at the
@@ -21,7 +21,7 @@ use ac2_proto::frame::{
 };
 use ac2_proto::grid::GridId;
 use ac2_proto::topic::Topic;
-use ac2_proto::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, SessionEpoch, WallNs};
+use ac2_proto::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, StreamEpoch, WallNs};
 use ac2_zmq::Context;
 
 use crate::cadence::Cadence;
@@ -74,7 +74,7 @@ pub(crate) struct JobEnv {
     pub(crate) ctx: Context,
     pub(crate) endpoint: String,
     pub(crate) incarnation: DaemonIncarnation,
-    pub(crate) epoch: SessionEpoch,
+    pub(crate) epoch: StreamEpoch,
     pub(crate) seqs: Arc<Seqs>,
     pub(crate) interest: Arc<Interest>,
     pub(crate) fps: u32,
@@ -82,13 +82,13 @@ pub(crate) struct JobEnv {
     pub(crate) frames: FrameTx,
 }
 
-/// The measurement a job runs: its id, its configuration at `config_rev`, and the session
+/// The measurement a job runs: its id, its configuration at `config_rev`, and the stream
 /// epoch it starts in.
 pub(crate) struct JobCtx<C> {
     pub(crate) meas: MeasId,
     pub(crate) cfg: C,
     pub(crate) config_rev: Rev,
-    pub(crate) epoch: SessionEpoch,
+    pub(crate) epoch: StreamEpoch,
 }
 
 /// Header fields a job decides.
@@ -162,7 +162,7 @@ impl Emitter {
             stamp: FrameStamp {
                 seq,
                 audio_sample: SampleIndex(s.audio_sample),
-                session_epoch: self.env.epoch,
+                stream_epoch: self.env.epoch,
                 daemon_incarnation: self.env.incarnation,
                 config_rev: s.config_rev,
                 config_applied_at: SampleIndex(s.applied_at),
@@ -883,7 +883,7 @@ impl LevelsMeter {
     }
 }
 
-/// Block channel index of device input `input` in a session capturing `input_map`.
+/// Block channel index of device input `input` in a stream capturing `input_map`.
 pub(crate) fn block_index(input_map: &[u16], input: u16) -> Option<usize> {
     input_map.iter().position(|&c| c == input)
 }

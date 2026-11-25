@@ -1,7 +1,7 @@
 //! Tags and tips resting on the clocks the rigs' always-on levels show
 //! (`State.remote.standing`), where no stream runs between the two.
 
-use ac2_proto::model::{DeviceClock, DeviceId, MinuteCount, RemoteLink, StandingSession};
+use ac2_proto::model::{DeviceClock, DeviceId, MinuteCount, RemoteLink, StandingStream};
 use ac2_proto::units::Seconds;
 
 use super::*;
@@ -36,7 +36,7 @@ fn standing(relation: PeerRelation, ppm: Option<f64>) -> RemoteState {
             rig: KETUNKOLO,
             name: "ketunkolo".into(),
             link: RemoteLink::Up,
-            session: Some(StandingSession {
+            stream: Some(StandingStream {
                 sample_rate_hz: 96_000,
                 channels: vec![0, 1],
             }),
@@ -92,7 +92,7 @@ fn cant_tell(reason: CantTellReason) -> PeerRelation {
     PeerRelation::CantTell { reason }
 }
 
-/// The stream pupu's session takes from ketunkolo, with its daemon's verdict.
+/// The stream pupu takes from ketunkolo, with its daemon's verdict.
 fn stream(relation: PeerRelation, ppm: Option<f64>) -> Vec<RemoteRig> {
     vec![RemoteRig {
         rig: KETUNKOLO,
@@ -259,8 +259,8 @@ fn levels_that_cannot_tell_say_why() {
         format!("can't tell: figure not steady: +0.4 … +3.1 ppm · {LEVELS}")
     );
     assert_eq!(
-        why(CantTellReason::NoSession { rig: PUPU }),
-        format!("can't tell: pupu has no audio session · {LEVELS}")
+        why(CantTellReason::NoStream { rig: PUPU }),
+        format!("can't tell: pupu has no audio stream · {LEVELS}")
     );
     assert_eq!(
         why(CantTellReason::ClocksDisagree {

@@ -1,6 +1,6 @@
 //! Remote inputs on the control thread (`docs/design/remote-inputs.md`): the links to the
 //! paired rigs (`rig.pair`, `rig.unpair`), the source side's filtered state (`source.state`) and tap, the
-//! joined feed of a session with remote inputs, and the `remote` entity they report into.
+//! joined feed of a stream with remote inputs, and the `remote` entity they report into.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -11,10 +11,10 @@ use ac2_core::mic_curve::MicCurve;
 use ac2_proto::event::Change;
 use ac2_proto::model::{
     BackendKind, CalStatus, InputKind, MeasKind, PeerClock, RemoteAudio, RemoteInput,
-    RemoteInputStatus, RemoteLink, RemoteRig, RemoteState, RigPeer, SessionConfig, SourceCurve,
-    SourceInput, SourceSession, SourceState, StreamIncarnation, SystemClock, remote_slot,
+    RemoteInputStatus, RemoteLink, RemoteRig, RemoteState, RigPeer, SourceCurve, SourceInput,
+    SourceState, SourceStream, StreamConfig, StreamIncarnation, SystemClock, remote_slot,
 };
-use ac2_proto::units::{RigId, Seconds, SessionEpoch, WallNs};
+use ac2_proto::units::{RigId, Seconds, StreamEpoch, WallNs};
 use ac2_proto::{ProtoError, ReplyBody};
 use ac2_zmq::PublicKey;
 
@@ -29,7 +29,7 @@ use crate::remote::standing_verdict::StandingWatch;
 use crate::remote::tap::SourceTap;
 use crate::remote::{InputReport, RemoteMsg, RemoteRun, RigReport};
 use crate::rig::RigSettings;
-use crate::session::Runtime;
+use crate::stream::Runtime;
 use crate::util::{invalid, missing, refused, wall_ns};
 
 /// Audio queued for other rigs while the I/O thread does not take it, s: well past the
@@ -49,7 +49,7 @@ const MAX_ADVERTS: usize = 64;
 
 /// The joined feed's last report.
 struct Joined {
-    epoch: SessionEpoch,
+    epoch: StreamEpoch,
     inputs: Vec<InputReport>,
     rigs: Vec<RigReport>,
     link_offset: Seconds,
@@ -65,7 +65,7 @@ pub(super) struct RemoteCtl {
     pub(super) watches: BTreeMap<RigId, PeerClockWatch>,
     /// The running transfer functions between this rig and one remote rig.
     pub(super) cross: BTreeMap<ac2_proto::units::MeasId, super::cross_rig::CrossTf>,
-    /// The links feeding the open session.
+    /// The links feeding the open stream.
     fed: BTreeSet<RigId>,
     /// The last mDNS advert seen per server key: a rig may announce its new address before
     /// its link here notices the old one is gone, or before it is paired.
@@ -133,7 +133,7 @@ pub(crate) fn check_peers(peers: &[RigPeer]) -> Result<(), String> {
     Ok(())
 }
 
-/// The session channels a job of `kind` reads.
+/// The stream channels a job of `kind` reads.
 pub(super) fn kind_inputs(kind: &MeasKind) -> Vec<u16> {
     match kind {
         MeasKind::Spectrum { config } => vec![config.input],
@@ -154,10 +154,10 @@ pub(super) fn capture_stamps(backend: BackendKind) -> bool {
     }
 }
 
-/// Why `src` cannot give `channel` to a session at `rate` Hz, as refused at open; `None`
+/// Why `src` cannot give `channel` to a stream at `rate` Hz, as refused at open; `None`
 /// when it can, or while its state is not known.
 fn source_refusal(src: &SourceState, channel: u16, rate: Option<u32>) -> Option<String> {
-    let s = src.session.as_ref()?;
+    let s = src.stream.as_ref()?;
     if s.replaying {
         return Some(format!("{} is replaying a recording", src.name));
     }
@@ -287,7 +287,7 @@ impl Control {
         self.set_rig_peers(peers)
     }
 
-    /// The paired rigs become `peers`: kept, linked, published. A running session's joined
+    /// The paired rigs become `peers`: kept, linked, published. A running stream's joined
     /// feed starts over only when an entry it takes inputs from changed or went: a link
     /// started again feeds nothing until attached anew, while the links to the other rigs
     /// never fed it.
@@ -303,7 +303,7 @@ impl Control {
             let mut r = self.store.state().remote.clone();
             r.peers = peers.clone();
             self.commit(Change::Remote(r));
-            if let Some(rt) = &mut self.session {
+            if let Some(rt) = &mut self.stream {
                 let fed_changed = rt.open.config.remote_inputs.iter().any(|i| {
                     before.iter().find(|p| p.rig == i.rig) != peers.iter().find(|p| p.rig == i.rig)
                 });
@@ -322,7 +322,7 @@ impl Control {
     /// `source.state`: what a rig taking this rig's inputs may know.
     pub(super) fn source_state(&self) -> SourceState {
         let st = self.store.state();
-        let session = self.session.as_ref().map(|rt| SourceSession {
+        let stream = self.stream.as_ref().map(|rt| SourceStream {
             incarnation: StreamIncarnation {
                 daemon: self.s.incarnation,
                 epoch: rt.epoch,
@@ -360,13 +360,13 @@ impl Control {
             rig: self.s.rig_id,
             name: self.s.name.clone(),
             clocks: st.clocks.clone(),
-            session,
+            stream,
         }
     }
 
-    /// Refuses a session the operator opens whose remote inputs cannot be: an input of this
+    /// Refuses a stream the operator opens whose remote inputs cannot be: an input of this
     /// rig, or one its rig is known not to give.
-    pub(super) fn check_remote_inputs(&self, cfg: &SessionConfig) -> Result<(), ProtoError> {
+    pub(super) fn check_remote_inputs(&self, cfg: &StreamConfig) -> Result<(), ProtoError> {
         for r in &cfg.remote_inputs {
             if r.rig == self.s.rig_id {
                 return Err(invalid("that input is on this rig"));
@@ -382,14 +382,14 @@ impl Control {
 
     /// Sets the source tap and the joined feed up on the open stream, once per stream.
     pub(super) fn remote_attach(&mut self) {
-        let Some(rt) = self.session.as_ref() else {
+        let Some(rt) = self.stream.as_ref() else {
             return;
         };
         if rt.remote.is_some() {
             return;
         }
-        // The tap, at every session start: whether another rig can take these inputs depends
-        // on the network pair, which comes and goes during the session.
+        // The tap, at every stream start: whether another rig can take these inputs depends
+        // on the network pair, which comes and goes during the stream.
         {
             // A message per channel per device period; past this much audio queued the I/O
             // thread has stalled, and the newest frames are dropped rather than memory
@@ -420,7 +420,7 @@ impl Control {
         let mut joined_map = Vec::new();
         if !inputs.is_empty() {
             joined_map = rt.input_map.clone();
-            joined_map.extend(inputs.iter().map(RemoteInput::session_channel));
+            joined_map.extend(inputs.iter().map(RemoteInput::stream_channel));
             let mut rigs = Vec::new();
             let mut feeds = Vec::new();
             for r in &inputs {
@@ -466,19 +466,19 @@ impl Control {
             }
         }
         self.remote.joined = None;
-        if let Some(rt) = &mut self.session {
+        if let Some(rt) = &mut self.stream {
             rt.remote = Some(RemoteRun { joined_map });
         }
         self.remote_publish();
     }
 
-    /// Stops the links feeding a session that is gone or has no remote inputs from them.
+    /// Stops the links feeding a stream that is gone or has no remote inputs from them.
     pub(super) fn remote_sync(&mut self) {
         if self.remote.fed.is_empty() {
             return;
         }
         let wanted: BTreeSet<RigId> = self
-            .session
+            .stream
             .as_ref()
             .filter(|rt| rt.remote.is_some())
             .map(|rt| rt.open.config.remote_inputs.iter().map(|r| r.rig).collect())
@@ -578,8 +578,8 @@ impl Control {
                     .remote
                     .sources
                     .get(&rig)
-                    .map(|s| s.session.as_ref().map(|s| &s.inputs))
-                    != Some(state.session.as_ref().map(|s| &s.inputs));
+                    .map(|s| s.stream.as_ref().map(|s| &s.inputs))
+                    != Some(state.stream.as_ref().map(|s| &s.inputs));
                 self.remote.sources.insert(rig, state);
                 if inputs_changed {
                     // Jobs on its inputs apply its calibration and curve as it does.
@@ -598,7 +598,7 @@ impl Control {
                 rigs,
                 link_offset,
             } => {
-                if self.session.as_ref().is_some_and(|rt| rt.epoch == epoch) {
+                if self.stream.as_ref().is_some_and(|rt| rt.epoch == epoch) {
                     self.remote.joined = Some(Joined {
                         epoch,
                         inputs,
@@ -623,12 +623,12 @@ impl Control {
         // Without a server key there is nothing to link with.
         let network = self.s.server.network.keys.is_some();
         let peers = st.remote.peers.clone();
-        let session_inputs: Vec<RemoteInput> = self
-            .session
+        let stream_inputs: Vec<RemoteInput> = self
+            .stream
             .as_ref()
             .map(|rt| rt.open.config.remote_inputs.clone())
             .unwrap_or_default();
-        let epoch = self.session.as_ref().map(|rt| rt.epoch);
+        let epoch = self.stream.as_ref().map(|rt| rt.epoch);
         let joined = self
             .remote
             .joined
@@ -637,7 +637,7 @@ impl Control {
         let now = self.remote.started.elapsed();
         let wall = WallNs(wall_ns());
         let mut rigs: Vec<RemoteRig> = Vec::new();
-        for r in &session_inputs {
+        for r in &stream_inputs {
             if rigs.iter().any(|x| x.rig == r.rig) {
                 continue;
             }
@@ -657,10 +657,10 @@ impl Control {
                 ours: (self.s.rig_id, &ours),
                 theirs: (r.rig, src.map(|s| &s.clocks)),
                 capture_stamps: src
-                    .and_then(|s| s.session.as_ref())
+                    .and_then(|s| s.stream.as_ref())
                     .is_some_and(|s| s.capture_stamps)
                     && self
-                        .session
+                        .stream
                         .as_ref()
                         .is_some_and(|rt| capture_stamps(rt.open.backend)),
                 long: report.and_then(|x| x.long),
@@ -682,11 +682,9 @@ impl Control {
                 window,
             });
         }
-        let in_session: BTreeSet<RigId> = rigs.iter().map(|r| r.rig).collect();
-        self.remote
-            .watches
-            .retain(|rig, _| in_session.contains(rig));
-        let inputs: Vec<RemoteInputStatus> = session_inputs
+        let in_stream: BTreeSet<RigId> = rigs.iter().map(|r| r.rig).collect();
+        self.remote.watches.retain(|rig, _| in_stream.contains(rig));
+        let inputs: Vec<RemoteInputStatus> = stream_inputs
             .iter()
             .map(|r| {
                 let rep = joined.and_then(|j| j.inputs.iter().find(|i| i.slot == r.slot));
@@ -694,7 +692,7 @@ impl Control {
                     .remote
                     .sources
                     .get(&r.rig)
-                    .and_then(|s| s.session.as_ref())
+                    .and_then(|s| s.stream.as_ref())
                     .and_then(|s| s.inputs.iter().find(|i| i.channel == r.channel));
                 let audio = if r.rig == self.s.rig_id {
                     RemoteAudio::OnThisRig
@@ -725,7 +723,7 @@ impl Control {
             peers,
             rigs,
             inputs,
-            link_offset: if session_inputs.is_empty() {
+            link_offset: if stream_inputs.is_empty() {
                 None
             } else {
                 link_offset
@@ -738,10 +736,10 @@ impl Control {
         }
     }
 
-    /// The remote input of session channel `ch`, if it is one.
+    /// The remote input of stream channel `ch`, if it is one.
     pub(super) fn remote_input(&self, ch: u16) -> Option<&RemoteInput> {
         let slot = remote_slot(ch)?;
-        self.session
+        self.stream
             .as_ref()?
             .open
             .config
@@ -759,7 +757,7 @@ impl Control {
             .remote
             .sources
             .get(&r.rig)
-            .and_then(|s| s.session.as_ref())
+            .and_then(|s| s.stream.as_ref())
             .and_then(|s| s.inputs.iter().find(|i| i.channel == r.channel))
         else {
             return InputCal::none();
@@ -792,7 +790,7 @@ impl Control {
             .remote
             .sources
             .get(&r.rig)?
-            .session
+            .stream
             .as_ref()?
             .inputs
             .iter()
@@ -825,9 +823,11 @@ impl Control {
         let mut remote: Vec<&RemoteInput> = Vec::new();
         for &c in inputs {
             if let Some(slot) = remote_slot(c) {
-                remote.push(self.remote_input(c).ok_or_else(|| {
-                    invalid(format!("remote input {slot} is not in the session"))
-                })?);
+                remote.push(
+                    self.remote_input(c).ok_or_else(|| {
+                        invalid(format!("remote input {slot} is not in the stream"))
+                    })?,
+                );
             }
         }
         if remote.is_empty() {
@@ -851,13 +851,13 @@ impl Control {
         ))
     }
 
-    /// The remote session channels, for the session input meters.
+    /// The remote stream channels, for the stream input meters.
     pub(super) fn remote_channels(rt: &Runtime) -> Vec<u16> {
         rt.open
             .config
             .remote_inputs
             .iter()
-            .map(RemoteInput::session_channel)
+            .map(RemoteInput::stream_channel)
             .collect()
     }
 }

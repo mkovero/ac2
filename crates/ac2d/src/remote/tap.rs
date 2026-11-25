@@ -12,7 +12,7 @@ use crate::fanout::Block;
 use crate::io::Interest;
 use crate::outbox::Outbox;
 
-/// What the fan-out needs to serve the session's channels to other rigs.
+/// What the fan-out needs to serve the stream's channels to other rigs.
 pub(crate) struct SourceTap {
     outbox: Outbox,
     interest: Arc<Interest>,
@@ -140,7 +140,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use ac2_proto::frame::encode_audio;
-    use ac2_proto::units::{DaemonIncarnation, SessionEpoch};
+    use ac2_proto::units::{DaemonIncarnation, StreamEpoch};
     use ac2_zmq::{Context, SocketType};
 
     use super::*;
@@ -156,7 +156,7 @@ mod tests {
         let interest = Arc::new(Interest::default());
         let incarnation = StreamIncarnation {
             daemon: DaemonIncarnation(1),
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
         };
         let mut tap = SourceTap::new(outbox, interest.clone(), &[4, 7], incarnation, 96_000, true);
         interest.subscribe(b"audio/7");

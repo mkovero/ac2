@@ -5,7 +5,7 @@ use std::sync::mpsc::{Receiver, channel};
 
 use ac2_audio::BlockFlags;
 use ac2_proto::model::{StopWhy, TransferConfig};
-use ac2_proto::units::{MeasId, Rev, SessionEpoch};
+use ac2_proto::units::{MeasId, Rev, StreamEpoch};
 
 use super::*;
 use crate::conv::FindBand;
@@ -60,7 +60,7 @@ fn rig(delay: usize, tracking: bool, cross: bool) -> Rig {
             meas: MeasId(3),
             cfg: TransferConfig::with_inputs(0, REMOTE),
             config_rev: Rev(1),
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
         },
         FS,
         (0, 1),
@@ -365,7 +365,7 @@ fn a_slip_moves_the_delay_by_exactly_the_slip() {
             meas: MeasId(4),
             cfg: TransferConfig::with_inputs(REMOTE, 0),
             config_rev: Rev(1),
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
         },
         FS,
         (1, 0),
@@ -569,7 +569,7 @@ fn a_stopped_cross_rig_job_shows_no_stage_bins() {
             meas: MeasId(3),
             cfg,
             config_rev: Rev(1),
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
         },
         FS,
         (0, 1),

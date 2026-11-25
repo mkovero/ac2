@@ -14,7 +14,7 @@ use ac2_proto::model::{
     ALIGN_MAX_DELAY_LIMIT, AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, MathReference,
     MeasKind, Measurement, Operand, TraceKind, TraceMeta,
 };
-use ac2_proto::units::{EqSetId, MeasId, SessionEpoch, TraceId};
+use ac2_proto::units::{EqSetId, MeasId, StreamEpoch, TraceId};
 use ac2_traces::math::trace_on_grid;
 
 use super::{Control, static_grid};
@@ -175,14 +175,14 @@ pub(super) struct Lookup<'a> {
     pub(super) trace: &'a dyn Fn(TraceId) -> Option<(&'a TraceMeta, GridDef)>,
     /// Whether measurement `meas` holds EQ set `set`.
     pub(super) eq: &'a dyn Fn(MeasId, EqSetId) -> bool,
-    /// The current session epoch, the time base of every live operand; `None` skips the
+    /// The current stream epoch, the time base of every live operand; `None` skips the
     /// time-base checks (a session being loaded starts a new epoch: its math traces say
     /// per frame which operands share it).
-    pub(super) epoch: Option<SessionEpoch>,
+    pub(super) epoch: Option<StreamEpoch>,
 }
 
 /// Checks math trace `own`'s operands (`None` while it is being created) against the
-/// state and returns the grid its result has without a session (a transfer result's), if
+/// state and returns the grid its result has without a stream (a transfer result's), if
 /// one is known yet.
 pub(super) fn check_operands(
     own: Option<MeasId>,
@@ -191,7 +191,7 @@ pub(super) fn check_operands(
 ) -> Result<Option<GridDef>, ProtoError> {
     let mut live_grid: Option<(GridDef, String)> = None;
     let mut stored_grid: Option<GridDef> = None;
-    let mut time_bases: Vec<(Option<SessionEpoch>, String)> = Vec::new();
+    let mut time_bases: Vec<(Option<StreamEpoch>, String)> = Vec::new();
     let want = domain_word(c.domain);
     let ratio = matches!(
         c.expr,
@@ -306,7 +306,7 @@ pub(super) fn check_operands(
     }
     Ok(match c.domain {
         MathDomain::Transfer => live_grid.map(|(g, _)| g).or(stored_grid),
-        // A live spectrum's or RTA's grid depends on the session's rate.
+        // A live spectrum's or RTA's grid depends on the stream's rate.
         MathDomain::Spectrum | MathDomain::Rta if !has_live(c) => stored_grid,
         MathDomain::Spectrum | MathDomain::Rta => None,
     })
@@ -354,7 +354,7 @@ impl Control {
         Some((t, g.clone()))
     }
 
-    /// The grid of `kind` for measurement `own` without a session: a transfer's own, a
+    /// The grid of `kind` for measurement `own` without a stream: a transfer's own, a
     /// transfer math trace's operands'.
     pub(super) fn grid_of(
         &self,
@@ -384,7 +384,7 @@ impl Control {
         }
     }
 
-    /// The grids of math trace `own` on the open session at `fs`, and its stored
+    /// The grids of math trace `own` on the open stream at `fs`, and its stored
     /// operands' columns on them (`None` for a live operand), in expression order.
     pub(super) fn math_setup(
         &self,
@@ -512,7 +512,7 @@ impl Control {
     /// now (a stored operand's mic curve changed). One that cannot start again is stopped
     /// and says why in the log.
     pub(super) fn restart_maths_naming(&mut self, o: Operand) {
-        if self.session.is_none() {
+        if self.stream.is_none() {
             return;
         }
         let running: Vec<Measurement> = self

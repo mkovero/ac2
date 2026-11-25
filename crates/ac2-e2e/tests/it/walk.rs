@@ -1,5 +1,5 @@
 //! A spatial walk from an empty daemon through the app alone: the transfer measurement made
-//! from the empty session, Shift+W, a room plan drawn in the plan editor, the setup window's
+//! from the empty stream, Shift+W, a room plan drawn in the plan editor, the setup window's
 //! suggestion, the walk pane, two points captured and the walk's average made.
 
 use super::harness::{Driver, R, measuring_kept, scene_texts};

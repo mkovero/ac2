@@ -24,7 +24,7 @@ use ac2_proto::model::{
     MeasKind, RecordRequest, RecordingEnd, RecordingRef, RecordingStatus, ReplayPace, RtaConfig,
     Signal, SpecAveraging, SpectrumConfig, TraceData,
 };
-use ac2_proto::units::{Dbfs, MeasId, Seconds, SessionEpoch, TraceId};
+use ac2_proto::units::{Dbfs, MeasId, Seconds, StreamEpoch, TraceId};
 use ac2_proto::{Command, ErrorCode};
 use ac2_traces::raw::{self, TimelineChange, WavReader};
 use ac2d::Daemon;
@@ -81,8 +81,8 @@ fn record(inputs: Vec<u16>, name: &str, max_s: f64) -> Command {
     }
 }
 
-/// One past the newest session sample of the xrun rig.
-fn session_end(d: &ac2_audio::FakeDriver) -> u64 {
+/// One past the newest stream sample of the xrun rig.
+fn stream_end(d: &ac2_audio::FakeDriver) -> u64 {
     end_sample(d)
         + if d.blocks() > XRUN_BLOCK {
             u64::from(LOST)
@@ -91,12 +91,12 @@ fn session_end(d: &ac2_audio::FakeDriver) -> u64 {
         }
 }
 
-/// Waits until the fan-out of session `epoch` has handed on everything up to `end`
+/// Waits until the fan-out of stream `epoch` has handed on everything up to `end`
 /// (keepalive sample).
-fn wait_handed_on(ka: &Sub, epoch: SessionEpoch, end: u64) {
+fn wait_handed_on(ka: &Sub, epoch: StreamEpoch, end: u64) {
     ka.frame(T, |f| {
         matches!(f.data, FrameData::Ka(_))
-            && f.stamp.session_epoch == epoch
+            && f.stamp.stream_epoch == epoch
             && f.stamp.audio_sample.0 + 1 >= end
     })
     .unwrap_or_else(|| panic!("audio up to {end} never arrived"));
@@ -132,8 +132,8 @@ fn assert_close(what: &str, a: &[f32], b: &[f32], tol: f32) {
     );
 }
 
-/// Samples of `file` by session sample, from its sidecar's discontinuities.
-fn by_session_sample(dir: &Path, name: &str) -> (Vec<(u64, Vec<f32>)>, u16) {
+/// Samples of `file` by stream sample, from its sidecar's discontinuities.
+fn by_stream_sample(dir: &Path, name: &str) -> (Vec<(u64, Vec<f32>)>, u16) {
     let s = raw::read_sidecar(dir, name).unwrap();
     let mut r = WavReader::open(&raw::audio_path(dir, name)).unwrap();
     let ch = r.info().channels;
@@ -148,7 +148,7 @@ fn by_session_sample(dir: &Path, name: &str) -> (Vec<(u64, Vec<f32>)>, u16) {
         .map(|f| {
             let i = f as usize * usize::from(ch);
             (
-                raw::session_sample_of(&s, f),
+                raw::stream_sample_of(&s, f),
                 all[i..i + usize::from(ch)].to_vec(),
             )
         })
@@ -170,13 +170,13 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     let (mut c, sub) = connect(&h, &[b"d/4/spl"]);
     let ka = Sub::connect(h.context(), h.data_endpoint(), &[b"ka"]);
 
-    // Nothing to record without a session.
+    // Nothing to record without a stream.
     let e = c.call(record(vec![0, 1], "x", 10.0)).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
 
     let live_epoch = c
-        .session(Command::SessionOpen {
-            config: session(true),
+        .stream(Command::StreamOpen {
+            config: stream(true),
         })
         .epoch;
     c.ok(Command::MeasCreate {
@@ -221,7 +221,7 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
         },
     });
 
-    // Inputs the session does not capture, and bad bounds, are refused.
+    // Inputs the stream does not capture, and bad bounds, are refused.
     for bad in [
         record(vec![2], "x", 10.0),
         record(vec![0, 0], "x", 10.0),
@@ -244,8 +244,8 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     while done < SECONDS {
         run(&mut d, 0.25);
         done += 0.25;
-        wait_handed_on(&ka, live_epoch, session_end(&d));
-        live_spl = spl_level(&sub, session_end(&d));
+        wait_handed_on(&ka, live_epoch, stream_end(&d));
+        live_spl = spl_level(&sub, stream_end(&d));
         if (done - 1.0f64).abs() < 1e-9 {
             // A configuration change in the middle: it lands in the timeline.
             c.ok(Command::MeasCreate {
@@ -260,7 +260,7 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
         }
         c.ok(Command::GenRefresh { lease_token: tok });
     }
-    let live_end = session_end(&d);
+    let live_end = stream_end(&d);
     let live_tf = capture(&mut c, 1, "live tf");
     let live_spec = capture(&mut c, 2, "live spec");
 
@@ -285,11 +285,11 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
 
     // The sidecar.
     let s = raw::read_sidecar(dir.path(), "take 1").unwrap();
-    assert_eq!(s.start.session_sample.0, 0);
+    assert_eq!(s.start.stream_sample.0, 0);
     let end = s.end.as_ref().expect("finished");
     assert_eq!(end.frames, frames);
     assert_eq!(end.reason, RecordingEnd::Stopped);
-    assert_eq!(end.at.session_sample.0, live_end);
+    assert_eq!(end.at.stream_sample.0, live_end);
     assert_eq!(s.device.backend, BackendKind::Fake);
     assert_eq!(s.audio.sample_rate, FS);
     assert!(
@@ -309,7 +309,7 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     let gap = &s.discontinuities[0];
     let xrun_frame = XRUN_BLOCK * u64::from(BLOCK);
     assert_eq!(gap.frame, xrun_frame);
-    assert_eq!(gap.session_sample.0, xrun_frame + u64::from(LOST));
+    assert_eq!(gap.stream_sample.0, xrun_frame + u64::from(LOST));
     assert_eq!(gap.lost_frames, u64::from(LOST));
     assert!(gap.causes.contains(&DiscontinuityCause::Xrun), "{gap:?}");
     let late = s
@@ -338,20 +338,20 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     assert_eq!(l[0].end, Some(RecordingEnd::Stopped));
 
     // Replay, as fast as the analyses take it: the same measurements run on the file.
-    let session = c.session(Command::SessionReplay {
+    let stream = c.stream(Command::StreamReplay {
         recording: RecordingRef::Name {
             name: "take 1".into(),
         },
         pace: ReplayPace::Fast,
     });
-    let open = session.open.clone().expect("open");
+    let open = stream.open.clone().expect("open");
     assert_eq!(open.backend, BackendKind::Replay);
     assert_eq!(open.replay.as_ref().map(|r| r.frames), Some(frames));
     assert_eq!(open.replay.as_ref().map(|r| r.end_sample.0), Some(live_end));
     assert_eq!(open.config.output_channels, 0);
     let g = c.state().generator;
     assert!(!g.armed && !g.firing, "a replay plays nothing");
-    wait_handed_on(&ka, session.epoch, live_end);
+    wait_handed_on(&ka, stream.epoch, live_end);
     let replay_spl = spl_level(&sub, live_end);
     let rep_tf = capture(&mut c, 1, "replay tf");
     let rep_spec = capture(&mut c, 2, "replay spec");
@@ -380,7 +380,7 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
 
     // Recording the replay (real time) gives back the recorded samples, bit for bit.
     let again_epoch = c
-        .session(Command::SessionReplay {
+        .stream(Command::StreamReplay {
             recording: RecordingRef::Path {
                 path: raw::sidecar_path(dir.path(), "take 1")
                     .to_string_lossy()
@@ -393,8 +393,8 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     wait_handed_on(&ka, again_epoch, live_end);
     let again = c.recording(Command::RecStop);
     assert!(again.frames > 0);
-    let (orig, _) = by_session_sample(dir.path(), "take 1");
-    let (copy, ch) = by_session_sample(dir.path(), "again");
+    let (orig, _) = by_stream_sample(dir.path(), "take 1");
+    let (copy, ch) = by_stream_sample(dir.path(), "again");
     assert_eq!(ch, 2);
     let first = copy[0].0;
     let start = orig.iter().position(|(s, _)| *s == first).expect("aligned");
@@ -412,12 +412,12 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     let s2 = raw::read_sidecar(dir.path(), "again").unwrap();
     if first <= xrun_frame {
         assert_eq!(s2.discontinuities.len(), 1, "the replay replays the xrun");
-        assert_eq!(s2.discontinuities[0].session_sample, gap.session_sample);
+        assert_eq!(s2.discontinuities[0].stream_sample, gap.stream_sample);
     }
     assert_eq!(s2.device.backend, BackendKind::Replay);
 
-    // A replayed session never had an input the recording lacks.
-    c.ok(Command::SessionClose);
+    // A replayed stream never had an input the recording lacks.
+    c.ok(Command::StreamClose);
     h.shutdown();
 }
 
@@ -438,8 +438,8 @@ fn replayed_rta_reads_a_steady_tone_alike() {
     let (mut c, _sub) = connect(&h, &[]);
     let ka = Sub::connect(h.context(), h.data_endpoint(), &[b"ka"]);
     let live_epoch = c
-        .session(Command::SessionOpen {
-            config: session(false),
+        .stream(Command::StreamOpen {
+            config: stream(false),
         })
         .epoch;
     c.ok(Command::MeasCreate {
@@ -496,7 +496,7 @@ fn replayed_rta_reads_a_steady_tone_alike() {
     c.ok(Command::RecStop);
 
     let epoch = c
-        .session(Command::SessionReplay {
+        .stream(Command::StreamReplay {
             recording: RecordingRef::Name {
                 name: "tone".into(),
             },
@@ -537,8 +537,8 @@ fn bounds_shutdown_and_a_dead_daemon_leave_finished_files() {
     cfg.recording_dir = Some(dir.path().to_owned());
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"evt"]);
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
 
     // The duration bound ends it by itself.
@@ -638,18 +638,18 @@ fn bounds_shutdown_and_a_dead_daemon_leave_finished_files() {
     );
     let s = raw::read_sidecar(dir.path(), "dead").unwrap();
     assert_eq!(s.end.map(|e| e.reason), Some(RecordingEnd::Interrupted));
-    // Replaying needs the inputs it recorded; a live session cannot be opened as a replay.
+    // Replaying needs the inputs it recorded; a live stream cannot be opened as a replay.
     let e = c
-        .call(Command::SessionOpen {
-            config: ac2_proto::model::SessionConfig {
+        .call(Command::StreamOpen {
+            config: ac2_proto::model::StreamConfig {
                 backend: Some(BackendKind::Replay),
-                ..session(false)
+                ..stream(false)
             },
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid);
     let e = c
-        .call(Command::SessionReplay {
+        .call(Command::StreamReplay {
             recording: RecordingRef::Name {
                 name: "nothing".into(),
             },

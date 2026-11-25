@@ -1,7 +1,7 @@
-//! `ac2 status` says when the open session's audio has stopped, why, and where reopening
-//! stands; the line goes once the daemon has reopened the session by itself. A simulated
-//! rig whose device vanishes and comes back. `ac2 session panel` opens the driver's
-//! control panel, and `session status` says what a change there did to the session.
+//! `ac2 status` says when the open stream's audio has stopped, why, and where reopening
+//! stands; the line goes once the daemon has reopened the stream by itself. A simulated
+//! rig whose device vanishes and comes back. `ac2 stream panel` opens the driver's
+//! control panel, and `stream status` says what a change there did to the stream.
 #![allow(clippy::unwrap_used)]
 
 use std::sync::Arc;
@@ -11,9 +11,9 @@ use ac2_audio::fake::{FakeDrive, Pace};
 use ac2_audio::{FakeBackend, FakeConfig};
 use ac2_client::Endpoints;
 use ac2_proto::Command;
-use ac2_proto::model::SessionConfig;
+use ac2_proto::model::StreamConfig;
 
-use super::common::{ac2, client, rig_on, session};
+use super::common::{ac2, client, rig_on, stream};
 
 async fn status(ep: &Endpoints, json: bool) -> String {
     run(ep, json, &["status"]).await
@@ -46,11 +46,11 @@ async fn status_shows_stopped_audio_until_the_daemon_reopens_it() {
     .unwrap();
     let (_h, ep) = rig_on(Arc::new(backend.clone()), |_| {});
     let c = client(&ep, "recovery-rig-test").await;
-    c.call(Command::SessionOpen {
-        config: SessionConfig {
+    c.call(Command::StreamOpen {
+        config: StreamConfig {
             sample_rate_hz: Some(48_000),
             buffer_frames: Some(256),
-            ..session(vec![0, 1])
+            ..stream(vec![0, 1])
         },
     })
     .await
@@ -76,26 +76,26 @@ async fn status_shows_stopped_audio_until_the_daemon_reopens_it() {
     );
     assert!(text.contains("\nAUDIO     open · "), "{text}");
     let json: serde_json::Value = serde_json::from_str(&status(&ep, true).await).unwrap();
-    assert_eq!(json["session"]["stopped"]["cause"]["type"], "host_ended");
-    assert_eq!(json["session"]["stopped"]["recovery"]["state"], "waiting");
+    assert_eq!(json["stream"]["stopped"]["cause"]["type"], "host_ended");
+    assert_eq!(json["stream"]["stopped"]["recovery"]["state"], "waiting");
 
     backend.restore();
-    let text = status_until(&ep, "reopened session", |t| !t.contains("STOPPED")).await;
+    let text = status_until(&ep, "reopened stream", |t| !t.contains("STOPPED")).await;
     assert!(text.contains("\nAUDIO     open · "), "{text}");
 }
 
-/// `ac2 session panel` on the open session's device; the operator picks 44.1 kHz and 512
-/// frames there; `session status` then shows the session at them and says the driver
+/// `ac2 stream panel` on the open stream's device; the operator picks 44.1 kHz and 512
+/// frames there; `stream status` then shows the stream at them and says the driver
 /// changed them.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn session_panel_opens_the_drivers_panel_and_status_says_what_it_changed() {
+async fn stream_panel_opens_the_drivers_panel_and_status_says_what_it_changed() {
     let backend = FakeBackend::new(FakeConfig {
         drive: FakeDrive::Thread(Pace::Realtime),
         ..FakeConfig::default()
     })
     .unwrap();
     let (_h, ep) = rig_on(Arc::new(backend.clone()), |_| {});
-    let fail = ac2(&ep, false, &["session", "panel"]).await;
+    let fail = ac2(&ep, false, &["stream", "panel"]).await;
     assert_ne!(fail.code, 0);
     assert!(
         fail.stderr
@@ -108,7 +108,7 @@ async fn session_panel_opens_the_drivers_panel_and_status_says_what_it_changed()
         &ep,
         false,
         &[
-            "session",
+            "stream",
             "open",
             "--backend",
             "fake",
@@ -122,7 +122,7 @@ async fn session_panel_opens_the_drivers_panel_and_status_says_what_it_changed()
     )
     .await;
     backend.script_panel(Some((44_100, 512)));
-    let said = run(&ep, false, &["session", "panel"]).await;
+    let said = run(&ep, false, &["stream", "panel"]).await;
     assert!(
         said.starts_with("fake: the driver's control panel is open"),
         "{said}"
@@ -131,7 +131,7 @@ async fn session_panel_opens_the_drivers_panel_and_status_says_what_it_changed()
 
     let deadline = Instant::now() + Duration::from_secs(30);
     let text = loop {
-        let t = run(&ep, false, &["session", "status"]).await;
+        let t = run(&ep, false, &["stream", "status"]).await;
         if t.contains("44.1 kHz") {
             break t;
         }

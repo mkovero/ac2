@@ -13,7 +13,7 @@ on:
   # `gh workflow run ci.yml --ref <branch> -f all_os=true` runs the macOS/Windows jobs on demand;
   # `-f full=true` runs the full test tier on Linux only. A push runs the quick tier.
   # `-f soak_minutes=60` adds the Windows job (if all_os did not) and runs its FlexASIO
-  # session that long, sampled once a minute (tools/release/windows-asio.ps1).
+  # stream that long, sampled once a minute (tools/release/windows-asio.ps1).
   workflow_dispatch:
     inputs:
       all_os:
@@ -23,7 +23,7 @@ on:
         type: boolean
         default: false
       soak_minutes:
-        description: Minutes of the Windows FlexASIO session soak (0 = the 30 s run); the job's 6 h limit includes the build
+        description: Minutes of the Windows FlexASIO stream soak (0 = the 30 s run); the job's 6 h limit includes the build
         type: number
         default: 0
 
@@ -272,7 +272,7 @@ jobs:
 
       # The app on the same driver: ac2-ui starts the ac2d beside it on ASIO
       # (`ac2d --backend asio`, stopped when the app quits), receives the device list with
-      # FlexASIO in it, and quits on its own (`--smoke`). No session opens, so nothing plays.
+      # FlexASIO in it, and quits on its own (`--smoke`). No stream opens, so nothing plays.
       # Runs after the step above, whose daemon has stopped and let the driver go.
       - name: ac2-ui on FlexASIO (ac2d started by the app)
         if: runner.os == 'Windows' && !cancelled()

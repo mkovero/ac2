@@ -585,7 +585,7 @@ mod tests {
     }
 
     /// Below 20 Hz and above 20 kHz the axis labels as it does in between: a sub's bottom
-    /// octaves and the top of a 192 or 384 kHz session read off the same decade ticks.
+    /// octaves and the top of a 192 or 384 kHz stream read off the same decade ticks.
     #[test]
     fn the_axis_labels_infrasonic_and_ultrasonic_ranges() {
         assert_eq!(

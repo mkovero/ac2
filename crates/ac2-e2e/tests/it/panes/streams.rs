@@ -3,7 +3,7 @@
 
 use super::{hint_line, new_spectrum, spectrum_panes};
 use crate::harness::{
-    Driver, NAME, R, connected, measure_from_empty, measuring, measuring_kept, session_from_empty,
+    Driver, NAME, R, connected, measure_from_empty, measuring, measuring_kept, stream_from_empty,
 };
 use ac2_client::{ClientConfig, Endpoints};
 use ac2_proto::FrameData;
@@ -343,7 +343,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
 
 /// From an empty daemon: measure, then record from the palette while the noise plays — the
 /// top bar shows REC with the audio's length and size, then what was recorded — and replay
-/// the recording from the palette: the session plays the file, the bar says so, and the
+/// the recording from the palette: the stream plays the file, the bar says so, and the
 /// transfer function shows the rig's path again from the recorded inputs.
 #[test]
 fn record_and_replay_from_the_app() -> R {
@@ -415,15 +415,15 @@ fn record_and_replay_from_the_app() -> R {
     d.key("Enter");
     d.send(Msg::Text(run.name.clone()));
     d.key("Enter");
-    d.until("the replay session", |s| {
-        s.open_session().is_some_and(|o| o.replay.is_some())
+    d.until("the replay stream", |s| {
+        s.open_stream().is_some_and(|o| o.replay.is_some())
     })?;
     let replay = d.st.replay_label().ok_or("no replay label")?;
     assert!(
         replay.starts_with(&format!("REPLAY {} · 0:0", run.name)),
         "{replay}"
     );
-    let epoch = d.st.daemon().map(|x| x.session.epoch).ok_or("state")?;
+    let epoch = d.st.daemon().map(|x| x.stream.epoch).ok_or("state")?;
     let topic = Topic::Data {
         meas,
         stream: Stream::Tf,
@@ -431,7 +431,7 @@ fn record_and_replay_from_the_app() -> R {
     d.until("the −6 dB path at 1 kHz from the recording", |s| {
         s.rig.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| {
-                f.frame.stamp.session_epoch == epoch
+                f.frame.stamp.stream_epoch == epoch
                     && match &f.frame.data {
                         FrameData::Tf(tf) => tf
                             .mag
@@ -458,7 +458,7 @@ fn record_and_replay_from_the_app() -> R {
 fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
     let (_daemon, mut d) = connected()?;
     // No transfer measurement: its own panes would come with its row on the Tab round.
-    session_from_empty(&mut d)?;
+    stream_from_empty(&mut d)?;
     // Spectrum 1 made with the empty spectrum pane focused takes it; Spectrum 2 opens
     // beside it, a pane the helper closes, so the split below is the only other one.
     d.key("Alt+2");

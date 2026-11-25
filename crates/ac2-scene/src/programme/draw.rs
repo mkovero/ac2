@@ -32,7 +32,7 @@ impl ProgrammeScene {
 }
 
 /// Builds the pane at `size`. `missing`: what the pane says instead of its meters when the
-/// inputs it names are not in the session ([`super::missing_text`]).
+/// inputs it names are not in the stream ([`super::missing_text`]).
 pub fn programme_scene(
     p: &ProgrammePane,
     style: Style,

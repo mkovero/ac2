@@ -1,6 +1,6 @@
 //! Remote inputs on the Audio I/O page (`docs/design/remote-inputs.md` §5): the add dialog's
 //! model and the pure parts of pairing two rigs (the name one rig is admitted under on the
-//! other, the address the session's rig reaches the source at). The reducer side is in
+//! other, the address the stream's rig reaches the source at). The reducer side is in
 //! `state/remote_impl.rs`; every word is `ac2_scene::remote_inputs`'.
 
 use ac2_proto::model::{MeasKind, RemoteInput};
@@ -29,7 +29,7 @@ pub struct RemoteRows {
 pub enum PickLine {
     /// Words: why a rig's inputs cannot be taken, or why none can.
     Text { text: String, problem: bool },
-    /// An input of rig `rig` (its device input `channel`), `added` when the session has it.
+    /// An input of rig `rig` (its device input `channel`), `added` when the stream has it.
     Input {
         rig: RigId,
         channel: u16,
@@ -127,7 +127,7 @@ pub fn peer_endpoints(
     Some((tcp(&host, ctrl_port), tcp(&host, data_port)))
 }
 
-/// The session channels measurement kind `kind` names.
+/// The stream channels measurement kind `kind` names.
 pub fn meas_channels(kind: &MeasKind) -> Vec<u16> {
     match kind {
         MeasKind::Spectrum { config } => vec![config.input],
@@ -144,7 +144,7 @@ pub fn meas_channels(kind: &MeasKind) -> Vec<u16> {
     }
 }
 
-/// The slot of a new remote input: past every slot the session has and every remote
+/// The slot of a new remote input: past every slot the stream has and every remote
 /// channel a measurement names (`used`), so a slot is never given to another input while
 /// a measurement may still name it.
 pub fn next_slot(remote: &[RemoteInput], used: impl IntoIterator<Item = u16>) -> Option<u16> {

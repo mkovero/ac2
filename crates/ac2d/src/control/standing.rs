@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use ac2_proto::model::{
-    CantTellReason, PeerClock, PeerRelation, RemoteLink, StandingRig, StandingSession,
+    CantTellReason, PeerClock, PeerRelation, RemoteLink, StandingRig, StandingStream,
 };
 use ac2_proto::units::{RigId, Seconds, WallNs};
 
@@ -25,11 +25,11 @@ impl Control {
         let ours = st.clocks.clone();
         let peers = st.remote.peers.clone();
         let our_stamps = self
-            .session
+            .stream
             .as_ref()
             .is_none_or(|rt| capture_stamps(rt.open.backend));
         let set_offset = self
-            .session
+            .stream
             .as_ref()
             .and_then(|rt| rt.open.config.link_offset)
             .map(|s| s.0);
@@ -51,17 +51,17 @@ impl Control {
             // Linked but neither its state nor its feed heard yet: nothing is missing, it
             // is only early.
             let early = up && (src.is_none() || report.is_none());
-            let their_session = src.is_some_and(|s| s.session.is_some());
+            let their_stream = src.is_some_and(|s| s.stream.is_some());
             let absent = match report.map(|r| r.absent) {
                 _ if !up => Some(CantTellReason::LinkDown),
                 None | Some(Some(Absent::Marks)) => Some(CantTellReason::NoMarks),
                 Some(None) => None,
-                Some(Some(Absent::OurSession)) => {
-                    Some(CantTellReason::NoSession { rig: self.s.rig_id })
+                Some(Some(Absent::OurStream)) => {
+                    Some(CantTellReason::NoStream { rig: self.s.rig_id })
                 }
-                // Its state shows a session yet no frame comes: its levels, not its session.
-                Some(Some(Absent::TheirFrames)) if their_session => Some(CantTellReason::NoMarks),
-                Some(Some(Absent::TheirFrames)) => Some(CantTellReason::NoSession { rig: p.rig }),
+                // Its state shows a stream yet no frame comes: its levels, not its stream.
+                Some(Some(Absent::TheirFrames)) if their_stream => Some(CantTellReason::NoMarks),
+                Some(Some(Absent::TheirFrames)) => Some(CantTellReason::NoStream { rig: p.rig }),
             };
             let fed = report.filter(|_| absent.is_none());
             let evidence = Evidence {
@@ -69,7 +69,7 @@ impl Control {
                 theirs: (p.rig, src.map(|s| &s.clocks)),
                 capture_stamps: our_stamps
                     && src
-                        .and_then(|s| s.session.as_ref())
+                        .and_then(|s| s.stream.as_ref())
                         .is_none_or(|s| s.capture_stamps),
                 long: fed.and_then(|r| r.long),
                 short: fed.and_then(|r| r.short),
@@ -101,10 +101,10 @@ impl Control {
                 figures,
                 wall,
             );
-            let session = report
+            let stream = report
                 .filter(|_| up)
                 .and_then(|r| r.levels.as_deref())
-                .map(|f| StandingSession {
+                .map(|f| StandingStream {
                     sample_rate_hz: f.meta.sample_rate_hz,
                     channels: f.meta.channels.clone(),
                 });
@@ -112,7 +112,7 @@ impl Control {
                 rig: p.rig,
                 name,
                 link,
-                session,
+                stream,
                 clock,
                 marks_since: shown.marks_since.filter(|_| fed.is_some()),
                 counting: shown.counting.filter(|_| !early),

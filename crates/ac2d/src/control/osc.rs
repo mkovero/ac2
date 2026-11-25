@@ -1,7 +1,7 @@
 //! OSC cues: the state of every cued limit of the SPL meters, sent to the rig's OSC target.
 //!
 //! The table is reconciled against the state after every message the control thread
-//! handles, so every path that ends a meter's judging (a closed session, a lost device, a
+//! handles, so every path that ends a meter's judging (a closed stream, a lost device, a
 //! stopped or deleted measurement, a removed cue) reaches the lights without its own hook:
 //! - a meter whose job is not running is `fault` on every cue: the rig cannot judge;
 //! - a running meter's subjects follow the job's latest report (`not_calibrated` is
@@ -341,7 +341,7 @@ impl Control {
                 continue;
             };
             let cued = has_cue(config);
-            let mut live = self.session.is_some() && self.jobs.contains_key(&m.id);
+            let mut live = self.stream.is_some() && self.jobs.contains_key(&m.id);
             if live && cued {
                 let seen = *self.rig.osc.alive.entry(m.id).or_insert(now);
                 live = now.saturating_duration_since(seen) < STALE;

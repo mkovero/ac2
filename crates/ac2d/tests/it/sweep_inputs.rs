@@ -89,10 +89,10 @@ fn two_mic_setup(
     c.ok(Command::Hello {
         client: "sweep inputs test".into(),
     });
-    c.ok(Command::SessionOpen {
-        config: ac2_proto::model::SessionConfig {
+    c.ok(Command::StreamOpen {
+        config: ac2_proto::model::StreamConfig {
             input_channels: vec![0, 1, 2],
-            ..session(true)
+            ..stream(true)
         },
     });
     let d = driver(&backend);
@@ -293,7 +293,7 @@ fn inputs_that_make_no_run_are_refused() {
     );
     let e = c.update(meas, make(vec![2, 2])).unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
-    // An input the session does not capture is refused at the run, before anything plays.
+    // An input the stream does not capture is refused at the run, before anything plays.
     let uncaptured = create(
         &mut c,
         "uncaptured",

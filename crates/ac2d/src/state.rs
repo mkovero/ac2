@@ -10,10 +10,10 @@ use std::time::Instant;
 
 use ac2_proto::event::{Change, Event, Patch, StateSnapshot};
 use ac2_proto::model::{
-    Autosave, AutosaveState, Clocks, Generator, Rig, Session, State, TimingState, TimingStatus,
+    Autosave, AutosaveState, Clocks, Generator, Rig, State, Stream, TimingState, TimingStatus,
     WorkingSession,
 };
-use ac2_proto::units::{DaemonIncarnation, Dbfs, Rev, SessionEpoch};
+use ac2_proto::units::{DaemonIncarnation, Dbfs, Rev, StreamEpoch};
 
 use crate::config::ReplayLimits;
 
@@ -27,12 +27,12 @@ pub(crate) struct Store {
 }
 
 impl Store {
-    /// Fresh state of a new incarnation: no session, disarmed generator with no owner.
+    /// Fresh state of a new incarnation: no stream, disarmed generator with no owner.
     pub(crate) fn new(ceiling: Dbfs, ceiling_bound: Dbfs, limits: ReplayLimits) -> Self {
         Self {
             state: State {
-                session: Session {
-                    epoch: SessionEpoch(0),
+                stream: Stream {
+                    epoch: StreamEpoch(0),
                     open: None,
                     stopped: None,
                 },
@@ -208,7 +208,7 @@ impl Store {
             state: self.state.clone(),
             rev: self.rev,
             daemon_incarnation: incarnation,
-            session_epoch: self.state.session.epoch,
+            stream_epoch: self.state.stream.epoch,
         }
     }
 }
@@ -231,7 +231,7 @@ fn upsert<T: Clone, K: PartialEq>(v: &mut Vec<T>, patch: &Patch<T, K>, key: impl
 /// Applies one change: plain assignment of the entity's new value.
 pub(crate) fn apply(s: &mut State, c: &Change) {
     match c {
-        Change::Session(x) => s.session = x.clone(),
+        Change::Stream(x) => s.stream = x.clone(),
         Change::Measurement(p) => upsert(&mut s.measurements, p, |m| m.id),
         Change::Trace(p) => upsert(&mut s.traces, p, |t| t.id),
         Change::Generator(g) => s.generator = g.clone(),

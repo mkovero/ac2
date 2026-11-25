@@ -1,6 +1,6 @@
 //! `ac2 osc …`, `ac2 cue …`, `ac2 rig …` and `ac2 meas scope` against a real daemon on the simulated rig:
 //! a meter made the rig's, its cues set and shown by name, the OSC target and the monitor
-//! at start, and the warning a `session close` prints while a rig meter runs.
+//! at start, and the warning a `stream close` prints while a rig meter runs.
 #![allow(clippy::unwrap_used)]
 
 use std::net::UdpSocket;
@@ -31,11 +31,7 @@ async fn rig_meter_cues_status_and_close_warning() {
         cfg.rig_logs = Some(dir.path().join("rig-logs"));
     });
 
-    ok(
-        &ep,
-        &["session", "open", "--backend", "fake", "--in", "1-4"],
-    )
-    .await;
+    ok(&ep, &["stream", "open", "--backend", "fake", "--in", "1-4"]).await;
     ok(
         &ep,
         &["meas", "new", "spl", "--input", "1", "--name", "Stage"],
@@ -128,8 +124,8 @@ async fn rig_meter_cues_status_and_close_warning() {
     let (q, _) = ok(&ep, &["cue", "Stage", "meter", "--clear"]).await;
     assert!(q["cue"].is_null(), "{q}");
 
-    // Closing the session leaves the rig meter blind: the reply's warning, by name.
-    let (_, se) = ok(&ep, &["session", "close"]).await;
+    // Closing the stream leaves the rig meter blind: the reply's warning, by name.
+    let (_, se) = ok(&ep, &["stream", "close"]).await;
     let w: Value = serde_json::from_str(se.trim()).unwrap_or_else(|e| panic!("{e}: {se}"));
     let w = w["warning"].as_str().unwrap();
     assert!(
@@ -137,7 +133,7 @@ async fn rig_meter_cues_status_and_close_warning() {
         "{w}"
     );
     // Closed already: nothing to warn about.
-    let (_, se) = ok(&ep, &["session", "close"]).await;
+    let (_, se) = ok(&ep, &["stream", "close"]).await;
     assert!(se.is_empty(), "{se}");
 
     ok(&ep, &["osc", "target", "off"]).await;

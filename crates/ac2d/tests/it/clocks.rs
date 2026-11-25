@@ -63,8 +63,8 @@ fn run(name: &str, audio_ppm: f64, crystal_ppm: f64) -> (f64, ClockBasis) {
         assert_eq!(before.system, SystemClock::NotStated);
     }
 
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     let mut d = driver(&backend);
     let opened = clocks(&sub, |c| c.capture.is_some());
@@ -92,7 +92,7 @@ fn run(name: &str, audio_ppm: f64, crystal_ppm: f64) -> (f64, ClockBasis) {
     };
     assert!(span.0 > 54.0 && span.0 <= 60.0, "{span:?}");
 
-    c.ok(Command::SessionClose);
+    c.ok(Command::StreamClose);
     clocks(&sub, |c| c.capture.is_none());
     (ppm, against)
 }

@@ -45,7 +45,7 @@ fn wall_ns() -> i128 {
 }
 
 /// Each instant recorded as `"now-<ns>"` (how long before the recording's end it was) put
-/// that long before `now`: a session opened a minute before the recording reads as opened a
+/// that long before `now`: a stream opened a minute before the recording reads as opened a
 /// minute ago, whenever the test runs.
 fn rebase(v: &mut serde_json::Value, now: i128) {
     use serde_json::Value;
@@ -62,17 +62,17 @@ fn rebase(v: &mut serde_json::Value, now: i128) {
     }
 }
 
-/// The state of a daemon just started, with no session (as on real audio).
+/// The state of a daemon just started, with no stream (as on real audio).
 pub fn empty_state() -> State {
     load("empty_state.json")
 }
 
-/// `session.devices` on the simulated rig: its one backend and device.
+/// `stream.devices` on the simulated rig: its one backend and device.
 pub fn backends() -> Vec<BackendInfo> {
-    load("session_devices.json")
+    load("stream_devices.json")
 }
 
-/// `session.detect_loopback` on the simulated rig, out 1 at −30 dBFS: in 1 is the loopback.
+/// `stream.detect_loopback` on the simulated rig, out 1 at −30 dBFS: in 1 is the loopback.
 pub fn detection() -> LoopbackDetection {
     load("detect_loopback.json")
 }

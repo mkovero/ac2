@@ -158,7 +158,7 @@ jobs:
           "$d/bin/ac2d" --backend fake > "$t/ac2d.log" 2>&1 &
           for _ in $(seq 100); do [ -S "$AC2_RUNTIME_DIR/ctrl.sock" ] && break; sleep 0.1; done
           "$d/bin/ac2" status
-          "$d/bin/ac2" session open --backend fake --in 1-2
+          "$d/bin/ac2" stream open --backend fake --in 1-2
           "$d/bin/ac2" meas new tf --ref 1 --meas 2 --name smoke
           "$d/bin/ac2" meas list
           "$d/bin/ac2" daemon stop
@@ -251,14 +251,14 @@ jobs:
           $d = Start-Process "$dir\ac2d.exe" -ArgumentList '--backend','fake' -PassThru -RedirectStandardError ac2d.log
           Start-Sleep -Seconds 2
           & "$dir\ac2.exe" status; if ($LASTEXITCODE -ne 0) { Get-Content ac2d.log; exit 1 }
-          & "$dir\ac2.exe" session open --backend fake --in 1-2; if ($LASTEXITCODE -ne 0) { exit 1 }
+          & "$dir\ac2.exe" stream open --backend fake --in 1-2; if ($LASTEXITCODE -ne 0) { exit 1 }
           & "$dir\ac2.exe" meas new tf --ref 1 --meas 2 --name smoke; if ($LASTEXITCODE -ne 0) { exit 1 }
           & "$dir\ac2.exe" meas list; if ($LASTEXITCODE -ne 0) { exit 1 }
           & "$dir\ac2.exe" daemon stop; if ($LASTEXITCODE -ne 0) { Get-Content ac2d.log; exit 1 }
           $d.WaitForExit(10000) | Out-Null
       # The installed binaries on real ASIO, not only the fake rig: FlexASIO over a VB-CABLE
       # loop (hosted runners have no audio interface), set up as ci.yml's Windows audio pass
-      # does. A short session; outputs stay silent.
+      # does. A short stream; outputs stay silent.
       - name: Virtual audio cable (VB-CABLE)
         uses: LABSN/sound-ci-helpers@e9d6ba52163a3283714a68412036ddf33f78d49c # main, 2026-06
       - name: Windows Audio service

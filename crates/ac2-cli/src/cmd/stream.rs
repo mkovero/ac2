@@ -1,5 +1,5 @@
-//! `ac2 devices` and `ac2 session open|close|status|replay|inputs`: the live audio
-//! session; the saved-session verbs go on to `sessions`.
+//! `ac2 devices` and `ac2 stream open|close|status|replay|inputs|link-offset|panel`: the
+//! live audio stream.
 
 use ac2_client::expect_body;
 use ac2_proto::model::*;
@@ -14,8 +14,8 @@ use ac2_audio::Direction;
 
 pub(crate) async fn devices(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
-    let r = c.call(Command::SessionDevices).await?;
-    let d = expect_body!("session.devices", r, ReplyBody::Backends(d) => d)?;
+    let r = c.call(Command::StreamDevices).await?;
+    let d = expect_body!("stream.devices", r, ReplyBody::Backends(d) => d)?;
     out.emit(&d, || output::devices(&d))?;
     Ok(())
 }
@@ -48,16 +48,12 @@ fn backend(b: BackendArg) -> BackendKind {
     }
 }
 
-pub(crate) async fn session(
-    cli: &Cli,
-    cmd: &SessionCmd,
-    out: &mut Out<'_>,
-) -> Result<(), CliError> {
+pub(crate) async fn stream(cli: &Cli, cmd: &StreamCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
     match cmd {
-        SessionCmd::Open(o) => {
-            let r = c.call(Command::SessionDevices).await?;
-            let backends = expect_body!("session.devices", r, ReplyBody::Backends(d) => d)?;
+        StreamCmd::Open(o) => {
+            let r = c.call(Command::StreamDevices).await?;
+            let backends = expect_body!("stream.devices", r, ReplyBody::Backends(d) => d)?;
             let want = backend(o.backend);
             let Some(b) = backends.iter().find(|b| b.kind == want) else {
                 return Err(CliError::Usage(format!(
@@ -116,8 +112,8 @@ pub(crate) async fn session(
             } else {
                 super::remote::remote_inputs(&super::state(&c).await?, &o.remote_in)?
             };
-            input_channels.extend(remote_inputs.iter().map(RemoteInput::session_channel));
-            let config = SessionConfig {
+            input_channels.extend(remote_inputs.iter().map(RemoteInput::stream_channel));
+            let config = StreamConfig {
                 backend: Some(want),
                 input_device: DeviceSelector::Id { id: dev.id.clone() },
                 output_device: DeviceSelector::Id {
@@ -132,8 +128,8 @@ pub(crate) async fn session(
                 remote_inputs,
                 link_offset: o.link_offset.map(|t| t.0),
             };
-            let (r, warnings) = c.call_warned(Command::SessionOpen { config }).await?;
-            let s = expect_body!("session.open", r, ReplyBody::Session(s) => s)?;
+            let (r, warnings) = c.call_warned(Command::StreamOpen { config }).await?;
+            let s = expect_body!("stream.open", r, ReplyBody::Stream(s) => s)?;
             super::osc::note_warnings(&c, &warnings, out).await;
             let inputs = if o.mics.is_empty() {
                 None
@@ -141,26 +137,26 @@ pub(crate) async fn session(
                 Some(
                     super::cal::set_inputs(
                         &c,
-                        &crate::args::SessionInputs {
+                        &crate::args::StreamInputs {
                             mics: o.mics.clone(),
-                            ..crate::args::SessionInputs::default()
+                            ..crate::args::StreamInputs::default()
                         },
                     )
                     .await?,
                 )
             };
             out.emit(&s, || match &inputs {
-                None => output::session(&s),
+                None => output::stream(&s),
                 Some(i) => format!(
                     "{}\n{}",
-                    output::session(&s),
+                    output::stream(&s),
                     output::inputs(i, crate::watch::now_wall())
                 ),
             })?;
         }
-        SessionCmd::LinkOffset { offset } => {
+        StreamCmd::LinkOffset { offset } => {
             let st = state(&c).await?;
-            let Some(open) = st.session.open else {
+            let Some(open) = st.stream.open else {
                 return Err(CliError::Usage("no audio I/O open: open one first".into()));
             };
             let mut config = open.config;
@@ -168,71 +164,44 @@ pub(crate) async fn session(
                 crate::args::LinkOffsetArg::Default => None,
                 crate::args::LinkOffsetArg::Set(t) => Some(t.0),
             };
-            let (r, warnings) = c.call_warned(Command::SessionOpen { config }).await?;
-            let s = expect_body!("session.open", r, ReplyBody::Session(s) => s)?;
+            let (r, warnings) = c.call_warned(Command::StreamOpen { config }).await?;
+            let s = expect_body!("stream.open", r, ReplyBody::Stream(s) => s)?;
             super::osc::note_warnings(&c, &warnings, out).await;
-            out.emit(&s, || output::session(&s))?;
+            out.emit(&s, || output::stream(&s))?;
         }
-        SessionCmd::Close => {
-            let (r, warnings) = c.call_warned(Command::SessionClose).await?;
-            let rev = expect_body!("session.close", r, ReplyBody::Ack { rev } => rev)?;
+        StreamCmd::Close => {
+            let (r, warnings) = c.call_warned(Command::StreamClose).await?;
+            let rev = expect_body!("stream.close", r, ReplyBody::Ack { rev } => rev)?;
             super::osc::note_warnings(&c, &warnings, out).await;
             out.emit(&json!({ "rev": rev }), || "audio I/O closed".to_owned())?;
         }
-        SessionCmd::Status => {
-            let r = c.call(Command::SessionStatus).await?;
-            let s = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
-            let st = state(&c).await?;
-            let logs =
-                output::log_failures(&st.autosave, &st.measurements, crate::watch::now_wall());
-            let (autosave, recording, working) = (st.autosave, st.recording, st.working);
+        StreamCmd::Status => {
+            let r = c.call(Command::StreamStatus).await?;
+            let s = expect_body!("stream.status", r, ReplyBody::Stream(s) => s)?;
+            let recording = state(&c).await?.recording;
             let mut j = json!(s);
-            j["autosave"] = json!(autosave);
-            j["working"] = json!(working);
             j["recording"] = json!(recording);
             out.emit(&j, || {
-                let mut t = format!(
-                    "{}\n{}",
-                    output::session(&s),
-                    output::autosave(&autosave, crate::watch::now_wall())
-                );
-                for l in &logs {
-                    t.push('\n');
-                    t.push_str(l);
-                }
-                t.push('\n');
-                t.push_str(&super::sessions::status_lines(
-                    &working,
-                    crate::watch::now_wall(),
-                ));
+                let mut t = output::stream(&s);
                 if let Some(r) = &recording {
                     t.push_str(&format!("\nrecording    {}", output::recording_line(r)));
                 }
                 t
             })?;
         }
-        SessionCmd::New { .. }
-        | SessionCmd::Save
-        | SessionCmd::SaveAs { .. }
-        | SessionCmd::Load { .. }
-        | SessionCmd::Recover
-        | SessionCmd::Salvage { .. }
-        | SessionCmd::Export { .. }
-        | SessionCmd::Import { .. }
-        | SessionCmd::List => super::sessions::session(cli, &c, cmd, out).await?,
-        SessionCmd::Replay { recording, fast } => {
+        StreamCmd::Replay { recording, fast } => {
             super::rec::replay(cli, &c, recording, *fast, out).await?;
         }
-        SessionCmd::Inputs(a) => return super::cal::session_inputs(cli, a, out).await,
-        SessionCmd::Panel { backend: b, device } => {
+        StreamCmd::Inputs(a) => return super::cal::stream_inputs(cli, a, out).await,
+        StreamCmd::Panel { backend: b, device } => {
             let (kind, id) = panel_target(&c, b.map(backend), device.as_deref()).await?;
             let r = c
-                .call(Command::SessionControlPanel {
+                .call(Command::StreamControlPanel {
                     backend: kind,
                     device: id.clone(),
                 })
                 .await?;
-            expect_body!("session.control_panel", r, ReplyBody::Ack { rev } => rev)?;
+            expect_body!("stream.control_panel", r, ReplyBody::Ack { rev } => rev)?;
             out.emit(&json!({ "backend": kind, "device": id }), || {
                 let panel = match kind {
                     BackendKind::CoreAudio => "Audio MIDI Setup",
@@ -249,15 +218,15 @@ pub(crate) async fn session(
     Ok(())
 }
 
-/// The device whose control panel `session panel` opens: the one named, else the open
-/// session's, else the backend's default.
+/// The device whose control panel `stream panel` opens: the one named, else the open
+/// stream's, else the backend's default.
 async fn panel_target(
     c: &ac2_client::Client,
     want: Option<BackendKind>,
     device: Option<&str>,
 ) -> Result<(BackendKind, DeviceId), CliError> {
     let st = state(c).await?;
-    let open = st.session.open.as_ref().filter(|o| o.replay.is_none());
+    let open = st.stream.open.as_ref().filter(|o| o.replay.is_none());
     let kind = match (want, open) {
         (Some(k), _) => k,
         (None, Some(o)) => o.backend,
@@ -273,8 +242,8 @@ async fn panel_target(
     {
         return Ok((kind, o.input_device.clone()));
     }
-    let r = c.call(Command::SessionDevices).await?;
-    let backends = expect_body!("session.devices", r, ReplyBody::Backends(d) => d)?;
+    let r = c.call(Command::StreamDevices).await?;
+    let backends = expect_body!("stream.devices", r, ReplyBody::Backends(d) => d)?;
     let Some(b) = backends.iter().find(|b| b.kind == kind) else {
         return Err(CliError::Usage(format!(
             "the daemon offers no {kind:?} backend (see `ac2 devices`)"
@@ -285,7 +254,7 @@ async fn panel_target(
     Ok((kind, dev.id.clone()))
 }
 
-/// The capture and playback devices `session open` asks for. Unnamed capture: the host's
+/// The capture and playback devices `stream open` asks for. Unnamed capture: the host's
 /// default capture device (or the only one). Unnamed playback: the capture device itself
 /// when it plays (one device, one clock where the host allows it), else the host's default
 /// playback device, else the capture device (which then has no outputs to offer).
@@ -385,14 +354,14 @@ mod tests {
     }
 
     #[test]
-    fn session_open_takes_a_count_of_spare_inputs() {
+    fn stream_open_takes_a_count_of_spare_inputs() {
         use clap::Parser;
-        let argv = ["ac2", "session", "open", "--backend", "jack", "--in", "1-2"];
+        let argv = ["ac2", "stream", "open", "--backend", "jack", "--in", "1-2"];
         let spare = |extra: &[&str]| match crate::Cli::try_parse_from(argv.iter().chain(extra))
             .map(|c| c.cmd)
         {
-            Ok(crate::args::Cmd::Session {
-                cmd: SessionCmd::Open(o),
+            Ok(crate::args::Cmd::Stream {
+                cmd: StreamCmd::Open(o),
             }) => Some(o.spare_inputs),
             _ => None,
         };

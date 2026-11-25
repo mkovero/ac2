@@ -1,4 +1,4 @@
-//! `ac2 session open` with the playback on another device than the capture: a simulated rig
+//! `ac2 stream open` with the playback on another device than the capture: a simulated rig
 //! listed as an input-only and an output-only device (as an OS lists a built-in mic and
 //! speakers).
 #![allow(clippy::unwrap_used)]
@@ -17,7 +17,7 @@ async fn ac2(ep: &Endpoints, args: &[&str]) -> (u8, String, String) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn session_open_plays_on_the_out_device() {
+async fn stream_open_plays_on_the_out_device() {
     let backend = FakeBackend::new(FakeConfig {
         drive: FakeDrive::Manual,
         endpoints: FakeEndpoints::Split,
@@ -35,7 +35,7 @@ async fn session_open_plays_on_the_out_device() {
     // plays.
     let open = |extra: &'static [&'static str]| {
         let mut a = vec![
-            "session",
+            "stream",
             "open",
             "--backend",
             "fake",
@@ -57,11 +57,7 @@ async fn session_open_plays_on_the_out_device() {
 
     // Nothing named: the system default capture and playback endpoints, not a refusal
     // for listing more than one device.
-    let (code, text, err) = ac2(
-        &ep,
-        &["session", "open", "--backend", "fake", "--in", "1-2"],
-    )
-    .await;
+    let (code, text, err) = ac2(&ep, &["stream", "open", "--backend", "fake", "--in", "1-2"]).await;
     assert_eq!(code, 0, "{text} {err}");
     assert!(text.contains(FAKE_INPUT_ID), "{text}");
     assert!(
@@ -91,7 +87,7 @@ async fn session_open_plays_on_the_out_device() {
     let (code, text, err) = ac2(
         &ep,
         &[
-            "session",
+            "stream",
             "open",
             "--backend",
             "fake",

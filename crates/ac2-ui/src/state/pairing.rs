@@ -357,10 +357,10 @@ impl AppState {
         }
     }
 
-    /// The open session of `r`'s remote inputs taken from rig `from`, by name.
+    /// The open stream of `r`'s remote inputs taken from rig `from`, by name.
     fn inputs_from(&self, r: &RigState, from: RigId) -> Vec<String> {
         r.daemon()
-            .and_then(|s| s.session.open.as_ref())
+            .and_then(|s| s.stream.open.as_ref())
             .map(|o| {
                 o.config
                     .remote_inputs
@@ -375,8 +375,8 @@ impl AppState {
     /// Unpairs the rig shown and rig `rig`: this rig drops it from its paired rigs and
     /// revokes its admission, and so does `rig` when the app reaches it. Refused, with
     /// nothing sent, while the app is not connected to the rig shown (its halves are not
-    /// known), or while a session the app sees takes inputs from the other rig: those inputs
-    /// would lose their link under a running session.
+    /// known), or while a stream the app sees takes inputs from the other rig: those inputs
+    /// would lose their link under a running stream.
     pub(super) fn unpair(&mut self, rig: RigId, out: &mut Vec<Request>) {
         let me = self.rig_label(&self.rig);
         if !connected(&self.rig) {

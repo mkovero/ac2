@@ -8,9 +8,9 @@ use crate::frame::{
     GonioFrame, GonioPair, HarmonicLevel, HarmonicReading, IrFrame, IrMeta, KaMeta, LeqFlags,
     LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMark, LevelsMeta, LoudnessSource,
     MathState, OperandState, OperandStatus, PairLevels, PreviewLevelsFrame, PreviewLevelsMeta,
-    ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SessionLevelsMeta, SourceLevelsFrame,
-    SourceLevelsMeta, SourceLoudness, SpecBand, SpecBands, SpecFrame, SpecHarmonics, SpecMeta,
-    SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
+    ProtectionFlags, RtaFrame, RtaMeta, SourceLevelsFrame, SourceLevelsMeta, SourceLoudness,
+    SpecBand, SpecBands, SpecFrame, SpecHarmonics, SpecMeta, SplFrame, SplMeta, StreamLevelsFrame,
+    StreamLevelsMeta, TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -37,7 +37,7 @@ pub fn stamp(grid: Option<GridDef>) -> FrameStamp {
     FrameStamp {
         seq: 1234,
         audio_sample: SampleIndex(48_000 * 3600),
-        session_epoch: SessionEpoch(2),
+        stream_epoch: StreamEpoch(2),
         daemon_incarnation: DaemonIncarnation(0x5eed_5eed_5eed_5eed),
         config_rev: Rev(40),
         config_applied_at: SampleIndex(48_000 * 3500),
@@ -483,8 +483,8 @@ pub fn frames() -> Vec<Frame> {
                 protection: ProtectionFlags::NONE,
                 ..stamp(None)
             },
-            data: FrameData::SessionLevels(SessionLevelsFrame {
-                meta: SessionLevelsMeta {
+            data: FrameData::StreamLevels(StreamLevelsFrame {
+                meta: StreamLevelsMeta {
                     channels: vec![0, 1, 2],
                     ballistic: Ballistic::Type1,
                     pair_levels: vec![PairLevels {
@@ -523,7 +523,7 @@ pub fn frames() -> Vec<Frame> {
                 protection: ProtectionFlags::NONE,
                 ..stamp(None)
             },
-            data: FrameData::SessionGonio(gonio_frame()),
+            data: FrameData::StreamGonio(gonio_frame()),
         },
         Frame {
             stamp: FrameStamp {
@@ -644,8 +644,8 @@ pub fn frames() -> Vec<Frame> {
                     audio: Some(AudioHealth {
                         load: Some(0.125),
                         peak: Some(0.5),
-                        session_load: None,
-                        session_peak: Some(0.75),
+                        stream_load: None,
+                        stream_peak: Some(0.75),
                         xruns: 3,
                     }),
                 },

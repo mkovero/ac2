@@ -27,10 +27,10 @@ impl AppState {
         Ok(())
     }
 
-    /// The open session's sample rate, when one is open.
-    fn session_rate(&self) -> Option<u32> {
+    /// The open stream's sample rate, when one is open.
+    fn stream_rate(&self) -> Option<u32> {
         self.daemon()
-            .and_then(|s| s.session.open.as_ref())
+            .and_then(|s| s.stream.open.as_ref())
             .map(|o| o.sample_rate_hz)
     }
 
@@ -38,7 +38,7 @@ impl AppState {
     /// running spectrum measurement of this rig reads a sine on, whose bins are bins of
     /// every longer one too. `None` with no spectrum running or no audio I/O open.
     pub fn sine_bins(&self) -> Option<(usize, f64)> {
-        let fs = f64::from(self.session_rate()?);
+        let fs = f64::from(self.stream_rate()?);
         let all = self.measurements();
         let running = all
             .iter()
@@ -279,10 +279,10 @@ impl AppState {
             self.warn("not connected");
             return;
         }
-        if self.daemon().is_some_and(|s| s.session.open.is_none()) {
+        if self.daemon().is_some_and(|s| s.stream.open.is_none()) {
             self.warn(format!(
                 "no audio I/O to sweep: {}",
-                open_session_hint(keymap)
+                open_stream_hint(keymap)
             ));
             return;
         }
@@ -326,7 +326,7 @@ impl AppState {
             self.overlay = Overlay::Form(Box::new(crate::signal_dialog::form(
                 self.rig.stimulus.sine,
                 self.sine_bins(),
-                self.session_rate(),
+                self.stream_rate(),
             )));
             self.toast(ac2_scene::stim_item::CHOOSE_SIGNAL_FIRST);
             return;
@@ -388,10 +388,10 @@ impl AppState {
             self.toast(ac2_scene::stim_item::LEVEL_FIRST);
             return;
         }
-        if self.daemon().is_some_and(|s| s.session.open.is_none()) {
+        if self.daemon().is_some_and(|s| s.stream.open.is_none()) {
             self.warn(format!(
                 "no audio I/O to play into: {}",
-                open_session_hint(keymap)
+                open_stream_hint(keymap)
             ));
             return;
         }
@@ -406,12 +406,12 @@ impl AppState {
         }
     }
 
-    /// The sweep dialog over the open session's inputs and outputs, by name.
+    /// The sweep dialog over the open stream's inputs and outputs, by name.
     pub(super) fn open_sweep_dialog(&mut self, keymap: &Keymap, out: &mut Vec<Request>) {
-        let Some(o) = self.open_session().cloned() else {
+        let Some(o) = self.open_stream().cloned() else {
             self.warn(format!(
                 "no audio I/O to sweep: {}",
-                open_session_hint(keymap)
+                open_stream_hint(keymap)
             ));
             return;
         };
@@ -419,8 +419,8 @@ impl AppState {
             self.warn(why);
             return;
         }
-        let inputs = self.session_input_names();
-        let outputs = self.session_output_names();
+        let inputs = self.stream_input_names();
+        let outputs = self.stream_output_names();
         let mics: Vec<u16> = self
             .daemon()
             .map(|s| {

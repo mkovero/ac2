@@ -3,12 +3,12 @@
 use crate::event::Event;
 use crate::grid::GridId;
 use crate::topic::{Stream, Topic};
-use crate::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, SessionEpoch, WallNs};
+use crate::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, StreamEpoch, WallNs};
 
 use super::{
     BandLeqMeta, BinsFrame, ClipFlags, FrameKind, GonioMeta, GonioPairMeta, IrMeta, KaMeta,
-    LeqFlags, LeqMeta, LevelsMeta, PreviewLevelsMeta, ProtectionFlags, RtaMeta, SessionLevelsMeta,
-    SourceLevelsMeta, SpecMeta, SplMeta, TfMeta, TimingMeta, ValidityMask,
+    LeqFlags, LeqMeta, LevelsMeta, PreviewLevelsMeta, ProtectionFlags, RtaMeta, SourceLevelsMeta,
+    SpecMeta, SplMeta, StreamLevelsMeta, TfMeta, TimingMeta, ValidityMask,
 };
 
 /// Header fields shared by every kind.
@@ -18,8 +18,8 @@ pub struct FrameStamp {
     pub seq: u64,
     /// See [`FrameHeader::audio_sample`](super::FrameHeader::audio_sample).
     pub audio_sample: SampleIndex,
-    /// See [`FrameHeader::session_epoch`](super::FrameHeader::session_epoch).
-    pub session_epoch: SessionEpoch,
+    /// See [`FrameHeader::stream_epoch`](super::FrameHeader::stream_epoch).
+    pub stream_epoch: StreamEpoch,
     /// See [`FrameHeader::daemon_incarnation`](super::FrameHeader::daemon_incarnation).
     pub daemon_incarnation: DaemonIncarnation,
     /// See [`FrameHeader::config_rev`](super::FrameHeader::config_rev).
@@ -175,14 +175,14 @@ pub struct LevelsFrame {
     pub clip: Vec<ClipFlags>,
 }
 
-/// Meters of every input of the open session, independent of measurements. Beside the
+/// Meters of every input of the open stream, independent of measurements. Beside the
 /// sample peak, RMS and clip, the programme meters of docs/design/programme-meter.md §3:
 /// the chosen ballistic's reading, the true peak, the daemon's max hold and over count per
 /// channel; the pair readings (correlation) are in `meta.pair_levels`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SessionLevelsFrame {
+pub struct StreamLevelsFrame {
     /// Channels, the ballistic in force and the pairs' correlation.
-    pub meta: SessionLevelsMeta,
+    pub meta: StreamLevelsMeta,
     /// Peak per channel, dBFS (sample peak); NaN: no reading (a remote input whose samples
     /// went missing this interval), where −∞ is digital silence.
     pub peak: Vec<f32>,
@@ -213,30 +213,30 @@ pub struct SessionLevelsFrame {
 }
 
 /// A rig's own input meters as served to a rig admitted to it ([`SourceLevelsMeta`]): the
-/// columns of [`SessionLevelsFrame`] over its captured inputs, none it joined from another
+/// columns of [`StreamLevelsFrame`] over its captured inputs, none it joined from another
 /// rig.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceLevelsFrame {
     /// Channels, ballistic, pairs, loudness, rate and the timing mark.
     pub meta: SourceLevelsMeta,
-    /// As [`SessionLevelsFrame::peak`].
+    /// As [`StreamLevelsFrame::peak`].
     pub peak: Vec<f32>,
-    /// As [`SessionLevelsFrame::rms`].
+    /// As [`StreamLevelsFrame::rms`].
     pub rms: Vec<f32>,
-    /// As [`SessionLevelsFrame::clip`].
+    /// As [`StreamLevelsFrame::clip`].
     pub clip: Vec<ClipFlags>,
-    /// As [`SessionLevelsFrame::ppm`].
+    /// As [`StreamLevelsFrame::ppm`].
     pub ppm: Vec<f32>,
-    /// As [`SessionLevelsFrame::true_peak`].
+    /// As [`StreamLevelsFrame::true_peak`].
     pub true_peak: Vec<f32>,
-    /// As [`SessionLevelsFrame::max`].
+    /// As [`StreamLevelsFrame::max`].
     pub max: Vec<f32>,
-    /// As [`SessionLevelsFrame::overs`].
+    /// As [`StreamLevelsFrame::overs`].
     pub overs: Vec<u32>,
 }
 
 /// Meters of every input of a previewed device, with the same programme meters as
-/// [`SessionLevelsFrame`] over the kinds and pairs `session.preview` declared.
+/// [`StreamLevelsFrame`] over the kinds and pairs `stream.preview` declared.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewLevelsFrame {
     /// Device and channels.
@@ -247,13 +247,13 @@ pub struct PreviewLevelsFrame {
     pub rms: Vec<f32>,
     /// Clip state per channel.
     pub clip: Vec<ClipFlags>,
-    /// As [`SessionLevelsFrame::ppm`].
+    /// As [`StreamLevelsFrame::ppm`].
     pub ppm: Vec<f32>,
-    /// As [`SessionLevelsFrame::true_peak`].
+    /// As [`StreamLevelsFrame::true_peak`].
     pub true_peak: Vec<f32>,
-    /// As [`SessionLevelsFrame::max`].
+    /// As [`StreamLevelsFrame::max`].
     pub max: Vec<f32>,
-    /// As [`SessionLevelsFrame::overs`].
+    /// As [`StreamLevelsFrame::overs`].
     pub overs: Vec<u32>,
 }
 
@@ -281,7 +281,7 @@ pub struct GonioPair {
     pub points: Vec<[i8; 2]>,
 }
 
-/// Goniometer points of every pair (`session/gonio`, `preview/gonio`), at the meter rate.
+/// Goniometer points of every pair (`stream/gonio`, `preview/gonio`), at the meter rate.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GonioFrame {
     /// Pairs, in the declared order.
@@ -326,14 +326,14 @@ pub enum FrameData {
     BandLeq(Box<BandLeqFrame>),
     /// `d/<meas>/levels`.
     Levels(LevelsFrame),
-    /// `session/levels`.
-    SessionLevels(SessionLevelsFrame),
-    /// `session/preview`.
+    /// `stream/levels`.
+    StreamLevels(StreamLevelsFrame),
+    /// `stream/preview`.
     PreviewLevels(PreviewLevelsFrame),
     /// `source/levels`.
     SourceLevels(SourceLevelsFrame),
-    /// `session/gonio`.
-    SessionGonio(GonioFrame),
+    /// `stream/gonio`.
+    StreamGonio(GonioFrame),
     /// `preview/gonio`.
     PreviewGonio(GonioFrame),
     /// `timing`.
@@ -364,10 +364,10 @@ impl FrameData {
             Self::Leq(_) => FrameKind::Leq,
             Self::BandLeq(_) => FrameKind::BandLeq,
             Self::Levels(_) => FrameKind::Levels,
-            Self::SessionLevels(_) => FrameKind::SessionLevels,
+            Self::StreamLevels(_) => FrameKind::StreamLevels,
             Self::PreviewLevels(_) => FrameKind::PreviewLevels,
             Self::SourceLevels(_) => FrameKind::SourceLevels,
-            Self::SessionGonio(_) => FrameKind::SessionGonio,
+            Self::StreamGonio(_) => FrameKind::StreamGonio,
             Self::PreviewGonio(_) => FrameKind::PreviewGonio,
             Self::Timing(_) => FrameKind::Timing,
             Self::Ka(_) => FrameKind::Ka,
@@ -390,10 +390,10 @@ impl FrameData {
             Self::Leq(f) => data(f.meas, Stream::Leq),
             Self::BandLeq(f) => data(f.meas, Stream::BandLeq),
             Self::Levels(f) => data(f.meas, Stream::Levels),
-            Self::SessionLevels(_) => Topic::SessionLevels,
+            Self::StreamLevels(_) => Topic::StreamLevels,
             Self::PreviewLevels(_) => Topic::PreviewLevels,
             Self::SourceLevels(_) => Topic::SourceLevels,
-            Self::SessionGonio(_) => Topic::SessionGonio,
+            Self::StreamGonio(_) => Topic::StreamGonio,
             Self::PreviewGonio(_) => Topic::PreviewGonio,
             Self::Timing(_) => Topic::Timing,
             Self::Ka(_) => Topic::Ka,

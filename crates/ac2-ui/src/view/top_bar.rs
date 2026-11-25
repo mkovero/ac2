@@ -155,10 +155,10 @@ impl App {
         let stopped_hover = stopped
             .as_ref()
             .map(|t| ac2_scene::chrome::stopped_hover(&t.banner, &t.detail));
-        let open = st.daemon().and_then(|s| s.session.open.as_ref());
-        let session_line = open.map(ac2_scene::audio::session_line);
+        let open = st.daemon().and_then(|s| s.stream.open.as_ref());
+        let stream_line = open.map(ac2_scene::audio::stream_line);
         let no_audio = st.no_audio_line(&self.keymap);
-        let audio = match (open, &session_line, &stopped, &stopped_hover) {
+        let audio = match (open, &stream_line, &stopped, &stopped_hover) {
             (Some(_), _, Some(t), Some(hover)) => Some(BarAudio::Stopped {
                 text: &t.bar,
                 hover,

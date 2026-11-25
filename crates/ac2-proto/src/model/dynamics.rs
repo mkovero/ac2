@@ -89,8 +89,8 @@ pub enum DynamicsFailure {
     Stopped,
     /// The stimulus lease expired.
     LeaseExpired,
-    /// The session closed or reopened.
-    SessionClosed,
+    /// The stream closed or reopened.
+    StreamClosed,
     /// Audio was lost while recording (an xrun or overflow).
     Dropout,
     /// The reference input carries no programme.

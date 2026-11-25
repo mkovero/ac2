@@ -4,7 +4,7 @@
 
 use ac2_proto::frame::{AudioHealth, DaemonHealth};
 use ac2_proto::model::{RecordingEnd, RecordingRun, RecordingStatus};
-use ac2_proto::units::{ClientId, SampleIndex, Seconds, SessionEpoch, WallNs};
+use ac2_proto::units::{ClientId, SampleIndex, Seconds, StreamEpoch, WallNs};
 
 use crate::health::{HealthInputs, UiFrames, health_line};
 use crate::network::{ChoiceFrom, choice_tip, network_tip};
@@ -31,7 +31,7 @@ fn recording(status: RecordingStatus) -> RecordingRun {
         path: "/home/op/.local/share/ac2/recordings/take 12.wav".into(),
         inputs: vec![0, 1],
         sample_rate_hz: 96_000,
-        session_epoch: SessionEpoch(1),
+        stream_epoch: StreamEpoch(1),
         start_sample: SampleIndex(0),
         started_at: WallNs(0),
         started_by: ClientId("a".into()),
@@ -126,8 +126,8 @@ fn every_hover_is_short() {
         audio: Some(AudioHealth {
             load: Some(1.0),
             peak: Some(2.0),
-            session_load: Some(0.99),
-            session_peak: Some(2.5),
+            stream_load: Some(0.99),
+            stream_peak: Some(2.5),
             xruns: 12_345,
         }),
     };

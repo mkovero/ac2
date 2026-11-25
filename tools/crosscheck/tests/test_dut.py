@@ -185,7 +185,7 @@ def test_patch_and_restore_exactly():
     assert ("ac2:out_5", "system:playback_5") in j.edges  # ac2's hardware outputs are left alone
     assert p.saved == {"ac2:in_3": ["system:capture_3"], "ac2:in_2": ["pw_rew:x", "system:capture_2"]}
     p.verify_sources()
-    # a hardware capture summed back in (ac2 reopening its session) fails the check
+    # a hardware capture summed back in (ac2 reopening its stream) fails the check
     j.connect("system:capture_3", "ac2:in_3")
     with pytest.raises(RuntimeError, match="ac2:in_3"):
         p.verify_sources()
@@ -305,7 +305,7 @@ def test_run_path_patches_only_the_ac2_stages_and_flags_a_failed_restore(monkeyp
     assert order == ["start", "sine_stage", "rew_stage", "patch", "ac2_sweeps", "ac2_tf", "restore", "stop"]
     assert rc == 4 and ctx.patch is None and ctx.dut is None
     out = capsys.readouterr().out
-    assert "!!!" in out and "ac2 session open" in out
+    assert "!!!" in out and "ac2 stream open" in out
 
 
 def test_a_failed_patch_runs_no_ac2_stage(monkeypatch, tmp_path):

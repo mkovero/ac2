@@ -1,28 +1,28 @@
 //! The simulated rig: an `ac2d` on the fake backend that keeps nothing
 //! ([`crate::spawn::spawn_simulated`]), made ready to use by the app as a client.
 //!
-//! Its session is opened (in 1–2, out 1, the loopback out 1 → in 1 as the rig is wired) and
+//! Its stream is opened (in 1–2, out 1, the loopback out 1 → in 1 as the rig is wired) and
 //! a transfer measurement "demo" (ref 1 → meas 2) is created and started. A daemon on real
-//! audio starts with no session: which interface and channels to open is the operator's
-//! choice, made in the session dialog.
+//! audio starts with no stream: which interface and channels to open is the operator's
+//! choice, made in the stream dialog.
 
 use ac2_client::ClientConfig;
 use ac2_proto::model::{
-    DeviceSelector, LoopbackRoute, MeasConfig, MeasKind, SessionConfig, TransferConfig,
+    DeviceSelector, LoopbackRoute, MeasConfig, MeasKind, StreamConfig, TransferConfig,
 };
 
 /// What a simulated rig has when the app (or a test) starts using it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Setup {
-    /// No session: the operator opens one, as on real audio.
+    /// No stream: the operator opens one, as on real audio.
     Empty,
-    /// The session open and the "demo" measurement running.
+    /// The stream open and the "demo" measurement running.
     Demo,
 }
 
-/// The session the simulated rig opens: inputs 1–2, output 1, loopback out 1 → in 1.
-pub fn demo_session() -> SessionConfig {
-    SessionConfig {
+/// The stream the simulated rig opens: inputs 1–2, output 1, loopback out 1 → in 1.
+pub fn demo_stream() -> StreamConfig {
+    StreamConfig {
         backend: Some(ac2_proto::model::BackendKind::Fake),
         input_device: DeviceSelector::Default,
         output_device: DeviceSelector::Default,
@@ -52,7 +52,7 @@ pub fn demo_measurement() -> MeasConfig {
     }
 }
 
-/// Opens the simulated rig's session and starts "demo", as a client of the daemon at
+/// Opens the simulated rig's stream and starts "demo", as a client of the daemon at
 /// `config`. Runs on its own thread and runtime, so it works whether or not the caller is
 /// inside one.
 pub fn set_up_demo(config: ClientConfig) -> Result<(), String> {
@@ -67,8 +67,8 @@ pub fn set_up_demo(config: ClientConfig) -> Result<(), String> {
         rt.block_on(async move {
             let work = async {
                 let c = Client::connect(config).await?;
-                c.call(Command::SessionOpen {
-                    config: demo_session(),
+                c.call(Command::StreamOpen {
+                    config: demo_stream(),
                 })
                 .await?;
                 let r = c

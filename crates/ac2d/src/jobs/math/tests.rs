@@ -10,7 +10,7 @@ use ac2_proto::model::{
     AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, MathReference, Operand, PhaseBasis,
 };
 use ac2_proto::units::{
-    DaemonIncarnation, MeasId, Rev, SampleIndex, Seconds, SessionEpoch, TraceId, WallNs,
+    DaemonIncarnation, MeasId, Rev, SampleIndex, Seconds, StreamEpoch, TraceId, WallNs,
 };
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,7 +20,7 @@ use crate::jobs::{Live, Probe};
 
 mod column_hz;
 
-const EPOCH: SessionEpoch = SessionEpoch(3);
+const EPOCH: StreamEpoch = StreamEpoch(3);
 
 fn grid() -> GridDef {
     GridDef::Log {
@@ -43,7 +43,7 @@ fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags
         stamp: FrameStamp {
             seq: 0,
             audio_sample: SampleIndex(48_000),
-            session_epoch: EPOCH,
+            stream_epoch: EPOCH,
             daemon_incarnation: DaemonIncarnation(1),
             config_rev: Rev(1),
             config_applied_at: SampleIndex(0),
@@ -84,7 +84,7 @@ fn flat(meas: u32, db: f32) -> Answer {
 }
 
 /// A stored operand: flat `db`, phase 0, measured with `delay`, in `time_base`.
-fn stored(db: f32, delay: f64, time_base: Option<SessionEpoch>) -> Answer {
+fn stored(db: f32, delay: f64, time_base: Option<StreamEpoch>) -> Answer {
     let n = grid().centres().len();
     Answer::Stored(Arc::new(Held {
         columns: Columns {
@@ -454,7 +454,7 @@ fn ratio_of_a_live_and_a_stored_operand() {
 /// and the sum has no value; a ratio with it is marked as of own alignments.
 #[test]
 fn sum_across_time_bases_leaves_the_operand_out() {
-    let other = Some(SessionEpoch(1));
+    let other = Some(StreamEpoch(1));
     let add = binary(meas(1), MathOp::Add, Operand::Trace { trace: TraceId(4) });
     let f = run(&add, &[None; 2], &[flat(1, 0.0), stored(0.0, 0.0, other)]);
     assert_eq!(

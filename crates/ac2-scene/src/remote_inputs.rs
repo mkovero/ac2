@@ -22,9 +22,9 @@ pub const ADMITTED: &str = "Rigs admitted to this rig";
 pub const NO_OTHER_RIG: &str =
     "The app holds no other rig: add one first (Connection › Add a rig), then pick its input here.";
 
-/// The add dialog on a rig without an open session.
-pub const NO_SESSION_HERE: &str =
-    "Open this rig's audio I/O first (Enter on this page): a remote input joins its session.";
+/// The add dialog on a rig without an open stream.
+pub const NO_STREAM_HERE: &str =
+    "Open this rig's audio I/O first (Enter on this page): a remote input joins its stream.";
 
 /// What a remote input is called: its rig's mic name, if any, then the rig and that rig's
 /// input number: `ketunkolo in 1`, `MM1 34804 · ketunkolo in 1`.
@@ -52,7 +52,7 @@ pub fn source_row(channel: u16, role: Option<InputRole>, name: Option<&str>) -> 
 }
 
 /// A row of the add dialog: `ketunkolo · in 1 · mic MM1 34804`, `… · added` when this
-/// rig's session has it already.
+/// rig's stream has it already.
 pub fn pick_row(rig: &str, row: &str, added: bool) -> String {
     if added {
         format!("{rig} · {row} · added")
@@ -66,9 +66,9 @@ pub fn pick_row(rig: &str, row: &str, added: bool) -> String {
 pub enum SourceRefusal {
     /// The two rigs cannot be paired (taking an input pairs them).
     Pair(PairRefusal),
-    /// It has no session: nothing captured to give.
-    NoSession,
-    /// Its session replays a recording: no device clock to pair with.
+    /// It has no stream: nothing captured to give.
+    NoStream,
+    /// Its stream replays a recording: no device clock to pair with.
     Replaying,
 }
 
@@ -81,8 +81,8 @@ pub fn source_refusal(rig: &str, why: &SourceRefusal) -> String {
              give its inputs"
         ),
         SourceRefusal::Pair(p) => crate::pairing::refusal(rig, p),
-        SourceRefusal::NoSession => {
-            format!("{rig} has no session: open its audio I/O there first")
+        SourceRefusal::NoStream => {
+            format!("{rig} has no stream: open its audio I/O there first")
         }
         SourceRefusal::Replaying => format!("{rig} is replaying a recording"),
     }
@@ -109,12 +109,12 @@ pub fn admitted_toast(source: &str, taker: &str) -> String {
     format!("{source} admitted {taker}: it may take {source}'s inputs")
 }
 
-/// The toast once the session reopened with remote input `name`.
+/// The toast once the stream reopened with remote input `name`.
 pub fn added_toast(name: &str) -> String {
     format!("{name} added to the audio I/O")
 }
 
-/// The fault once the session did not reopen with a remote input after its rig `paired`
+/// The fault once the stream did not reopen with a remote input after its rig `paired`
 /// was paired for it: the pairing is not undone, so it says the rig stays listed.
 pub fn open_failed(e: &str, paired: Option<&str>) -> String {
     match paired {
@@ -128,7 +128,7 @@ pub fn remove_confirm(name: &str) -> String {
     format!("Delete again removes {name} (the audio I/O reopens)")
 }
 
-/// The toast once the session reopened without remote input `name`.
+/// The toast once the stream reopened without remote input `name`.
 pub fn removed_toast(name: &str) -> String {
     format!("{name} removed from the audio I/O")
 }
@@ -137,7 +137,7 @@ pub fn removed_toast(name: &str) -> String {
 mod tests {
     use super::*;
 
-    /// A session that did not reopen after its rig was paired says the pairing stays.
+    /// A stream that did not reopen after its rig was paired says the pairing stays.
     #[test]
     fn a_failed_reopen_says_the_rig_stays_paired() {
         assert_eq!(

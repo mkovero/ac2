@@ -585,7 +585,7 @@ fn only_missing(r: &CantTellReason) -> bool {
         r,
         CantTellReason::NoAudio
             | CantTellReason::NoMarks
-            | CantTellReason::NoSession { .. }
+            | CantTellReason::NoStream { .. }
             | CantTellReason::LinkDown
     )
 }

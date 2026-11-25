@@ -1,4 +1,4 @@
-//! `session.devices` on JACK: names from the server's ports, or the reason it cannot be
+//! `stream.devices` on JACK: names from the server's ports, or the reason it cannot be
 //! used. Runs against whatever server is reachable (`jackd -d dummy` locally) and checks
 //! the unavailable reason when none is.
 #![cfg(target_os = "linux")]
@@ -21,7 +21,7 @@ fn jack_lists_port_names_or_says_why_not() {
     cfg.backends = backends;
     let h = Daemon::start(cfg).expect("daemon");
     let (mut c, _s) = connect(&h, &[]);
-    let b = c.backends(Command::SessionDevices);
+    let b = c.backends(Command::StreamDevices);
     assert_eq!(b[0].kind, BackendKind::Jack);
     assert!(
         b.iter().all(|x| x.kind != BackendKind::Fake),
@@ -120,7 +120,7 @@ impl Recorder {
 #[test]
 fn chosen_outputs_reach_playback_and_connections_survive_routing() {
     use ac2_proto::model::{
-        DeviceSelector, GeneratorDesired, GeneratorSettings, SessionConfig, Signal,
+        DeviceSelector, GeneratorDesired, GeneratorSettings, Signal, StreamConfig,
     };
     use ac2_proto::units::{Dbfs, Hz};
     if std::env::var_os("AC2_JACK_DUMMY").is_none() {
@@ -133,7 +133,7 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
     cfg.backends = backends;
     let h = Daemon::start(cfg).expect("daemon");
     let (mut c, _s) = connect(&h, &[]);
-    let b = c.backends(Command::SessionDevices);
+    let b = c.backends(Command::StreamDevices);
     let Some(dev) = b[0].devices.first() else {
         eprintln!("skipping: no JACK server");
         return;
@@ -149,8 +149,8 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
     }
     // The listing names the dummy ports by their short names.
     let phys = |k: usize| format!("system:{}", playback[k]);
-    let s = c.session(Command::SessionOpen {
-        config: SessionConfig {
+    let s = c.stream(Command::StreamOpen {
+        config: StreamConfig {
             backend: Some(BackendKind::Jack),
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
@@ -212,9 +212,9 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
         "the recorder hears output 2: {p:?}"
     );
     let snap = c.snapshot(Command::StateSnapshot);
-    assert_eq!(snap.state.session.epoch, s.epoch, "no reopen");
+    assert_eq!(snap.state.stream.epoch, s.epoch, "no reopen");
     c.ok(Command::GenStop);
-    c.ok(Command::SessionClose);
+    c.ok(Command::StreamClose);
     h.shutdown();
 }
 
@@ -223,7 +223,7 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
 /// new stream's port of the same input. Capture only.
 #[test]
 fn spare_input_sources_survive_a_reopen() {
-    use ac2_proto::model::{DeviceSelector, SessionConfig};
+    use ac2_proto::model::{DeviceSelector, StreamConfig};
     if std::env::var_os("AC2_JACK_DUMMY").is_none() {
         eprintln!("skipping: needs AC2_JACK_DUMMY=1 (dummy driver only)");
         return;
@@ -234,15 +234,15 @@ fn spare_input_sources_survive_a_reopen() {
     cfg.backends = backends;
     let h = Daemon::start(cfg).expect("daemon");
     let (mut c, _s) = connect(&h, &[]);
-    let b = c.backends(Command::SessionDevices);
+    let b = c.backends(Command::StreamDevices);
     let Some(input) = b[0].devices.first().and_then(|d| d.input.clone()) else {
         eprintln!("skipping: no JACK capture ports");
         return;
     };
     let first = input.max_channels;
     let open = |c: &mut Client, spares: u16| {
-        let s = c.session(Command::SessionOpen {
-            config: SessionConfig {
+        let s = c.stream(Command::StreamOpen {
+            config: StreamConfig {
                 backend: Some(BackendKind::Jack),
                 input_device: DeviceSelector::Default,
                 output_device: DeviceSelector::Default,
@@ -285,6 +285,6 @@ fn spare_input_sources_survive_a_reopen() {
         !linked(&out, &ports[1].port),
         "the new spare is the operator's"
     );
-    c.ok(Command::SessionClose);
+    c.ok(Command::StreamClose);
     h.shutdown();
 }

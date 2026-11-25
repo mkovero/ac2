@@ -1,23 +1,23 @@
-//! A paired rig's clock tag, rate and pairing words from the clocks and session the rig
+//! A paired rig's clock tag, rate and pairing words from the clocks and stream the rig
 //! shown's daemon hears in its always-on levels (`State.remote.standing`), where no stream
 //! runs between the two; a stream's verdict stays the tag where one does.
 
 use super::*;
 use ac2_proto::model::{
     CantTellReason, NotLockedReason, PeerClock, PeerRelation, RemoteLink, RemoteRig, StandingRig,
-    StandingSession,
+    StandingStream,
 };
 use ac2_proto::units::Seconds;
 use ac2_scene::standing::FROM_LEVELS;
 
-/// pupu as the rig shown's daemon hears it in its levels: at 48 kHz when `session`, the
+/// pupu as the rig shown's daemon hears it in its levels: at 48 kHz when `stream`, the
 /// relation `relation` at `ppm`, its link `link`.
-fn heard(relation: PeerRelation, ppm: Option<f64>, session: bool, link: RemoteLink) -> StandingRig {
+fn heard(relation: PeerRelation, ppm: Option<f64>, stream: bool, link: RemoteLink) -> StandingRig {
     StandingRig {
         rig: PUPU,
         name: "pupu".into(),
         link,
-        session: session.then(|| StandingSession {
+        stream: stream.then(|| StandingStream {
             sample_rate_hz: 48_000,
             channels: vec![0, 1],
         }),
@@ -105,20 +105,20 @@ fn a_paired_rig_with_no_input_is_tagged_from_its_levels() {
     assert_eq!(h[1].0, "pupu / 48 kHz FREE");
 }
 
-/// Its levels say its session is closed: the heading says so in the top bar's words, and no
+/// Its levels say its stream is closed: the heading says so in the top bar's words, and no
 /// tag; the link between the daemons down: its words, nothing heard.
 #[test]
-fn a_paired_rigs_session_and_link_read_from_its_levels() {
-    let no_session = CantTellReason::NoSession { rig: PUPU };
+fn a_paired_rigs_stream_and_link_read_from_its_levels() {
+    let no_stream = CantTellReason::NoStream { rig: PUPU };
     let mut t = pupu_not_held(Some(heard(
-        PeerRelation::CantTell { reason: no_session },
+        PeerRelation::CantTell { reason: no_stream },
         None,
         false,
         RemoteLink::Up,
     )));
     let h = headings(&t);
     assert_eq!(h[0].0, "test rig / 48 kHz");
-    assert_eq!(h[1].0, "pupu / no session");
+    assert_eq!(h[1].0, "pupu / no stream");
     assert!(!h[1].1.contains("clock"), "{}", h[1].1);
 
     let down = CantTellReason::LinkDown;

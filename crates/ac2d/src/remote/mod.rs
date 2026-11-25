@@ -1,13 +1,13 @@
 //! Remote inputs (`docs/design/remote-inputs.md`): one rig measures with another rig's
 //! input. The source side serves its captured channels as `audio/<channel>` ([`tap`]); the
-//! session side keeps a link to each paired rig ([`link`]), joins the remote samples into
+//! stream side keeps a link to each paired rig ([`link`]), joins the remote samples into
 //! its own blocks ([`join`]) and judges the clocks between the rigs ([`peer_clock`]).
 
 use std::ops::Range;
 use std::time::Duration;
 
 use ac2_proto::model::{Anchor, RemoteAudio, RemoteLink, SourceState};
-use ac2_proto::units::{RigId, Seconds, SessionEpoch};
+use ac2_proto::units::{RigId, Seconds, StreamEpoch};
 
 pub(crate) mod follow;
 pub(crate) mod join;
@@ -37,7 +37,7 @@ pub(crate) fn link_offset(set: Option<f64>, ours_s: f64, theirs_s: f64) -> f64 {
 
 /// What a stream runs for remote inputs, once set up on it.
 pub(crate) struct RemoteRun {
-    /// Session channel per column of the joined feed: this rig's inputs, then the remote
+    /// Stream channel per column of the joined feed: this rig's inputs, then the remote
     /// inputs in `remote_inputs` order; empty without remote inputs.
     pub(crate) joined_map: Vec<u16>,
 }
@@ -160,9 +160,9 @@ pub(crate) enum RemoteMsg {
     },
     /// A paired rig's filtered state, as read.
     Source { rig: RigId, state: Box<SourceState> },
-    /// The joined feed of the session `epoch`, once a second.
+    /// The joined feed of the stream `epoch`, once a second.
     Joined {
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         inputs: Vec<InputReport>,
         rigs: Vec<RigReport>,
         link_offset: Seconds,

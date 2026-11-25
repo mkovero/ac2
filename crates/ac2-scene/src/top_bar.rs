@@ -8,7 +8,7 @@
 //! than its room), so the bar reads the same in every state the tests can name without a
 //! window.
 
-use crate::audio::SessionLine;
+use crate::audio::StreamLine;
 use crate::chrome::{LinkTone, RIG_NOT_AUTHORIZED, RigDown};
 use crate::health::HealthLine;
 
@@ -59,7 +59,7 @@ pub enum BarAudio<'a> {
     /// Open, on `device`.
     Open {
         device: &'a str,
-        line: &'a SessionLine,
+        line: &'a StreamLine,
     },
     /// Open and stopped: what the bar says of it, and the banner behind it.
     Stopped { text: &'a str, hover: &'a str },

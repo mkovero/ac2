@@ -1,4 +1,4 @@
-//! The session, its meters and logs, and the full state.
+//! The stream, its meters and logs, and the full state.
 
 use super::builders::*;
 use super::traces::*;
@@ -203,11 +203,11 @@ pub(super) fn inputs() -> InputSetups {
     }
 }
 
-pub(super) fn session() -> Session {
-    Session {
-        epoch: SessionEpoch(2),
-        open: Some(OpenSession {
-            config: session_config(),
+pub(super) fn stream() -> Stream {
+    Stream {
+        epoch: StreamEpoch(2),
+        open: Some(OpenStream {
+            config: stream_config(),
             backend: BackendKind::CoreAudio,
             input_device: DeviceId("hw:UMC1820".into()),
             output_device: DeviceId("hw:UMC1820".into()),
@@ -247,9 +247,9 @@ pub(super) fn session() -> Session {
     }
 }
 
-/// A session replaying a recording.
-pub(super) fn replay_session() -> Session {
-    let mut s = session();
+/// A stream replaying a recording.
+pub(super) fn replay_stream() -> Stream {
+    let mut s = stream();
     if let Some(o) = &mut s.open {
         o.backend = BackendKind::Replay;
         o.config.backend = Some(BackendKind::Replay);
@@ -275,7 +275,7 @@ pub fn recording_run() -> RecordingRun {
         path: "/home/op/.local/share/ac2/recordings/soundcheck.wav".into(),
         inputs: vec![0, 1],
         sample_rate_hz: 48_000,
-        session_epoch: SessionEpoch(2),
+        stream_epoch: StreamEpoch(2),
         start_sample: SampleIndex(96_000),
         started_at: WallNs(1_789_999_100_000_000_000),
         started_by: ClientId("alice".into()),
@@ -611,7 +611,7 @@ pub(super) fn spl_log_page() -> SplLogPage {
 /// A full state.
 pub fn state() -> State {
     State {
-        session: session(),
+        stream: stream(),
         measurements: vec![measurement(), spectrum_measurement()],
         traces: vec![trace_meta(), spectrum_trace_meta()],
         generator: generator(),

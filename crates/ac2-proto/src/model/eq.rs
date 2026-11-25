@@ -374,7 +374,7 @@ pub enum EqEdit {
     New {
         /// Name; `None`: the next free `EQ n`.
         name: Option<String>,
-        /// Realisation; `None`: digital at the session rate (48 kHz without a session).
+        /// Realisation; `None`: digital at the stream rate (48 kHz without a stream).
         realisation: Option<EqRealisation>,
         /// Default Q reading; `None`: half gain.
         peak_q: Option<PeakQ>,

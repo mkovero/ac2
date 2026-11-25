@@ -28,7 +28,7 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
         MeasCmd::New(n) => {
             let config = meas_config(n)?;
             if n.start
-                && let Some(open) = &state(&c).await?.session.open
+                && let Some(open) = &state(&c).await?.stream.open
             {
                 uncaptured(&config.kind, &open.config.input_channels)?;
             }

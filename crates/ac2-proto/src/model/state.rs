@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CalEntry, Clocks, DynamicsRun, Generator, InputSetup, LineCalEntry, Measurement, Mic,
-    OutputSetup, Pair, PlanSpec, RecordingRun, RemoteState, Rig, ServerSummary, Session,
-    SimFitKept, SimState, SplLog, SweepRun, TraceMeta, WalkState, WorkingSession,
+    OutputSetup, Pair, PlanSpec, RecordingRun, RemoteState, Rig, ServerSummary, SimFitKept,
+    SimState, SplLog, Stream, SweepRun, TraceMeta, WalkState, WorkingSession,
 };
 use crate::units::{MeasId, SampleIndex, Samples, Seconds, WallNs};
 
@@ -49,7 +49,7 @@ pub struct LastLock {
 
 /// Drift between the output and the input clock, from the slope of the loopback offset
 /// (`docs/design/multi-device.md`). Kept after the stimulus stops and through offset
-/// epochs of the same stream; a new session starts without one.
+/// epochs of the same stream; a new stream starts without one.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Drift {
@@ -85,8 +85,8 @@ pub struct TimingStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct State {
-    /// Session.
-    pub session: Session,
+    /// The audio stream.
+    pub stream: Stream,
     /// Measurements.
     pub measurements: Vec<Measurement>,
     /// Traces.
@@ -112,7 +112,7 @@ pub struct State {
     /// The host's clocks: the capture device's against the system clock, and the system
     /// clock's status as the OS states it.
     pub clocks: Clocks,
-    /// Remote inputs: the rigs paired with this one, and the session's remote rigs and
+    /// Remote inputs: the rigs paired with this one, and the stream's remote rigs and
     /// inputs as this rig runs them.
     pub remote: RemoteState,
     /// The latest sweep run, if any.

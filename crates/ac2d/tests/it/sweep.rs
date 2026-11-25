@@ -1,6 +1,6 @@
 //! Sweep measurements (`MeasKind::Sweep`, `sweep.run`) end to end on a fake rig whose
 //! acoustic path distorts with known harmonics: from an empty daemon through a sweep
-//! measurement that waits, session, lease, arm and run to stored runs it owns with H2/H3 at
+//! measurement that waits, stream, lease, arm and run to stored runs it owns with H2/H3 at
 //! their analytic levels; aborts discard the run.
 #![allow(clippy::unwrap_used)]
 
@@ -141,8 +141,8 @@ fn setup() -> (
     c.ok(Command::Hello {
         client: "sweep test".into(),
     });
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let d = driver(&backend);
     let token = c.acquire();
@@ -467,10 +467,10 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
     c.ok(Command::Hello {
         client: "hall test".into(),
     });
-    c.ok(Command::SessionOpen {
-        config: ac2_proto::model::SessionConfig {
+    c.ok(Command::StreamOpen {
+        config: ac2_proto::model::StreamConfig {
             input_channels: vec![0, 1, 2],
-            ..session(true)
+            ..stream(true)
         },
     });
     let mut d = driver(&backend);

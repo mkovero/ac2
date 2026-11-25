@@ -33,7 +33,7 @@ pub struct Rig {
     pub artnet_target: Option<ArtnetTarget>,
     /// How long the DMX channels take to move to a new cue frame (0: they jump).
     pub artnet_fade: ArtnetFade,
-    /// At start the daemon reopens the last session's device capture-only, so the rig
+    /// At start the daemon reopens the last stream's device capture-only, so the rig
     /// measurements meter with no client connected.
     pub monitor_at_start: bool,
     /// The programme meters' ballistic, correlator window, over threshold and correlation

@@ -11,7 +11,7 @@ use crate::model::{
 };
 use crate::units::{
     ClientId, DaemonIncarnation, Db, Dbfs, Dbtp, Hz, Lufs, Rev, SampleIndex, Samples, Seconds,
-    SessionEpoch, WallNs,
+    StreamEpoch, WallNs,
 };
 
 use super::{ArrayDesc, FrameKind, ProtectionFlags};
@@ -535,37 +535,37 @@ pub struct SourceLoudness {
     pub since: WallNs,
 }
 
-/// Session input meters metadata.
+/// Stream input meters metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SessionLevelsMeta {
+pub struct StreamLevelsMeta {
     /// Device input channel of each column.
     pub channels: Vec<u16>,
     /// What the bars read (the rig's `levels.ballistic`), so a frame is self-describing:
     /// under a peak detector `ppm` and `max` are its reading; under `momentary` /
     /// `short_term` they are each input's true peak in dBTP and the bars read `loudness`.
     pub ballistic: Ballistic,
-    /// Every declared pair whose both inputs are captured, in `session.inputs` order.
+    /// Every declared pair whose both inputs are captured, in `stream.inputs` order.
     pub pair_levels: Vec<PairLevels>,
     /// Every loudness source: pairs first in `pair_levels` order, then unpaired line and
     /// digital inputs ascending by channel; none for mic inputs.
     pub loudness: Vec<SourceLoudness>,
 }
 
-/// A rig's own input meters for another rig: [`SessionLevelsMeta`] over its captured inputs
+/// A rig's own input meters for another rig: [`StreamLevelsMeta`] over its captured inputs
 /// only, with its rate and the timing mark the clocks between the rigs are measured from.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceLevelsMeta {
     /// Device input channel of each column.
     pub channels: Vec<u16>,
-    /// As [`SessionLevelsMeta::ballistic`].
+    /// As [`StreamLevelsMeta::ballistic`].
     pub ballistic: Ballistic,
-    /// As [`SessionLevelsMeta::pair_levels`].
+    /// As [`StreamLevelsMeta::pair_levels`].
     pub pair_levels: Vec<PairLevels>,
-    /// As [`SessionLevelsMeta::loudness`].
+    /// As [`StreamLevelsMeta::loudness`].
     pub loudness: Vec<SourceLoudness>,
-    /// The session's nominal sample rate, Hz.
+    /// The stream's nominal sample rate, Hz.
     pub sample_rate_hz: u32,
     /// The newest block's timing; `None` where the rig stamps no capture times or its stamp
     /// clock is not yet mapped onto its system clock.
@@ -578,7 +578,7 @@ pub struct SourceLevelsMeta {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LevelsMark {
-    /// Session sample index of the block's first frame.
+    /// Stream sample index of the block's first frame.
     pub sample: SampleIndex,
     /// Its capture time on the rig's system clock, ns since the Unix epoch.
     pub system_ns: u64,
@@ -598,15 +598,15 @@ pub struct PreviewLevelsMeta {
     pub device: DeviceId,
     /// Device input channel of each column.
     pub channels: Vec<u16>,
-    /// What is on the inputs, as `session.preview` declared them.
+    /// What is on the inputs, as `stream.preview` declared them.
     pub inputs: Vec<PreviewInput>,
     /// Pairs among them, as declared.
     pub pairs: Vec<Pair>,
-    /// As [`SessionLevelsMeta::ballistic`].
+    /// As [`StreamLevelsMeta::ballistic`].
     pub ballistic: Ballistic,
-    /// As [`SessionLevelsMeta::pair_levels`], one per declared pair.
+    /// As [`StreamLevelsMeta::pair_levels`], one per declared pair.
     pub pair_levels: Vec<PairLevels>,
-    /// As [`SessionLevelsMeta::loudness`].
+    /// As [`StreamLevelsMeta::loudness`].
     pub loudness: Vec<SourceLoudness>,
 }
 
@@ -700,11 +700,11 @@ pub struct DaemonHealth {
     /// share of the host's capacity (1.0 = every core busy). `None` until the daemon has
     /// sampled twice, or where the system states none.
     pub cpu: Option<f64>,
-    /// The open session's audio; `None` with no session open.
+    /// The open stream's audio; `None` with no stream open.
     pub audio: Option<AudioHealth>,
 }
 
-/// The open session's audio callback load and xruns.
+/// The open stream's audio callback load and xruns.
 ///
 /// The load is the time the daemon's own audio callback takes as a share of the period
 /// its blocks cover (1.0 = the whole period, where the next block is late). It is this
@@ -718,11 +718,11 @@ pub struct AudioHealth {
     pub load: Option<f64>,
     /// The largest load of a single callback over about the last second.
     pub peak: Option<f64>,
-    /// Mean load since the session opened.
-    pub session_load: Option<f64>,
-    /// The largest load of a single callback since the session opened.
-    pub session_peak: Option<f64>,
-    /// Xruns the backend reported since the session opened.
+    /// Mean load since the stream opened.
+    pub stream_load: Option<f64>,
+    /// The largest load of a single callback since the stream opened.
+    pub stream_peak: Option<f64>,
+    /// Xruns the backend reported since the stream opened.
     pub xruns: u64,
 }
 
@@ -748,14 +748,14 @@ pub enum FrameMeta {
     BandLeq(BandLeqMeta),
     /// Levels.
     Levels(LevelsMeta),
-    /// Session levels.
-    SessionLevels(SessionLevelsMeta),
+    /// Stream levels.
+    StreamLevels(StreamLevelsMeta),
     /// Preview levels.
     PreviewLevels(PreviewLevelsMeta),
     /// A rig's own levels for another rig.
     SourceLevels(SourceLevelsMeta),
-    /// Session goniometer.
-    SessionGonio(GonioMeta),
+    /// Stream goniometer.
+    StreamGonio(GonioMeta),
     /// Preview goniometer.
     PreviewGonio(GonioMeta),
     /// Timing.
@@ -776,10 +776,10 @@ impl FrameMeta {
             Self::Leq(_) => FrameKind::Leq,
             Self::BandLeq(_) => FrameKind::BandLeq,
             Self::Levels(_) => FrameKind::Levels,
-            Self::SessionLevels(_) => FrameKind::SessionLevels,
+            Self::StreamLevels(_) => FrameKind::StreamLevels,
             Self::PreviewLevels(_) => FrameKind::PreviewLevels,
             Self::SourceLevels(_) => FrameKind::SourceLevels,
-            Self::SessionGonio(_) => FrameKind::SessionGonio,
+            Self::StreamGonio(_) => FrameKind::StreamGonio,
             Self::PreviewGonio(_) => FrameKind::PreviewGonio,
             Self::Timing(_) => FrameKind::Timing,
             Self::Ka(_) => FrameKind::Ka,
@@ -802,10 +802,10 @@ pub struct FrameHeader {
     pub kind: FrameKind,
     /// Per-topic sequence number.
     pub seq: u64,
-    /// Session sample index of the newest sample in the frame.
+    /// Stream sample index of the newest sample in the frame.
     pub audio_sample: SampleIndex,
-    /// Session epoch.
-    pub session_epoch: SessionEpoch,
+    /// Stream epoch.
+    pub stream_epoch: StreamEpoch,
     /// Daemon incarnation.
     pub daemon_incarnation: DaemonIncarnation,
     /// Rev of the config the DSP actually used.

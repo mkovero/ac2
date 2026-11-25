@@ -56,7 +56,7 @@ fn sidecar(name: &str) -> Sidecar {
             output_device: DeviceId("fake".into()),
             buffer_frames: 256,
             clock: ClockRelation::SingleCallback,
-            session_epoch: SessionEpoch(3),
+            stream_epoch: StreamEpoch(3),
             loopback: Some(LoopbackRoute {
                 output: 0,
                 input: 0,
@@ -84,14 +84,14 @@ fn sidecar(name: &str) -> Sidecar {
         discontinuities: vec![
             Discontinuity {
                 frame: 256,
-                session_sample: SampleIndex(1256),
+                stream_sample: SampleIndex(1256),
                 lost_frames: 0,
                 estimated: false,
                 causes: vec![DiscontinuityCause::Xrun],
             },
             Discontinuity {
                 frame: 512,
-                session_sample: SampleIndex(2512),
+                stream_sample: SampleIndex(2512),
                 lost_frames: 1000,
                 estimated: false,
                 causes: vec![DiscontinuityCause::RecorderBehind],
@@ -101,14 +101,14 @@ fn sidecar(name: &str) -> Sidecar {
             RemoteGap {
                 channel: 2,
                 frame: 280,
-                session_sample: SampleIndex(1280),
+                stream_sample: SampleIndex(1280),
                 frames: 64,
                 late: true,
             },
             RemoteGap {
                 channel: 2,
                 frame: 600,
-                session_sample: SampleIndex(2600),
+                stream_sample: SampleIndex(2600),
                 frames: 200,
                 late: false,
             },
@@ -116,7 +116,7 @@ fn sidecar(name: &str) -> Sidecar {
         remote_slips: vec![RemoteSlip {
             channel: 2,
             frame: 800,
-            session_sample: SampleIndex(2800),
+            stream_sample: SampleIndex(2800),
             samples: -3,
         }],
     }
@@ -179,14 +179,14 @@ fn sidecar_calibration_without_loading_reads_unloaded() {
 }
 
 #[test]
-fn file_frames_and_session_samples_map_across_gaps() {
+fn file_frames_and_stream_samples_map_across_gaps() {
     let s = sidecar("a");
     // Frames 0..512 are samples 1000..1512; the recorder lost 1000 samples before
     // frame 512, which is sample 2512.
-    assert_eq!(session_sample_of(&s, 0), 1000);
-    assert_eq!(session_sample_of(&s, 511), 1511);
-    assert_eq!(session_sample_of(&s, 512), 2512);
-    assert_eq!(session_sample_of(&s, 600), 2600);
+    assert_eq!(stream_sample_of(&s, 0), 1000);
+    assert_eq!(stream_sample_of(&s, 511), 1511);
+    assert_eq!(stream_sample_of(&s, 512), 2512);
+    assert_eq!(stream_sample_of(&s, 600), 2600);
     let f = |x| frame_of(1000, &s.discontinuities, x);
     assert_eq!(f(900), 0);
     assert_eq!(f(1000), 0);
@@ -235,7 +235,7 @@ fn an_unfinished_recording_is_finished_as_interrupted() {
     let end = back.end.expect("ended");
     assert_eq!(end.reason, RecordingEnd::Interrupted);
     assert_eq!(end.frames, 300);
-    assert_eq!(end.at.session_sample, SampleIndex(1300));
+    assert_eq!(end.at.stream_sample, SampleIndex(1300));
     // Remote marks past the last frame go; a gap the end cuts keeps the part recorded.
     assert_eq!(
         back.remote_gaps

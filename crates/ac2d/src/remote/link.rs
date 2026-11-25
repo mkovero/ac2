@@ -3,7 +3,7 @@
 //! rig's own server key pair as the client key, pinned to the key the app gave.
 //!
 //! It reads the other rig's filtered state (`source.state`) once a second, subscribes the
-//! audio of the channels the open session takes from it, handing each frame to the fan-out
+//! audio of the channels the open stream takes from it, handing each frame to the fan-out
 //! through a bounded channel, and always subscribes its levels (`source/levels`), whose
 //! timing marks relate the two rigs' clocks with no audio ([`super::standing`]). libzmq
 //! reconnects on its own (backing off up to [`RECONNECT_MAX`]); a completed handshake
@@ -35,7 +35,7 @@ use super::RemoteMsg;
 use super::standing::{LocalClock, StandingFeed};
 
 /// How often the other rig's filtered state is read: its clocks' map is refitted every 5 s,
-/// and a session it reopens should show here within a second or so.
+/// and a stream it reopens should show here within a second or so.
 const SOURCE_EVERY: Duration = Duration::from_secs(1);
 /// A connection whose `source.state` goes unanswered this long is not reaching the rig
 /// (a half-open TCP connection looks connected).
@@ -64,7 +64,7 @@ pub(crate) enum LinkFrame {
 /// What the link is told.
 pub(crate) enum LinkCmd {
     /// Take the audio of `channels` (the other rig's device inputs) into `to`; `None`: no
-    /// session takes anything from this rig.
+    /// stream takes anything from this rig.
     Feed {
         channels: Vec<u16>,
         to: Option<SyncSender<LinkFrame>>,
@@ -533,7 +533,7 @@ impl<'p> Link<'p> {
                     if s.rig != self.peer.rig {
                         continue;
                     }
-                    self.their_period = s.session.as_ref().map(|x| x.buffer_frames);
+                    self.their_period = s.stream.as_ref().map(|x| x.buffer_frames);
                     if self.warned.take().is_some() {
                         tracing::info!("link to {}: answered again", self.peer.name);
                     }
@@ -594,7 +594,7 @@ impl<'p> Link<'p> {
             if !levels {
                 self.bytes += len as u64;
             }
-            // Audio of a rig that is not the one paired never reaches a session.
+            // Audio of a rig that is not the one paired never reaches a stream.
             if !self.h.welcomed {
                 continue;
             }

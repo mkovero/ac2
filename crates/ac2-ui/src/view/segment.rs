@@ -349,8 +349,8 @@ mod tests {
             audio: Some(AudioHealth {
                 load: Some(dsp),
                 peak: None,
-                session_load: None,
-                session_peak: None,
+                stream_load: None,
+                stream_peak: None,
                 xruns,
             }),
         };

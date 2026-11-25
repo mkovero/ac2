@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl SessionDialog {
+impl StreamDialog {
     // ----- loopback detection --------------------------------------------------------------
 
     /// The stimulus output, if one is marked (the lowest).
@@ -143,7 +143,7 @@ impl SessionDialog {
                     }
                     let row = &mut self.inputs[i];
                     row.reference = true;
-                    row.in_session = true;
+                    row.in_stream = true;
                     // The loopback carries the stimulus back, not a mic.
                     if row.is_mic() {
                         row.kind = InputKind::Line;
@@ -201,7 +201,7 @@ impl SessionDialog {
     }
 
     /// The default reference as its loopback pair, in words: which input the stimulus output
-    /// returns on, and whether that is the open session's already.
+    /// returns on, and whether that is the open stream's already.
     pub fn reference_text(&self) -> String {
         let input = self.inputs.iter().find(|r| r.reference);
         let output = self

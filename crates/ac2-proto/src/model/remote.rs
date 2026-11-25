@@ -4,24 +4,24 @@
 use serde::{Deserialize, Serialize};
 
 use super::{CalEntry, CalStatus, Clocks, InputSetup, MicCurveRef};
-use crate::units::{DaemonIncarnation, MeasId, RigId, Seconds, SessionEpoch, WallNs};
+use crate::units::{DaemonIncarnation, MeasId, RigId, Seconds, StreamEpoch, WallNs};
 
-/// Session channel of remote input slot 0. A remote input is numbered from here rather than
+/// Stream channel of remote input slot 0. A remote input is numbered from here rather than
 /// after the device's channels, so a device with another channel count never renumbers it
 /// under the measurements, panes and recordings that name it.
 pub const REMOTE_BASE: u16 = 0x8000;
 
-/// The remote slot of session channel `ch`; `None` for a channel of this rig's device.
+/// The remote slot of stream channel `ch`; `None` for a channel of this rig's device.
 pub fn remote_slot(ch: u16) -> Option<u16> {
     ch.checked_sub(REMOTE_BASE)
 }
 
-/// An input of another rig captured into this session.
+/// An input of another rig captured into this stream.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteInput {
-    /// Its session channel is `REMOTE_BASE + slot` (slot < 0x8000); a slot is never reused
-    /// in a session.
+    /// Its stream channel is `REMOTE_BASE + slot` (slot < 0x8000); a slot is never reused
+    /// in a stream.
     pub slot: u16,
     /// The rig, by id.
     pub rig: RigId,
@@ -32,8 +32,8 @@ pub struct RemoteInput {
 }
 
 impl RemoteInput {
-    /// Its session channel.
-    pub fn session_channel(&self) -> u16 {
+    /// Its stream channel.
+    pub fn stream_channel(&self) -> u16 {
         REMOTE_BASE + self.slot
     }
 }
@@ -82,17 +82,17 @@ impl StampMap {
     }
 }
 
-/// One run of a rig's capture: a new one on every session reopen or daemon start.
+/// One run of a rig's capture: a new one on every stream reopen or daemon start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StreamIncarnation {
     /// The daemon process.
     pub daemon: DaemonIncarnation,
-    /// Its session.
-    pub epoch: SessionEpoch,
+    /// Its stream.
+    pub epoch: StreamEpoch,
 }
 
-/// What a rig tells a rig admitted to it (`source.state`): its clocks, and what its session
+/// What a rig tells a rig admitted to it (`source.state`): its clocks, and what its stream
 /// captures with each input's setup and calibration. Nothing else of its state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -103,14 +103,14 @@ pub struct SourceState {
     pub name: String,
     /// Its clocks, with its stamp map.
     pub clocks: Clocks,
-    /// Its session; `None` while it has none.
-    pub session: Option<SourceSession>,
+    /// Its stream; `None` while it has none.
+    pub stream: Option<SourceStream>,
 }
 
-/// A source rig's session as a rig taking its audio sees it.
+/// A source rig's stream as a rig taking its audio sees it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SourceSession {
+pub struct SourceStream {
     /// The capture's run.
     pub incarnation: StreamIncarnation,
     /// Rate, Hz.
@@ -154,22 +154,22 @@ pub struct SourceCurve {
 }
 
 /// Remote inputs as this rig runs them: the rigs it may take audio from, each remote rig of
-/// the session and each remote input.
+/// the stream and each remote input.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteState {
     /// The rigs paired with this one (`rig.pair`, `rig.unpair`).
     pub peers: Vec<RigPeer>,
-    /// The rigs the open session takes inputs from.
+    /// The rigs the open stream takes inputs from.
     pub rigs: Vec<RemoteRig>,
-    /// The open session's remote inputs, in its `remote_inputs` order.
+    /// The open stream's remote inputs, in its `remote_inputs` order.
     pub inputs: Vec<RemoteInputStatus>,
     /// How long audio meeting a remote input waits for it; `None` without a remote input or
     /// before the source rig's period is known.
     pub link_offset: Option<Seconds>,
     /// The running transfer functions between this rig and one remote rig, by measurement.
     pub transfers: Vec<CrossRigTransfer>,
-    /// Every paired rig as its levels frames show it, audio or none: alive, its session, and
+    /// Every paired rig as its levels frames show it, audio or none: alive, its stream, and
     /// the clocks between it and this rig from the timing those frames carry.
     pub standing: Vec<StandingRig>,
 }
@@ -184,16 +184,16 @@ pub struct StandingRig {
     pub name: String,
     /// The connection to it.
     pub link: RemoteLink,
-    /// Its audio session as its levels frames last showed it; `None`: no session, or no
+    /// Its audio stream as its levels frames last showed it; `None`: no stream, or no
     /// frame for a second.
-    pub session: Option<StandingSession>,
+    pub stream: Option<StandingStream>,
     /// The clocks between the two rigs from the frames' timing marks, judged as the audio's
     /// are, a verdict held as `docs/design/remote-auto.md` §5.1 says (`clock.span`: how much
     /// of a window the figure covers). Figures to 0.01 ppm and whole seconds, so the entry
     /// changes only when a shown digit does.
     pub clock: PeerClock,
     /// When this rig began pairing the marks counted now (its wall time, placed again only
-    /// when off by over 2 s), since both rigs' sessions (re)started, the last hole in the
+    /// when off by over 2 s), since both rigs' streams (re)started, the last hole in the
     /// marks of over a minute or the last report the judge could not tell from (marks late
     /// or ahead, a system clock unsynced); `None` while none come and through such a spell.
     pub marks_since: Option<WallNs>,
@@ -214,17 +214,17 @@ pub struct MinuteCount {
     pub needed: u32,
 }
 
-/// A paired rig's open session as its levels frames show it.
+/// A paired rig's open stream as its levels frames show it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StandingSession {
+pub struct StandingStream {
     /// Its nominal sample rate, Hz.
     pub sample_rate_hz: u32,
     /// The device input channels it meters (zero-based).
     pub channels: Vec<u16>,
 }
 
-/// A rig the session takes inputs from.
+/// A rig the stream takes inputs from.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteRig {
@@ -278,7 +278,7 @@ pub enum RemoteLink {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteInputStatus {
-    /// Its slot (session channel `REMOTE_BASE + slot`).
+    /// Its slot (stream channel `REMOTE_BASE + slot`).
     pub slot: u16,
     /// Its audio.
     pub audio: RemoteAudio,
@@ -312,9 +312,9 @@ pub enum RemoteAudio {
     Waiting,
     /// The input is on this rig (a session file loaded on its own source): no audio.
     OnThisRig,
-    /// Its rig has no session.
-    NoSession,
-    /// Its rig's session does not capture that input.
+    /// Its rig has no stream.
+    NoStream,
+    /// Its rig's stream does not capture that input.
     NotCaptured,
     /// Its rig replays a recording: no device clock to pair with.
     Replaying,
@@ -417,7 +417,7 @@ pub enum NotLockedReason {
         /// Its rate against its system clock, ppm.
         ppm: f64,
     },
-    /// The two sessions run at different nominal rates.
+    /// The two streams run at different nominal rates.
     OtherRate {
         /// The remote rig's, Hz.
         theirs: u32,
@@ -458,8 +458,8 @@ pub enum CantTellReason {
     /// The remote rig's levels frames carry no timing marks (its capture is not stamped or
     /// its stamps are not yet on its system clock), or none came for a while.
     NoMarks,
-    /// A rig has no audio session, so no sample clock to relate.
-    NoSession {
+    /// A rig has no audio stream, so no sample clock to relate.
+    NoStream {
         /// Which rig.
         rig: RigId,
     },

@@ -4,7 +4,7 @@
 use crate::harness::{Driver, R};
 use ac2_client::{Client, ClientConfig, Endpoints};
 use ac2_proto::model::{
-    MeasConfig, MeasKind, MeasScope, REMOTE_BASE, RemoteInput, RigPeer, SessionConfig, SystemClock,
+    MeasConfig, MeasKind, MeasScope, REMOTE_BASE, RemoteInput, RigPeer, StreamConfig, SystemClock,
     TransferConfig,
 };
 use ac2_proto::units::RigId;
@@ -111,8 +111,8 @@ pub(crate) fn config(h: &ac2d::Handle, app: &KeyPair, name: &str) -> R<ClientCon
     Ok(c)
 }
 
-pub(crate) fn session(inputs: Vec<u16>, remote: Vec<RemoteInput>) -> SessionConfig {
-    SessionConfig {
+pub(crate) fn stream(inputs: Vec<u16>, remote: Vec<RemoteInput>) -> StreamConfig {
+    StreamConfig {
         backend: None,
         input_device: ac2_proto::model::DeviceSelector::Default,
         output_device: ac2_proto::model::DeviceSelector::Default,
@@ -154,8 +154,8 @@ fn slow_clocks_not_locked_across_rigs() -> R {
     let call = |c: &Client, cmd: Command| -> R<ReplyBody> { Ok(rt.block_on(c.call(cmd))?) };
     call(
         &b,
-        Command::SessionOpen {
-            config: session(vec![0, 1], Vec::new()),
+        Command::StreamOpen {
+            config: stream(vec![0, 1], Vec::new()),
         },
     )?;
     // Kettu admits pupu as a rig; pupu knows where kettu is and which key it holds.
@@ -181,8 +181,8 @@ fn slow_clocks_not_locked_across_rigs() -> R {
     )?;
     call(
         &a,
-        Command::SessionOpen {
-            config: session(
+        Command::StreamOpen {
+            config: stream(
                 vec![0, REMOTE_BASE],
                 vec![RemoteInput {
                     slot: 0,

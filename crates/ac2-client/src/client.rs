@@ -494,7 +494,7 @@ impl Client {
 
     /// Sends `cmd` with the default retry policy; the reply body with the warnings the
     /// daemon attached (what the command did that the operator should hear about, e.g. a
-    /// `session.close` leaving the rig meters blind).
+    /// `stream.close` leaving the rig meters blind).
     pub async fn call_warned(
         &self,
         cmd: Command,
@@ -613,7 +613,7 @@ impl Client {
 
     /// The newest frame per topic, with age and STALE computed now. Every message received
     /// since the previous call is applied, and the values of the newest per topic built.
-    /// Frames of an older session epoch or another incarnation are discarded. Returns the
+    /// Frames of an older stream epoch or another incarnation are discarded. Returns the
     /// credit for what it read: a consumer that calls this rarely is sent less.
     pub fn latest(&self) -> Result<crate::data::Latest, ClientError> {
         let mut out = crate::data::Latest::default();

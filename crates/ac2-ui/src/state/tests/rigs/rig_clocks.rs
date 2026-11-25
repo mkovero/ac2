@@ -133,7 +133,7 @@ fn pupu_clocks(t: &mut T, clocks: Clocks) {
     to(t, PUPU, mirror(s));
 }
 
-/// Two paired rigs with a session each: every heading carries its clock tag after the
+/// Two paired rigs with a stream each: every heading carries its clock tag after the
 /// rate, and its tooltip the words behind the tag. The tags are judged over the rigs
 /// listed together, so both change when one rig's clock does.
 #[test]

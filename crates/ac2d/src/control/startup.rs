@@ -104,7 +104,7 @@ impl Control {
             store,
             cal,
             dedup,
-            session: None,
+            stream: None,
             health: crate::health::Health::new(),
             audio_recovery: None,
             spare_links: Vec::new(),

@@ -99,15 +99,15 @@ fn switching_the_rig_shown_changes_the_list() {
 /// A rig with nothing measured and no audio I/O says so where its rate would be, in the
 /// top bar's words.
 #[test]
-fn a_rig_without_a_session_says_so_beside_its_name() {
+fn a_rig_without_a_stream_says_so_beside_its_name() {
     let (mut t, _) = two_lists();
     let mut s = pupu(&t).daemon().cloned().expect("pupu's state");
-    s.session.open = None;
+    s.stream.open = None;
     to(&mut t, PUPU, mirror(s.clone()));
     assert_eq!(heads(&t)[1].1, "pupu / no audio I/O");
     s.measurements.clear();
     to(&mut t, PUPU, mirror(s));
-    assert_eq!(heads(&t)[1].1, "pupu / no session");
+    assert_eq!(heads(&t)[1].1, "pupu / no stream");
 }
 
 /// Tab steps through the list as shown: past the rig shown's rows onto pupu's, never onto

@@ -10,7 +10,7 @@ use super::common::{rig, run_json as ac2};
 async fn selftest_frames_logs_every_frame_of_a_spectrum() {
     let (_h, ep) = rig();
     for args in [
-        &["session", "open", "--backend", "fake", "--in", "1-2"][..],
+        &["stream", "open", "--backend", "fake", "--in", "1-2"][..],
         &[
             "meas", "new", "spectrum", "--input", "1", "--name", "Spec", "--start",
         ][..],

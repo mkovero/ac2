@@ -1,11 +1,11 @@
 //! The recording indicator (`REC 1:23 · 23.0 MB`, then `recorded take 1 · 1:23 · 23.0 MB`)
 //! and the replay label (`REPLAY take 1 · 0:12 / 1:23`). Shared by the app's top bar and
-//! `ac2 rec status` / `ac2 session status`.
+//! `ac2 rec status` / `ac2 stream status`.
 //!
 //! Elapsed time is the audio in the file (frames ÷ rate), not wall time: a recording that
 //! lost audio says so as dropouts rather than as a longer clock.
 
-use ac2_proto::model::{OpenSession, RecordingEnd, RecordingRun, RecordingStatus};
+use ac2_proto::model::{OpenStream, RecordingEnd, RecordingRun, RecordingStatus};
 
 /// How the indicator is coloured.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,7 +106,7 @@ pub fn recorded_seconds(r: &RecordingRun) -> f64 {
 }
 
 /// The indicator for `r`; `input_name` names a device input (zero-based) the way the
-/// session shows it.
+/// stream shows it.
 pub fn recording_label(r: &RecordingRun, input_name: impl Fn(u16) -> String) -> RecordingLabel {
     let t = clock(recorded_seconds(r));
     let size = bytes(r.bytes);
@@ -167,12 +167,12 @@ pub fn recording_label(r: &RecordingRun, input_name: impl Fn(u16) -> String) -> 
                 RecordingEnd::SizeLimit => {
                     (format!("{saved} (size limit)"), RecordingTone::Quiet, None)
                 }
-                RecordingEnd::SessionClosed => (
+                RecordingEnd::StreamClosed => (
                     format!("{saved} (audio I/O closed)"),
                     RecordingTone::Quiet,
                     None,
                 ),
-                RecordingEnd::SessionReopened => (
+                RecordingEnd::StreamReopened => (
                     format!("{saved} (audio I/O reopened)"),
                     RecordingTone::Warning,
                     Some("the device or its settings changed".to_owned()),
@@ -213,11 +213,11 @@ pub fn recording_label(r: &RecordingRun, input_name: impl Fn(u16) -> String) -> 
 /// What the replay label says on hover.
 pub const REPLAY_DETAIL: &str = "Plays a recording, not a device: no output";
 
-/// `REPLAY take 1 · 0:12 / 1:23` for a replay session, `REPLAY take 1 · ended` once its
+/// `REPLAY take 1 · 0:12 / 1:23` for a replay stream, `REPLAY take 1 · ended` once its
 /// last frame went by, `REPLAY take 1 · 1:23` when the position is not known (`played`
-/// `None`); `None` for a live session. `played` is the newest sample handed on (the
+/// `None`); `None` for a live stream. `played` is the newest sample handed on (the
 /// keepalive's).
-pub fn replay_label(o: &OpenSession, played: Option<u64>) -> Option<String> {
+pub fn replay_label(o: &OpenStream, played: Option<u64>) -> Option<String> {
     let r = o.replay.as_ref()?;
     let rate = f64::from(o.sample_rate_hz.max(1));
     let end = r.end_sample.0;
@@ -238,7 +238,7 @@ pub fn replay_label(o: &OpenSession, played: Option<u64>) -> Option<String> {
 mod tests {
     use super::*;
     use ac2_proto::model::{RecordingRun, ReplayInfo, ReplayPace};
-    use ac2_proto::units::{ClientId, SampleIndex, Seconds, SessionEpoch, WallNs};
+    use ac2_proto::units::{ClientId, SampleIndex, Seconds, StreamEpoch, WallNs};
 
     fn run(status: RecordingStatus, frames: u64, gaps: u32) -> RecordingRun {
         RecordingRun {
@@ -246,7 +246,7 @@ mod tests {
             path: "/r/take 1.wav".into(),
             inputs: vec![0, 1],
             sample_rate_hz: 48_000,
-            session_epoch: SessionEpoch(1),
+            stream_epoch: StreamEpoch(1),
             start_sample: SampleIndex(0),
             started_at: WallNs(0),
             started_by: ClientId("a".into()),
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn replay_counts_to_the_end_of_the_file() {
-        let mut o = ac2_proto::samples::state().session.open.expect("open");
+        let mut o = ac2_proto::samples::state().stream.open.expect("open");
         assert_eq!(replay_label(&o, Some(10)), None);
         o.replay = Some(ReplayInfo {
             name: "take 1".into(),

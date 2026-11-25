@@ -44,7 +44,7 @@ pub struct ReplayMark {
     pub lost_frames: u64,
     /// What the block starting there carries (the configuration-change bit is never
     /// replayed: a replay has no device that could have changed, and the bit would make
-    /// the daemon reopen the session).
+    /// the daemon reopen the stream).
     pub flags: BlockFlags,
 }
 

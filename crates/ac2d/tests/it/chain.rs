@@ -48,8 +48,8 @@ fn start(name: &str) -> (Handle, Client) {
     config.publish_fps = 60;
     let h = Daemon::start(config).unwrap();
     let mut c = Client::connect(h.context(), h.ctrl_endpoint());
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     c.ok(Command::MeasCreate {
         config: transfer("tf"),

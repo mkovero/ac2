@@ -48,8 +48,8 @@ use crate::keys::{Chord, CommandId, Keymap, RESERVED, STOP_ANYWHERE, Scope};
 use crate::leq_dialog::LeqDialog;
 use crate::palette::Palette;
 use crate::prefs::UiPrefs;
-use crate::session_dialog::{RoleKey, Row, SessionDialog};
 use crate::settings::{FocusWant, Page, Settings};
+use crate::stream_dialog::{RoleKey, Row, StreamDialog};
 
 mod display;
 pub use display::{ChoicePrompt, ChoicePurpose, DeletePrompt, DeleteTarget, MoveWhat};
@@ -129,7 +129,7 @@ pub use panes::views::{
 };
 pub use panes::{Axis, PaneId, PaneNode, PaneRect, Side, SplitGap};
 pub use text::{
-    curve_what, kind_shown, meas_input, mics_text, open_session_hint, parse_band, parse_mics,
+    curve_what, kind_shown, meas_input, mics_text, open_stream_hint, parse_band, parse_mics,
     parse_session_ref, parse_slot, trace_label,
 };
 use text::{drawn_in, offset_text, slot_of};
@@ -147,7 +147,7 @@ mod msg;
 pub use msg::{
     CAL_PAGE, COHERENCE_MASKS, DELAY_FINE_STEP, DelayChoice, FormMsg, HELP_LINE, HELP_PAGE,
     LEVEL_FLOOR, LeqMsg, MAX_TOASTS, Msg, NUDGE_S, NewLogPrompt, Notice, Overlay, PAN_OCTAVES,
-    PREVIEW_RENEW_S, PlateMsg, Prompt, PromptKind, RECORD_MAX_S, SessionMsg, Toast, Toasts,
+    PREVIEW_RENEW_S, PlateMsg, Prompt, PromptKind, RECORD_MAX_S, StreamMsg, Toast, Toasts,
     ZOOM_FACTOR,
 };
 use msg::{LeqLogSeen, Muted};
@@ -453,7 +453,7 @@ impl AppState {
             self.layout_drag_due(&mut out);
         }
         self.sync_meters(before, tick, &mut out);
-        self.sync_session_watch(&mut out);
+        self.sync_stream_watch(&mut out);
         if !tick {
             self.restore_pane_meas();
             self.restore_meas_choices();
@@ -483,7 +483,7 @@ impl AppState {
             Msg::Command(c) => self.command(c, keymap, out),
             Msg::Conn(_, e) => self.conn_event(*e, out),
             Msg::Form(m) => self.form_msg(m, out),
-            Msg::Session(m) => self.session_msg(m, out),
+            Msg::Stream(m) => self.stream_msg(m, out),
             Msg::NewLog(go) => self.new_log(go, out),
             Msg::Delete(go) => self.delete(go, out),
             Msg::LevelZoom {

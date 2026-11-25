@@ -67,10 +67,7 @@ fn ctrl_m_lists_every_kind_with_its_own_key() {
         c.choices[8].blocked.as_deref(),
         Some(ac2_scene::new_meas::SPATIAL_AVERAGE_NEEDS)
     );
-    assert_eq!(
-        c.choices[9].blocked, None,
-        "the session has inputs to meter"
-    );
+    assert_eq!(c.choices[9].blocked, None, "the stream has inputs to meter");
     // One transfer function and one spectrum: Shift+M would refuse, and the row says so.
     assert!(
         c.choices[6]
@@ -250,29 +247,29 @@ fn the_spatial_average_row_prefills_the_average_of_every_transfer() {
     );
 }
 
-/// A session without inputs has nothing to meter: the row says so.
+/// A stream without inputs has nothing to meter: the row says so.
 #[test]
 fn the_meter_row_is_blocked_without_inputs() {
     let mut t = T::new();
     let mut s = daemon_state();
-    if let Some(o) = &mut s.session.open {
+    if let Some(o) = &mut s.stream.open {
         o.config.input_channels.clear();
     }
     t.conn(mirror(s));
     t.key("Ctrl+M");
     assert_eq!(
         chooser(&t).choices[9].blocked.as_deref(),
-        Some("no inputs in the session to meter")
+        Some("no inputs in the stream to meter")
     );
 }
 
 /// One mic and no outputs (a USB mic for SPL): the meters can be made, a transfer and a
 /// sweep say what they need, on their rows and on their own keys.
 #[test]
-fn a_lone_mic_session_says_what_a_transfer_and_a_sweep_need() {
+fn a_lone_mic_stream_says_what_a_transfer_and_a_sweep_need() {
     let mut t = T::new();
     let mut s = daemon_state();
-    if let Some(o) = &mut s.session.open {
+    if let Some(o) = &mut s.stream.open {
         o.config.input_channels = vec![1];
         o.config.output_channels = 0;
         o.config.loopback = None;
@@ -299,7 +296,7 @@ fn a_lone_mic_session_says_what_a_transfer_and_a_sweep_need() {
     t.key("Escape");
     // Two inputs but no output: the transfer can be made, the sweep has nowhere to play.
     t.remirror(|s| {
-        if let Some(o) = &mut s.session.open {
+        if let Some(o) = &mut s.stream.open {
             o.config.input_channels = vec![0, 1];
         }
     });
@@ -362,11 +359,11 @@ fn enter_opens_the_kinds_form_and_a_refused_kind_stays_listed() {
 
 /// From an empty daemon: every command that makes a measurement opens the Sessions dialog
 /// rather than a chooser that could only refuse; its New opens the audio setup, headed as a
-/// new session, and the opened session asks what to measure.
+/// new session, and the opened stream asks what to measure.
 #[test]
 fn without_a_session_new_measurement_goes_through_the_sessions_dialog() {
     let mut t = T::new();
-    t.conn(mirror(no_session_state()));
+    t.conn(mirror(no_stream_state()));
     for c in [
         CommandId::NewMeasurement,
         CommandId::NewTransfer,
@@ -413,12 +410,12 @@ fn without_a_session_new_measurement_goes_through_the_sessions_dialog() {
     t.conn(ConnEvent::Devices(Ok(backends(true))));
     let r = t.key("Enter");
     assert!(opened(&r).is_some(), "{r:?}");
-    t.conn(ConnEvent::SessionOpened);
+    t.conn(ConnEvent::StreamOpened);
     let mut s = daemon_state();
     s.measurements.clear();
     t.conn(mirror(s));
     assert_eq!(chooser(&t).purpose, ChoicePurpose::NewMeasurement);
-    // With the session open, the chooser opens directly again.
+    // With the stream open, the chooser opens directly again.
     t.key("Escape");
     t.key("Ctrl+M");
     assert_eq!(chooser(&t).purpose, ChoicePurpose::NewMeasurement);

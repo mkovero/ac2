@@ -9,16 +9,16 @@ impl Command {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Hello { .. } => "hello",
-            Self::SessionDevices => "session.devices",
-            Self::SessionPreview { .. } => "session.preview",
-            Self::SessionPreviewStop => "session.preview_stop",
-            Self::SessionControlPanel { .. } => "session.control_panel",
-            Self::SessionDetectLoopback { .. } => "session.detect_loopback",
-            Self::SessionOpen { .. } => "session.open",
-            Self::SessionClose => "session.close",
-            Self::SessionStatus => "session.status",
-            Self::SessionInputs { .. } => "session.inputs",
-            Self::SessionOutputs { .. } => "session.outputs",
+            Self::StreamDevices => "stream.devices",
+            Self::StreamPreview { .. } => "stream.preview",
+            Self::StreamPreviewStop => "stream.preview_stop",
+            Self::StreamControlPanel { .. } => "stream.control_panel",
+            Self::StreamDetectLoopback { .. } => "stream.detect_loopback",
+            Self::StreamOpen { .. } => "stream.open",
+            Self::StreamClose => "stream.close",
+            Self::StreamStatus => "stream.status",
+            Self::StreamInputs { .. } => "stream.inputs",
+            Self::StreamOutputs { .. } => "stream.outputs",
             Self::GenAcquire { .. } => "gen.acquire",
             Self::GenSet { .. } => "gen.set",
             Self::GenRefresh { .. } => "gen.refresh",
@@ -93,7 +93,7 @@ impl Command {
             Self::RecStart { .. } => "rec.start",
             Self::RecStop => "rec.stop",
             Self::RecList => "rec.list",
-            Self::SessionReplay { .. } => "session.replay",
+            Self::StreamReplay { .. } => "stream.replay",
             Self::ServerInfo => "server.info",
             Self::ServerNetwork { .. } => "server.network",
             Self::ServerAuthorize { .. } => "server.authorize",
@@ -126,12 +126,12 @@ impl Command {
         !matches!(
             self,
             Self::Hello { .. }
-                | Self::SessionDevices
-                | Self::SessionPreview { .. }
-                | Self::SessionPreviewStop
-                | Self::SessionControlPanel { .. }
-                | Self::SessionDetectLoopback { .. }
-                | Self::SessionStatus
+                | Self::StreamDevices
+                | Self::StreamPreview { .. }
+                | Self::StreamPreviewStop
+                | Self::StreamControlPanel { .. }
+                | Self::StreamDetectLoopback { .. }
+                | Self::StreamStatus
                 | Self::TraceList
                 | Self::TraceGet { .. }
                 | Self::DynamicsTable { .. }
@@ -164,7 +164,7 @@ impl Command {
             Self::GenSet { lease_token, .. }
             | Self::GenRefresh { lease_token }
             | Self::GenRelease { lease_token }
-            | Self::SessionDetectLoopback { lease_token, .. }
+            | Self::StreamDetectLoopback { lease_token, .. }
             | Self::SweepRun(super::SweepRunArgs { lease_token, .. })
             | Self::DynamicsRun(super::DynamicsRunArgs { lease_token, .. }) => Some(*lease_token),
             _ => None,

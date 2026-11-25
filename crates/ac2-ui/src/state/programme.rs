@@ -1,5 +1,5 @@
 //! Programme panes: what each meters, the app-side flying peaks and goniometer rings fed
-//! from the session's levels and gonio frames, the loudness column's source, and the reset of
+//! from the stream's levels and gonio frames, the loudness column's source, and the reset of
 //! max, overs and loudness.
 //!
 //! The daemon computes every number (ballistics, true peak, max, overs, correlation,
@@ -26,7 +26,7 @@ use crate::state::{AppState, Folding, PaneId, PaneKind, RigState};
 pub const MAX_METERED: usize = PaneContent::MAX_INPUTS;
 
 /// What a Programme pane meters: up to [`MAX_METERED`] inputs side by side, or a stereo
-/// pair. Zero-based device inputs, as the session names them. A fixed array, so a pane's
+/// pair. Zero-based device inputs, as the stream names them. A fixed array, so a pane's
 /// view stays a plain value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Metered {
@@ -234,7 +234,7 @@ impl AppState {
     }
 
     /// What Programme pane `id` shows: its bars, its pair's chip, the ballistic in force;
-    /// with the inputs it names that the open session lacks (all of them with no session).
+    /// with the inputs it names that the open stream lacks (all of them with no stream).
     pub fn programme_pane(&self, id: PaneId) -> Option<(ProgrammePane, Vec<u16>)> {
         let v = self
             .layout
@@ -242,7 +242,7 @@ impl AppState {
             .filter(|v| v.kind == PaneKind::Programme)?;
         let metered = v.meters?;
         let captured = self
-            .open_session()
+            .open_stream()
             .map(|o| o.config.input_channels.clone())
             .unwrap_or_default();
         let missing: Vec<u16> = metered
@@ -263,11 +263,11 @@ impl AppState {
             .rig
             .data
             .as_ref()
-            .and_then(|d| d.latest.get(&Topic::SessionLevels))
-            // The session dialog's meters may be another device's preview.
-            .filter(|f| !f.stale && self.overlay.session().is_none());
+            .and_then(|d| d.latest.get(&Topic::StreamLevels))
+            // The stream dialog's meters may be another device's preview.
+            .filter(|f| !f.stale && self.overlay.stream().is_none());
         let frame = latest.and_then(|f| match &f.frame.data {
-            FrameData::SessionLevels(l) => Some(l),
+            FrameData::StreamLevels(l) => Some(l),
             _ => None,
         });
         let rig = st.map(|s| s.rig.levels);
@@ -275,7 +275,7 @@ impl AppState {
             .map(|f| f.meta.ballistic)
             .or(rig.map(|r| r.ballistic))
             .unwrap_or_default();
-        let names: BTreeMap<u16, String> = self.session_input_labels().into_iter().collect();
+        let names: BTreeMap<u16, String> = self.stream_input_labels().into_iter().collect();
         let name = |c: u16| {
             names
                 .get(&c)
@@ -287,7 +287,7 @@ impl AppState {
             // NaN: not metered (a remote input's true peak), or no reading this interval.
             let col = |v: &[f32]| at.and_then(|i| v.get(i).copied()).filter(|v| !v.is_nan());
             let device = st
-                .and_then(|s| s.session.open.as_ref())
+                .and_then(|s| s.stream.open.as_ref())
                 .map(|o| &o.input_device);
             ProgrammeInput {
                 label: name(c),
@@ -322,7 +322,7 @@ impl AppState {
                 .and_then(|p| p.name.clone())
                 .unwrap_or_else(|| ac2_scene::meter::pair_name(&name(l), &name(r)))
         };
-        let loudness = self.open_session().and_then(|o| {
+        let loudness = self.open_stream().and_then(|o| {
             let s = st?;
             let pairs: Vec<NamedPair> = s
                 .pairs
@@ -410,9 +410,9 @@ impl AppState {
     }
 
     /// What the Inputs-list row of input `c` meters: its pair when `c` is the left of one
-    /// the session captures, else `c` alone.
+    /// the stream captures, else `c` alone.
     pub fn row_meters(&self, c: u16) -> Option<Metered> {
-        let o = self.open_session()?;
+        let o = self.open_stream()?;
         let captured = &o.config.input_channels;
         let pair = self.daemon().and_then(|s| {
             s.pairs
@@ -433,7 +433,7 @@ impl AppState {
 
     /// What an Inputs row that meters `m` is called (its name in the list), for a drag label.
     pub(in crate::state) fn metered_name(&self, m: Metered) -> String {
-        self.session_inputs()
+        self.stream_inputs()
             .into_iter()
             .find(|r| self.row_meters(r.channel) == Some(m))
             .map_or_else(
@@ -505,8 +505,8 @@ impl AppState {
 
     /// `levels.reset` of `channels` (empty: every input), with what the toast says.
     pub(in crate::state) fn levels_reset(&mut self, channels: Vec<u16>, out: &mut Vec<Request>) {
-        if self.open_session().is_none() {
-            self.fault("no session is open: nothing to reset");
+        if self.open_stream().is_none() {
+            self.fault("no stream is open: nothing to reset");
             return;
         }
         let what = if channels.is_empty() {
@@ -530,8 +530,8 @@ impl RigState {
     /// gonio frame, at display time `now_s`; drops the rings no visible pane shows.
     pub(in crate::state) fn fold_programme(&mut self, d: &DataSnapshot, fold: &Folding) {
         let now = fold.now_s;
-        if let Some(tf) = d.latest.get(&Topic::SessionLevels)
-            && let FrameData::SessionLevels(f) = &tf.frame.data
+        if let Some(tf) = d.latest.get(&Topic::StreamLevels)
+            && let FrameData::StreamLevels(f) = &tf.frame.data
             && self.programme.levels_seq != Some(tf.frame.stamp.seq)
         {
             self.programme.levels_seq = Some(tf.frame.stamp.seq);
@@ -547,8 +547,8 @@ impl RigState {
         let shown = &fold.pairs_shown;
         self.programme.rings.retain(|k, _| shown.contains(k));
         let capacity = ac2_scene::gonio::ring_capacity(fold.cooling);
-        if let Some(tf) = d.latest.get(&Topic::SessionGonio)
-            && let FrameData::SessionGonio(g) = &tf.frame.data
+        if let Some(tf) = d.latest.get(&Topic::StreamGonio)
+            && let FrameData::StreamGonio(g) = &tf.frame.data
             && self.programme.gonio_seq != Some(tf.frame.stamp.seq)
         {
             self.programme.gonio_seq = Some(tf.frame.stamp.seq);

@@ -62,7 +62,7 @@ fn mirror(ms: Vec<Measurement>) -> Msg {
             client_id: Some(ClientId("pane-title".into())),
             phase: Phase::Live,
             incarnation: Some(DaemonIncarnation(1)),
-            session_epoch: Some(SessionEpoch(1)),
+            stream_epoch: Some(StreamEpoch(1)),
             rev: Rev(1),
             state: Some(Arc::new(s)),
             last_ka: Some(Instant::now()),

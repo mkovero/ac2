@@ -18,7 +18,7 @@ use std::time::Duration;
 use ac2_audio::fake::{FakeDrive, FakePath};
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_core::generator::RAMP_SECONDS;
-use ac2_proto::frame::{FrameData, LoudnessSource, SessionLevelsFrame, SourceLoudness};
+use ac2_proto::frame::{FrameData, LoudnessSource, SourceLoudness, StreamLevelsFrame};
 use ac2_proto::model::{
     Ballistic, GeneratorDesired, GeneratorSettings, InputKind, InputSetup, Pair, Signal,
 };
@@ -57,7 +57,7 @@ struct Prog {
     /// Per column, the highest true peak any frame carried so far, dBTP.
     tp_seen: Vec<f32>,
     /// The block a case's programme starts at: the sources start with the frame after
-    /// `session.inputs`, so a case begins once that frame is out, with room to spare.
+    /// `stream.inputs`, so a case begins once that frame is out, with room to spare.
     t0: u64,
 }
 
@@ -84,17 +84,17 @@ fn open(name: &str, ballistic: Ballistic, start: f64) -> Prog {
     .unwrap();
     let h = Daemon::start(steady_config(backend.clone(), inproc(name))).unwrap();
     let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
-    let mut cfg = session(false);
+    let mut cfg = stream(false);
     cfg.input_channels = vec![0, 1, 2, 3];
     cfg.sample_rate_hz = Some(FS);
     cfg.buffer_frames = Some(B);
-    c.ok(Command::SessionOpen { config: cfg });
+    c.ok(Command::StreamOpen { config: cfg });
     let line = |channel| InputSetup {
         channel,
         kind: InputKind::Line,
         pair: None,
     };
-    c.ok(Command::SessionInputs {
+    c.ok(Command::StreamInputs {
         inputs: vec![line(0), line(1), line(2)],
         pairs: vec![Pair {
             left: 0,
@@ -159,7 +159,7 @@ impl Prog {
 
     /// The meters up to the end of block `upto` (exclusive count): one block run after the
     /// frame interval, so the fan-out has a frame due and publishes what it metered.
-    fn frame(&mut self, upto: u64) -> SessionLevelsFrame {
+    fn frame(&mut self, upto: u64) -> StreamLevelsFrame {
         assert_eq!(self.d.blocks() + 1, upto, "a read is one block ahead");
         std::thread::sleep(Duration::from_millis(40));
         self.run(1);
@@ -168,7 +168,7 @@ impl Prog {
         let f = self
             .s
             .frame(T, |f| {
-                let FrameData::SessionLevels(l) = &f.data else {
+                let FrameData::StreamLevels(l) = &f.data else {
                     return false;
                 };
                 for (s, &tp) in seen.iter_mut().zip(&l.true_peak) {
@@ -177,7 +177,7 @@ impl Prog {
                 f.stamp.audio_sample.0 + 1 >= end
             })
             .unwrap_or_else(|| panic!("no meter frame up to sample {end}"));
-        let FrameData::SessionLevels(l) = f.data else {
+        let FrameData::StreamLevels(l) = f.data else {
             unreachable!()
         };
         l
@@ -185,7 +185,7 @@ impl Prog {
 
     /// Plays `steps` (block, dBFS: the level from that block on) and reads a frame at the end
     /// of each block of `reads`, in block order.
-    fn play(&mut self, steps: &[(u64, f64)], reads: &[u64]) -> Vec<(u64, SessionLevelsFrame)> {
+    fn play(&mut self, steps: &[(u64, f64)], reads: &[u64]) -> Vec<(u64, StreamLevelsFrame)> {
         let (mut si, mut ri) = (0, 0);
         let mut got = Vec::new();
         loop {
@@ -213,7 +213,7 @@ impl Prog {
 
     /// Under a loudness ballistic the frame says so, and every input's own column, a mic's
     /// included, is its true peak and true-peak hold.
-    fn columns_are_true_peak(&self, f: &SessionLevelsFrame, ballistic: Ballistic, held: bool) {
+    fn columns_are_true_peak(&self, f: &StreamLevelsFrame, ballistic: Ballistic, held: bool) {
         assert_eq!(f.meta.ballistic, ballistic);
         assert_eq!(f.meta.channels, [0, 1, 2, 3]);
         for i in 0..4 {
@@ -231,7 +231,7 @@ impl Prog {
         assert!(f.true_peak[3].is_finite(), "the mic hears the tone");
     }
 
-    /// The generator's envelope (linear amplitude, 1 = 0 dBFS) at every session sample up to
+    /// The generator's envelope (linear amplitude, 1 = 0 dBFS) at every stream sample up to
     /// `end`, as it ramps: from the block of each step, linearly over the ramp.
     fn envelope(&self, end: usize) -> Vec<f64> {
         let ramp = (RAMP_SECONDS * f64::from(FS)).round() as usize;
@@ -269,7 +269,7 @@ fn window_lufs(g: &[f64], end: usize, window: usize) -> f64 {
     10.0 * ms.log10()
 }
 
-fn source(f: &SessionLevelsFrame, s: LoudnessSource) -> SourceLoudness {
+fn source(f: &StreamLevelsFrame, s: LoudnessSource) -> SourceLoudness {
     *f.meta
         .loudness
         .iter()

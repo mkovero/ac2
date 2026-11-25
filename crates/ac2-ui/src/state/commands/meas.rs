@@ -7,7 +7,7 @@ impl AppState {
     /// A new transfer form's default name: the reference → the measurement input's name.
     fn name_transfer(&self, f: &mut Form) {
         let mic = f.channel(crate::forms::FieldId::Measurement).and_then(|c| {
-            self.session_input_labels()
+            self.stream_input_labels()
                 .into_iter()
                 .find(|(ch, _)| *ch == c)
                 .map(|(_, l)| l)
@@ -28,17 +28,17 @@ impl AppState {
     fn open_meas_edit(&mut self, m: &Measurement, out: &mut Vec<Request>) {
         let form = match &m.config.kind {
             MeasKind::Dynamics { .. } => {
-                let open = self.open_session().cloned();
-                let (inputs, outputs) = (self.session_input_names(), self.session_output_names());
+                let open = self.open_stream().cloned();
+                let (inputs, outputs) = (self.stream_input_names(), self.stream_output_names());
                 Form::edit_dynamics(m, open.as_ref(), &inputs, &outputs)
             }
             MeasKind::Sweep { .. } => {
-                let open = self.open_session().cloned();
-                let (inputs, outputs) = (self.session_input_names(), self.session_output_names());
+                let open = self.open_stream().cloned();
+                let (inputs, outputs) = (self.stream_input_names(), self.stream_output_names());
                 Form::edit_sweep(m, open.as_ref(), &inputs, &outputs)
             }
             MeasKind::Transfer { .. } | MeasKind::Spectrum { .. } | MeasKind::Rta { .. } => {
-                Form::edit_spec(m, &self.session_input_names(), self.open_session())
+                Form::edit_spec(m, &self.stream_input_names(), self.open_stream())
             }
             MeasKind::Math { config } => {
                 let candidates = self.math_candidates(Some(config.owner));
@@ -111,7 +111,7 @@ impl AppState {
                 self.session_command(c, out);
             }
             C::Reconnect => out.push(Request::Reconnect),
-            C::OpenSession => {
+            C::OpenStream => {
                 if !self.connected() {
                     self.warn("not connected");
                 } else {
@@ -123,13 +123,13 @@ impl AppState {
                     .daemon()
                     .and_then(|s| s.recording.as_ref())
                     .is_some_and(ac2_proto::model::RecordingRun::active);
-                match self.open_session().cloned() {
+                match self.open_stream().cloned() {
                     _ if recording => {
                         self.call(out, Command::RecStop, "recording stopped".into());
                     }
                     None => self.warn(format!(
                         "no audio I/O to record: {}",
-                        open_session_hint(keymap)
+                        open_stream_hint(keymap)
                     )),
                     Some(o) => self.call(
                         out,
@@ -156,11 +156,11 @@ impl AppState {
                     self.warn("not connected");
                 }
             }
-            C::CloseSession => {
-                if self.open_session().is_none() {
+            C::CloseStream => {
+                if self.open_stream().is_none() {
                     self.warn("no audio I/O is open");
                 } else {
-                    self.call(out, Command::SessionClose, "audio I/O closed".into());
+                    self.call(out, Command::StreamClose, "audio I/O closed".into());
                 }
             }
             C::NewTransfer | C::NewSpectrum | C::NewRta | C::NewSpl => {
@@ -170,10 +170,10 @@ impl AppState {
                     C::NewSpl => FormKind::Spl,
                     _ => FormKind::Transfer,
                 };
-                match self.open_session().cloned() {
+                match self.open_stream().cloned() {
                     None => self.warn(format!(
                         "no audio I/O to measure: {}",
-                        open_session_hint(keymap)
+                        open_stream_hint(keymap)
                     )),
                     Some(_)
                         if let Some(why) = (kind == FormKind::Transfer)
@@ -183,7 +183,7 @@ impl AppState {
                         self.warn(why)
                     }
                     Some(o) => {
-                        let names = self.session_input_names();
+                        let names = self.stream_input_names();
                         let mics: Vec<u16> = self
                             .daemon()
                             .map(|s| {

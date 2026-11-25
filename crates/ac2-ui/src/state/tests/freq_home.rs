@@ -5,7 +5,7 @@ use ac2_scene::view::FreqRange;
 
 fn at_rate(t: &mut T, rate: u32) {
     t.remirror(|s| {
-        s.session.open.as_mut().expect("session").sample_rate_hz = rate;
+        s.stream.open.as_mut().expect("session").sample_rate_hz = rate;
     });
 }
 

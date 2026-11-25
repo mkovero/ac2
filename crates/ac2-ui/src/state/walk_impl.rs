@@ -84,7 +84,7 @@ impl AppState {
                     (_, Some(n)) => n,
                     // A sweep walk's mics share its measurement: the input tells them apart.
                     (WalkKind::Sweep, None) => self
-                        .session_input_names()
+                        .stream_input_names()
                         .into_iter()
                         .find(|(c, _)| *c == mic.input)
                         .map_or_else(|| format!("Input {}", mic.input + 1), |(_, n)| n),

@@ -9,7 +9,7 @@
 //! splices.
 //!
 //! Per-channel block statistics (sum of squares, peak) are computed once, when a block is
-//! popped, and travel with it: the running levels for `cal.spl`, the session meters
+//! popped, and travel with it: the running levels for `cal.spl`, the stream meters
 //! published from here, and every job's own meters all read them instead of rescanning
 //! the samples. The fan-out also watches for configuration changes.
 
@@ -23,14 +23,14 @@ use ac2_audio::timer::{Sleeper, Waker};
 use ac2_audio::{BlockFlags, Delivery, DuplexStream};
 use ac2_proto::frame::LevelsMark;
 use ac2_proto::model::StopCause;
-use ac2_proto::units::{Rev, SampleIndex, SessionEpoch, WallNs};
+use ac2_proto::units::{Rev, SampleIndex, StreamEpoch, WallNs};
 
 use crate::batch_pool::Pool;
 use crate::burst::BurstDetector;
 use crate::capture_clock::CaptureClock;
 use crate::control::ControlMsg;
 use crate::hop_wake::{HopWake, WakeLog, in_by, next_frame_end, schedule};
-use crate::jobs::meters::{SessionLevels, meter_period};
+use crate::jobs::meters::{StreamLevels, meter_period};
 use crate::jobs::programme::Programme;
 use crate::jobs::{Emitter, JobEnv, JobMsg};
 use crate::remote::ColumnMarks;
@@ -49,7 +49,7 @@ pub(crate) struct ChanStats {
 /// One captured block.
 #[derive(Debug)]
 pub(crate) struct Block {
-    /// Session sample index of the first frame.
+    /// Stream sample index of the first frame.
     pub(crate) start_sample: u64,
     pub(crate) frames: u32,
     pub(crate) channels: u16,
@@ -251,17 +251,17 @@ pub(crate) enum FanoutMsg {
     AttachJoined(u64, JobFeed),
     /// Serve the captured channels to other rigs (`None`: stop).
     Tap(Option<Box<SourceTap>>),
-    /// Join the remote inputs into the session's blocks (`None`: no remote input).
+    /// Join the remote inputs into the stream's blocks (`None`: no remote input).
     Join(Option<Box<Joiner>>),
     /// Run this once every message sent before it is handled.
     Then(Box<dyn FnOnce() + Send>),
     Detach(u64),
-    /// Publish the session input meters of a session capturing `input_map`, stamped with
+    /// Publish the stream input meters of a stream capturing `input_map`, stamped with
     /// `config_rev`.
     Levels {
         env: JobEnv,
         input_map: Vec<u16>,
-        /// Session channels of the remote inputs, metered from the joined feed.
+        /// Stream channels of the remote inputs, metered from the joined feed.
         remote: Vec<u16>,
         config_rev: Rev,
         programme: Box<Programme>,
@@ -299,7 +299,7 @@ pub(crate) const JOB_QUEUE_S: f64 = 2.0;
 const MAX_BATCH: usize = 4096;
 
 /// How often captured audio is handed on. Jobs publish at most `fps` times a second and
-/// the session meters [`ac2_proto::frame::METER_FPS`] times; handing off at twice the
+/// the stream meters [`ac2_proto::frame::METER_FPS`] times; handing off at twice the
 /// meter rate (or the publish rate, if faster) lets both publish on schedule while every
 /// thread downstream wakes once per hand-off rather than once per device period. Never
 /// shorter than one device period: waking between blocks finds nothing.
@@ -382,7 +382,7 @@ impl Fanout {
     /// whole at every hand-off, and a consumer that falls behind loses batches.
     pub(crate) fn spawn(
         stream: DuplexStream,
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         to_control: Sender<ControlMsg>,
         fps: u32,
         lossless: bool,
@@ -463,7 +463,7 @@ impl Fanout {
         self.send(FanoutMsg::Then(f));
     }
 
-    /// Starts publishing the session input meters.
+    /// Starts publishing the stream input meters.
     pub(crate) fn start_levels(
         &self,
         env: JobEnv,
@@ -528,7 +528,7 @@ impl Wait {
 }
 
 struct Config {
-    epoch: SessionEpoch,
+    epoch: StreamEpoch,
     rate: f64,
     sample_rate: u32,
     handoff: Duration,
@@ -556,7 +556,7 @@ fn run(
     let mut tap: Option<Box<SourceTap>> = None;
     let mut joiner: Option<Box<Joiner>> = None;
     let mut ms: Vec<(f64, f64)> = vec![(0.0, 0.0); meters.ms.len()];
-    let mut levels: Option<(SessionLevels, Emitter)> = None;
+    let mut levels: Option<(StreamLevels, Emitter)> = None;
     // This rig's timing (`remote::standing`): continuity breaks so far, the newest stamped
     // block, and the cell the links read it from.
     let mut breaks = 0u64;
@@ -612,7 +612,7 @@ fn run(
                     local,
                 } => match Emitter::connect(env) {
                     Ok(em) => {
-                        let l = SessionLevels::new(
+                        let l = StreamLevels::new(
                             &input_map,
                             &remote,
                             cfg.sample_rate,
@@ -623,7 +623,7 @@ fn run(
                         levels = Some((l, em));
                         local_clock = Some(local);
                     }
-                    Err(e) => tracing::error!("cannot start the session meters: {e}"),
+                    Err(e) => tracing::error!("cannot start the stream meters: {e}"),
                 },
                 FanoutMsg::Stop => {
                     if let Some(c) = &local_clock {

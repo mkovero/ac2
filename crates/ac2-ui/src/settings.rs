@@ -13,7 +13,7 @@
 //! Every setting says whose it is: [`THIS_APP`] (kept in `ui.toml` on this computer) or
 //! [`THE_RIG`] (kept by the daemon; every client sees and changes it).
 //!
-//! Pure data like the dialogs it hosts ([`SessionDialog`], [`CalView`], [`LeqDialog`]): the
+//! Pure data like the dialogs it hosts ([`StreamDialog`], [`CalView`], [`LeqDialog`]): the
 //! lines and texts come from the mirrored state on every call, and the reducer turns the
 //! actions into requests.
 
@@ -23,7 +23,7 @@ use ac2_scene::rig::{RAISE_WHILE_LIVE, RAISE_WORD};
 
 use crate::cal_view::CalView;
 use crate::leq_dialog::LeqDialog;
-use crate::session_dialog::SessionDialog;
+use crate::stream_dialog::StreamDialog;
 
 mod connection;
 mod display;
@@ -127,13 +127,13 @@ impl Page {
                 let pair = crate::keys::Chord::shift(eframe::egui::Key::P).label_in(style);
                 return format!(
                     "↑↓ move · ←→ backend / input / output device, a mic's curve · type the rate \
-                     or buffer · Space in session · R reference · M mic · L line · A digital · \
+                     or buffer · Space in stream · R reference · M mic · L line · A digital · \
                      {pair} pair · N name (the mic, the pair or an output) · S stimulus output · \
                      D detects the loopback · P opens the driver's settings (ASIO panel, Audio \
                      MIDI Setup) · Delete on a remote input removes it (twice) · on the \
                      stimulus signal: ←→ change, type the sine's frequency, Enter · on Stop \
                      transfers with the stimulus: ←→ · on the stimulus level and the max \
-                     level: type dBFS, Enter · Enter opens the session (on Add an input from \
+                     level: type dBFS, Enter · Enter opens the stream (on Add an input from \
                      another rig…: picks one) · Esc closes"
                 );
             }
@@ -357,7 +357,7 @@ pub fn recording_rows(limit_min: u32, server: Option<&ServerInfo>) -> Vec<(Recor
 pub struct Settings {
     pub page: Page,
     /// The Audio I/O page's device and channel rows.
-    pub session: SessionDialog,
+    pub stream: StreamDialog,
     /// The max level row is focused on the Audio I/O page (below the channels).
     pub on_ceiling: bool,
     pub ceiling: CeilingEdit,
@@ -390,10 +390,10 @@ pub enum FocusWant {
 }
 
 impl Settings {
-    pub fn new(page: Page, session: SessionDialog, cal: CalView, leq: Option<LeqDialog>) -> Self {
+    pub fn new(page: Page, stream: StreamDialog, cal: CalView, leq: Option<LeqDialog>) -> Self {
         let mut s = Self {
             page,
-            session,
+            stream,
             on_ceiling: false,
             ceiling: CeilingEdit::default(),
             signal: SignalRows::default(),
@@ -420,11 +420,11 @@ impl Settings {
 
     /// The device's rows arrived (or changed): a waiting focus wish lands on them.
     pub fn follow_focus_want(&mut self) {
-        use crate::session_dialog::Row;
+        use crate::stream_dialog::Row;
         let Some(want) = self.focus_want else {
             return;
         };
-        let d = &self.session;
+        let d = &self.stream;
         let row = match want {
             FocusWant::Inputs => (!d.inputs.is_empty()).then_some(Row::Input(0)),
             FocusWant::StimulusOutputs => d
@@ -436,22 +436,22 @@ impl Settings {
         };
         if let Some(row) = row {
             self.focus_want = None;
-            self.focus_session_row(row);
+            self.focus_stream_row(row);
         }
     }
 
     /// Shows the Audio I/O page focused on `row`.
-    pub fn focus_session_row(&mut self, row: crate::session_dialog::Row) {
+    pub fn focus_stream_row(&mut self, row: crate::stream_dialog::Row) {
         self.show(Page::AudioIo);
         self.on_ceiling = false;
         self.signal.leave();
-        self.session.detect_cancel();
-        self.session.focus_row(row);
+        self.stream.detect_cancel();
+        self.stream.focus_row(row);
     }
 
     /// The max level row takes the focus.
     pub fn focus_ceiling(&mut self) {
-        self.session.finish_edit();
+        self.stream.finish_edit();
         self.signal.leave();
         self.on_ceiling = true;
     }
@@ -476,7 +476,7 @@ impl Settings {
         match self.page {
             Page::AudioIo if self.on_ceiling => true,
             Page::AudioIo if self.signal.at().is_some() => self.signal.typed(),
-            Page::AudioIo => self.session.text_focus(),
+            Page::AudioIo => self.stream.text_focus(),
             Page::Calibration => self.cal.typing(),
             Page::Leq => self.leq.is_some(),
             Page::Recording => self.recording.focus == RecordingRow::Limit,
@@ -521,14 +521,14 @@ impl Settings {
     /// ↑/↓ on the Audio I/O page: the device rows, the channel rows, the stimulus rows
     /// (`sine`: the sine's own are shown), then the max level row, wrapping.
     pub fn io_move(&mut self, d: i32, sine: bool) {
-        let rows = self.session.rows();
+        let rows = self.stream.rows();
         let stim = StimFocus::rows(sine);
         if self.on_ceiling {
             self.on_ceiling = false;
             self.ceiling.confirm = None;
             self.ceiling.error = None;
             match (d > 0, rows.first()) {
-                (true, Some(first)) => self.session.focus = *first,
+                (true, Some(first)) => self.stream.focus = *first,
                 (true, None) => self.signal.set(stim[0]),
                 (false, _) => self.signal.set(stim[stim.len() - 1]),
             }
@@ -541,28 +541,28 @@ impl Settings {
                 Some(r) => self.signal.set(*r),
                 None if d > 0 => self.on_ceiling = true,
                 None => match rows.last() {
-                    Some(last) => self.session.focus = *last,
+                    Some(last) => self.stream.focus = *last,
                     None => self.on_ceiling = true,
                 },
             }
             return;
         }
-        let i = rows.iter().position(|r| *r == self.session.focus);
+        let i = rows.iter().position(|r| *r == self.stream.focus);
         let leaving = match i {
             Some(i) => (d > 0 && i + 1 == rows.len()) || (d < 0 && i == 0),
             None => true,
         };
         if leaving {
-            self.session.finish_edit();
-            self.session.detect_cancel();
+            self.stream.finish_edit();
+            self.stream.detect_cancel();
             if d > 0 {
                 self.signal.set(stim[0]);
             } else {
                 self.on_ceiling = true;
             }
         } else {
-            self.session.detect_cancel();
-            self.session.move_focus(d);
+            self.stream.detect_cancel();
+            self.stream.move_focus(d);
         }
     }
 

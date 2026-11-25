@@ -257,7 +257,7 @@ mod tests {
         TraceSource::Math {
             meas: MeasId(4),
             meas_name: "m".into(),
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
             at_sample: SampleIndex(0),
             expr,
             operands: vec![],
@@ -312,7 +312,7 @@ mod tests {
         TraceSource::Captured {
             meas: MeasId(1),
             meas_name: "Main L".into(),
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
             at_sample: SampleIndex(0),
         }
     }
@@ -343,7 +343,7 @@ mod tests {
             meas_name: "Genelec".into(),
             run: SweepId(1),
             number: 1,
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
             sweep: EssSpec {
                 start: Hz(20.0),
                 end: Hz(20_000.0),

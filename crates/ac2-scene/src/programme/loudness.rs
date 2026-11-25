@@ -48,7 +48,7 @@ pub struct NamedPair {
     pub name: String,
 }
 
-/// What the resolution rests on: the session's rate, pairs, captured inputs and the latest
+/// What the resolution rests on: the stream's rate, pairs, captured inputs and the latest
 /// frame's loudness, with how inputs are named, what kind they are and what they read.
 pub struct LoudnessFacts<'a> {
     pub rate_hz: u32,

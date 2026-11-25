@@ -19,7 +19,7 @@ use ac2_proto::model::{
 };
 use serde_json::Value;
 
-use super::common::{client, document, fake_backend, rig_on, run_json as run, session};
+use super::common::{client, document, fake_backend, rig_on, run_json as run, stream};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/salvage")
@@ -58,8 +58,8 @@ async fn rig(open_inputs: Option<Vec<u16>>) -> Rig {
     });
     let c = client(&ep, "salvage-rig-test").await;
     if let Some(inputs) = open_inputs {
-        c.call(Command::SessionOpen {
-            config: session(inputs),
+        c.call(Command::StreamOpen {
+            config: stream(inputs),
         })
         .await
         .unwrap();

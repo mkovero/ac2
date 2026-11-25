@@ -47,7 +47,7 @@ pub enum SplitAxis {
 /// daemon: a pane may draw this rig's curves beside another rig's. A pane with no pick holds
 /// [`PaneContent::Nothing`] and keeps its kind; it follows no selection.
 ///
-/// Inputs are zero-based device input channels, as the session's `input_channels` names
+/// Inputs are zero-based device input channels, as the stream's `input_channels` names
 /// them; a pane of a session loaded on a device without them shows which are missing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]

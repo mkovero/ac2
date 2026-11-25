@@ -45,7 +45,7 @@ pub fn mirror_differs(a: &MirrorView, b: &MirrorView) -> bool {
     state
         || a.phase != b.phase
         || a.incarnation != b.incarnation
-        || a.session_epoch != b.session_epoch
+        || a.stream_epoch != b.stream_epoch
         || a.rev != b.rev
         || a.generator != b.generator
         || a.timing != b.timing
@@ -78,13 +78,13 @@ fn health_shown(v: &MirrorView) -> Option<HealthShown<'_>> {
 /// input's true peak is NaN in every levels frame and must not wake the UI each time.
 fn same_data(a: &ac2_proto::FrameData, b: &ac2_proto::FrameData) -> bool {
     use ac2_proto::FrameData;
-    use ac2_proto::frame::{LevelsFrame, SessionLevelsFrame};
+    use ac2_proto::frame::{LevelsFrame, StreamLevelsFrame};
     let bits = |x: &[f32], y: &[f32]| {
         x.len() == y.len() && x.iter().zip(y).all(|(p, q)| p.to_bits() == q.to_bits())
     };
     match (a, b) {
-        (FrameData::SessionLevels(x), FrameData::SessionLevels(y)) => {
-            let SessionLevelsFrame {
+        (FrameData::StreamLevels(x), FrameData::StreamLevels(y)) => {
+            let StreamLevelsFrame {
                 meta,
                 peak,
                 rms,
@@ -142,7 +142,7 @@ pub(super) const METER_QUIET_PERIOD: Duration = Duration::from_millis(500);
 pub(super) fn meter_states(f: &ac2_proto::Frame) -> Option<Vec<ac2_scene::meter::MeterState>> {
     use ac2_proto::FrameData;
     let (peak, rms, clip) = match &f.data {
-        FrameData::SessionLevels(l) => (&l.peak, &l.rms, &l.clip),
+        FrameData::StreamLevels(l) => (&l.peak, &l.rms, &l.clip),
         FrameData::PreviewLevels(l) => (&l.peak, &l.rms, &l.clip),
         _ => return None,
     };

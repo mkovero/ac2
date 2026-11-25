@@ -119,7 +119,7 @@ impl ElectricalDialog {
             ),
         };
         let acoustic = s
-            .session
+            .stream
             .open
             .as_ref()
             .and_then(|o| {
@@ -395,7 +395,7 @@ pub fn key(
 mod tests {
     use super::*;
     use ac2_proto::model::{
-        CalEntry, CalKey, DeviceId, InputSetup, Mic, MicCurveRef, OpenSession, SplCal,
+        CalEntry, CalKey, DeviceId, InputSetup, Mic, MicCurveRef, OpenStream, SplCal,
     };
     use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, Ohms, Volts, WallNs};
 
@@ -427,10 +427,10 @@ mod tests {
     }
 
     fn device(s: &State) -> DeviceId {
-        s.session
+        s.stream
             .open
             .as_ref()
-            .map(|o: &OpenSession| o.input_device.clone())
+            .map(|o: &OpenStream| o.input_device.clone())
             .unwrap_or_else(|| DeviceId("none".into()))
     }
 

@@ -9,7 +9,7 @@ use ac2_audio::{FakeBackend, FakeConfig};
 use ac2_proto::frame::FrameData;
 use ac2_proto::model::{
     CantTellReason, NotLockedReason, PeerRelation, RemoteLink, RemoteState, RigPeer, SampleClock,
-    SessionConfig, StandingRig,
+    StandingRig, StreamConfig,
 };
 use ac2_proto::units::{RigId, WallNs};
 use ac2_proto::{Command, Topic};
@@ -31,13 +31,13 @@ struct Rigs {
     a_keys: KeyPair,
 }
 
-/// Rig A paired with rig B, which admits it; both sessions open at `rate_b` on B, and no
+/// Rig A paired with rig B, which admits it; both streams open at `rate_b` on B, and no
 /// remote input anywhere.
 fn rigs(rate_b: u32) -> Rigs {
     rigs_with(rate_b, None)
 }
 
-/// [`rigs`], B's capture stamps off by `start` over its stream's first seconds. B's session
+/// [`rigs`], B's capture stamps off by `start` over its stream's first seconds. B's stream
 /// then opens a few seconds before A's, so the marks pair only after that error is gone:
 /// B's own line is fitted over it, the cross-rig figure is not.
 fn rigs_with(rate_b: u32, start: Option<StartStampError>) -> Rigs {
@@ -64,11 +64,11 @@ fn rigs_with(rate_b: u32, start: Option<StartStampError>) -> Rigs {
     let ctx = Context::new().unwrap();
     let (mut cb, b_id) = client(&ctx, &b, &app);
     let (mut ca, a_id) = client(&ctx, &a, &app);
-    cb.ok(Command::SessionOpen { config: at(rate_b) });
+    cb.ok(Command::StreamOpen { config: at(rate_b) });
     if start.is_some() {
         std::thread::sleep(Duration::from_secs(3));
     }
-    ca.ok(Command::SessionOpen { config: at(FS) });
+    ca.ok(Command::StreamOpen { config: at(FS) });
     cb.ok(Command::AuthAdmitRig {
         key: a_keys.public.to_z85(),
         rig_id: a_id,
@@ -96,10 +96,10 @@ fn rigs_with(rate_b: u32, start: Option<StartStampError>) -> Rigs {
     }
 }
 
-fn at(rate: u32) -> SessionConfig {
-    SessionConfig {
+fn at(rate: u32) -> StreamConfig {
+    StreamConfig {
         sample_rate_hz: Some(rate),
-        ..session(false)
+        ..stream(false)
     }
 }
 
@@ -124,7 +124,7 @@ fn measuring_for(r: &RemoteState, s: f64) -> bool {
     standing(r).is_some_and(|x| {
         x.link == RemoteLink::Up
             && x.clock.relation == PeerRelation::Measuring
-            && x.session.as_ref().map(|s| s.channels.as_slice()) == Some(&[0, 1][..])
+            && x.stream.as_ref().map(|s| s.channels.as_slice()) == Some(&[0, 1][..])
     }) && marks_for(r) >= s
 }
 
@@ -142,29 +142,29 @@ fn the_clocks_are_measured_from_levels_alone_and_start_again_on_a_reopen() {
     let s = standing(&r).unwrap();
     assert_eq!(s.rig, t.b_id);
     assert_eq!(s.name, "rig-b");
-    assert_eq!(s.session.as_ref().unwrap().sample_rate_hz, FS);
+    assert_eq!(s.stream.as_ref().unwrap().sample_rate_hz, FS);
 
-    // B closes: its frames stop, A says whose session is missing.
-    t.cb.ok(Command::SessionClose);
-    wait_remote(&mut t.ca, "B has no session", |r| {
-        cant_tell(r, CantTellReason::NoSession { rig: t.b_id })
-            && standing(r).is_some_and(|s| s.session.is_none())
+    // B closes: its frames stop, A says whose stream is missing.
+    t.cb.ok(Command::StreamClose);
+    wait_remote(&mut t.ca, "B has no stream", |r| {
+        cant_tell(r, CantTellReason::NoStream { rig: t.b_id })
+            && standing(r).is_some_and(|s| s.stream.is_none())
     });
     // Absent: no count shown as if it went on.
     assert_eq!(marks_for(&remote(&mut t.ca)), 0.0);
     // B again: a new run, the marks counted from its start.
     let opened = Instant::now();
-    t.cb.ok(Command::SessionOpen { config: at(FS) });
+    t.cb.ok(Command::StreamOpen { config: at(FS) });
     wait_remote(&mut t.ca, "measuring again", |r| measuring_for(r, 1.0));
     let since = opened.elapsed().as_secs_f64();
     assert!(marks_for(&remote(&mut t.ca)) <= since + 1.0);
 
     // A closes: B's frames still come, A has nothing to pair them with.
-    t.ca.ok(Command::SessionClose);
-    wait_remote(&mut t.ca, "A has no session", |r| {
-        cant_tell(r, CantTellReason::NoSession { rig: t.a_id })
+    t.ca.ok(Command::StreamClose);
+    wait_remote(&mut t.ca, "A has no stream", |r| {
+        cant_tell(r, CantTellReason::NoStream { rig: t.a_id })
     });
-    t.ca.ok(Command::SessionOpen { config: at(FS) });
+    t.ca.ok(Command::StreamOpen { config: at(FS) });
     wait_remote(&mut t.ca, "measuring after A's reopen", |r| {
         measuring_for(r, 1.0) && marks_for(r) < 5.0
     });
@@ -227,7 +227,7 @@ fn another_nominal_rate_is_not_locked() {
                         ours: FS,
                     },
                 }
-                && s.session.as_ref().map(|x| x.sample_rate_hz) == Some(96_000)
+                && s.stream.as_ref().map(|x| x.sample_rate_hz) == Some(96_000)
         })
     });
     // Nothing fitted across two rates.
@@ -247,19 +247,19 @@ fn source_levels_go_to_an_admitted_rig_only() {
         server_key: t.b.server_public_key().unwrap(),
     };
     let levels = |f: &ac2_proto::frame::Frame| matches!(f.data, FrameData::SourceLevels(_));
-    let session = |f: &ac2_proto::frame::Frame| matches!(f.data, FrameData::SessionLevels(_));
-    // An app asks for both: its session's levels come, the source levels never do.
+    let stream = |f: &ac2_proto::frame::Frame| matches!(f.data, FrameData::StreamLevels(_));
+    // An app asks for both: its stream's levels come, the source levels never do.
     let app = Sub::connect_with(
         &ctx,
         net_endpoints(&t.b).1.as_str(),
         &[
             Topic::SourceLevels.to_string().as_bytes(),
-            Topic::SessionLevels.to_string().as_bytes(),
+            Topic::StreamLevels.to_string().as_bytes(),
         ],
         Some(&curve),
         None,
     );
-    assert!(app.frame(Duration::from_secs(5), session).is_some());
+    assert!(app.frame(Duration::from_secs(5), stream).is_some());
     assert!(app.frame(Duration::from_secs(2), levels).is_none());
     // The admitted rig had them all along: its marks kept counting.
     let r = remote(&mut t.ca);

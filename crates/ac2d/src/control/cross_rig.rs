@@ -13,7 +13,7 @@ use ac2_proto::model::{
     NotLockedReason, PeerRelation, Relock, RelockOutcome, RemoteInput, RemoteInputStatus,
     RemoteSide, SampleClock, StopWhy, remote_slot,
 };
-use ac2_proto::units::{MeasId, RigId, Seconds, SessionEpoch, WallNs};
+use ac2_proto::units::{MeasId, RigId, Seconds, StreamEpoch, WallNs};
 
 use super::{Control, DelaySource};
 use crate::conv;
@@ -199,7 +199,7 @@ impl CrossTf {
         Some(gate)
     }
 
-    /// What its job reported; `fs` the session rate.
+    /// What its job reported; `fs` the stream rate.
     pub(super) fn event(&mut self, e: &CrossEvent, fs: f64, now: Instant) {
         match e {
             CrossEvent::Stopped { held } => {
@@ -301,7 +301,7 @@ impl Control {
     /// how the clocks stand.
     pub(super) fn cross_start(&mut self, m: &Measurement) {
         let inputs = self
-            .session
+            .stream
             .as_ref()
             .map(|rt| rt.open.config.remote_inputs.clone())
             .unwrap_or_default();
@@ -414,9 +414,9 @@ impl Control {
     }
 
     /// A cross-rig job reports.
-    pub(super) fn cross_event(&mut self, meas: MeasId, epoch: SessionEpoch, e: CrossEvent) {
+    pub(super) fn cross_event(&mut self, meas: MeasId, epoch: StreamEpoch, e: CrossEvent) {
         let Some(fs) = self
-            .session
+            .stream
             .as_ref()
             .filter(|rt| rt.epoch == epoch)
             .map(|rt| f64::from(rt.sample_rate))

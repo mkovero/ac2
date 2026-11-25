@@ -6,7 +6,7 @@
 //! placed by the frames alone jump by those steps, which the eye reads as judder, and the
 //! jumps are the audio's, not the display's.
 //!
-//! The time axis instead runs on the display's own clock, `now − offset`, in the session's
+//! The time axis instead runs on the display's own clock, `now − offset`, in the stream's
 //! audio time (`audio_sample ÷ rate`), so it moves the same distance every display frame.
 //! The offset is the earliest the audio has recently reached the app (the smallest of
 //! arrival − audio time over the last [`WINDOW`] frames), so when a frame arrives the axis
@@ -21,7 +21,7 @@
 //! of a few percent the eye does not see, so the axis never steps back when the earliest
 //! frame leaves the window. A frame earlier than any before moves the axis on to it at
 //! once (rare once the window holds the hand-off's earliest phase). A jump beyond
-//! [`RESET_S`] (a stall, a new session, the audio clock going back) is a new start.
+//! [`RESET_S`] (a stall, a new stream, the audio clock going back) is a new start.
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -65,7 +65,7 @@ fn secs(a: Instant, b: Instant) -> f64 {
 }
 
 impl ScrollClock {
-    /// Takes a frame carrying audio up to `audio_s` (session audio time, s) that arrived
+    /// Takes a frame carrying audio up to `audio_s` (stream audio time, s) that arrived
     /// at `arrived`. A frame no newer than the newest is ignored; one older, or one far
     /// from where the axis stands, starts the clock over from it.
     pub fn observe(&mut self, arrived: Instant, audio_s: f64) {
@@ -247,7 +247,7 @@ mod tests {
         // A second's stall: the axis starts from the frame after it.
         c.observe(at(1.5), 10.6);
         assert!((c.position_s(at(1.5)).expect("started") - 10.6).abs() < 1e-9);
-        // A new session's audio clock starts near zero.
+        // A new stream's audio clock starts near zero.
         c.observe(at(1.6), 0.1);
         assert_eq!(c.newest_s(), Some(0.1));
         assert!((c.position_s(at(1.6)).expect("started") - 0.1).abs() < 1e-9);

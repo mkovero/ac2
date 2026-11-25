@@ -55,18 +55,18 @@ pub enum ConnEvent {
         results: Vec<(String, Result<Box<TraceMeta>, String>)>,
     },
     Stimulus(StimEvent),
-    /// `session.devices` answered (or could not be asked).
+    /// `stream.devices` answered (or could not be asked).
     Devices(Result<Vec<BackendInfo>, String>),
-    /// `session.preview` of `backend`/`device` answered.
+    /// `stream.preview` of `backend`/`device` answered.
     Preview {
         backend: BackendKind,
         device: DeviceId,
         result: Result<Preview, String>,
     },
-    /// `session.detect_loopback` answered (or could not run).
+    /// `stream.detect_loopback` answered (or could not run).
     LoopbackDetected(Result<LoopbackDetection, String>),
-    /// The session dialog's session is open (and its mic names set).
-    SessionOpened,
+    /// The stream dialog's stream is open (and its mic names set).
+    StreamOpened,
     /// A measurement was created (and, unless a reply says otherwise, started).
     MeasCreated(Box<Measurement>),
     /// `walk.new` answered with the walk.

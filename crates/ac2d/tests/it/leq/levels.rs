@@ -11,8 +11,8 @@ async fn slow_weightings_change_in_place_and_keep_the_log() {
     init_log();
     let h = Daemon::start(steady_config(realtime_rig(), local_tcp())).unwrap();
     let c = connect(&h).await;
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();
@@ -97,8 +97,8 @@ async fn slow_peak_limits_and_the_position_correction() {
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();

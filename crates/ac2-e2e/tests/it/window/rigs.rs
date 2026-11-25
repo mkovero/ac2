@@ -183,7 +183,7 @@ fn tone(level: f64) -> GeneratorDesired {
 /// The reading of the shown rig's Inputs-list row for input 1.
 fn in1_reading(a: &App) -> Option<f64> {
     a.state
-        .session_inputs()
+        .stream_inputs()
         .into_iter()
         .find(|r| r.channel == 0)
         .and_then(|r| r.reading.text.replace('\u{2212}', "-").parse().ok())
@@ -324,7 +324,7 @@ fn a_session_with_its_own_panes_loads_on_either_rig() -> R {
     step_until(&mut h, "kettu shown", |a| {
         a.state.active() == kettu_id && synced(a)
     });
-    step_until(&mut h, "kettu has the session", |a| {
+    step_until(&mut h, "kettu has the stream", |a| {
         a.state.meas(MIC_FFT).is_some_and(|m| m.layout.is_some())
     });
     tab_to(&mut h, MIC_FFT);
@@ -751,7 +751,7 @@ fn lists_and_admits(rig: &Rig, peer: RigId) -> R<bool> {
 }
 
 /// Settings › Connection › *Pair with rig…* on pupu, kettu picked: in that one act both
-/// daemons list the other and admit the other, no session touched; the row then says
+/// daemons list the other and admit the other, no stream touched; the row then says
 /// paired both ways. Delete twice on it unpairs both daemons the same way.
 #[test]
 fn pair_with_rig_pairs_both_daemons_in_one_act() -> R {
@@ -807,9 +807,9 @@ fn pair_with_rig_pairs_both_daemons_in_one_act() -> R {
             .and_then(|p| p.pairing.row(kettu_id).cloned())
             .is_some_and(|r| r.text == "kettu · paired both ways")
     });
-    let session = |r: &Rig| r.cli.state().and_then(|s| s.session.open.clone());
+    let stream = |r: &Rig| r.cli.state().and_then(|s| s.stream.open.clone());
     assert!(
-        session(&pupu).is_some_and(|o| o.config.remote_inputs.is_empty()),
+        stream(&pupu).is_some_and(|o| o.config.remote_inputs.is_empty()),
         "no remote input added"
     );
     // Delete twice on the row: both sides unpaired.

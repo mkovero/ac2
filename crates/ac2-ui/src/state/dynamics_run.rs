@@ -31,10 +31,10 @@ pub struct DynamicsRunUi {
 impl AppState {
     /// Opens the dynamics dialog (new measurement), or says why it cannot open.
     pub(super) fn open_dynamics_dialog(&mut self, keymap: &Keymap, out: &mut Vec<Request>) {
-        let Some(o) = self.open_session().cloned() else {
+        let Some(o) = self.open_stream().cloned() else {
             self.warn(format!(
                 "no audio I/O to play on: {}",
-                open_session_hint(keymap)
+                open_stream_hint(keymap)
             ));
             return;
         };
@@ -51,8 +51,8 @@ impl AppState {
         let f = Form::dynamics(
             Some(&o),
             made,
-            &self.session_input_names(),
-            &self.session_output_names(),
+            &self.stream_input_names(),
+            &self.stream_output_names(),
         )
         .play_on(Some(&o), &self.rig.stimulus.outputs);
         self.overlay = Overlay::Form(Box::new(f));
@@ -107,10 +107,10 @@ impl AppState {
             self.warn("not connected");
             return;
         }
-        if self.daemon().is_some_and(|s| s.session.open.is_none()) {
+        if self.daemon().is_some_and(|s| s.stream.open.is_none()) {
             self.warn(format!(
                 "no audio I/O to play on: {}",
-                open_session_hint(keymap)
+                open_stream_hint(keymap)
             ));
             return;
         }

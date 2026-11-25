@@ -144,8 +144,8 @@ fn recording_grammar() {
     assert_eq!(a.dir, Some(std::path::PathBuf::from("/tmp/r")));
     assert!(parse(&["rec", "import"]).is_err(), "the file is required");
     assert!(matches!(
-        ok(&["session", "replay", "show", "--fast"]).cmd,
-        Cmd::Session { cmd: SessionCmd::Replay { ref recording, fast: true } } if recording == "show"
+        ok(&["stream", "replay", "show", "--fast"]).cmd,
+        Cmd::Stream { cmd: StreamCmd::Replay { ref recording, fast: true } } if recording == "show"
     ));
 }
 
@@ -313,7 +313,7 @@ fn other_commands_parse() {
     ok(&["daemon", "stop"]);
     ok(&["daemon", "status", "--json"]);
     let c = ok(&[
-        "session",
+        "stream",
         "open",
         "--backend",
         "fake",
@@ -328,18 +328,18 @@ fn other_commands_parse() {
         "--loopback-in",
         "1",
     ]);
-    let Cmd::Session {
-        cmd: SessionCmd::Open(o),
+    let Cmd::Stream {
+        cmd: StreamCmd::Open(o),
     } = c.cmd
     else {
-        panic!("not session open");
+        panic!("not stream open");
     };
     assert_eq!(o.backend, BackendArg::Fake);
     assert_eq!(o.inputs, Channels(vec![0, 1, 2, 3]));
     assert_eq!(o.buffer, Some(SampleCount(256)));
     assert_eq!((o.device, o.out_device), (None, None));
     let c = ok(&[
-        "session",
+        "stream",
         "open",
         "--backend",
         "coreaudio",
@@ -350,15 +350,15 @@ fn other_commands_parse() {
         "--in",
         "1",
     ]);
-    let Cmd::Session {
-        cmd: SessionCmd::Open(o),
+    let Cmd::Stream {
+        cmd: StreamCmd::Open(o),
     } = c.cmd
     else {
-        panic!("not session open");
+        panic!("not stream open");
     };
     assert_eq!(o.device.as_deref(), Some("USB mic"));
     assert_eq!(o.out_device.as_deref(), Some("{0.0.0.00000000}.{out}"));
-    ok(&["session", "close"]);
+    ok(&["stream", "close"]);
     ok(&[
         "gen", "sine", "--freq", "1khz", "--out", "1", "--level", "-30dbfs", "--force",
     ]);
@@ -529,7 +529,7 @@ fn calibration_and_input_setup_parse() {
     assert_eq!(a.device.as_deref(), Some("hw:1"));
 
     let c = ok(&[
-        "session",
+        "stream",
         "inputs",
         "--mic",
         "3=M30",
@@ -542,11 +542,11 @@ fn calibration_and_input_setup_parse() {
         "--curve",
         "4=90°",
     ]);
-    let Cmd::Session {
-        cmd: SessionCmd::Inputs(i),
+    let Cmd::Stream {
+        cmd: StreamCmd::Inputs(i),
     } = c.cmd
     else {
-        panic!("not session inputs");
+        panic!("not stream inputs");
     };
     assert_eq!(
         i.mics,
@@ -581,7 +581,7 @@ fn calibration_and_input_setup_parse() {
         ]
     );
     let c = ok(&[
-        "session",
+        "stream",
         "open",
         "--backend",
         "fake",
@@ -592,17 +592,17 @@ fn calibration_and_input_setup_parse() {
         "--mic",
         "4=ECM",
     ]);
-    let Cmd::Session {
-        cmd: SessionCmd::Open(o),
+    let Cmd::Stream {
+        cmd: StreamCmd::Open(o),
     } = c.cmd
     else {
-        panic!("not session open");
+        panic!("not stream open");
     };
     assert_eq!(o.mics.len(), 2);
     assert!(matches!(
-        ok(&["session", "inputs"]).cmd,
-        Cmd::Session {
-            cmd: SessionCmd::Inputs(_)
+        ok(&["stream", "inputs"]).cmd,
+        Cmd::Stream {
+            cmd: StreamCmd::Inputs(_)
         }
     ));
 }
@@ -629,11 +629,11 @@ fn refusals() {
         &["trace", "target", "tilt", "--slope", "-1"],
         &["trace", "target", "loudness", "--to", "100db"],
         &["trace", "target", "tilt", "--shelf-corner", "80hz"],
-        // Session backend is never implied.
-        &["session", "open", "--in", "1,2"],
-        &["session", "open", "--backend", "alsa", "--in", "1"],
+        // Stream backend is never implied.
+        &["stream", "open", "--in", "1,2"],
+        &["stream", "open", "--backend", "alsa", "--in", "1"],
         &[
-            "session",
+            "stream",
             "open",
             "--backend",
             "fake",
@@ -661,9 +661,9 @@ fn refusals() {
         &["cal", "curve", "rename", "--mic", "M30", "0°"],
         &["cal", "rm", "--mic", "M30"],
         &["cal", "rm", "--input", "3", "--sensitivity", "--curve"],
-        &["session", "inputs", "--mic", "M30"],
-        &["session", "inputs", "--mic", "0=M30"],
-        &["session", "inputs", "--curve", "3="],
+        &["stream", "inputs", "--mic", "M30"],
+        &["stream", "inputs", "--mic", "0=M30"],
+        &["stream", "inputs", "--curve", "3="],
         &["cal", "use", "3", ""],
         &["spl", "watch"],
         &["spl", "watch", "--meas", "a", "--input", "1"],

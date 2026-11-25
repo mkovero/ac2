@@ -16,7 +16,7 @@ use ac2_proto::units::{DbSpl, Dbfs, Hz};
 use ac2_proto::{Command, ReplyBody};
 use serde_json::Value;
 
-use super::common::{client, document, fake_backend, rig_on, run_json as run, session};
+use super::common::{client, document, fake_backend, rig_on, run_json as run, stream};
 
 fn lines(text: &str) -> Vec<Value> {
     text.lines()
@@ -41,8 +41,8 @@ async fn slow_leq_set_watch_and_export() {
     assert_eq!(code, 1, "{text}");
     assert!(text.contains("no SPL meter"), "{text}");
 
-    c.call(Command::SessionOpen {
-        config: session(vec![0, 1]),
+    c.call(Command::StreamOpen {
+        config: stream(vec![0, 1]),
     })
     .await
     .unwrap();

@@ -39,8 +39,8 @@ fn start(name: &str, backend: FakeBackend) -> Rig {
     cfg.session_dir = dir.path().join("sessions");
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/spec", b"d/2/spec", b"d/3/spec"]);
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     let tok = c.acquire();
     let d = driver(&backend);

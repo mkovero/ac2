@@ -1,7 +1,7 @@
 //! Calibration commands (`docs/design/q7-calibration.md`, `programme-meter.md` §1):
 //! sensitivity calibrations (`cal.spl`, `cal.spl_electrical`), line calibrations
 //! (`cal.line`), `cal.delete`, the mic library (`cal.curve_import`, `cal.curve_rename`,
-//! `cal.curve_delete`), the input setup with its pairs (`session.inputs`) and `cal.list`.
+//! `cal.curve_delete`), the input setup with its pairs (`stream.inputs`) and `cal.list`.
 //!
 //! Every change goes through [`Control::commit_store`]: the store file is written first
 //! (nothing is committed when that fails), then the changed entities are committed and the
@@ -173,14 +173,14 @@ impl Control {
         Ok(rev)
     }
 
-    /// The open session's capture device, with `input` captured by it.
+    /// The open stream's capture device, with `input` captured by it.
     fn cal_target(&self, input: u16) -> Result<ac2_proto::model::DeviceId, ProtoError> {
         // A remote input's calibration is its own rig's: set there, read here.
         self.not_remote(input)?;
         let n = nth(input);
-        let Some(rt) = self.session.as_ref() else {
+        let Some(rt) = self.stream.as_ref() else {
             return Err(invalid(
-                "no open session: a calibration is tied to the session's capture device",
+                "no open stream: a calibration is tied to the stream's capture device",
             ));
         };
         block_index(&rt.input_map, input)
@@ -199,7 +199,7 @@ impl Control {
     }
 
     /// The steady, uncorrected broadband level of `input` (τ = 1 s) for a calibration,
-    /// with the device it is tied to. Refused without a session, without signal (below
+    /// with the device it is tied to. Refused without a stream, without signal (below
     /// −80 dBFS), when the input reached full scale in the last 2 s (a clipped tone reads
     /// low) and while the level is not steady. `tone` names the signal in the refusals.
     fn steady_level(
@@ -209,8 +209,8 @@ impl Control {
     ) -> Result<(ac2_proto::model::DeviceId, f64), ProtoError> {
         let n = nth(input);
         let device = self.cal_target(input)?;
-        let Some(rt) = self.session.as_ref() else {
-            return Err(invalid("no open session"));
+        let Some(rt) = self.stream.as_ref() else {
+            return Err(invalid("no open stream"));
         };
         let idx = block_index(&rt.input_map, input)
             .ok_or_else(|| invalid(format!("input {n} is not captured")))?;
@@ -451,7 +451,7 @@ impl Control {
         calstore::check_mic_name(&mic)?;
         if let Some(i) = input {
             self.mic_input(i, "a mic curve")?;
-            if self.session.is_some() {
+            if self.stream.is_some() {
                 self.cal_target(i)?;
             }
         }
@@ -625,7 +625,7 @@ impl Control {
 
     /// Removes a sensitivity or line calibration, on any device: housekeeping of
     /// calibrations that no longer describe the hardware (a mic sold, a device retired) needs
-    /// no open session.
+    /// no open stream.
     pub(super) fn cal_delete(&mut self, key: &CalRef) -> Result<ReplyBody, ProtoError> {
         self.cal.check()?;
         let mut new = self.cal_contents();
@@ -754,10 +754,10 @@ impl Control {
         })
     }
 
-    /// `session.inputs`: rows upsert, the pair list replaces. The rows are checked as given,
+    /// `stream.inputs`: rows upsert, the pair list replaces. The rows are checked as given,
     /// the pairs over the merged setup (a row's kind may change under a pair), and every
     /// row's `pair` side is set from the list.
-    pub(super) fn session_inputs(
+    pub(super) fn stream_inputs(
         &mut self,
         rows: Vec<InputSetup>,
         pairs: Vec<Pair>,
@@ -802,7 +802,7 @@ impl Control {
         }
         let mut new = self.cal_contents();
         let merged = upsert_inputs(&new.inputs, rows);
-        let captured = self.session.as_ref().map(|rt| rt.input_map.clone());
+        let captured = self.stream.as_ref().map(|rt| rt.input_map.clone());
         let captured_fn = |ch: u16| captured.as_ref().is_some_and(|m| m.contains(&ch));
         cal::check_pairs(
             &merged,

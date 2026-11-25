@@ -35,8 +35,8 @@ struct Rigs {
     /// Arrival after capture beyond 5 ms, s, per frame number.
     jitter: Box<dyn Fn(u64) -> f64>,
     theirs_rate: u32,
-    epoch: SessionEpoch,
-    ours: SessionEpoch,
+    epoch: StreamEpoch,
+    ours: StreamEpoch,
     marks: bool,
     local: bool,
     /// The other rig's own sample clock against its system clock, as it states it, ppm,
@@ -57,8 +57,8 @@ impl Rigs {
             offset: Box::new(|_| 0.0),
             jitter: Box::new(|_| 0.0),
             theirs_rate: RATE,
-            epoch: SessionEpoch(1),
-            ours: SessionEpoch(1),
+            epoch: StreamEpoch(1),
+            ours: StreamEpoch(1),
             marks: true,
             local: true,
             own_ppm: 0.0,
@@ -109,7 +109,7 @@ impl Rigs {
         let stamp = FrameStamp {
             seq: (t * FPS).round() as u64,
             audio_sample: SampleIndex(sample),
-            session_epoch: self.epoch,
+            stream_epoch: self.epoch,
             daemon_incarnation: DaemonIncarnation(9),
             config_rev: Rev(1),
             config_applied_at: SampleIndex(0),
@@ -399,7 +399,7 @@ fn a_new_series_makes_every_line_young_again() {
     r.run(0.0, 200.0);
     assert_eq!(r.shown(200.0), PeerRelation::Agree);
     // The other rig reopens: a new series; its line, stated all along, reads beyond.
-    r.epoch = SessionEpoch(2);
+    r.epoch = StreamEpoch(2);
     r.own_ppm = 3.0;
     let c = first_close(&mut r, 200.0, 265.0);
     assert!(!c.closed.unwrap().classed);
@@ -718,11 +718,11 @@ fn a_repeated_mark_is_skipped_and_one_stepping_back_is_a_hole() {
 }
 
 #[test]
-fn either_rig_reopening_its_session_starts_the_windows_again() {
+fn either_rig_reopening_its_stream_starts_the_windows_again() {
     let mut r = Rigs::new(0.0);
     r.run(0.0, 65.0);
     assert!(r.report(65.0).long.is_some());
-    r.epoch = SessionEpoch(2);
+    r.epoch = StreamEpoch(2);
     r.run(65.0, 70.0);
     let rep = r.report(70.0);
     assert!(rep.long.is_none());
@@ -732,7 +732,7 @@ fn either_rig_reopening_its_session_starts_the_windows_again() {
 
     let mut r = Rigs::new(0.0);
     r.run(0.0, 65.0);
-    r.ours = SessionEpoch(7);
+    r.ours = StreamEpoch(7);
     r.run(65.0, 66.0);
     let rep = r.report(66.0);
     assert!(rep.long.is_none());
@@ -756,12 +756,12 @@ fn another_nominal_rate_is_not_locked_until_this_rig_closes() {
             }
         }
     );
-    // This rig's session closes: no rate of its own to differ from.
+    // This rig's stream closes: no rate of its own to differ from.
     r.local = false;
     r.run(65.0, 66.0);
     let rep = r.report(66.0);
     assert_eq!(rep.other_rate, None);
-    assert_eq!(rep.absent, Some(Absent::OurSession));
+    assert_eq!(rep.absent, Some(Absent::OurStream));
 }
 
 #[test]
@@ -862,7 +862,7 @@ fn a_steady_pair_shows_the_same_entry_second_after_second() {
 }
 
 #[test]
-fn frames_without_marks_or_without_a_session_here_say_why() {
+fn frames_without_marks_or_without_a_stream_here_say_why() {
     let mut r = Rigs::new(0.0);
     r.marks = false;
     r.run(0.0, 5.0);
@@ -874,7 +874,7 @@ fn frames_without_marks_or_without_a_session_here_say_why() {
     let mut r = Rigs::new(0.0);
     r.local = false;
     r.run(0.0, 5.0);
-    assert_eq!(r.report(5.0).absent, Some(Absent::OurSession));
+    assert_eq!(r.report(5.0).absent, Some(Absent::OurStream));
 }
 
 #[test]

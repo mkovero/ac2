@@ -5,13 +5,13 @@ use super::*;
 
 fn opened_pairs(r: &[Request]) -> Option<&[Pair]> {
     r.iter().find_map(|r| match r {
-        Request::OpenSession { pairs, .. } => Some(pairs.as_slice()),
+        Request::OpenStream { pairs, .. } => Some(pairs.as_slice()),
         _ => None,
     })
 }
 
 /// L and A set an input's kind, Shift+P on two inputs pairs them, N names the pair; the
-/// refusals name the rule, and the opened session carries the kinds and the pair.
+/// refusals name the rule, and the opened stream carries the kinds and the pair.
 #[test]
 fn kinds_and_pairs_by_key() {
     let mut t = T::new();
@@ -20,7 +20,7 @@ fn kinds_and_pairs_by_key() {
     let d = dialog(&t);
     assert_eq!(d.inputs[1].kind_pref(), KindPref::Mic);
     assert_eq!(d.inputs[2].kind_pref(), KindPref::Line);
-    assert!(!d.inputs[2].in_session);
+    assert!(!d.inputs[2].in_stream);
     let notice = |t: &T| dialog(t).notice.clone().unwrap_or_default();
     focus(&mut t, Row::Input(2));
     t.type_key("Space", " ");
@@ -78,7 +78,7 @@ fn kinds_and_pairs_by_key() {
     assert_eq!(dialog(&t).inputs[3].kind_pref(), KindPref::Mic);
     assert_eq!(dialog(&t).pairs.len(), 1);
     // Line again on both, still paired, opened: the setups carry the kinds and the sides,
-    // the session the pair, and the device remembers both.
+    // the stream the pair, and the device remembers both.
     t.key("L");
     assert_eq!(dialog(&t).inputs[2].kind_pref(), KindPref::Line);
     assert_eq!(dialog(&t).pairs.len(), 1);
@@ -105,7 +105,7 @@ fn kinds_and_pairs_by_key() {
 /// *pair* clicked on one input.
 fn click_pair(t: &mut T, i: usize) {
     t.st.apply(
-        Msg::Session(SessionMsg::Role(Row::Input(i), RoleKey::Pair)),
+        Msg::Stream(StreamMsg::Role(Row::Input(i), RoleKey::Pair)),
         &t.keys,
     );
 }
@@ -120,19 +120,19 @@ fn the_pair(t: &T) -> Option<(u16, u16)> {
 }
 
 /// *pair* on in 1 then on in 4 pairs them across the mic between: adjacency does not matter,
-/// and both go in the session without Space.
+/// and both go in the stream without Space.
 #[test]
 fn pair_by_two_clicks_any_inputs() {
     let mut t = T::new();
     open_dialog(&mut t, backends(true));
-    assert!(!dialog(&t).inputs[3].in_session);
+    assert!(!dialog(&t).inputs[3].in_stream);
     click_pair(&mut t, 0);
     assert_eq!(dialog(&t).pair_pick, Some(0));
     assert_eq!(the_pair(&t), None);
     click_pair(&mut t, 3);
     assert_eq!(the_pair(&t), Some((0, 3)));
     assert_eq!(dialog(&t).pair_pick, None);
-    assert!(dialog(&t).inputs[0].in_session && dialog(&t).inputs[3].in_session);
+    assert!(dialog(&t).inputs[0].in_stream && dialog(&t).inputs[3].in_stream);
     assert_eq!(
         dialog(&t).notice.as_deref(),
         Some("in 1 and 4 are a pair (N names it)")
@@ -147,7 +147,7 @@ fn pair_left_is_the_lower_input() {
     click_pair(&mut t, 3);
     click_pair(&mut t, 2);
     assert_eq!(the_pair(&t), Some((2, 3)));
-    assert!(dialog(&t).inputs[2].in_session && dialog(&t).inputs[3].in_session);
+    assert!(dialog(&t).inputs[2].in_stream && dialog(&t).inputs[3].in_stream);
 }
 
 /// *pair* again on the picked row drops the pick; Esc closes the dialog as always, the
@@ -207,7 +207,7 @@ fn pair_refusals_keep_the_first_pick() {
 }
 
 /// *pair* on either row of a pair unpairs it; the pick is dropped when its row leaves the
-/// session, and kept when its kind changes (the second pick checks the kinds).
+/// stream, and kept when its kind changes (the second pick checks the kinds).
 #[test]
 fn pair_unpairs_and_pick_follows_the_row() {
     let mut t = T::new();
@@ -220,11 +220,11 @@ fn pair_unpairs_and_pick_follows_the_row() {
         dialog(&t).notice.as_deref(),
         Some("in 3 and 4 are no longer a pair")
     );
-    // Picked, then out of the session (in 3 went in with the pair): no pick.
+    // Picked, then out of the stream (in 3 went in with the pair): no pick.
     click_pair(&mut t, 2);
     focus(&mut t, Row::Input(2));
     t.type_key("Space", " ");
-    assert!(!dialog(&t).inputs[2].in_session);
+    assert!(!dialog(&t).inputs[2].in_stream);
     assert_eq!(dialog(&t).pair_pick, None);
     // Picked, then a mic: still picked.
     click_pair(&mut t, 2);
@@ -285,7 +285,7 @@ fn two_mics_pair() {
 }
 
 /// The remembered kinds and pair of a device come back in the dialog and open with it; a
-/// pair whose input is out of the session is dropped, not sent.
+/// pair whose input is out of the stream is dropped, not sent.
 #[test]
 fn kinds_and_pairs_are_remembered_per_device() {
     let mut t = T::new();
@@ -326,7 +326,7 @@ fn kinds_and_pairs_are_remembered_per_device() {
     assert_eq!(d.pair_of(3).map(|(_, s)| s), Some(PairSide::Right));
     let r = t.key("Enter");
     assert_eq!(opened_pairs(&r), Some(std::slice::from_ref(&pair)));
-    // One input of the pair out of the session, or a hand-edited file pairing two kinds:
+    // One input of the pair out of the stream, or a hand-edited file pairing two kinds:
     // no pair.
     for edit in [
         |r: &mut crate::prefs::DeviceRoles| r.inputs = vec![0, 1, 2],

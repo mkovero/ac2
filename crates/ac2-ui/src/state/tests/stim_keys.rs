@@ -318,7 +318,7 @@ fn held_stimulus_keys_do_not_repeat() {
 /// mic-to-mic transfer (6) against input 1, and TF 3 (7) against it but stopped.
 fn with_transfers(t: &mut T) {
     t.remirror(|s| {
-        if let Some(o) = &mut s.session.open {
+        if let Some(o) = &mut s.stream.open {
             o.config.loopback = Some(ac2_proto::model::LoopbackRoute {
                 output: 1,
                 input: 0,

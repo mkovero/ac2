@@ -120,7 +120,7 @@ pub fn fake_rig() -> Result<FakeBackend, String> {
 }
 
 /// The simulated rig listed as an input-only and an output-only device, the way an OS lists
-/// a built-in mic beside built-in speakers: a session plays on it only when its output
+/// a built-in mic beside built-in speakers: a stream plays on it only when its output
 /// device is chosen apart from its input device.
 pub fn fake_rig_endpoints() -> Result<FakeBackend, String> {
     FakeBackend::new(FakeConfig {

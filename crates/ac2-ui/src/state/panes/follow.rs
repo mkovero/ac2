@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use ac2_proto::FrameData;
 use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::LevelScale;
-use ac2_proto::units::{DaemonIncarnation, MeasId, SessionEpoch};
+use ac2_proto::units::{DaemonIncarnation, MeasId, StreamEpoch};
 use ac2_scene::axis::Range;
 use ac2_scene::view::follow::{EASE_S, Ease, Follow, HANDS_OFF_S, MAX_GAP_S, SHADE_S, Sample};
 
@@ -55,14 +55,14 @@ struct Feed {
     /// Per live curve, the signal history its frames belong to and the newest frame taken;
     /// kept while the curve is away (a reconnect), so a restarted rig's frames are told
     /// from the old ones when it is back.
-    curves: BTreeMap<MeasId, (SessionEpoch, DaemonIncarnation, u64)>,
+    curves: BTreeMap<MeasId, (StreamEpoch, DaemonIncarnation, u64)>,
     sample: Option<Sample>,
     /// When the newest frame arrived (the app's clock, set by the tick that comes before
     /// each drain of the links).
     at: f64,
     /// A frame not yet given to the follower.
     fresh: bool,
-    /// A curve's rig restarted its session or daemon: the history so far is another signal's.
+    /// A curve's rig restarted its stream or daemon: the history so far is another signal's.
     reset: bool,
     /// The pane's measurement is stopped: no frame of it is a level now, and the time
     /// without frames is no silence, so the pane leaves its group and its range holds.
@@ -181,7 +181,7 @@ impl AppState {
                     continue;
                 };
                 let s = &tf.frame.stamp;
-                curves.insert(m.id, (s.session_epoch, s.daemon_incarnation, s.seq));
+                curves.insert(m.id, (s.stream_epoch, s.daemon_incarnation, s.seq));
                 drawn.push((freqs, levels));
             }
             let sample = Sample::of(drawn.iter().map(|(f, l)| (&f[..], &l[..])));

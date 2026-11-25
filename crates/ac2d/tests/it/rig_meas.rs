@@ -141,7 +141,7 @@ fn rig_meter_survives_loads_and_stays_out_of_session_files() {
     // A rig meter is not session content: the working state is clean after the load.
     assert!(!c.state().working.dirty);
 
-    // Back to the session: the rig settings let it go.
+    // Back to the stream: the rig settings let it go.
     c.update_ok(MeasId(1), spl("FOH", 1));
     assert!(
         rig_json(dir.path())["meters"]
@@ -241,8 +241,8 @@ fn monitor_at_start_meters_with_no_client() {
         base: rev,
         on: true,
     });
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     let mut d = driver(&backend);
     run(&mut d, 3.5);
@@ -258,7 +258,7 @@ fn monitor_at_start_meters_with_no_client() {
     // A load does not end the rig meter's log.
     c.ok(Command::FileNew { discard: true });
     assert!(log_total(&mut c, MeasId(1)) >= logged);
-    let recorded = rig_json(dir.path())["monitor_session"].clone();
+    let recorded = rig_json(dir.path())["monitor_stream"].clone();
     assert_eq!(recorded["output_channels"], 2, "recorded as opened");
     drop(c);
     drop(d);
@@ -270,7 +270,7 @@ fn monitor_at_start_meters_with_no_client() {
     let (mut c, sub) = connect(&h, &[b"d/1/leq"]);
     let st = c.state();
     let open = st
-        .session
+        .stream
         .open
         .expect("the monitor at start opened the audio");
     assert_eq!(open.config.output_channels, 0, "capture only");
@@ -312,7 +312,7 @@ fn monitor_at_start_meters_with_no_client() {
     h.shutdown();
 }
 
-/// The monitor at start reopens a recorded session whose remote input could not be added
+/// The monitor at start reopens a recorded stream whose remote input could not be added
 /// now (here: it names this very rig): an add-time refusal is for the operator, so the
 /// audio opens with the input marked rather than retrying for ever with no meter up.
 #[test]
@@ -331,8 +331,8 @@ fn monitor_at_start_keeps_a_remote_input_it_could_not_add() {
         base: rev,
         on: true,
     });
-    c.ok(Command::SessionOpen {
-        config: SessionConfig {
+    c.ok(Command::StreamOpen {
+        config: StreamConfig {
             input_channels: vec![0, 1, REMOTE_BASE],
             remote_inputs: vec![RemoteInput {
                 slot: 0,
@@ -340,14 +340,14 @@ fn monitor_at_start_keeps_a_remote_input_it_could_not_add() {
                 rig_name: "elsewhere".into(),
                 channel: 0,
             }],
-            ..session(false)
+            ..stream(false)
         },
     });
     drop(c);
     h.shutdown();
-    // The recorded input now names this rig, as a session copied between rigs would.
+    // The recorded input now names this rig, as a stream copied between rigs would.
     let mut rig = rig_json(dir.path());
-    rig["monitor_session"]["remote_inputs"][0]["rig"] = serde_json::to_value(w.rig_id).unwrap();
+    rig["monitor_stream"]["remote_inputs"][0]["rig"] = serde_json::to_value(w.rig_id).unwrap();
     std::fs::write(
         dir.path().join("rig.json"),
         serde_json::to_vec(&rig).unwrap(),
@@ -358,7 +358,7 @@ fn monitor_at_start_keeps_a_remote_input_it_could_not_add() {
     let (mut c, _sub) = connect(&h, &[]);
     let st = c.state();
     let open = st
-        .session
+        .stream
         .open
         .expect("the monitor at start opened the audio");
     assert_eq!(open.config.remote_inputs.len(), 1);
@@ -370,10 +370,10 @@ fn monitor_at_start_keeps_a_remote_input_it_could_not_add() {
     h.shutdown();
 }
 
-/// Reply warnings: `session.close`, and `session.open` of another input device, while a rig
+/// Reply warnings: `stream.close`, and `stream.open` of another input device, while a rig
 /// meter exists say so in the reply; the same device again, or no rig meter, says nothing.
 #[test]
-fn session_close_and_device_change_warn_of_rig_meters() {
+fn stream_close_and_device_change_warn_of_rig_meters() {
     let dir = tempfile::tempdir().unwrap();
     let (h, _backend) = start("rig-meas-warnings", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
@@ -387,13 +387,13 @@ fn session_close_and_device_change_warn_of_rig_meters() {
     assert!(
         warned(
             &mut c,
-            Command::SessionOpen {
-                config: session(false)
+            Command::StreamOpen {
+                config: stream(false)
             }
         )
         .is_empty()
     );
-    assert!(warned(&mut c, Command::SessionClose).is_empty());
+    assert!(warned(&mut c, Command::StreamClose).is_empty());
 
     c.ok(Command::MeasCreate {
         config: rig_meter("Stage"),
@@ -401,8 +401,8 @@ fn session_close_and_device_change_warn_of_rig_meters() {
     assert!(
         warned(
             &mut c,
-            Command::SessionOpen {
-                config: session(false)
+            Command::StreamOpen {
+                config: stream(false)
             }
         )
         .is_empty()
@@ -411,31 +411,31 @@ fn session_close_and_device_change_warn_of_rig_meters() {
     assert!(
         warned(
             &mut c,
-            Command::SessionOpen {
-                config: session(false)
+            Command::StreamOpen {
+                config: stream(false)
             }
         )
         .is_empty()
     );
-    let dev = c.state().session.open.unwrap().input_device;
-    let other = SessionConfig {
+    let dev = c.state().stream.open.unwrap().input_device;
+    let other = StreamConfig {
         input_device: DeviceSelector::Id { id: dev },
-        ..session(false)
+        ..stream(false)
     };
     assert_eq!(
-        warned(&mut c, Command::SessionOpen { config: other }),
+        warned(&mut c, Command::StreamOpen { config: other }),
         vec![ac2_proto::Warning::RigMonitorMoved {
             meas: vec![MeasId(1)]
         }]
     );
     assert_eq!(
-        warned(&mut c, Command::SessionClose),
+        warned(&mut c, Command::StreamClose),
         vec![ac2_proto::Warning::RigMonitorBlind {
             meas: vec![MeasId(1)]
         }]
     );
     // Already closed: the meters were blind before this close.
-    assert!(warned(&mut c, Command::SessionClose).is_empty());
+    assert!(warned(&mut c, Command::StreamClose).is_empty());
     drop(c);
     h.shutdown();
 }
@@ -456,7 +456,7 @@ fn copy_dir(from: &Path, to: &Path) {
 
 #[test]
 fn a_loaded_measurements_pane_references_follow_its_new_number() {
-    // Rig X: its meter is 1, the session's A and B are 2 and 3. B's panes draw A's group
+    // Rig X: its meter is 1, the stream's A and B are 2 and 3. B's panes draw A's group
     // with B's, A's live curve beside another rig's measurement 2, meter 1, A as a meter
     // (an SPL pane naming a moved id) and walk 1.
     let dx = tempfile::tempdir().unwrap();
@@ -548,7 +548,7 @@ fn a_loaded_measurements_pane_references_follow_its_new_number() {
     // B keeps 3. Every reference of this rig to A follows it; the one naming meter 1 (a
     // rig meter, not in the file) still names it, and another rig's measurement 2 is that
     // rig's id, untouched. Walk ids are not renumbered by a load; walk 2 is not in the
-    // session, so its pane is pruned to nothing.
+    // stream, so its pane is pruned to nothing.
     let dy = tempfile::tempdir().unwrap();
     let (hy, _by) = start("rig-meas-remap-y", dy.path());
     let (mut c, _sub) = connect(&hy, &[]);

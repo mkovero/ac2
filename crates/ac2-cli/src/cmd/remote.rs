@@ -1,5 +1,5 @@
 //! Remote inputs from the CLI: admit another rig (`auth admit-rig`), pair with one
-//! (`auth peer-add` / `peer-remove`), and the remote inputs of `session open --remote-in`.
+//! (`auth peer-add` / `peer-remove`), and the remote inputs of `stream open --remote-in`.
 
 use ac2_client::endpoint::{Endpoints, RemoteAddr};
 use ac2_proto::Command;

@@ -10,7 +10,7 @@ pub(super) fn sweep_trace(id: u32) -> StoredTrace {
         meas_name: "Sweep".into(),
         number: 1,
         run: SweepId(1),
-        epoch: SessionEpoch(2),
+        epoch: StreamEpoch(2),
         sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
         level: Dbfs(-50.0),
         repeats: 2,

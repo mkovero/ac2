@@ -16,7 +16,7 @@ use ac2_core::timing::{LoopbackTiming, TimingConfig};
 use ac2_proto::frame::FrameData;
 use ac2_proto::model::{TimingState, TimingStatus};
 use ac2_proto::topic::Topic;
-use ac2_proto::units::{Samples, SessionEpoch};
+use ac2_proto::units::{Samples, StreamEpoch};
 
 use super::Timing;
 use crate::control::ControlMsg;
@@ -69,7 +69,7 @@ impl Sim {
             drift: None,
             internal_reference: false,
         };
-        let job = Timing::new(FS, 0, history, tx, SessionEpoch(1), initial);
+        let job = Timing::new(FS, 0, history, tx, StreamEpoch(1), initial);
         Self {
             stream,
             driver,

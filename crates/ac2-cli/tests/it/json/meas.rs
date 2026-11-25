@@ -52,7 +52,7 @@ async fn delay_find_bands_ambiguity_and_refusal() -> R {
     ok_json(
         &f,
         &[
-            "session",
+            "stream",
             "open",
             "--backend",
             "fake",
@@ -178,7 +178,7 @@ async fn session_meas_delay_trace_flow() -> R {
     let s = ok_json(
         &f,
         &[
-            "session",
+            "stream",
             "open",
             "--backend",
             "fake",
@@ -198,15 +198,7 @@ async fn session_meas_delay_trace_flow() -> R {
     // A backend without devices is refused, never silently replaced.
     let r = ac2(
         &f,
-        &[
-            "session",
-            "open",
-            "--backend",
-            "jack",
-            "--in",
-            "1",
-            "--json",
-        ],
+        &["stream", "open", "--backend", "jack", "--in", "1", "--json"],
     )
     .await?;
     assert_eq!(r.code, 1);
@@ -475,7 +467,7 @@ async fn numeric_names_resolve_and_ambiguity_is_refused() -> R {
     ok_json(
         &f,
         &[
-            "session",
+            "stream",
             "open",
             "--backend",
             "fake",

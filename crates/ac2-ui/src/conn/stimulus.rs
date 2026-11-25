@@ -9,7 +9,7 @@ pub(super) enum StimOp {
     },
     Set(GeneratorDesired),
     Stop,
-    Detect(crate::session_dialog::DetectRequest),
+    Detect(crate::stream_dialog::DetectRequest),
     Sweep {
         meas: MeasId,
         /// With the `config_rev` it was made on.
@@ -146,7 +146,7 @@ pub(super) async fn arm(
 pub(super) async fn detect(
     client: &Client,
     lease: &mut Option<StimulusLease>,
-    d: crate::session_dialog::DetectRequest,
+    d: crate::stream_dialog::DetectRequest,
 ) -> Result<LoopbackDetection, String> {
     let taken = if lease.is_none() {
         Some(
@@ -163,7 +163,7 @@ pub(super) async fn detect(
         (None, None) => return Err("no stimulus lease".into()),
     };
     let r = client
-        .call(Command::SessionDetectLoopback {
+        .call(Command::StreamDetectLoopback {
             lease_token: token,
             backend: d.backend,
             input_device: d.device,
@@ -173,7 +173,7 @@ pub(super) async fn detect(
         })
         .await
         .and_then(
-            |r| expect_body!("session.detect_loopback", r, ReplyBody::LoopbackDetection(x) => x),
+            |r| expect_body!("stream.detect_loopback", r, ReplyBody::LoopbackDetection(x) => x),
         )
         .map_err(|e| e.to_string());
     if let Some(l) = taken {

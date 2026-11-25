@@ -1,8 +1,8 @@
-//! An open session whose audio stopped, in words: the AUDIO STOPPED banner, the app's top
+//! An open stream whose audio stopped, in words: the AUDIO STOPPED banner, the app's top
 //! bar and the `ac2 status` line all say the same thing (`docs/design/audio-recovery.md`).
 
 use ac2_proto::model::{
-    AudioStopped, ClockSource, DriverResetReason, OpenSession, Recovery, SparePort, StatedLatency,
+    AudioStopped, ClockSource, DriverResetReason, OpenStream, Recovery, SparePort, StatedLatency,
     StopCause,
 };
 use ac2_proto::units::WallNs;
@@ -15,7 +15,7 @@ use crate::time::local_clock;
 /// forever.
 pub const SLOW_ATTEMPT_S: f64 = 5.0;
 
-/// The texts of a stopped session's audio.
+/// The texts of a stopped stream's audio.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioStoppedText {
     /// Banner headline: `AUDIO STOPPED · device not delivering since 20:36`.
@@ -133,7 +133,7 @@ fn reset_headline(r: DriverResetReason) -> &'static str {
     }
 }
 
-/// A driver reset in one sentence, for a toast and the session's note: `Audio clock
+/// A driver reset in one sentence, for a toast and the stream's note: `Audio clock
 /// changed (driver asked to resync): output stopped`. `output_stopped`: the generator was
 /// emitting, so its output was cut and stays stopped until started again.
 pub fn driver_reset_line(r: DriverResetReason, output_stopped: bool) -> String {
@@ -151,8 +151,8 @@ pub fn driver_reset_line(r: DriverResetReason, output_stopped: bool) -> String {
     }
 }
 
-/// The driver reset the session reopened after, if any (see [`driver_reset_line`]).
-pub fn driver_reset_text(o: &OpenSession) -> Option<String> {
+/// The driver reset the stream reopened after, if any (see [`driver_reset_line`]).
+pub fn driver_reset_text(o: &OpenStream) -> Option<String> {
     o.driver_reset
         .map(|d| driver_reset_line(d.reason, d.output_stopped))
 }
@@ -186,7 +186,7 @@ pub fn stated_latency_text(l: &StatedLatency, rate_hz: u32) -> String {
     )
 }
 
-/// A session's sample rate, as every text says it: `96 kHz`, `44.1 kHz`. A whole number
+/// A stream's sample rate, as every text says it: `96 kHz`, `44.1 kHz`. A whole number
 /// of kHz has no decimal: two rates are compared at a glance across the bar, the list's
 /// rig headings and the lines between rigs, and `48.0` beside `48` reads as two.
 pub fn rate_text(hz: u32) -> String {
@@ -197,16 +197,16 @@ pub fn rate_text(hz: u32) -> String {
     )
 }
 
-/// The running session's audio settings in words: the app's top bar, `ac2 session status`.
+/// The running stream's audio settings in words: the app's top bar, `ac2 stream status`.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SessionLine {
+pub struct StreamLine {
     /// `Fireface USB · 44.1 kHz · 512 frames · driver changed from 48 kHz`.
     pub full: String,
     /// The same without the device: `44.1 kHz · 512 frames`.
     pub short: String,
-    /// What the driver did under the session, as `full` ends: `driver changed from 48 kHz`.
+    /// What the driver did under the stream, as `full` ends: `driver changed from 48 kHz`.
     pub change: Option<String>,
-    /// The driver changed the rate or buffer size under the session (its control panel),
+    /// The driver changed the rate or buffer size under the stream (its control panel),
     /// or reset or changed its clock: the operator should notice, since every measurement
     /// restarted and a generator that was playing stopped.
     pub changed: bool,
@@ -215,10 +215,10 @@ pub struct SessionLine {
     pub detail: Option<String>,
 }
 
-/// The driver's change of the session's settings, when it made one: `the driver changed
+/// The driver's change of the stream's settings, when it made one: `the driver changed
 /// the rate to 44.1 kHz (was 48 kHz) and the buffer to 512 frames (was 256); measurements
 /// restarted at the new settings`.
-pub fn driver_change_text(o: &OpenSession) -> Option<String> {
+pub fn driver_change_text(o: &OpenStream) -> Option<String> {
     let d = o.driver_change?;
     let mut what = Vec::new();
     if d.from_rate_hz != o.sample_rate_hz {
@@ -267,8 +267,8 @@ pub fn spare_port_text(p: &SparePort) -> String {
     format!("in {} · {}", p.input + 1, p.port)
 }
 
-/// The line for open session `o`.
-pub fn session_line(o: &OpenSession) -> SessionLine {
+/// The line for open stream `o`.
+pub fn stream_line(o: &OpenStream) -> StreamLine {
     let rate = rate_text(o.sample_rate_hz);
     let short = format!("{rate} · {} frames", o.buffer_frames);
     let change = driver_change_text(o);
@@ -299,7 +299,7 @@ pub fn session_line(o: &OpenSession) -> SessionLine {
     .into_iter()
     .flatten()
     .collect();
-    SessionLine {
+    StreamLine {
         full,
         short,
         change: headline,
@@ -387,12 +387,12 @@ mod tests {
         );
     }
 
-    fn open(rate: u32, frames: u32) -> OpenSession {
+    fn open(rate: u32, frames: u32) -> OpenStream {
         use ac2_proto::model::{
-            BackendKind, ClockRelation, DeviceId, DeviceSelector, SessionConfig,
+            BackendKind, ClockRelation, DeviceId, DeviceSelector, StreamConfig,
         };
-        OpenSession {
-            config: SessionConfig {
+        OpenStream {
+            config: StreamConfig {
                 backend: Some(BackendKind::Asio),
                 input_device: DeviceSelector::Default,
                 output_device: DeviceSelector::Default,
@@ -422,8 +422,8 @@ mod tests {
     }
 
     #[test]
-    fn a_session_as_opened_names_its_device_rate_and_buffer() {
-        let l = session_line(&open(48_000, 256));
+    fn a_stream_as_opened_names_its_device_rate_and_buffer() {
+        let l = stream_line(&open(48_000, 256));
         assert_eq!(l.full, "Fireface USB · 48 kHz · 256 frames");
         assert_eq!(l.short, "48 kHz · 256 frames");
         assert!(!l.changed);
@@ -438,7 +438,7 @@ mod tests {
             from_rate_hz: 48_000,
             from_buffer_frames: 256,
         });
-        let l = session_line(&o);
+        let l = stream_line(&o);
         assert_eq!(
             l.full,
             "Fireface USB · 44.1 kHz · 512 frames · driver changed from 48 kHz"
@@ -493,7 +493,7 @@ mod tests {
             from_rate_hz: 48_000,
             from_buffer_frames: 256,
         });
-        let l = session_line(&o);
+        let l = stream_line(&o);
         assert_eq!(
             l.full,
             "Fireface USB · 48 kHz · 512 frames · driver changed the buffer"
@@ -532,14 +532,14 @@ mod tests {
             "Audio driver reset (driver changed its buffer size)"
         );
 
-        // Reopened at the same settings: the session line still says it, in the warning
-        // colour, until a client opens the session anew.
+        // Reopened at the same settings: the stream line still says it, in the warning
+        // colour, until a client opens the stream anew.
         let mut o = open(48_000, 256);
         o.driver_reset = Some(DriverReset {
             reason: DriverResetReason::ResyncRequest,
             output_stopped: true,
         });
-        let l = session_line(&o);
+        let l = stream_line(&o);
         assert_eq!(
             l.full,
             "Fireface USB · 48 kHz · 256 frames · audio clock changed"
@@ -591,7 +591,7 @@ mod tests {
         );
         let mut o = open(48_000, 256);
         o.stated_latency = Some(l);
-        let line = session_line(&o);
+        let line = stream_line(&o);
         assert!(!line.changed);
         assert_eq!(
             line.detail.as_deref(),

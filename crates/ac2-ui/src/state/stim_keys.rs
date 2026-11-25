@@ -256,7 +256,7 @@ impl AppState {
             return Vec::new();
         }
         let Some(loopback) = self
-            .open_session()
+            .open_stream()
             .and_then(|o| o.config.loopback)
             .map(|l| l.input)
         else {

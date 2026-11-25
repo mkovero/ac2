@@ -3,7 +3,7 @@
 //! # Time base
 //!
 //! A captured transfer function is stored with its own inserted delay `τₖ` removed
-//! (`hₖ = Hₖ·e^{+j2πfτₖ}`, see `ac2_core::average`). Traces captured in the same session
+//! (`hₖ = Hₖ·e^{+j2πfτₖ}`, see `ac2_core::average`). Traces captured in the same stream
 //! epoch share one time reference, so their phases can be re-referred to a common delay and
 //! combined. Every other trace (imported, averaged, math, another epoch) has only its own
 //! alignment (decision 8a): combining its phase with another trace's would invent a
@@ -20,7 +20,7 @@ use ac2_proto::FrameData;
 use ac2_proto::GridDef;
 use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::{AverageMethod, DelayReference, TraceKind};
-use ac2_proto::units::{Seconds, SessionEpoch, TraceId};
+use ac2_proto::units::{Seconds, StreamEpoch, TraceId};
 use num_complex::Complex64;
 
 use crate::columns::{Columns, StoredTrace, resample};
@@ -70,7 +70,7 @@ impl fmt::Display for OpError {
             ),
             Self::NoSharedTimeBase => write!(
                 f,
-                "complex and coherence-weighted averages combine phase, which needs traces captured in the same session epoch; use power"
+                "complex and coherence-weighted averages combine phase, which needs traces captured in the same stream epoch; use power"
             ),
             Self::NoPhase(t) => write!(f, "trace {t} has no phase"),
             Self::NoCoherence(t) => write!(f, "trace {t} has no coherence to weight by"),
@@ -152,8 +152,8 @@ pub fn capture_columns(data: &FrameData) -> Option<(TraceKind, Columns)> {
     }
 }
 
-/// The session epoch whose time base a trace's phase is in, if any.
-pub fn shared_epoch(t: &StoredTrace) -> Option<SessionEpoch> {
+/// The stream epoch whose time base a trace's phase is in, if any.
+pub fn shared_epoch(t: &StoredTrace) -> Option<StreamEpoch> {
     t.meta.source.shared_epoch()
 }
 
@@ -327,7 +327,7 @@ fn average_tf(
 }
 
 /// Averages transfer columns that share one grid and one time base (captures of one
-/// session epoch, or the live results of a spatial average's members): each `cols[k]` was
+/// stream epoch, or the live results of a spatial average's members): each `cols[k]` was
 /// measured with its own inserted delay `delays[k]` removed, and every phase is re-referred
 /// to `reference` before combining (`ac2_core::average`). Every column needs phase, and
 /// coherence for [`AverageMethod::CoherenceWeighted`]; the result's coherence is the plain

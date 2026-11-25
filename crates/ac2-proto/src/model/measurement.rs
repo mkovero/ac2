@@ -668,7 +668,7 @@ pub enum MathReference {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PhaseBasis {
-    /// Every operand shares one time base (one session epoch): the phase keeps their
+    /// Every operand shares one time base (one stream epoch): the phase keeps their
     /// relative arrival, referred to the delay the result states.
     SharedTimeBase,
     /// The operands share no time base (an import, another epoch): the phase combines each

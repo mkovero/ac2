@@ -1,6 +1,6 @@
 //! Spatial walks on the fake rig: moving the mic restarts each walk measurement with
 //! tracking on, captures carry their positions and whether they were settled, the average
-//! follows captures, redos and skips, the owners checks hold, a session keeps the walk
+//! follows captures, redos and skips, the owners checks hold, a stream keeps the walk
 //! and its plan, and a loaded walk restarts its measurements on their first run.
 #![allow(clippy::unwrap_used)]
 
@@ -40,9 +40,9 @@ fn rig(name: &str, backend: FakeBackend) -> Rig {
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
     // A third input for a second mic.
-    let mut s = session(true);
+    let mut s = stream(true);
     s.input_channels = vec![0, 1, 2];
-    c.ok(Command::SessionOpen { config: s });
+    c.ok(Command::StreamOpen { config: s });
     let mut m = transfer("main");
     if let MeasKind::Transfer { config } = &mut m.kind {
         config.depth = DepthPolicy::FastLf {
@@ -639,7 +639,7 @@ fn awaiting_pick_reaches_the_walk_pane_and_marks_the_capture_unsettled() {
 
 #[test]
 fn a_session_round_trip_keeps_the_walk_and_its_plan() {
-    let mut r = rig("walk-session", manual_rig());
+    let mut r = rig("walk-stream", manual_rig());
     let w = r.new_walk(&["P1", "P2", "P3"]);
     r.capture(w.id);
     r.capture(w.id);
@@ -650,7 +650,7 @@ fn a_session_round_trip_keeps_the_walk_and_its_plan() {
         },
         overwrite: false,
     });
-    // The library's plan goes; the session holds its copy.
+    // The library's plan goes; the stream holds its copy.
     r.c.ok(Command::PlanDelete {
         name: "Hall".into(),
     });

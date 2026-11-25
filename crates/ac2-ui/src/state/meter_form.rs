@@ -6,10 +6,10 @@ use super::*;
 use crate::meter_dialog::{ember_decay, ember_glow, levels, metered, wanted};
 
 impl AppState {
-    /// The session's pairs as the dialog offers them: each pair row of the Inputs list whose
-    /// sides the session both captures, by the row's name.
+    /// The stream's pairs as the dialog offers them: each pair row of the Inputs list whose
+    /// sides the stream both captures, by the row's name.
     fn meter_pairs(&self) -> Vec<((u16, u16), String)> {
-        self.session_inputs()
+        self.stream_inputs()
             .into_iter()
             .filter(|r| r.right.is_some())
             .filter_map(|r| Some((self.row_meters(r.channel)?.pair()?, r.label)))
@@ -18,7 +18,7 @@ impl AppState {
 
     /// The dialog for a new pane, starting from the picked Inputs row; or why it cannot open.
     pub(super) fn meter_form(&self) -> Result<Form, String> {
-        let inputs = self.session_input_names();
+        let inputs = self.stream_input_names();
         if inputs.is_empty() {
             return Err(ac2_scene::programme::form::NO_INPUTS.to_owned());
         }

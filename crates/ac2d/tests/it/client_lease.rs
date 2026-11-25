@@ -31,7 +31,7 @@ fn desired() -> GeneratorDesired {
     }
 }
 
-/// A daemon on the manual fake device with leases expiring after `expiry`, a session open
+/// A daemon on the manual fake device with leases expiring after `expiry`, a stream open
 /// (firing needs one), and a client on it.
 async fn rig(expiry: Duration) -> (Handle, FakeBackend, Client) {
     init_log();
@@ -40,8 +40,8 @@ async fn rig(expiry: Duration) -> (Handle, FakeBackend, Client) {
     cfg.lease_expiry = expiry;
     let h = Daemon::start(cfg).unwrap();
     let c = mirror(&h, "ac2-client-test").await;
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();

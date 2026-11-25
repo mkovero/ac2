@@ -1,5 +1,5 @@
 //! Calibration (`cal spl`, `cal electrical`, `cal line`, `cal curve …`, `cal use`, `cal list`,
-//! `cal rm`) and the input setup (`session inputs`, `session open --mic`):
+//! `cal rm`) and the input setup (`stream inputs`, `stream open --mic`):
 //! `docs/design/q7-calibration.md`, `docs/design/programme-meter.md` §1–2.
 
 use ac2_client::{Client, expect_body};
@@ -16,7 +16,7 @@ use super::{connect, state};
 use crate::CliError;
 use crate::args::{
     CalCmd, CalCurveCmd, CalCurveImport, CalElectrical, CalLine, CalRm, CalSpl, Cli, CurveArg,
-    CurveAssign, ElectricalMethodArg, PairArg, SessionInputs,
+    CurveAssign, ElectricalMethodArg, PairArg, StreamInputs,
 };
 use crate::output::{self, Out};
 use crate::watch::now_wall;
@@ -31,10 +31,10 @@ fn mic_for(s: &State, input: u16, given: Option<&String>) -> Result<String, CliE
     match kind.mic() {
         Some(m) => Ok(m.to_owned()),
         None if matches!(kind, InputKind::Mic { .. }) => Err(CliError::Usage(format!(
-            "input {n} has no mic name: give --mic NAME (or set it with `ac2 session inputs --mic {n}=NAME`)"
+            "input {n} has no mic name: give --mic NAME (or set it with `ac2 stream inputs --mic {n}=NAME`)"
         ))),
         None => Err(CliError::Usage(format!(
-            "input {n} is a {}; a sensitivity calibration is for a microphone (`ac2 session inputs --kind {n}=mic`)",
+            "input {n} is a {}; a sensitivity calibration is for a microphone (`ac2 stream inputs --kind {n}=mic`)",
             kind.word()
         ))),
     }
@@ -55,7 +55,7 @@ fn row<'a>(rows: &'a mut Vec<InputSetup>, s: &State, ch: u16) -> &'a mut InputSe
 /// line or digital input is refused here, since the kind is where a mic's name lives (the
 /// daemon would otherwise be asked to turn the input into a mic by the side door). A new mic
 /// name starts with no curve chosen (the daemon chooses a one-curve mic's curve).
-pub(crate) async fn set_inputs(c: &Client, a: &SessionInputs) -> Result<State, CliError> {
+pub(crate) async fn set_inputs(c: &Client, a: &StreamInputs) -> Result<State, CliError> {
     let s = state(c).await?;
     let mut rows: Vec<InputSetup> = Vec::new();
     for k in &a.kinds {
@@ -95,12 +95,12 @@ pub(crate) async fn set_inputs(c: &Client, a: &SessionInputs) -> Result<State, C
         a.pairs.iter().map(PairArg::to_pair).collect()
     };
     let r = c
-        .call(Command::SessionInputs {
+        .call(Command::StreamInputs {
             inputs: rows,
             pairs,
         })
         .await?;
-    expect_body!("session.inputs", r, ReplyBody::Inputs(i) => i)?;
+    expect_body!("stream.inputs", r, ReplyBody::Inputs(i) => i)?;
     state(c).await
 }
 
@@ -110,10 +110,10 @@ fn emit_inputs(s: &State, out: &mut Out<'_>) -> Result<(), CliError> {
     Ok(())
 }
 
-/// `session inputs`.
-pub(crate) async fn session_inputs(
+/// `stream inputs`.
+pub(crate) async fn stream_inputs(
     cli: &Cli,
-    a: &SessionInputs,
+    a: &StreamInputs,
     out: &mut Out<'_>,
 ) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
@@ -305,24 +305,24 @@ async fn use_curve(
     let s = state(&c).await?;
     if input_setup(&s.inputs, input.0).kind.mic().is_none() {
         return Err(CliError::Usage(format!(
-            "input {input} has no mic name: set it first (`ac2 session inputs --mic {input}=NAME`)"
+            "input {input} has no mic name: set it first (`ac2 stream inputs --mic {input}=NAME`)"
         )));
     }
     let s = set_inputs(
         &c,
-        &SessionInputs {
+        &StreamInputs {
             curves: vec![CurveAssign {
                 input,
                 curve: curve.clone(),
             }],
-            ..SessionInputs::default()
+            ..StreamInputs::default()
         },
     )
     .await?;
     emit_inputs(&s, out)
 }
 
-/// The device of the calibration `cal rm` names: `--device`, else the open session's
+/// The device of the calibration `cal rm` names: `--device`, else the open stream's
 /// capture device, else the one device among `holders` (the devices holding such a
 /// calibration for this input).
 fn rm_device(
@@ -334,7 +334,7 @@ fn rm_device(
     if let Some(d) = &a.device {
         return Ok(DeviceId(d.clone()));
     }
-    if let Some(o) = &s.session.open {
+    if let Some(o) = &s.stream.open {
         return Ok(o.input_device.clone());
     }
     holders.dedup();

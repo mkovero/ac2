@@ -530,28 +530,28 @@ fn the_link_receives_what_the_panes_draw() {
     assert!(t.st.wanted_topics().contains(&topic(4, Stream::Rta)));
 }
 
-/// The session dialog says when input and output may be on different clocks: an open
-/// session playing on another device, or a device whose directions are separate endpoints.
+/// The stream dialog says when input and output may be on different clocks: an open
+/// stream playing on another device, or a device whose directions are separate endpoints.
 #[test]
-fn session_dialog_notes_separate_clocks() {
+fn stream_dialog_notes_separate_clocks() {
     let mut t = T::new();
     let mut s = daemon_state();
-    if let Some(o) = &mut s.session.open {
+    if let Some(o) = &mut s.stream.open {
         o.backend = BackendKind::Fake;
     }
     t.conn(mirror(s.clone()));
-    t.st.apply(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.st.apply(Msg::Command(CommandId::OpenStream), &t.keys);
     t.conn(ConnEvent::Devices(Ok(backends(true))));
     assert!(dialog(&t).is_open_device());
     assert_eq!(dialog(&t).clock_note(), None);
     t.key("Escape");
 
-    if let Some(o) = &mut s.session.open {
+    if let Some(o) = &mut s.stream.open {
         o.output_device = DeviceId("speakers".into());
         o.clock = ClockRelation::Unknown;
     }
     t.conn(mirror(s));
-    t.st.apply(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.st.apply(Msg::Command(CommandId::OpenStream), &t.keys);
     let mut b = backends(true);
     b[0].devices[0].duplex_clock = ClockRelation::Unknown;
     t.conn(ConnEvent::Devices(Ok(b)));

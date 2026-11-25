@@ -1,7 +1,7 @@
 //! Declared input kinds and pairs (`docs/design/programme-meter.md` §1, §2): the pair rules
 //! name the inputs they refuse, an SPL meter wants a microphone, a line calibration wants a
 //! line input and lands in `cal.list`, and a preview's frames carry the declared kinds and
-//! pairs so a meter page can draw them before a session exists.
+//! pairs so a meter page can draw them before a stream exists.
 #![allow(clippy::unwrap_used)]
 
 use crate::common;
@@ -46,13 +46,13 @@ fn pair(left: u16, right: u16) -> Pair {
 }
 
 fn open_four(c: &mut Client) {
-    let mut cfg = session(false);
+    let mut cfg = stream(false);
     cfg.input_channels = vec![0, 1, 2, 3];
-    c.ok(Command::SessionOpen { config: cfg });
+    c.ok(Command::StreamOpen { config: cfg });
 }
 
 fn declare(c: &mut Client, inputs: Vec<InputSetup>, pairs: Vec<Pair>) -> Result<ReplyBody, String> {
-    c.call(Command::SessionInputs { inputs, pairs })
+    c.call(Command::StreamInputs { inputs, pairs })
         .map_err(|e| {
             assert_eq!(e.code, ErrorCode::Invalid, "{}", e.msg);
             e.msg
@@ -93,11 +93,11 @@ fn pair_rules_name_the_inputs_they_refuse() {
     assert_eq!(e, "input 2 is in two pairs");
     let e = declare(&mut c, rows.clone(), vec![pair(0, 0)]).unwrap_err();
     assert_eq!(e, "input 1 cannot be paired with itself");
-    // Only inputs the session captures.
+    // Only inputs the stream captures.
     let e = declare(&mut c, rows.clone(), vec![pair(0, 7)]).unwrap_err();
     assert_eq!(
         e,
-        "input 8 is not captured by the session, so it cannot be paired"
+        "input 8 is not captured by the stream, so it cannot be paired"
     );
     // Nothing of the refused attempts stuck.
     let snap = c.snapshot(Command::StateSnapshot);
@@ -347,7 +347,7 @@ fn preview_frames_carry_the_declared_kinds_and_pairs() {
     }];
     // The pair rules hold for a preview too, against the device's channel count.
     let e = c
-        .call(Command::SessionPreview {
+        .call(Command::StreamPreview {
             backend: BackendKind::Fake,
             device: fake_dev(),
             inputs: inputs.clone(),
@@ -361,7 +361,7 @@ fn preview_frames_carry_the_declared_kinds_and_pairs() {
         e.msg
     );
     let e = c
-        .call(Command::SessionPreview {
+        .call(Command::StreamPreview {
             backend: BackendKind::Fake,
             device: fake_dev(),
             inputs: inputs.clone(),
@@ -370,9 +370,9 @@ fn preview_frames_carry_the_declared_kinds_and_pairs() {
         .unwrap_err();
     assert_eq!(
         e.msg,
-        "input 10 is not captured by the session, so it cannot be paired"
+        "input 10 is not captured by the stream, so it cannot be paired"
     );
-    c.ok(Command::SessionPreview {
+    c.ok(Command::StreamPreview {
         backend: BackendKind::Fake,
         device: fake_dev(),
         inputs: inputs.clone(),
@@ -387,5 +387,5 @@ fn preview_frames_carry_the_declared_kinds_and_pairs() {
     assert_eq!(p.meta.channels, vec![0, 1, 2, 3]);
     assert_eq!(p.meta.inputs, inputs);
     assert_eq!(p.meta.pairs, pairs);
-    c.ok(Command::SessionPreviewStop);
+    c.ok(Command::StreamPreviewStop);
 }

@@ -8,9 +8,9 @@ use ac2_scene::remote_inputs as words;
 
 use crate::app::App;
 use crate::remote_inputs::PickLine;
-use crate::session_dialog::{Row, SessionDialog};
 use crate::settings::Settings;
-use crate::state::SessionMsg;
+use crate::state::StreamMsg;
+use crate::stream_dialog::{Row, StreamDialog};
 use crate::theme::Chrome;
 
 /// The remote inputs, the add row, and the add dialog while it is open.
@@ -20,9 +20,9 @@ pub(super) fn remote_section(
     s: &Settings,
     focus: Option<Row>,
     ch: &Chrome,
-    msg: &mut Option<SessionMsg>,
+    msg: &mut Option<StreamMsg>,
 ) {
-    let d: &SessionDialog = &s.session;
+    let d: &StreamDialog = &s.stream;
     super::settings::section(ui, words::SECTION, "set on each input's own rig", ch);
     let rows = app.state.remote_rows();
     let mut heading: Option<&str> = None;
@@ -41,16 +41,16 @@ pub(super) fn remote_section(
             ui.label(RichText::new(marker).color(ch.focus).monospace());
             let t = RichText::new(&row.text).color(if focused { ch.focus } else { ch.text });
             if ui.add(egui::Button::selectable(focused, t)).clicked() {
-                *msg = Some(SessionMsg::Focus(Row::Remote(i)));
+                *msg = Some(StreamMsg::Focus(Row::Remote(i)));
             }
-            super::session::meter(ui, &row.reading, ch);
+            super::stream::meter(ui, &row.reading, ch);
             let remove = RichText::new("Remove").color(if pending { ch.fault } else { ch.dim });
             if ui
                 .add(egui::Button::new(remove).small())
                 .on_hover_text("Delete (twice)")
                 .clicked()
             {
-                *msg = Some(SessionMsg::RemoveRemote(r.slot));
+                *msg = Some(StreamMsg::RemoveRemote(r.slot));
             }
         });
         ui.horizontal(|ui| {
@@ -73,7 +73,7 @@ pub(super) fn remote_section(
             ch.text
         });
         if ui.add(egui::Button::selectable(focused, t)).clicked() {
-            *msg = Some(SessionMsg::AddRemote);
+            *msg = Some(StreamMsg::AddRemote);
         }
     });
     if let Some(p) = &s.remote.pick {
@@ -86,7 +86,7 @@ fn pick_window(
     ui: &mut egui::Ui,
     p: &crate::remote_inputs::RemotePick,
     ch: &Chrome,
-    msg: &mut Option<SessionMsg>,
+    msg: &mut Option<StreamMsg>,
 ) {
     let lines = app.state.remote_pick_lines();
     let n = lines.iter().filter(|l| l.pick().is_some()).count();
@@ -122,7 +122,7 @@ fn pick_window(
                             if ui.add(egui::Button::selectable(focused, t)).clicked()
                                 && let Some((rig, c)) = pick
                             {
-                                *msg = Some(SessionMsg::PickRemote(rig, c));
+                                *msg = Some(StreamMsg::PickRemote(rig, c));
                             }
                         });
                         if pick.is_some() {
@@ -142,7 +142,7 @@ fn pick_window(
         });
 }
 
-/// The Connection page's *Between rigs*: per rig the session takes inputs from, the clocks
+/// The Connection page's *Between rigs*: per rig the stream takes inputs from, the clocks
 /// and the link.
 pub(super) fn between_rigs(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
     let blocks = app.state.between_rigs();

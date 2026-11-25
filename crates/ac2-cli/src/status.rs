@@ -10,7 +10,7 @@ use ac2_proto::Welcome;
 use ac2_proto::cal::state_input_use;
 use ac2_proto::model::{
     AutosaveState, ClockRelation, CrossTfState, InputKind, PeerRelation, RemoteInput, RemoteLink,
-    RemoteState, Session, State, StopWhy, remote_slot,
+    RemoteState, State, Stream, StopWhy, remote_slot,
 };
 use ac2_proto::units::WallNs;
 use ac2_scene::between_rigs as br;
@@ -38,7 +38,7 @@ pub enum Build {
 /// What the page is made from.
 pub struct Input<'a> {
     pub welcome: &'a Welcome,
-    pub session: &'a Session,
+    pub stream: &'a Stream,
     pub state: &'a State,
     pub build: Build,
     /// Wall time now, on this machine's clock.
@@ -51,7 +51,7 @@ pub struct Input<'a> {
 /// The status page.
 pub fn text(i: &Input<'_>) -> String {
     let remote_inputs = i
-        .session
+        .stream
         .open
         .as_ref()
         .map(|o| o.config.remote_inputs.as_slice())
@@ -137,7 +137,7 @@ fn header(i: &Input<'_>) -> Section {
             "incarnation",
             &format!("{:016x}", w.daemon_incarnation.0),
         ]));
-        rows.push(Row::new(["epoch", &w.session_epoch.to_string()]));
+        rows.push(Row::new(["epoch", &w.stream_epoch.to_string()]));
         rows.push(Row::new(["rev", &w.rev.to_string()]));
     }
     Section {
@@ -171,7 +171,7 @@ pub fn channel_ranges(ch: &[u16]) -> String {
         .join(", ")
 }
 
-/// A session channel's name: `3` for this rig's input, `ketunkolo in 1` for another rig's.
+/// A stream channel's name: `3` for this rig's input, `ketunkolo in 1` for another rig's.
 fn input_name(r: &RemoteState, remote: &[RemoteInput], ch: u16) -> String {
     match remote_slot(ch).and_then(|s| remote.iter().find(|x| x.slot == s)) {
         Some(x) => ac2_scene::remote_inputs::remote_name(&br::rig_name(r, x), x.channel, None),
@@ -182,12 +182,12 @@ fn input_name(r: &RemoteState, remote: &[RemoteInput], ch: u16) -> String {
 fn audio(i: &Input<'_>, remote: &[RemoteInput]) -> Section {
     let st = i.state;
     let mut rows = Vec::new();
-    let Some(o) = &i.session.open else {
+    let Some(o) = &i.stream.open else {
         return Section {
             heading: "AUDIO".into(),
             summary: Some(Line::plain("closed")),
             rows: if i.verbose {
-                vec![Row::new(["epoch", &i.session.epoch.to_string()])]
+                vec![Row::new(["epoch", &i.stream.epoch.to_string()])]
             } else {
                 Vec::new()
             },
@@ -201,7 +201,7 @@ fn audio(i: &Input<'_>, remote: &[RemoteInput]) -> Section {
             o.input_device.0, o.buffer_frames
         ),
     };
-    if let Some(s) = &i.session.stopped {
+    if let Some(s) = &i.stream.stopped {
         let t = ac2_scene::audio::audio_stopped_text(s, i.now, i.offset_s);
         let mut row = Row::new(["audio", &t.status]).trouble(true);
         if i.verbose {
@@ -228,7 +228,7 @@ fn audio(i: &Input<'_>, remote: &[RemoteInput]) -> Section {
         ins.push(channel_ranges(&local));
     }
     for x in remote {
-        ins.push(input_name(&st.remote, remote, x.session_channel()));
+        ins.push(input_name(&st.remote, remote, x.stream_channel()));
     }
     let mut in_row = Row::new([
         "in",
@@ -269,9 +269,9 @@ fn audio(i: &Input<'_>, remote: &[RemoteInput]) -> Section {
     }
 }
 
-/// The session's clock domain, its drift, then the sample and system clocks in the
+/// The stream's clock domain, its drift, then the sample and system clocks in the
 /// Connection page's words.
-fn clock_row(i: &Input<'_>, o: &ac2_proto::model::OpenSession) -> Row {
+fn clock_row(i: &Input<'_>, o: &ac2_proto::model::OpenStream) -> Row {
     let t = &i.state.timing;
     let (relation, long) = match o.clock {
         ClockRelation::SingleCallback => ("one clock", "one callback for input and output"),
@@ -311,9 +311,9 @@ fn clock_row(i: &Input<'_>, o: &ac2_proto::model::OpenSession) -> Row {
     row
 }
 
-/// A driver-reporting session's clock source, spare ports, stated latency, and a change
+/// A driver-reporting stream's clock source, spare ports, stated latency, and a change
 /// or reset the driver made under it.
-fn driver_rows(o: &ac2_proto::model::OpenSession, rows: &mut Vec<Row>) {
+fn driver_rows(o: &ac2_proto::model::OpenStream, rows: &mut Vec<Row>) {
     if let Some(c) = &o.clock_source {
         rows.push(Row::new(["source", c]));
     }
@@ -348,7 +348,7 @@ fn link_trouble(l: &RemoteLink) -> bool {
     !matches!(l, RemoteLink::Up | RemoteLink::Connecting)
 }
 
-/// Each rig once: the session's relation and link with one line per input taken from
+/// Each rig once: the stream's relation and link with one line per input taken from
 /// it, else what its levels say (`levels only`).
 fn rigs(i: &Input<'_>, remote: &[RemoteInput]) -> Section {
     let r = &i.state.remote;
@@ -515,10 +515,10 @@ fn measurements(i: &Input<'_>) -> Section {
 }
 
 /// The channels the input list names: every input with a setup row, and every input the
-/// open session captures.
+/// open stream captures.
 fn input_channels(s: &State) -> Vec<u16> {
     let mut ch: Vec<u16> = s.inputs.iter().map(|i| i.channel).collect();
-    if let Some(o) = &s.session.open {
+    if let Some(o) = &s.stream.open {
         ch.extend(o.config.input_channels.iter().copied());
     }
     ch.sort_unstable();
@@ -565,7 +565,7 @@ fn kind_text(k: &InputKind) -> String {
 fn inputs(i: &Input<'_>, remote: &[RemoteInput]) -> Section {
     let s = i.state;
     let mut rows = Vec::new();
-    if !s.inputs.is_empty() || i.session.open.is_some() {
+    if !s.inputs.is_empty() || i.stream.open.is_some() {
         let name = |ch| input_name(&s.remote, remote, ch);
         let mut shown: Vec<u16> = Vec::new();
         for ch in input_channels(s) {

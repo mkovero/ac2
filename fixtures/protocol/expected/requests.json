@@ -14,7 +14,7 @@
   "v": 105,
   "id": 2,
   "cmd": {
-   "op": "session.open",
+   "op": "stream.open",
    "args": {
     "config": {
      "backend": "coreaudio",
@@ -238,7 +238,7 @@
   "v": 105,
   "id": 39,
   "cmd": {
-   "op": "session.inputs",
+   "op": "stream.inputs",
    "args": {
     "inputs": [
      {
@@ -327,7 +327,7 @@
   "v": 105,
   "id": 41,
   "cmd": {
-   "op": "session.preview",
+   "op": "stream.preview",
    "args": {
     "backend": "jack",
     "device": "jack",
@@ -360,7 +360,7 @@
   "v": 105,
   "id": 42,
   "cmd": {
-   "op": "session.preview_stop"
+   "op": "stream.preview_stop"
   },
   "expect_rev": null
  },
@@ -368,7 +368,7 @@
   "v": 105,
   "id": 43,
   "cmd": {
-   "op": "session.detect_loopback",
+   "op": "stream.detect_loopback",
    "args": {
     "lease_token": {
      "$bin": "0123456789abcdeffedcba9876543210"
@@ -504,7 +504,7 @@
   "v": 105,
   "id": 54,
   "cmd": {
-   "op": "session.replay",
+   "op": "stream.replay",
    "args": {
     "recording": {
      "type": "name",
@@ -531,7 +531,7 @@
   "v": 105,
   "id": 56,
   "cmd": {
-   "op": "session.outputs",
+   "op": "stream.outputs",
    "args": {
     "outputs": [
      {
@@ -727,7 +727,7 @@
   "v": 105,
   "id": 76,
   "cmd": {
-   "op": "session.control_panel",
+   "op": "stream.control_panel",
    "args": {
     "backend": "asio",
     "device": "Fireface USB"

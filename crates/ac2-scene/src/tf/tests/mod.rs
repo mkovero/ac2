@@ -4,7 +4,7 @@ use crate::time::Freshness;
 use crate::trace::TimeBase;
 use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::{Polarity, Smoothing, SmoothingFraction, SmoothingMode};
-use ac2_proto::units::{MeasId, Seconds, SessionEpoch, TraceId};
+use ac2_proto::units::{MeasId, Seconds, StreamEpoch, TraceId};
 
 mod bins;
 mod extremes;
@@ -63,7 +63,7 @@ fn trace(c: &Cols, key: TraceKey, delay: f64) -> TfTrace<'_> {
         nudge: Seconds(0.0),
         delay_nudge: Seconds(0.0),
         time_base: TimeBase::Shared {
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
             delay: Seconds(delay),
         },
         freshness: Some(Freshness::from_age(0.1)),

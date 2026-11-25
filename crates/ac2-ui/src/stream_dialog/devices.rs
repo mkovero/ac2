@@ -2,10 +2,10 @@
 
 use super::*;
 
-impl SessionDialog {
+impl StreamDialog {
     // ----- backend and device ------------------------------------------------------------
 
-    /// Fills the backends from `session.devices` and selects one: the open session's, else
+    /// Fills the backends from `stream.devices` and selects one: the open stream's, else
     /// the first usable real one, else the first usable (a daemon started on the simulated
     /// rig offers only that).
     pub fn set_backends(&mut self, list: Vec<BackendInfo>, prefs: RigPrefs<'_>) {
@@ -77,7 +77,7 @@ impl SessionDialog {
         self.backend_info()?.devices.get(self.device)
     }
 
-    /// The device the session plays on, if it has outputs.
+    /// The device the stream plays on, if it has outputs.
     pub fn output_info(&self) -> Option<&DeviceInfo> {
         let d = match self.out_device {
             OutputDevice::SameAsInput => self.device_info(),
@@ -172,7 +172,7 @@ impl SessionDialog {
         })
     }
 
-    /// The open session plays on the chosen output device.
+    /// The open stream plays on the chosen output device.
     pub fn is_open_output(&self) -> bool {
         match (&self.open, self.output_info()) {
             (Some(o), Some(d)) => self.is_open_device() && o.output_device == d.id,
@@ -185,7 +185,7 @@ impl SessionDialog {
         self.backend_info().map(|b| b.kind)
     }
 
-    /// The open session runs on the chosen device.
+    /// The open stream runs on the chosen device.
     pub fn is_open_device(&self) -> bool {
         match (&self.open, self.backend_kind(), self.device_info()) {
             (Some(o), Some(k), Some(d)) => o.backend == k && o.input_device == d.id,
@@ -207,13 +207,13 @@ impl SessionDialog {
         ac2_scene::audio::clock_sources_text(&self.device_info()?.clock_sources)
     }
 
-    /// The open session, if the dialog opened over one.
-    pub fn open_session(&self) -> Option<&OpenSession> {
+    /// The open stream, if the dialog opened over one.
+    pub fn open_stream(&self) -> Option<&OpenStream> {
         self.open.as_ref()
     }
 
     /// A note when input and output of the chosen device are not known to share a clock:
-    /// the open session plays on another device than it captures from, or the device's
+    /// the open stream plays on another device than it captures from, or the device's
     /// directions are separate endpoints. Measurements on the loopback reference are
     /// unaffected; the drift is measured once a stimulus plays
     /// (`docs/design/multi-device.md`).
@@ -250,7 +250,7 @@ impl SessionDialog {
     }
 
     /// Where meters come from for the chosen device: a capture-only preview, unless the
-    /// open session already captures it (its `session/levels` are shown then) or a
+    /// open stream already captures it (its `stream/levels` are shown then) or a
     /// loopback detection holds the device.
     pub fn preview_target(&self) -> Option<(BackendKind, DeviceId)> {
         if self.is_open_device() || self.detecting() {
@@ -266,7 +266,7 @@ impl SessionDialog {
     }
 
     /// Builds the rows of the chosen device and applies its remembered roles: the
-    /// preferences, else the open session (on this device), else defaults.
+    /// preferences, else the open stream (on this device), else defaults.
     fn load_device(&mut self, prefs: RigPrefs<'_>) {
         self.detect = None;
         self.notice = None;
@@ -289,7 +289,7 @@ impl SessionDialog {
             .map(|channel| InputRow {
                 channel,
                 device_name: names(d.input.as_ref(), channel),
-                in_session: false,
+                in_stream: false,
                 reference: false,
                 kind: InputKind::Line,
             })
@@ -299,7 +299,7 @@ impl SessionDialog {
         let remembered = prefs
             .roles_for(&key)
             .cloned()
-            .or_else(|| self.roles_of_open_session());
+            .or_else(|| self.roles_of_open_stream());
         self.out_device = remembered
             .as_ref()
             .and_then(|r| r.output_device.as_ref())
@@ -335,7 +335,7 @@ impl SessionDialog {
     }
 
     /// Another output device was chosen: its rows, with the stimulus outputs last used on
-    /// it (none on a device never used) and the session's output count clamped to it.
+    /// it (none on a device never used) and the stream's output count clamped to it.
     fn change_output(&mut self, to: OutputDevice, prefs: RigPrefs<'_>) {
         self.out_device = to;
         self.detect = None;
@@ -363,7 +363,7 @@ impl SessionDialog {
         }
     }
 
-    fn roles_of_open_session(&self) -> Option<DeviceRoles> {
+    fn roles_of_open_stream(&self) -> Option<DeviceRoles> {
         if !self.is_open_device() {
             return None;
         }
@@ -404,12 +404,12 @@ impl SessionDialog {
 
     /// The remembered roles onto the rows. A row's kind is the remembered one (a mic gets
     /// its name back and the daemon's curve for it); the reference is a line input unless
-    /// remembered digital. A pair whose rows are not both in the session is dropped.
+    /// remembered digital. A pair whose rows are not both in the stream is dropped.
     fn apply_roles(&mut self, r: &DeviceRoles) {
         self.mic_names = r.mic_names.clone();
         for row in &mut self.inputs {
             let c = row.channel;
-            row.in_session = r.inputs.contains(&c) || r.reference == Some(c) || r.mics.contains(&c);
+            row.in_stream = r.inputs.contains(&c) || r.reference == Some(c) || r.mics.contains(&c);
             row.reference = r.reference == Some(c);
             let mut kind = r.kind_of(c);
             if row.reference && kind == KindPref::Mic {
@@ -427,12 +427,12 @@ impl SessionDialog {
                 *curve = c;
             }
         }
-        // A pair is two inputs of one kind, both in the session; the prefs file may have
+        // A pair is two inputs of one kind, both in the stream; the prefs file may have
         // been edited by hand, so a pair that is not that is dropped here.
         let pairable = |c: u16| {
             self.inputs
                 .iter()
-                .find(|row| row.channel == c && row.in_session)
+                .find(|row| row.channel == c && row.in_stream)
                 .map(|row| row.kind_pref())
         };
         self.pairs = r
@@ -506,8 +506,8 @@ impl SessionDialog {
             .map_or(0, |i| i.spare_channels)
     }
 
-    /// The graph port of spare input `channel` in the open session, when this device's
-    /// session has it open.
+    /// The graph port of spare input `channel` in the open stream, when this device's
+    /// stream has it open.
     pub fn spare_port(&self, channel: u16) -> Option<&str> {
         if !self.is_open_device() {
             return None;
@@ -541,7 +541,7 @@ impl SessionDialog {
         )
     }
 
-    /// The session opens `n` spare inputs: rows are added in the session (a spare exists to
+    /// The stream opens `n` spare inputs: rows are added in the stream (a spare exists to
     /// be metered) or removed with their roles.
     pub fn set_spares(&mut self, n: u16) {
         self.notice = None;
@@ -570,7 +570,7 @@ impl SessionDialog {
     }
 
     /// Appends `n` spare input rows after the last one.
-    fn add_spare_rows(&mut self, n: u16, in_session: bool) {
+    fn add_spare_rows(&mut self, n: u16, in_stream: bool) {
         let first = self.physical_inputs() + self.spares;
         for channel in first..first + n {
             let device_name = Some(self.spare_port(channel).map_or_else(
@@ -580,7 +580,7 @@ impl SessionDialog {
             self.inputs.push(InputRow {
                 channel,
                 device_name,
-                in_session,
+                in_stream,
                 reference: false,
                 kind: InputKind::Line,
             });
@@ -589,7 +589,7 @@ impl SessionDialog {
     }
 }
 
-/// What a spare input is called until a session names its port: `spare 1`.
+/// What a spare input is called until a stream names its port: `spare 1`.
 fn spare_name(k: u16) -> String {
     format!("spare {}", k + 1)
 }

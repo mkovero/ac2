@@ -92,8 +92,8 @@ fn simulated_rig_starts_measuring() -> R {
 
     let mut d = Driver::connect(config, &daemon.describe())?;
     d.synced()?;
-    // Session open as the rig is wired, "demo" running and selected: nothing to set up.
-    let open = d.st.open_session().cloned().ok_or("no session")?;
+    // Stream open as the rig is wired, "demo" running and selected: nothing to set up.
+    let open = d.st.open_stream().cloned().ok_or("no stream")?;
     assert_eq!(open.config.input_channels, vec![0, 1]);
     assert_eq!(open.config.output_channels, 1);
     assert_eq!(
@@ -317,7 +317,7 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
         applied(s).is_some_and(|(_, n)| (n - want).abs() < 1e-6)
     })?;
     let (secs, _) = applied(&d.st).ok_or("delay")?;
-    let rate = f64::from(d.st.open_session().ok_or("session")?.sample_rate_hz);
+    let rate = f64::from(d.st.open_stream().ok_or("stream")?.sample_rate_hz);
     assert!((secs - want / rate).abs() < 1e-12);
     assert_eq!(
         ac2_scene::format::delay(secs),
@@ -506,7 +506,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         meas: m.id,
         stream: Stream::Tf,
     };
-    let rate = f64::from(d.st.open_session().ok_or("session")?.sample_rate_hz);
+    let rate = f64::from(d.st.open_stream().ok_or("stream")?.sample_rate_hz);
     d.until("a frame at the new delay", |s| {
         s.rig.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
@@ -731,7 +731,7 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
     };
     let d0 = delay(&d.st).ok_or("delay")?;
     let arrival = d0.applied_samples - d0.nudged_samples;
-    let rate = f64::from(d.st.open_session().ok_or("session")?.sample_rate_hz);
+    let rate = f64::from(d.st.open_stream().ok_or("stream")?.sample_rate_hz);
     let before = drawn_phase(&d.st, 1000.0);
     let live_before = drawn_curve(&d.st, live);
 

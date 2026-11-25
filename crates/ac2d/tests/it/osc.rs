@@ -1,6 +1,6 @@
 //! OSC cues end to end on the fake rig: a UDP receiver on the loopback interface is the
 //! rig's OSC target. The target is rev-guarded, `osc.test` arrives, every cue is sent on a
-//! change and again every second, a meter that cannot judge (not running, no session,
+//! change and again every second, a meter that cannot judge (not running, no stream,
 //! uncalibrated limit) is `fault`, a deleted measurement sends `ok`; with a calibrated tone
 //! over a limit, `over` carries the level and turning it down sends `ok`.
 #![allow(clippy::unwrap_used)]
@@ -223,15 +223,15 @@ async fn cues_follow_the_meters_and_repeat() {
         ]
     );
 
-    // A meter with no session cannot judge: fault, with no level.
+    // A meter with no stream cannot judge: fault, with no level.
     let a = create(&c, meter("A", vec![window(Some(90.0), "a")], None)).await;
     let (m, _) = rx.until("/a/fault");
     assert!(m.args.is_empty(), "{:?}", m.args);
 
     // Running uncalibrated, its limit is not judged: still fault. A meter without a limit
     // is ok once its first second is judged.
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();
@@ -261,8 +261,8 @@ async fn cues_follow_the_meters_and_repeat() {
     .unwrap();
     rx.until("/a/ok");
 
-    // The session closed: the rig is blind.
-    c.call(Command::SessionClose).await.unwrap();
+    // The stream closed: the rig is blind.
+    c.call(Command::StreamClose).await.unwrap();
     rx.until("/b/fault");
     rig_cue_until(&c, b, CueState::Fault).await;
     assert!(c.view().state.clone().unwrap().rig.osc.sent > 0);
@@ -325,8 +325,8 @@ async fn slow_a_tone_over_the_limit_lights_over_and_back_ok() {
     let c = connect(&h).await;
     let rx = Receiver::new();
     set_target(&c, rx.addr()).await;
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();
@@ -396,8 +396,8 @@ async fn a_rig_meters_cue_survives_a_load() {
     .unwrap();
 
     // Uncalibrated, the limit cannot be judged: fault, which the load must not clear.
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();
@@ -454,8 +454,8 @@ async fn monitor_at_start_cues_with_no_client() {
         })
         .await
         .unwrap();
-        c.call(Command::SessionOpen {
-            config: session(false),
+        c.call(Command::StreamOpen {
+            config: stream(false),
         })
         .await
         .unwrap();

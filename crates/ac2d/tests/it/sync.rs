@@ -36,7 +36,7 @@ fn apply(state: &mut State, e: &Event) {
             state.measurements.retain(|x| x.id != *id);
         }
         Change::Generator(g) => state.generator = g.clone(),
-        Change::Session(s) => state.session = s.clone(),
+        Change::Stream(s) => state.stream = s.clone(),
         Change::Timing(t) => state.timing = *t,
         Change::Working(w) => state.working = w.clone(),
         Change::SplLog(ac2_proto::Patch::Set(l)) => {
@@ -66,7 +66,7 @@ fn hello_and_version_refusal() {
     assert_eq!(w.rev, Rev(0));
 
     // Another version: refused with a typed error at the daemon's version.
-    let mut req = Request::new(c.next_id(), Command::SessionStatus);
+    let mut req = Request::new(c.next_id(), Command::StreamStatus);
     req.v = PROTO_VERSION + 1;
     let r = c.call_req(req);
     let e = r.result.unwrap_err();
@@ -87,7 +87,7 @@ fn hello_and_version_refusal() {
     }
     let raw = rmp_serde::to_vec_named(&NoVersion {
         id: 77,
-        cmd: Command::SessionStatus,
+        cmd: Command::StreamStatus,
     })
     .unwrap();
     c.sock.send(&[raw]).unwrap();
@@ -119,10 +119,7 @@ fn hello_and_version_refusal() {
     c.sock.send(&[raw]).unwrap();
     let r = c.recv(T).unwrap();
     assert_eq!(r.result.unwrap_err().code, ErrorCode::Invalid);
-    assert!(matches!(
-        c.ok(Command::SessionStatus),
-        ReplyBody::Session(_)
-    ));
+    assert!(matches!(c.ok(Command::StreamStatus), ReplyBody::Stream(_)));
     h.shutdown();
 }
 
@@ -260,7 +257,7 @@ fn request_dedup_and_expect_rev() {
     assert_eq!(c.recv_raw(T).unwrap(), conflict);
     assert_eq!(snapshot(&mut c).0.measurements.len(), 1, "not deleted");
     // Reads ignore expect_rev.
-    let mut read = Request::new(c.next_id(), Command::SessionStatus);
+    let mut read = Request::new(c.next_id(), Command::StreamStatus);
     read.expect_rev = Some(Rev(0));
     assert!(c.call_req(read).result.is_ok());
     h.shutdown();
@@ -353,8 +350,8 @@ fn daemon_restart_is_a_new_incarnation() {
     h2.shutdown();
 }
 
-/// Keepalives carry the daemon's host and, with a session open, its callback load and the
-/// xruns the backend reported; nothing of the audio without a session.
+/// Keepalives carry the daemon's host and, with a stream open, its callback load and the
+/// xruns the backend reported; nothing of the audio without a stream.
 #[test]
 fn keepalives_carry_the_host_the_callback_load_and_the_xruns() {
     use ac2_audio::fake::{FakeConfig, FakeFault};
@@ -372,10 +369,10 @@ fn keepalives_carry_the_host_the_callback_load_and_the_xruns() {
     let (mut c, sub) = connect(&h, &[b"ka"]);
     let first = health(&sub);
     assert!(!first.host.is_empty());
-    assert_eq!(first.audio, None, "no session");
+    assert_eq!(first.audio, None, "no stream");
 
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     let mut d = driver(&backend);
     d.run_blocks(50);
@@ -393,9 +390,9 @@ fn keepalives_carry_the_host_the_callback_load_and_the_xruns() {
     };
     let load = audio.load.unwrap();
     assert!((0.0..1.0).contains(&load), "{load}");
-    assert!(audio.peak.unwrap() >= load && audio.session_load.is_some());
+    assert!(audio.peak.unwrap() >= load && audio.stream_load.is_some());
 
-    c.ok(Command::SessionClose);
+    c.ok(Command::StreamClose);
     let deadline = std::time::Instant::now() + T;
     while health(&sub).audio.is_some() {
         assert!(

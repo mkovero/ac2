@@ -21,7 +21,7 @@ use crate::topic::{Subscription, Topic};
 /// impulse response view, ≈ 13 kB) fit, so a frame never waits for the one before it on a
 /// fast link, and on a starved one (2 Mbit/s) the standing delay is ≈ 0.26 s.
 pub const DATA_WINDOW_DEFAULT: u32 = 64 * 1024;
-/// Smallest window the daemon honours: above the largest frame a session sends, so every
+/// Smallest window the daemon honours: above the largest frame a stream sends, so every
 /// topic fits the window on its own. A frame larger than the window still goes, alone.
 pub const DATA_WINDOW_MIN: u32 = 20 * 1024;
 /// Largest window the daemon honours. With [`FRAME_CHARGE_MIN`] it bounds the frames in
@@ -279,6 +279,6 @@ mod tests {
         assert!(outside_window(b"ka"));
         assert!(outside_window(FLOW_TOPIC));
         assert!(!outside_window(b"d/1/tf"));
-        assert!(!outside_window(b"session/levels"));
+        assert!(!outside_window(b"stream/levels"));
     }
 }

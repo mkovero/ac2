@@ -60,7 +60,7 @@ async fn artnet_target_test_cue_levels_and_status() {
     let f = frame_until(&rx, |d| d[11] == 255);
     assert_eq!(f[12], 40);
 
-    // A meter's fault levels (no session: the rig cannot judge) go out and show in status.
+    // A meter's fault levels (no stream: the rig cannot judge) go out and show in status.
     ok(
         &ep,
         &["meas", "new", "spl", "--input", "1", "--name", "Stage"],

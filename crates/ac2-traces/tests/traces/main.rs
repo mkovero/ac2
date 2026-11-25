@@ -83,7 +83,7 @@ fn captured(epoch: u32) -> TraceSource {
     TraceSource::Captured {
         meas: MeasId(1),
         meas_name: "main".into(),
-        epoch: SessionEpoch(epoch),
+        epoch: StreamEpoch(epoch),
         at_sample: SampleIndex(48_000),
     }
 }

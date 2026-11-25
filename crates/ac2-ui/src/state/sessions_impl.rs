@@ -152,7 +152,7 @@ impl AppState {
     /// instead (its New leads to the audio setup, then the New measurement chooser), or the
     /// audio setup when measurements are kept; `true` when it did.
     pub(super) fn sessions_first(&mut self, out: &mut Vec<Request>) -> bool {
-        if !self.connected() || self.daemon().is_none() || self.open_session().is_some() {
+        if !self.connected() || self.daemon().is_none() || self.open_stream().is_some() {
             return false;
         }
         // With measurements kept, New session would discard them: their audio is what

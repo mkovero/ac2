@@ -336,7 +336,7 @@ fn smoothed_phase_and_spectrum() -> R {
     })
 }
 
-/// A daemon with no audio I/O: the transfer pane says how to open a session; a target
+/// A daemon with no audio I/O: the transfer pane says how to open a stream; a target
 /// imported without one is drawn on no pane, and the hint stays in the pane's centre.
 #[test]
 fn no_session_hint_stays_with_an_imported_target() -> R {

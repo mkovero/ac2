@@ -98,7 +98,7 @@ cmd = ["~/ac2-test/bin/ac2", "--remote", "localhost"]
 timeout = "5s"
 recordings_dir = "~/.local/share/ac2/recordings"  # ac2d --recordings default; `rec` files land here
 cal_store = "~/.config/ac2/calibrations.json"
-session_open = ["session", "open", "--backend", "jack", "--in", "1-8", "--outputs", "6",
+stream_open = ["stream", "open", "--backend", "jack", "--in", "1-8", "--outputs", "6",
                 "--loopback-out", "2", "--loopback-in", "2", "--mic", "1=MM1 34804"]
 systemd_unit = "ac2d.service"
 # The electrical drop-in (only with --allow-electrical-level): a runtime unit override,

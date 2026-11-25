@@ -453,7 +453,7 @@ fn nothing_to_compare_is_no_tag() {
     assert_eq!((tags(&d), d.rigs[0].tip.as_deref()), (vec![None], None));
     assert_eq!(d.rigs[0].domain, Domain::NotCompared);
 
-    // A rig with no session leaves the other alone in the list.
+    // A rig with no stream leaves the other alone in the list.
     let d = clock_domains(&[rig("pupu", 96_000, &c), idle]);
     assert_eq!(tags(&d), [None, None]);
     assert_eq!(
@@ -461,13 +461,13 @@ fn nothing_to_compare_is_no_tag() {
         DomainTag {
             tag: None,
             tip: None,
-            domain: Domain::NoSession
+            domain: Domain::NoStream
         }
     );
     assert_eq!(
         d.same_domain(0, 1),
         SameDomain::CantTell {
-            reason: "idle has no audio session".into()
+            reason: "idle has no audio stream".into()
         }
     );
     assert_eq!(d.same_domain(1, 1), SameDomain::Yes);

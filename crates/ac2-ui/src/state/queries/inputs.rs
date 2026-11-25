@@ -1,4 +1,4 @@
-//! The daemon's running operation, the session's inputs and outputs and their meters.
+//! The daemon's running operation, the stream's inputs and outputs and their meters.
 
 use crate::state::*;
 
@@ -17,14 +17,14 @@ impl AppState {
         ac2_scene::progress::sweep(run, since)
     }
 
-    /// Every input the open session captures, labelled by name and role, with its meter
+    /// Every input the open stream captures, labelled by name and role, with its meter
     /// and what the running sweep (else the selected measurement) uses it as.
-    pub fn session_inputs(&self) -> Vec<ac2_scene::meter::InputRow> {
+    pub fn stream_inputs(&self) -> Vec<ac2_scene::meter::InputRow> {
         use ac2_scene::meter::{InputRole, InputRow, InputUse, MeterReading, input_label};
-        let Some(o) = self.open_session() else {
+        let Some(o) = self.open_stream() else {
             return Vec::new();
         };
-        let meters = if self.overlay.session().is_some() {
+        let meters = if self.overlay.stream().is_some() {
             // The dialog's meters may be another device's preview.
             BTreeMap::new()
         } else {
@@ -119,7 +119,7 @@ impl AppState {
             if loopback == Some(c) {
                 InputRole::Reference
             } else {
-                crate::session_dialog::kind_role(kind_of(c))
+                crate::stream_dialog::kind_role(kind_of(c))
             }
         };
         // A line row's calibration, dBu with its age; an uncalibrated row's numbers carry
@@ -211,7 +211,7 @@ impl AppState {
             (_, Some((backend, device))) if before.1 != after.1 || renew => {
                 let (inputs, pairs) = self
                     .overlay
-                    .session()
+                    .stream()
                     .map(|d| d.preview_setup())
                     .unwrap_or_default();
                 out.push(Request::Preview {
@@ -227,9 +227,9 @@ impl AppState {
         }
     }
 
-    /// Input meters of the session dialog's device (its preview, or the session's own
-    /// meters when the session captures it) or, for the measurement dialogs, of the
-    /// session: device input → reading. Stale frames read as nothing.
+    /// Input meters of the stream dialog's device (its preview, or the stream's own
+    /// meters when the stream captures it) or, for the measurement dialogs, of the
+    /// stream: device input → reading. Stale frames read as nothing.
     pub fn input_meters(&self) -> BTreeMap<u16, ac2_scene::meter::MeterReading> {
         use ac2_proto::FrameData;
         use ac2_proto::topic::Topic;
@@ -237,17 +237,17 @@ impl AppState {
         let Some(d) = &self.rig.data else {
             return out;
         };
-        let from_preview = self.overlay.session().and_then(|s| s.preview_target());
+        let from_preview = self.overlay.stream().and_then(|s| s.preview_target());
         let topic = if from_preview.is_some() {
             Topic::PreviewLevels
         } else {
-            Topic::SessionLevels
+            Topic::StreamLevels
         };
         let Some(tf) = d.latest.get(&topic).filter(|f| !f.stale) else {
             return out;
         };
         let (channels, peak, rms, clip) = match &tf.frame.data {
-            FrameData::SessionLevels(f) => (&f.meta.channels, &f.peak, &f.rms, &f.clip),
+            FrameData::StreamLevels(f) => (&f.meta.channels, &f.peak, &f.rms, &f.clip),
             FrameData::PreviewLevels(f) => {
                 if from_preview.as_ref() != Some(&(f.meta.backend, f.meta.device.clone())) {
                     return out;
@@ -272,9 +272,9 @@ impl AppState {
         out
     }
 
-    /// The names of the open session's outputs: the device's channel name, else `Output N`.
-    pub fn session_output_names(&self) -> Vec<(u16, String)> {
-        let Some(o) = self.open_session() else {
+    /// The names of the open stream's outputs: the device's channel name, else `Output N`.
+    pub fn stream_output_names(&self) -> Vec<(u16, String)> {
+        let Some(o) = self.open_stream() else {
             return Vec::new();
         };
         let device_names = self
@@ -298,18 +298,18 @@ impl AppState {
             .collect()
     }
 
-    /// The names of the open session's inputs, as the dialogs show them: mic name, else the
+    /// The names of the open stream's inputs, as the dialogs show them: mic name, else the
     /// device's channel name, else `Input N`.
-    pub fn session_input_names(&self) -> Vec<(u16, String)> {
-        self.session_input_labels()
+    pub fn stream_input_names(&self) -> Vec<(u16, String)> {
+        self.stream_input_labels()
             .into_iter()
             .map(|(c, name)| (c, ac2_scene::meter::channel_choice(c, &name)))
             .collect()
     }
 
-    /// The open session's inputs by name alone (mic, device channel name or `Input N`).
-    pub fn session_input_labels(&self) -> Vec<(u16, String)> {
-        let Some(o) = self.open_session() else {
+    /// The open stream's inputs by name alone (mic, device channel name or `Input N`).
+    pub fn stream_input_labels(&self) -> Vec<(u16, String)> {
+        let Some(o) = self.open_stream() else {
             return Vec::new();
         };
         let device_names = self.input_channel_names();
@@ -334,7 +334,7 @@ impl AppState {
 
     /// The open input device's channel names, as the backend reports them.
     fn input_channel_names(&self) -> Option<Vec<String>> {
-        let o = self.open_session()?;
+        let o = self.open_stream()?;
         self.rig
             .devices
             .iter()

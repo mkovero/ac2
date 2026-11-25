@@ -914,7 +914,7 @@ fn a_driver_clock_change_is_told_with_whether_output_stopped() {
     let stopped = |s: &mut State, reason| {
         s.generator.firing = false;
         s.generator.armed = false;
-        s.session.stopped = Some(ac2_proto::model::AudioStopped {
+        s.stream.stopped = Some(ac2_proto::model::AudioStopped {
             since: WallNs(0),
             cause: ac2_proto::model::StopCause::DriverReset { reason },
             recovery: ac2_proto::model::Recovery::Opening {

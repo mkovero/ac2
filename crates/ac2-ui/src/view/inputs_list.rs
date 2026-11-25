@@ -1,4 +1,4 @@
-//! The sidebar's Inputs list: a row per session input or pair, each bar reading what the
+//! The sidebar's Inputs list: a row per stream input or pair, each bar reading what the
 //! Programme pane's per-input bar reads (`ac2_scene::programme::row_block`), its number in
 //! a fixed slot beside it, then each side's max, the true peak where the bar reads
 //! something else, a pair's correlation and a row's note. Only the bar fills and ticks
@@ -20,12 +20,12 @@ const BAR_MIN_W: f32 = 24.0;
 
 use super::chrome::ROW_DRAG_START;
 
-/// Every input of the open session, metered all the time: the operator sees what reaches
+/// Every input of the open stream, metered all the time: the operator sees what reaches
 /// the mic and the reference before and during any measurement. A click picks a row for
 /// the Inputs keys (reset its max); a row dragged onto a pane meters it there: the message
 /// it makes.
 pub(super) fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) -> Option<Msg> {
-    let rows = app.state.session_inputs();
+    let rows = app.state.stream_inputs();
     if rows.is_empty() {
         return None;
     }

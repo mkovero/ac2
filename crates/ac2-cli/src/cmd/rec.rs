@@ -1,4 +1,4 @@
-//! `rec …` and `session replay`: raw capture files on the daemon host.
+//! `rec …` and `stream replay`: raw capture files on the daemon host.
 
 use std::path::{Path, PathBuf};
 
@@ -20,11 +20,11 @@ pub(crate) async fn run(cli: &Cli, cmd: &RecCmd, out: &mut Out<'_>) -> Result<()
                 Some(ch) => ch.0.clone(),
                 None => state(&c)
                     .await?
-                    .session
+                    .stream
                     .open
                     .map(|o| o.config.input_channels)
                     .ok_or_else(|| {
-                        CliError::Usage("no audio I/O open to record (ac2 session open)".into())
+                        CliError::Usage("no audio I/O open to record (ac2 stream open)".into())
                     })?,
             };
             let r = c
@@ -90,7 +90,7 @@ fn recording_ref(arg: &str, local: bool) -> Result<RecordingRef, CliError> {
     })
 }
 
-/// `session replay`.
+/// `stream replay`.
 pub(crate) async fn replay(
     cli: &Cli,
     c: &Client,
@@ -100,7 +100,7 @@ pub(crate) async fn replay(
 ) -> Result<(), CliError> {
     let local = is_local(cli) || cli.ctrl_endpoint.is_some();
     let r = c
-        .call(Command::SessionReplay {
+        .call(Command::StreamReplay {
             recording: recording_ref(recording, local)?,
             pace: if fast {
                 ReplayPace::Fast
@@ -109,8 +109,8 @@ pub(crate) async fn replay(
             },
         })
         .await?;
-    let s = expect_body!("session.replay", r, ReplyBody::Session(s) => s)?;
-    out.emit(&s, || output::session(&s))?;
+    let s = expect_body!("stream.replay", r, ReplyBody::Stream(s) => s)?;
+    out.emit(&s, || output::stream(&s))?;
     Ok(())
 }
 
@@ -155,7 +155,7 @@ pub(crate) fn import_text(src: &Path, path: &Path, s: &ac2_traces::raw::Sidecar)
     let secs = frames as f64 / f64::from(s.audio.sample_rate.max(1));
     format!(
         "{} imported as {}: {} channel(s) at {} Hz, {:.1} s\nreplay it in real time (file \
-         second t is the replay's start + t on the meter's clock): ac2 session replay \"{}\"",
+         second t is the replay's start + t on the meter's clock): ac2 stream replay \"{}\"",
         src.display(),
         path.display(),
         s.audio.channels.len(),

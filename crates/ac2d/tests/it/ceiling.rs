@@ -102,8 +102,8 @@ fn lowering_applies_at_once_raising_needs_a_confirmation_and_silence() {
     let g = a.state().generator;
     assert_eq!((g.ceiling, g.ceiling_bound), (Dbfs(-10.0), Dbfs(-10.0)));
 
-    a.ok(Command::SessionOpen {
-        config: session(false),
+    a.ok(Command::StreamOpen {
+        config: stream(false),
     });
     a.ok(Command::MeasCreate {
         config: spl("loopback", 0),
@@ -215,19 +215,19 @@ fn level_and_output_labels_survive_a_restart_under_the_bound() {
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
     ceiling(&mut c, -32.0, false).unwrap();
-    let o = c.outputs(Command::SessionOutputs {
+    let o = c.outputs(Command::StreamOutputs {
         outputs: vec![label(0, "Main L"), label(1, "Sub")],
     });
     assert_eq!(o, vec![label(0, "Main L"), label(1, "Sub")]);
     // A label clears with none; a bad one is refused.
-    c.ok(Command::SessionOutputs {
+    c.ok(Command::StreamOutputs {
         outputs: vec![OutputSetup {
             channel: 1,
             label: None,
         }],
     });
     let e = c
-        .call(Command::SessionOutputs {
+        .call(Command::StreamOutputs {
             outputs: vec![label(2, " padded")],
         })
         .unwrap_err();

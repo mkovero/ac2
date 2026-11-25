@@ -524,15 +524,15 @@ impl AppState {
     }
 
     /// The daemon's open audio I/O.
-    pub fn open_session(&self) -> Option<&ac2_proto::model::OpenSession> {
-        self.daemon().and_then(|s| s.session.open.as_ref())
+    pub fn open_stream(&self) -> Option<&ac2_proto::model::OpenStream> {
+        self.daemon().and_then(|s| s.stream.open.as_ref())
     }
 
     /// No audio I/O and nothing kept (no measurements, no stored curves): a fresh start,
     /// where the Sessions dialog begins one. With anything kept, a session lives on (an
     /// autosave restored, a file loaded) and only its audio is missing.
     pub fn nothing_kept(&self) -> bool {
-        self.open_session().is_none()
+        self.open_stream().is_none()
             && self.measurements().is_empty()
             && self.stored_traces().is_empty()
     }
@@ -543,14 +543,14 @@ impl AppState {
         if self.measurements().is_empty() {
             format!(
                 "{} · {}, then New session",
-                ac2_scene::rig_tree::NO_SESSION,
+                ac2_scene::rig_tree::NO_STREAM,
                 keymap.reach(CommandId::Sessions)
             )
         } else {
             format!(
                 "{} · {} opens it",
                 ac2_scene::rig_tree::NO_AUDIO,
-                keymap.reach(CommandId::OpenSession)
+                keymap.reach(CommandId::OpenStream)
             )
         }
     }
@@ -566,75 +566,74 @@ impl AppState {
         }
         let st = self.daemon()?;
         let kind = self.layout.kind(pane);
-        let text = if kind == PaneKind::Transfer
-            && st.session.open.is_none()
-            && st.measurements.is_empty()
-        {
-            // Nothing to keep: a new session is the way in.
-            ac2_scene::sessions::no_session_hint(&keymap.reach(CommandId::Sessions))
-        } else if kind == PaneKind::Transfer && st.session.open.is_none() {
-            format!("No audio I/O — {}", open_session_hint(keymap))
-        } else if kind == PaneKind::Transfer && st.measurements.is_empty() {
-            let reach = [CommandId::NewMeasurement, CommandId::Palette]
-                .into_iter()
-                .find_map(|c| keymap.label(c, Scope::Global))
-                .unwrap_or_else(|| "Command palette".to_owned());
-            ac2_scene::new_meas::no_measurements(&reach)
-        } else if let Some(name) = self.rig.pending.deleted.get(&pane).filter(|_| {
-            self.layout
-                .view(pane)
-                .is_some_and(|v| self.ours(v) && !v.has_content())
-        }) {
-            // Its name still waits, so one made again takes the pane back; until then the
-            // pane says why it emptied.
-            ac2_scene::pane_edit::deleted_here(name)
-        } else if self.pane_unpicked(pane) {
-            // An unpicked pane follows no selection: a row dropped on it is what it shows.
-            ac2_scene::pane_edit::NOTHING_PICKED.to_owned()
-        } else if let Some(what) = self.pane_waits(pane) {
-            ac2_scene::pane_edit::waiting_for(&what, &self.rig_name(self.rig.id))
-        } else if !self.pane_shows_stored(pane)
-            && let n @ 1.. = self.imported_traces(kind)
-        {
-            // An imported file draws nowhere until it has a measurement: say where it went.
-            let key = keymap
-                .chords(CommandId::MoveTrace, Scope::Global)
-                .first()
-                .map(|c| c.label());
-            let text = ac2_scene::meas_list::imported_hint(n, key.as_deref());
-            let place = if self.pane_shows_live(pane) {
-                HintPlace::Title
-            } else {
-                HintPlace::Centre
-            };
-            return Some(EmptyHint { text, place });
-        } else if kind == PaneKind::Spectrum
+        let text =
+            if kind == PaneKind::Transfer && st.stream.open.is_none() && st.measurements.is_empty()
+            {
+                // Nothing to keep: a new session is the way in.
+                ac2_scene::sessions::no_session_hint(&keymap.reach(CommandId::Sessions))
+            } else if kind == PaneKind::Transfer && st.stream.open.is_none() {
+                format!("No audio I/O — {}", open_stream_hint(keymap))
+            } else if kind == PaneKind::Transfer && st.measurements.is_empty() {
+                let reach = [CommandId::NewMeasurement, CommandId::Palette]
+                    .into_iter()
+                    .find_map(|c| keymap.label(c, Scope::Global))
+                    .unwrap_or_else(|| "Command palette".to_owned());
+                ac2_scene::new_meas::no_measurements(&reach)
+            } else if let Some(name) = self.rig.pending.deleted.get(&pane).filter(|_| {
+                self.layout
+                    .view(pane)
+                    .is_some_and(|v| self.ours(v) && !v.has_content())
+            }) {
+                // Its name still waits, so one made again takes the pane back; until then the
+                // pane says why it emptied.
+                ac2_scene::pane_edit::deleted_here(name)
+            } else if self.pane_unpicked(pane) {
+                // An unpicked pane follows no selection: a row dropped on it is what it shows.
+                ac2_scene::pane_edit::NOTHING_PICKED.to_owned()
+            } else if let Some(what) = self.pane_waits(pane) {
+                ac2_scene::pane_edit::waiting_for(&what, &self.rig_name(self.rig.id))
+            } else if !self.pane_shows_stored(pane)
+                && let n @ 1.. = self.imported_traces(kind)
+            {
+                // An imported file draws nowhere until it has a measurement: say where it went.
+                let key = keymap
+                    .chords(CommandId::MoveTrace, Scope::Global)
+                    .first()
+                    .map(|c| c.label());
+                let text = ac2_scene::meas_list::imported_hint(n, key.as_deref());
+                let place = if self.pane_shows_live(pane) {
+                    HintPlace::Title
+                } else {
+                    HintPlace::Centre
+                };
+                return Some(EmptyHint { text, place });
+            } else if kind == PaneKind::Spectrum
             // The spectrograph says it under its own history.
             && !self.pane_modes(pane).spectrum.spectrograph()
             && !self.pane_shows_live(pane)
             && !self.pane_shows_stored(pane)
             && let Some(m) = self.pane_meas(pane)
-        {
-            // Its own measurement has nothing to draw: say why, never draw another's.
-            use ac2_scene::missing::{Missing, missing_text};
-            let (why, command, scope) = if self.meas_hidden(m) {
-                (Missing::Hidden, CommandId::ToggleSelected, Scope::Global)
-            } else if !m.running {
-                (Missing::Stopped, CommandId::StartStop, Scope::Spectrum)
-            } else {
-                let what = Missing::NotYet {
-                    what: "frames",
-                    after: None,
+            {
+                // Its own measurement has nothing to draw: say why, never draw another's.
+                use ac2_scene::missing::{Missing, missing_text};
+                let (why, command, scope) = if self.meas_hidden(m) {
+                    (Missing::Hidden, CommandId::ToggleSelected, Scope::Global)
+                } else if !m.running {
+                    (Missing::Stopped, CommandId::StartStop, Scope::Spectrum)
+                } else {
+                    let what = Missing::NotYet {
+                        what: "frames",
+                        after: None,
+                    };
+                    (what, CommandId::StartStop, Scope::Spectrum)
                 };
-                (what, CommandId::StartStop, Scope::Spectrum)
+                let key = keymap
+                    .first_chord(command, scope)
+                    .map_or_else(|| "the palette".to_owned(), |c| c.label());
+                missing_text(&m.config.name, why, &key)
+            } else {
+                return None;
             };
-            let key = keymap
-                .first_chord(command, scope)
-                .map_or_else(|| "the palette".to_owned(), |c| c.label());
-            missing_text(&m.config.name, why, &key)
-        } else {
-            return None;
-        };
         let place = if self.pane_shows_stored(pane) {
             HintPlace::Title
         } else {

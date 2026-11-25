@@ -1,5 +1,5 @@
 //! The programme meters (`docs/design/programme-meter.md` §3–§5, §7): `levels.set` is a rig
-//! edit kept in the rig settings file, the session meters carry the chosen ballistic, the
+//! edit kept in the rig settings file, the stream meters carry the chosen ballistic, the
 //! true peak, the max holds, the overs and each pair's correlation, a sustained over counts
 //! once, `levels.reset` clears the holds, and the goniometer frame carries 256 points.
 #![allow(clippy::unwrap_used)]
@@ -9,7 +9,7 @@ use crate::common;
 use std::path::Path;
 use std::time::Duration;
 
-use ac2_proto::frame::{FrameData, GONIO_POINTS, SessionLevelsFrame};
+use ac2_proto::frame::{FrameData, GONIO_POINTS, StreamLevelsFrame};
 use ac2_proto::model::{
     Ballistic, CorrelationWindow, GeneratorDesired, GeneratorSettings, InputKind, InputSetup,
     LevelsSettings, Pair, PairSide, Signal,
@@ -201,36 +201,36 @@ fn a_loudness_target_outside_its_range_is_refused() {
     h.shutdown();
 }
 
-fn levels_frame(f: &ac2_proto::Frame) -> Option<&SessionLevelsFrame> {
+fn levels_frame(f: &ac2_proto::Frame) -> Option<&StreamLevelsFrame> {
     match &f.data {
-        FrameData::SessionLevels(l) => Some(l),
+        FrameData::StreamLevels(l) => Some(l),
         _ => None,
     }
 }
 
-/// The first session meter frame satisfying `pred`.
+/// The first stream meter frame satisfying `pred`.
 fn meters(
     s: &Sub,
     what: &str,
-    mut pred: impl FnMut(&SessionLevelsFrame) -> bool,
-) -> SessionLevelsFrame {
+    mut pred: impl FnMut(&StreamLevelsFrame) -> bool,
+) -> StreamLevelsFrame {
     let f = s
         .frame(T, |f| levels_frame(f).is_some_and(&mut pred))
-        .unwrap_or_else(|| panic!("no session meter frame: {what}"));
+        .unwrap_or_else(|| panic!("no stream meter frame: {what}"));
     levels_frame(&f).unwrap().clone()
 }
 
 #[test]
-fn slow_session_meters_carry_the_programme_columns_and_count_an_over_once() {
+fn slow_stream_meters_carry_the_programme_columns_and_count_an_over_once() {
     init_log();
     let h = Daemon::start(steady_config(realtime_rig(), inproc("levels-meters"))).unwrap();
     let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
-    let mut cfg = session(false);
+    let mut cfg = stream(false);
     cfg.input_channels = vec![0, 1, 2, 3];
-    c.ok(Command::SessionOpen { config: cfg });
+    c.ok(Command::StreamOpen { config: cfg });
     // Input 1 hears output 0 through the fake rig's acoustic path, input 2 nothing: a pair
     // of the two has a quiet right side.
-    c.ok(Command::SessionInputs {
+    c.ok(Command::StreamInputs {
         inputs: vec![line(0), line(1), line(2)],
         pairs: vec![Pair {
             left: 1,
@@ -292,9 +292,9 @@ fn slow_session_meters_carry_the_programme_columns_and_count_an_over_once() {
     assert!((f.max[1] - acoustic).abs() < 0.5);
     // The goniometer frame of the pair: 256 points, the left side's gain.
     let g = s
-        .frame(T, |f| matches!(f.data, FrameData::SessionGonio(_)))
-        .expect("session/gonio frame");
-    let FrameData::SessionGonio(g) = g.data else {
+        .frame(T, |f| matches!(f.data, FrameData::StreamGonio(_)))
+        .expect("stream/gonio frame");
+    let FrameData::StreamGonio(g) = g.data else {
         unreachable!()
     };
     assert_eq!(g.pairs.len(), 1);

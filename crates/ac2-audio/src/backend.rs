@@ -474,7 +474,7 @@ pub enum Delivery {
 }
 
 /// What a cheap look at the audio host says about a device, without opening a client or a
-/// stream: a stopped session's recovery looks this often and reopens at once when the
+/// stream: a stopped stream's recovery looks this often and reopens at once when the
 /// device comes back, instead of waiting out a long backoff step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Presence {

@@ -10,7 +10,7 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::Backends(_) => "backends",
         ReplyBody::Preview(_) => "preview",
         ReplyBody::LoopbackDetection(_) => "loopback_detection",
-        ReplyBody::Session(_) => "session",
+        ReplyBody::Stream(_) => "stream",
         ReplyBody::Lease(_) => "lease",
         ReplyBody::Generator(_) => "generator",
         ReplyBody::Measurement(_) => "measurement",

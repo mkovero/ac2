@@ -3,7 +3,7 @@
 //! (`docs/design/math-traces.md`).
 //!
 //! The job analyses no audio itself. The capture fan-out still feeds it every hand-off, so
-//! it publishes on the same clock as its live operands, its frames carry the session's
+//! it publishes on the same clock as its live operands, its frames carry the stream's
 //! sample index, and it goes STALE exactly when they do. A frame is due when a live operand
 //! has a new result (its job's result generation, read through its probe on each hand-off)
 //! or a command changed the math trace; a math trace of stored traces alone only refreshes, as any
@@ -14,7 +14,7 @@
 //! columns on the result's grid, prepared when the job starts.
 //!
 //! The mathematics is [`ac2_traces::math`]'s, shared with every test: live operands run in
-//! the session epoch, so they share one time base with each other and with the captures of
+//! the stream epoch, so they share one time base with each other and with the captures of
 //! that epoch.
 
 use std::sync::Arc;
@@ -26,7 +26,7 @@ use ac2_proto::frame::{BinsFrame, FrameData, ProtectionFlags};
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{LevelScale, MathConfig, Operand, SpecLevel};
 use ac2_proto::topic::Topic;
-use ac2_proto::units::{MeasId, Rev, SessionEpoch};
+use ac2_proto::units::{MeasId, Rev, StreamEpoch};
 use ac2_traces::columns::Columns;
 
 use super::bins::OperandBins;
@@ -50,7 +50,7 @@ pub(crate) struct Held {
     /// The delay its phase is referred to.
     pub(crate) delay: f64,
     /// The epoch whose time base its phase is in, if any.
-    pub(crate) time_base: Option<SessionEpoch>,
+    pub(crate) time_base: Option<StreamEpoch>,
     /// Level scale (spectrum, RTA).
     pub(crate) scale: Option<LevelScale>,
     /// Tone level or density (spectrum).
@@ -99,7 +99,7 @@ pub(crate) struct MathJob {
     grid_id: GridId,
     display_id: Option<GridId>,
     freqs: Vec<f64>,
-    epoch: SessionEpoch,
+    epoch: StreamEpoch,
     probes: Arc<Probes>,
     /// Every operand, in expression order: `None` for a live one (asked when due).
     stored: Vec<Option<Arc<Held>>>,

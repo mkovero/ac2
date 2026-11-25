@@ -99,7 +99,7 @@ pub(super) fn dynamics_meta() -> TraceMeta {
             meas_name: "Studer VCA".into(),
             run: DynamicsId(2),
             number: 1,
-            epoch: SessionEpoch(2),
+            epoch: StreamEpoch(2),
         },
         depth: None,
         lf_window: None,

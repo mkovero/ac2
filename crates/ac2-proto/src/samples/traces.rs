@@ -99,7 +99,7 @@ pub(super) fn trace_meta() -> TraceMeta {
         source: TraceSource::Captured {
             meas: MeasId(1),
             meas_name: "Main L".into(),
-            epoch: SessionEpoch(2),
+            epoch: StreamEpoch(2),
             at_sample: SampleIndex(4_800_000),
         },
         grid_id: log_grid().id(),
@@ -225,7 +225,7 @@ pub(super) fn sweep_meta() -> TraceMeta {
             meas_name: "Genelec 1 m".into(),
             run: SweepId(3),
             number: 2,
-            epoch: SessionEpoch(2),
+            epoch: StreamEpoch(2),
             sweep: sweep(),
             level: Dbfs(-50.0),
             repeats: 2,

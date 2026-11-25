@@ -44,7 +44,7 @@ fn run_meta(id: u32, number: u32) -> TraceMeta {
             meas_name: "Studer VCA".into(),
             run: DynamicsId(number),
             number,
-            epoch: SessionEpoch(2),
+            epoch: StreamEpoch(2),
         },
         ..base
     }

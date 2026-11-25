@@ -15,7 +15,7 @@ async fn gen_refusals_never_touch_the_lease() -> R {
     .await?;
     assert_eq!(r.code, 4);
     assert_eq!(r.json()?["error"]["code"], "refused");
-    // No session open.
+    // No stream open.
     let r = ac2(
         &f,
         &["gen", "pink", "--out", "1", "--level", "-30dbfs", "--json"],

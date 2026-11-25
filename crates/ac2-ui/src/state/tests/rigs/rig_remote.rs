@@ -1,5 +1,5 @@
 //! Multi-rig stage 3a (`docs/design/remote-inputs.md` §2.3, §5): the app pairs two rigs it
-//! holds and adds one's input to the other's session; the input's row, its name in the
+//! holds and adds one's input to the other's stream; the input's row, its name in the
 //! pickers and the Connection page say what its rig and link do, in words.
 
 use super::*;
@@ -83,9 +83,9 @@ fn texts(t: &T) -> Vec<String> {
 /// The palette's *Add an input from another rig…* opens the dialog on the Audio I/O page
 /// and asks both rigs for their keys; the other rig's captured inputs are listed with its
 /// row text; Enter on one has pupu admit this rig, and this rig pair with pupu and reopen
-/// its session with the input added, the rest of the session as it was.
+/// its stream with the input added, the rest of the stream as it was.
 #[test]
-fn picking_another_rigs_input_pairs_both_rigs_and_reopens_the_session() {
+fn picking_another_rigs_input_pairs_both_rigs_and_reopens_the_stream() {
     let mut t = paired_ready();
     let r = cmd(CommandId::AddRemoteInput, &mut t);
     assert!(
@@ -125,7 +125,7 @@ fn picking_another_rigs_input_pairs_both_rigs_and_reopens_the_session() {
     let (peers, config, what) = r
         .iter()
         .find_map(|(rig, q)| match q {
-            Request::RemoteSession { pair, config, what } if *rig == RIG => {
+            Request::RemoteStream { pair, config, what } if *rig == RIG => {
                 Some((pair.clone(), config.clone(), what.clone()))
             }
             _ => None,
@@ -192,10 +192,10 @@ fn the_dialog_refuses_in_words() {
     );
 }
 
-/// This rig's session with pupu's input 2, as its daemon reports it.
+/// This rig's stream with pupu's input 2, as its daemon reports it.
 pub(super) fn with_remote(t: &mut T, link: RemoteLink, audio: RemoteAudio) {
     t.remirror(|s| {
-        let o = s.session.open.as_mut().expect("open");
+        let o = s.stream.open.as_mut().expect("open");
         o.config.remote_inputs = vec![RemoteInput {
             slot: 0,
             rig: PUPU,
@@ -261,7 +261,7 @@ fn a_remote_input_reads_by_its_rig_and_name() {
         "streaming, placed by capture time · 0 late frames in the last hour · 0 slips"
     );
     assert!(!rows[0].tone.is_problem());
-    let names = t.st.session_input_names();
+    let names = t.st.stream_input_names();
     assert_eq!(
         names.last(),
         Some(&(REMOTE_BASE, "MM1 34804 · pupu in 2".to_string()))
@@ -306,22 +306,22 @@ fn a_remote_input_reads_by_its_rig_and_name() {
 }
 
 /// On a remote input's row the kind keys are refused (*set on pupu*); Delete asks, a
-/// second Delete reopens the session without it.
+/// second Delete reopens the stream without it.
 #[test]
 fn a_remote_inputs_row_refuses_setup_and_removes_on_a_second_delete() {
     let mut t = two_mirrored();
     with_remote(&mut t, RemoteLink::Up, RemoteAudio::Streaming);
     t.st.update(Msg::Command(CommandId::Settings), &t.keys);
     t.st.update(
-        Msg::Session(SessionMsg::Focus(crate::session_dialog::Row::Remote(0))),
+        Msg::Stream(StreamMsg::Focus(crate::stream_dialog::Row::Remote(0))),
         &t.keys,
     );
     key(&mut t, "M");
-    let d = t.st.overlay.session().expect("audio I/O page");
+    let d = t.st.overlay.stream().expect("audio I/O page");
     assert_eq!(d.error.as_deref(), Some(words::set_on("pupu").as_str()));
     let r = key(&mut t, "Delete");
     assert!(r.is_empty(), "{r:?}");
-    let d = t.st.overlay.session().expect("audio I/O page");
+    let d = t.st.overlay.stream().expect("audio I/O page");
     assert_eq!(
         d.notice.as_deref(),
         Some(words::remove_confirm("MM1 34804 · pupu in 2").as_str())
@@ -330,7 +330,7 @@ fn a_remote_inputs_row_refuses_setup_and_removes_on_a_second_delete() {
     let config = r
         .iter()
         .find_map(|(_, q)| match q {
-            Request::RemoteSession {
+            Request::RemoteStream {
                 pair: None,
                 config,
                 what,

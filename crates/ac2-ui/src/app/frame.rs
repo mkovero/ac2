@@ -222,7 +222,7 @@ impl eframe::App for App {
             || self.startup.first_frame.is_none()
         {
             self.pacer.request(&ctx);
-        } else if self.state.overlay.session().is_some()
+        } else if self.state.overlay.stream().is_some()
             || self
                 .state
                 .overlay

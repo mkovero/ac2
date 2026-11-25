@@ -56,7 +56,7 @@ pub(crate) struct FrameRow {
     pub interval_ms: Option<f64>,
     /// `arrival_wall_ns − capture_wall_ns`, ms (includes the clock offset).
     pub age_ms: Option<f64>,
-    /// `audio_sample` step from the previous new frame, ms at the session rate: the hop.
+    /// `audio_sample` step from the previous new frame, ms at the stream rate: the hop.
     pub hop_ms: Option<f64>,
     /// Frames between this one and the previous new one that never arrived.
     pub seq_missing: u64,
@@ -210,7 +210,7 @@ pub(crate) struct Summary {
     /// Frames the client never saw (`seq` gaps), and in how many gaps.
     pub seq_missing: u64,
     pub seq_gap_events: u64,
-    /// `audio_sample` step between new frames at the session rate, ms: the daemon's hop.
+    /// `audio_sample` step between new frames at the stream rate, ms: the daemon's hop.
     pub hop_ms: Option<Spread>,
     /// Bytes per message.
     pub bytes: Option<Spread>,
@@ -354,7 +354,7 @@ fn text(c: &Closing<'_>) -> String {
         ms(h, |x| x.min),
         ms(h, |x| x.max),
         c.rate_hz
-            .map_or_else(|| "no open session".into(), |r| format!("{r} Hz"))
+            .map_or_else(|| "no open stream".into(), |r| format!("{r} Hz"))
     );
     let a = &s.age_ms;
     let _ = writeln!(
@@ -489,7 +489,7 @@ mod tests {
     use super::*;
     use ac2_proto::Stream;
     use ac2_proto::frame::{FrameStamp, ProtectionFlags};
-    use ac2_proto::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, SessionEpoch, WallNs};
+    use ac2_proto::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, StreamEpoch, WallNs};
 
     const RATE: u32 = 48_000;
 
@@ -512,7 +512,7 @@ mod tests {
         FrameStamp {
             seq,
             audio_sample: SampleIndex(seq * 960),
-            session_epoch: SessionEpoch(1),
+            stream_epoch: StreamEpoch(1),
             daemon_incarnation: DaemonIncarnation(1),
             config_rev: Rev(1),
             config_applied_at: SampleIndex(0),

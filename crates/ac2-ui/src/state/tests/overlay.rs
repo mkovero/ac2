@@ -38,7 +38,7 @@ enum Window {
     DelayPick,
     Form,
     Sweep,
-    Session,
+    Stream,
     NewMeas,
     Calibrations,
     Electrical,
@@ -56,7 +56,7 @@ const WINDOWS: [Window; 15] = [
     Window::DelayPick,
     Window::Form,
     Window::Sweep,
-    Window::Session,
+    Window::Stream,
     Window::NewMeas,
     Window::Calibrations,
     Window::Electrical,
@@ -103,7 +103,7 @@ fn with_window(w: Window) -> T {
         Window::Sweep => {
             t.type_key("Shift+S", "S");
         }
-        Window::Session => {
+        Window::Stream => {
             open_dialog(&mut t, backends(true));
         }
         Window::NewMeas => cmd(&mut t, CommandId::NewMeasurement),
@@ -142,7 +142,7 @@ fn with_window(w: Window) -> T {
             | (Window::Form | Window::Sweep, Overlay::Form(_))
             | (Window::NewMeas, Overlay::Choose(_))
             | (
-                Window::Session
+                Window::Stream
                     | Window::Calibrations
                     | Window::Electrical
                     | Window::Acoustic

@@ -75,15 +75,15 @@
       "port": null,
       "status": "off"
     },
-    "session": {
-      "epoch": 0,
-      "open": null,
-      "stopped": null
-    },
     "sim": null,
     "sim_fit": null,
     "sim_map": null,
     "spl_logs": [],
+    "stream": {
+      "epoch": 0,
+      "open": null,
+      "stopped": null
+    },
     "sweep": null,
     "timing": {
       "drift": null,

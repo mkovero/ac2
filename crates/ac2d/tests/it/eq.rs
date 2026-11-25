@@ -134,9 +134,9 @@ fn rig() -> Rig {
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[]);
     sub_tf(&sub, MeasId(1));
-    let mut s = session(false);
+    let mut s = stream(false);
     s.input_channels = vec![0, 1, 2];
-    c.ok(Command::SessionOpen { config: s });
+    c.ok(Command::StreamOpen { config: s });
     c.ok(Command::MeasCreate {
         config: transfer("Main L"),
     });
@@ -504,7 +504,7 @@ fn slow_eq_predicts_without_applying_twice() {
     r.h.shutdown();
 }
 
-/// Without a session: a set on a transfer measurement, its curve at the 48 kHz default, a
+/// Without a stream: a set on a transfer measurement, its curve at the 48 kHz default, a
 /// set refused on a spectrum, the eighth set's limit, copy and delete.
 #[test]
 fn eq_sets_without_audio() {

@@ -15,7 +15,7 @@ use std::net::SocketAddr;
 
 use ac2_proto::model::{
     ArtnetFade, ArtnetTarget, ColourFamily, LevelsSettings, MeasConfig, MeasKind, MeasScope,
-    OutputSetup, PaneLayout, RigPeer, SessionConfig,
+    OutputSetup, PaneLayout, RigPeer, StreamConfig,
 };
 use ac2_proto::units::MeasId;
 use serde::Serialize;
@@ -25,7 +25,7 @@ use serde_json::{Map, Value};
 use super::{RigMeter, RigSettings};
 
 pub(super) const FORMAT: &str = "ac2-rig-settings";
-pub(super) const VERSION: u32 = 11;
+pub(super) const VERSION: u32 = 12;
 
 /// The file as written: every section always present (`null` for none), so that a key
 /// missing on read is damage, not a default.
@@ -37,7 +37,7 @@ struct Out<'a> {
     outputs: &'a [OutputSetup],
     meters: &'a [RigMeter],
     monitor_at_start: bool,
-    monitor_session: Option<&'a SessionConfig>,
+    monitor_stream: Option<&'a StreamConfig>,
     osc_target: Option<SocketAddr>,
     artnet_target: Option<ArtnetTarget>,
     artnet_fade: ArtnetFade,
@@ -54,7 +54,7 @@ pub(super) fn write(s: &RigSettings) -> serde_json::Result<Vec<u8>> {
         outputs: &s.outputs,
         meters: &s.meters,
         monitor_at_start: s.monitor_at_start,
-        monitor_session: s.monitor_session.as_ref(),
+        monitor_stream: s.monitor_stream.as_ref(),
         osc_target: s.osc_target,
         artnet_target: s.artnet_target,
         artnet_fade: s.artnet_fade,
@@ -70,7 +70,7 @@ pub(super) struct Sections {
     pub(super) outputs: Option<Vec<OutputSetup>>,
     pub(super) meters: Option<Vec<RigMeter>>,
     pub(super) monitor_at_start: Option<bool>,
-    pub(super) monitor_session: Option<Option<SessionConfig>>,
+    pub(super) monitor_stream: Option<Option<StreamConfig>>,
     pub(super) osc_target: Option<Option<SocketAddr>>,
     pub(super) artnet_target: Option<Option<ArtnetTarget>>,
     pub(super) artnet_fade: Option<ArtnetFade>,
@@ -86,7 +86,7 @@ impl Sections {
             outputs: self.outputs.or(other.outputs),
             meters: self.meters.or(other.meters),
             monitor_at_start: self.monitor_at_start.or(other.monitor_at_start),
-            monitor_session: self.monitor_session.or(other.monitor_session),
+            monitor_stream: self.monitor_stream.or(other.monitor_stream),
             osc_target: self.osc_target.or(other.osc_target),
             artnet_target: self.artnet_target.or(other.artnet_target),
             artnet_fade: self.artnet_fade.or(other.artnet_fade),
@@ -102,7 +102,7 @@ impl Sections {
             ("outputs", self.outputs.is_none()),
             ("meters", self.meters.is_none()),
             ("monitor_at_start", self.monitor_at_start.is_none()),
-            ("monitor_session", self.monitor_session.is_none()),
+            ("monitor_stream", self.monitor_stream.is_none()),
             ("osc_target", self.osc_target.is_none()),
             ("artnet_target", self.artnet_target.is_none()),
             ("artnet_fade", self.artnet_fade.is_none()),
@@ -124,7 +124,7 @@ impl Sections {
             outputs: self.outputs.unwrap_or_default(),
             meters: self.meters.unwrap_or_default(),
             monitor_at_start: self.monitor_at_start.unwrap_or_default(),
-            monitor_session: self.monitor_session.flatten(),
+            monitor_stream: self.monitor_stream.flatten(),
             osc_target: self.osc_target.flatten(),
             artnet_target: self.artnet_target.flatten(),
             artnet_fade: self.artnet_fade.unwrap_or_default(),
@@ -174,9 +174,9 @@ pub(super) fn read(text: &[u8]) -> Result<Read, String> {
         outputs: r.section("outputs", |o: &Vec<OutputSetup>| check_outputs(o)),
         meters: r.meters(),
         monitor_at_start: r.section("monitor_at_start", |_| Ok(())),
-        monitor_session: r.section("monitor_session", |s: &Option<SessionConfig>| {
+        monitor_stream: r.section("monitor_stream", |s: &Option<StreamConfig>| {
             s.as_ref()
-                .map_or(Ok(()), |c| crate::session::validate(c).map_err(|e| e.msg))
+                .map_or(Ok(()), |c| crate::stream::validate(c).map_err(|e| e.msg))
         }),
         osc_target: r.section("osc_target", check_osc),
         artnet_target: r.section("artnet_target", |t: &Option<ArtnetTarget>| {

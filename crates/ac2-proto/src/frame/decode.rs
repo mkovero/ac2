@@ -10,8 +10,8 @@ use super::schema::{desc, level_unit, spec_unit};
 use super::{
     ArrayDesc, ArrayName, BandLeqFrame, BinsFrame, CodedFrame, DataMessage, DecodeError, Frame,
     FrameData, FrameKind, FrameMeta, GONIO_POINTS, GonioFrame, GonioPair, IrFrame, LeqFrame,
-    LevelsFrame, PreviewLevelsFrame, RtaFrame, SessionLevelsFrame, SourceLevelsFrame, SpecFrame,
-    SplFrame, TfFrame, Unit,
+    LevelsFrame, PreviewLevelsFrame, RtaFrame, SourceLevelsFrame, SpecFrame, SplFrame,
+    StreamLevelsFrame, TfFrame, Unit,
 };
 
 /// An alignment's four view curves: all of them or none.
@@ -212,10 +212,10 @@ pub(super) fn topic_kind(topic: Topic) -> Option<FrameKind> {
     Some(match topic {
         Topic::Data { stream, .. } => stream_kind(stream),
         Topic::Bins { .. } => FrameKind::Bins,
-        Topic::SessionLevels => FrameKind::SessionLevels,
+        Topic::StreamLevels => FrameKind::StreamLevels,
         Topic::PreviewLevels => FrameKind::PreviewLevels,
         Topic::SourceLevels => FrameKind::SourceLevels,
-        Topic::SessionGonio => FrameKind::SessionGonio,
+        Topic::StreamGonio => FrameKind::StreamGonio,
         Topic::PreviewGonio => FrameKind::PreviewGonio,
         Topic::Timing => FrameKind::Timing,
         Topic::Ka => FrameKind::Ka,
@@ -359,13 +359,13 @@ pub(super) fn to_frame(c: &CodedFrame) -> Result<Frame, DecodeError> {
                 clip: a.mask(ArrayName::Clip)?,
             })
         }
-        FrameMeta::SessionLevels(meta) => {
+        FrameMeta::StreamLevels(meta) => {
             if meta.channels.len() != h.n as usize {
                 return Err(DecodeError::Schema(
-                    "session levels: channels.len() != n".into(),
+                    "stream levels: channels.len() != n".into(),
                 ));
             }
-            FrameData::SessionLevels(SessionLevelsFrame {
+            FrameData::StreamLevels(StreamLevelsFrame {
                 meta,
                 peak: a.f32(ArrayName::Peak, Unit::Dbfs)?,
                 rms: a.f32(ArrayName::Rms, Unit::Dbfs)?,
@@ -410,7 +410,7 @@ pub(super) fn to_frame(c: &CodedFrame) -> Result<Frame, DecodeError> {
                 overs: a.counts(ArrayName::Overs)?,
             })
         }
-        FrameMeta::SessionGonio(meta) => FrameData::SessionGonio(gonio(&mut a, meta, h.n)?),
+        FrameMeta::StreamGonio(meta) => FrameData::StreamGonio(gonio(&mut a, meta, h.n)?),
         FrameMeta::PreviewGonio(meta) => FrameData::PreviewGonio(gonio(&mut a, meta, h.n)?),
         FrameMeta::Timing(m) => FrameData::Timing(m),
         FrameMeta::Ka(m) => FrameData::Ka(m),

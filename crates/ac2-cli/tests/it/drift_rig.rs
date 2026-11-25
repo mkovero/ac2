@@ -1,4 +1,4 @@
-//! `ac2 status` names the session's clock domain and, once the loopback monitor has measured
+//! `ac2 status` names the stream's clock domain and, once the loopback monitor has measured
 //! it, the drift between output and input: here a simulated rig whose DAC runs 50 ppm slow.
 #![allow(clippy::unwrap_used)]
 
@@ -8,11 +8,11 @@ use std::time::{Duration, Instant};
 use ac2_audio::fake::{FakeDrive, FakePath};
 use ac2_audio::{FakeBackend, FakeConfig};
 use ac2_client::{Endpoints, OnDrop};
-use ac2_proto::model::{GeneratorDesired, GeneratorSettings, LoopbackRoute, SessionConfig, Signal};
+use ac2_proto::model::{GeneratorDesired, GeneratorSettings, LoopbackRoute, Signal, StreamConfig};
 use ac2_proto::units::Dbfs;
 use ac2_proto::{Command, ReplyBody};
 
-use super::common::{ac2, client, rig_on, session};
+use super::common::{ac2, client, rig_on, stream};
 
 async fn status(ep: &Endpoints) -> String {
     let r = ac2(ep, false, &["status"]).await;
@@ -35,15 +35,15 @@ async fn slow_status_shows_the_clock_domain_and_the_drift() {
         cfg.lease_expiry = Duration::from_secs(60);
     });
     let c = client(&ep, "drift-rig-test").await;
-    c.call(Command::SessionOpen {
-        config: SessionConfig {
+    c.call(Command::StreamOpen {
+        config: StreamConfig {
             sample_rate_hz: Some(48_000),
             buffer_frames: Some(256),
             loopback: Some(LoopbackRoute {
                 output: 0,
                 input: 0,
             }),
-            ..session(vec![0, 1])
+            ..stream(vec![0, 1])
         },
     })
     .await
@@ -53,7 +53,7 @@ async fn slow_status_shows_the_clock_domain_and_the_drift() {
         before.contains("\n  clock   one clock · drift not measured yet (needs a stimulus)\n"),
         "{before}"
     );
-    // A session just opened has no minute of stamps: no figure for its sample clock yet, and
+    // A stream just opened has no minute of stamps: no figure for its sample clock yet, and
     // the system clock is named on the clock row's continuation.
     let clocks = before
         .lines()

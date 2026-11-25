@@ -78,7 +78,7 @@ impl AcousticDialog {
             .unwrap_or_default()
             .to_owned();
         let replaces = s
-            .session
+            .stream
             .open
             .as_ref()
             .and_then(|o| {

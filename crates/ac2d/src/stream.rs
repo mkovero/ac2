@@ -9,18 +9,18 @@ use ac2_audio::{
 };
 use ac2_proto::ErrorCode;
 use ac2_proto::ProtoError;
-use ac2_proto::model::{OpenSession, REMOTE_BASE, RemoteInput, SessionConfig, remote_slot};
-use ac2_proto::units::{SessionEpoch, WallNs};
+use ac2_proto::model::{OpenStream, REMOTE_BASE, RemoteInput, StreamConfig, remote_slot};
+use ac2_proto::units::{StreamEpoch, WallNs};
 
 use crate::control::ControlMsg;
 use crate::conv;
 use crate::fanout::Fanout;
 use crate::util::{internal, invalid, perr, wall_ns};
 
-/// A running session.
+/// A running stream.
 pub(crate) struct Runtime {
-    pub(crate) epoch: SessionEpoch,
-    pub(crate) open: OpenSession,
+    pub(crate) epoch: StreamEpoch,
+    pub(crate) open: OpenStream,
     pub(crate) sample_rate: u32,
     /// Device input channel per block channel (this rig's inputs only).
     pub(crate) input_map: Vec<u16>,
@@ -48,9 +48,9 @@ pub(crate) fn audio_err(e: AudioError) -> ProtoError {
     perr(code, e.to_string())
 }
 
-/// The channels of this rig's device among the session's inputs, in their order: the
+/// The channels of this rig's device among the stream's inputs, in their order: the
 /// device opens these; the remote ones come over the links.
-pub(crate) fn local_inputs(cfg: &SessionConfig) -> Vec<u16> {
+pub(crate) fn local_inputs(cfg: &StreamConfig) -> Vec<u16> {
     cfg.input_channels
         .iter()
         .copied()
@@ -60,20 +60,20 @@ pub(crate) fn local_inputs(cfg: &SessionConfig) -> Vec<u16> {
 
 /// `cfg` taking `remote` as its remote inputs in place of its own: the local inputs stay,
 /// the remote channels become `remote`'s, in its order.
-pub(crate) fn with_remote_inputs(cfg: &SessionConfig, remote: &[RemoteInput]) -> SessionConfig {
+pub(crate) fn with_remote_inputs(cfg: &StreamConfig, remote: &[RemoteInput]) -> StreamConfig {
     let mut c = cfg.clone();
     c.input_channels.retain(|&ch| remote_slot(ch).is_none());
     c.input_channels
-        .extend(remote.iter().map(RemoteInput::session_channel));
+        .extend(remote.iter().map(RemoteInput::stream_channel));
     c.remote_inputs = remote.to_vec();
     c
 }
 
-/// Checks a session configuration without a device.
-pub(crate) fn validate(cfg: &SessionConfig) -> Result<(), ProtoError> {
+/// Checks a stream configuration without a device.
+pub(crate) fn validate(cfg: &StreamConfig) -> Result<(), ProtoError> {
     if local_inputs(cfg).is_empty() {
         return Err(invalid(
-            "no input channels on this rig: its device paces the session",
+            "no input channels on this rig: its device paces the stream",
         ));
     }
     check_remote(cfg)?;
@@ -106,7 +106,7 @@ pub(crate) fn validate(cfg: &SessionConfig) -> Result<(), ProtoError> {
 
 /// The remote inputs and the remote channels among `input_channels` name the same slots,
 /// each once, and the link offset is a duration.
-fn check_remote(cfg: &SessionConfig) -> Result<(), ProtoError> {
+fn check_remote(cfg: &StreamConfig) -> Result<(), ProtoError> {
     for (i, r) in cfg.remote_inputs.iter().enumerate() {
         if r.slot >= REMOTE_BASE {
             return Err(invalid(format!("remote slot {} out of range", r.slot)));
@@ -124,7 +124,7 @@ fn check_remote(cfg: &SessionConfig) -> Result<(), ProtoError> {
                 r.channel + 1
             )));
         }
-        if !cfg.input_channels.contains(&r.session_channel()) {
+        if !cfg.input_channels.contains(&r.stream_channel()) {
             return Err(invalid(format!(
                 "remote input {} ({} in {}) is not captured",
                 r.slot,
@@ -163,15 +163,15 @@ pub(crate) struct Limits {
 
 impl Runtime {
     /// Opens the stream with the generator routed to `routes`; silent until a source is set
-    /// and started. The stream carries every output of the session, so a later routing
+    /// and started. The stream carries every output of the stream, so a later routing
     /// change ([`Self::set_routes`]) never reopens it.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn open(
         backend: &dyn Backend,
-        cfg: &SessionConfig,
+        cfg: &StreamConfig,
         routes: &[u16],
         limits: Limits,
-        epoch: SessionEpoch,
+        epoch: StreamEpoch,
         to_control: Sender<ControlMsg>,
         fps: u32,
         marks: Option<Arc<crate::remote::replay::ReplayMarks>>,
@@ -197,7 +197,7 @@ impl Runtime {
         let history = stream.history().cloned();
         let patch = stream.graph_patch();
         let health = stream.health();
-        let open = OpenSession {
+        let open = OpenStream {
             config: cfg.clone(),
             backend: conv::backend_kind(backend.kind()),
             input_device: ac2_proto::model::DeviceId(n.input_device.0.clone()),
@@ -221,7 +221,7 @@ impl Runtime {
                 .collect(),
         };
         tracing::info!(
-            "session open: {} in / {} out @ {} Hz on {:?}/{:?} ({:?}), epoch {}",
+            "stream open: {} in / {} out @ {} Hz on {:?}/{:?} ({:?}), epoch {}",
             n.input_channels,
             n.output_channels,
             n.sample_rate,
@@ -267,7 +267,7 @@ impl Runtime {
     }
 
     /// Outputs the operator chose to carry the stimulus: the generator's routes and the
-    /// loopback output of the session. On a backend whose outputs are graph ports (JACK)
+    /// loopback output of the stream. On a backend whose outputs are graph ports (JACK)
     /// these, and only these, are connected to the physical playback ports of the same
     /// number; connections the daemon made for outputs no longer chosen are removed.
     fn connect_outputs(&self) {
@@ -345,7 +345,7 @@ impl Runtime {
     pub(crate) fn close(self) {
         self.gen_handle.stop();
         self.fanout.stop();
-        tracing::info!("session epoch {} closed", self.epoch.0);
+        tracing::info!("stream epoch {} closed", self.epoch.0);
     }
 }
 
@@ -356,8 +356,8 @@ mod tests {
 
     use super::*;
 
-    fn cfg(inputs: Vec<u16>, remote: Vec<u16>) -> SessionConfig {
-        SessionConfig {
+    fn cfg(inputs: Vec<u16>, remote: Vec<u16>) -> StreamConfig {
+        StreamConfig {
             backend: None,
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
@@ -394,7 +394,7 @@ mod tests {
         assert!(validate(&cfg(vec![0], vec![0])).is_err());
         // A slot twice.
         assert!(validate(&cfg(vec![0, REMOTE_BASE], vec![0, 0])).is_err());
-        // Only remote inputs: nothing paces the session.
+        // Only remote inputs: nothing paces the stream.
         assert!(validate(&cfg(vec![REMOTE_BASE], vec![0])).is_err());
     }
 

@@ -10,7 +10,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
     let h = start(&store);
     let c = connect(&h).await;
 
-    // No session: a calibration needs the capture device it is tied to.
+    // No stream: a calibration needs the capture device it is tied to.
     let e = c
         .call(Command::CalSpl {
             input: 1,
@@ -22,8 +22,8 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
         .unwrap_err();
     assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
 
-    c.call(Command::SessionOpen {
-        config: session(false),
+    c.call(Command::StreamOpen {
+        config: stream(false),
     })
     .await
     .unwrap();
@@ -247,7 +247,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
     // A captured RTA trace records the input's mic, its curve and the verified calibration.
     let t = capture(&c, 4, "rta-m30").await;
     let key = CalKey {
-        device: st.session.open.as_ref().unwrap().input_device.clone(),
+        device: st.stream.open.as_ref().unwrap().input_device.clone(),
         channel: 1,
         mic: "M30".into(),
     };
@@ -281,7 +281,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
     // (M30's curve belongs to M30, and none is stored for the ECM). Choosing M30's label for
     // the ECM is refused.
     let e = c
-        .call(Command::SessionInputs {
+        .call(Command::StreamInputs {
             inputs: vec![InputSetup {
                 channel: 1,
                 kind: InputKind::Mic {
@@ -334,7 +334,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
     assert_eq!(st.mics[0].curves[0].points, 5);
     assert_eq!(st.inputs[0].mic(), Some("ECM"));
 
-    // Library and sensitivity changes need no session. The curve first (the calibration
+    // Library and sensitivity changes need no stream. The curve first (the calibration
     // stays), then the sensitivity.
     let missing =
         |e: ClientError| matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::NotFound);

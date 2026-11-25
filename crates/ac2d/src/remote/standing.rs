@@ -9,7 +9,7 @@
 //! and 40 s windows and judged by the same judge. Only the feed differs, so the relation is
 //! there whether or not any audio streams.
 //!
-//! Either rig's new incarnation or reopened session starts the windows again: a sample index
+//! Either rig's new incarnation or reopened stream starts the windows again: a sample index
 //! then means something new. A hole in the marks themselves (by their own sample index and
 //! system time, not by when they arrive: a link that stalls and then delivers everything
 //! late has lost nothing) is a break in the windows: both sample indices kept counting
@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use ac2_core::clock_map::StampLine;
 use ac2_core::clock_rate::RateWindow;
 use ac2_proto::frame::{FrameStamp, SourceLevelsFrame};
-use ac2_proto::units::{DaemonIncarnation, SessionEpoch};
+use ac2_proto::units::{DaemonIncarnation, StreamEpoch};
 
 use super::join::{CROSS_LONG_S, CROSS_SHORT_S, CROSS_STEP_S};
 use crate::jobs::meters::source_period;
@@ -65,7 +65,7 @@ pub(crate) fn local_at(reference: (u64, u64), line: StampLine, rate: f64, system
 /// This rig's side of the pairing, as the fan-out last saw it.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LocalMark {
-    pub(crate) epoch: SessionEpoch,
+    pub(crate) epoch: StreamEpoch,
     pub(crate) rate: u32,
     /// The newest stamped block: its first frame's index and capture stamp.
     pub(crate) reference: (u64, u64),
@@ -103,8 +103,8 @@ impl LocalClock {
 /// Why no marks feed the windows now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Absent {
-    /// This rig has no session (or its stream stopped).
-    OurSession,
+    /// This rig has no stream (or its stream stopped).
+    OurStream,
     /// No frame from the other rig.
     TheirFrames,
     /// Frames come without marks, or none could be paired.
@@ -147,14 +147,14 @@ pub(crate) struct StandingReport {
     /// While fed.
     pub(crate) minutes: Option<Minutes>,
     pub(crate) absent: Option<Absent>,
-    /// The two sessions' nominal rates differ: (theirs, ours).
+    /// The two streams' nominal rates differ: (theirs, ours).
     pub(crate) other_rate: Option<(u32, u32)>,
     /// The other rig's newest frame, while frames come.
     pub(crate) levels: Option<Box<SourceLevelsFrame>>,
 }
 
 /// The run both sample indices belong to: either side's new one starts the windows again.
-type Run = (DaemonIncarnation, SessionEpoch, SessionEpoch);
+type Run = (DaemonIncarnation, StreamEpoch, StreamEpoch);
 
 /// The standing feed of one paired rig.
 pub(crate) struct StandingFeed {
@@ -261,7 +261,7 @@ impl StandingFeed {
         self.levels = Some(Box::new(f));
         self.no_local = local.is_none();
         let Some(local) = local else {
-            // Without a session here there is no rate of this rig's to differ from.
+            // Without a stream here there is no rate of this rig's to differ from.
             self.other_rate = None;
             return;
         };
@@ -276,7 +276,7 @@ impl StandingFeed {
         let Some(mark) = mark else {
             return;
         };
-        let run = (stamp.daemon_incarnation, stamp.session_epoch, local.epoch);
+        let run = (stamp.daemon_incarnation, stamp.stream_epoch, local.epoch);
         if self.run != Some(run) {
             self.restart(run, local.rate);
         }
@@ -368,7 +368,7 @@ impl StandingFeed {
         let absent = if !fresh(self.last_frame) {
             Some(Absent::TheirFrames)
         } else if self.no_local {
-            Some(Absent::OurSession)
+            Some(Absent::OurStream)
         } else if self.other_rate.is_some() {
             None
         } else if !fresh(self.last_mark) {

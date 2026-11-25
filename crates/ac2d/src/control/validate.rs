@@ -140,7 +140,7 @@ pub(crate) fn check_meas_name(c: &MeasConfig) -> Result<(), ProtoError> {
         .map_err(invalid)
 }
 
-/// Checks a measurement configuration without a session.
+/// Checks a measurement configuration without a stream.
 pub(crate) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
     let inv = |m: &str| Err(invalid(m.to_owned()));
     if c.scope == MeasScope::Rig && !matches!(c.kind, MeasKind::Spl { .. }) {
@@ -225,8 +225,8 @@ pub(crate) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
     Ok(())
 }
 
-/// Checks of a dynamics measurement's settings that need no session (the carrier's period
-/// and the ceiling are checked at every run, at the session's rate).
+/// Checks of a dynamics measurement's settings that need no stream (the carrier's period
+/// and the ceiling are checked at every run, at the stream's rate).
 fn validate_dynamics(c: &DynamicsConfig) -> Result<(), ProtoError> {
     let inv = |m: String| Err(invalid(m));
     c.check_inputs().map_err(invalid)?;
@@ -276,7 +276,7 @@ fn validate_dynamics(c: &DynamicsConfig) -> Result<(), ProtoError> {
             "every burst lasts more than 0 s and at most {max} s"
         ));
     }
-    // Checked again at every run, on the carrier as snapped to the session's rate.
+    // Checked again at every run, on the carrier as snapped to the stream's rate.
     let period_s = 1.0 / c.carrier.0;
     if let Some(d) = c
         .durations
@@ -300,7 +300,7 @@ fn validate_dynamics(c: &DynamicsConfig) -> Result<(), ProtoError> {
     Ok(())
 }
 
-/// Checks of a sweep measurement's settings that need no session (the session's inputs,
+/// Checks of a sweep measurement's settings that need no stream (the stream's inputs,
 /// outputs and rate, and the ceiling, are checked at every run).
 fn validate_sweep(c: &SweepConfig) -> Result<(), ProtoError> {
     let inv = |m: String| Err(invalid(m));
@@ -431,7 +431,7 @@ pub(super) fn not_a_sweep(m: &Measurement) -> Result<(), ProtoError> {
     }
 }
 
-/// Grid of a transfer measurement; known without a session.
+/// Grid of a transfer measurement; known without a stream.
 pub(super) fn static_grid(kind: &MeasKind) -> Option<GridDef> {
     match kind {
         MeasKind::Transfer { config } => Some(GridDef::Log {

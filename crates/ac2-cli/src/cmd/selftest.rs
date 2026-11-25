@@ -261,7 +261,7 @@ fn clock_text(c: ClockRelation) -> &'static str {
     }
 }
 
-/// The backend's latency statement for the `latency` row, in the words of the app's session
+/// The backend's latency statement for the `latency` row, in the words of the app's stream
 /// line: a driver's frames per direction with the round trip in frames and ms, JACK's port
 /// ranges, or that it states none.
 fn latency_text(l: &StaticLatency, rate_hz: u32) -> String {

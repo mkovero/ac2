@@ -104,7 +104,7 @@ pub fn status_text(s: &SimState) -> String {
                 SimCancel::Operator => "stopped",
                 SimCancel::PlanChanged => "the plan changed",
                 SimCancel::WalkDeleted => "its walk was deleted",
-                SimCancel::SessionClosed => "the session closed",
+                SimCancel::StreamClosed => "the stream closed",
             }
         ),
         SimStatus::Failed { msg } => format!("failed: {msg}"),

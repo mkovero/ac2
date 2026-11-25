@@ -28,9 +28,9 @@ mod selftest_frames;
 mod selftest_net;
 mod selftest_stamps;
 mod server;
-mod session;
 mod sessions;
 mod sim;
+mod stream;
 mod traces;
 mod walk;
 
@@ -39,19 +39,23 @@ use std::time::Duration;
 use ac2_client::{Client, ClientConfig, ClientError, Endpoints, KeyDir, Retry};
 use ac2_proto::model::{Measurement, State, TraceMeta};
 
-use crate::args::{Cli, Cmd, MeasRef, SessionCmd};
+use crate::args::{Cli, Cmd, MeasRef, StreamCmd};
 use crate::output::Out;
 use crate::{BUILD_ID, CliError};
 
 pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
     match &cli.cmd {
-        Cmd::Devices => session::devices(cli, out).await,
+        Cmd::Devices => stream::devices(cli, out).await,
         Cmd::Status { verbose } => daemon::status(cli, *verbose, out).await,
         Cmd::Daemon { cmd } => daemon::run(cli, cmd, out).await,
-        Cmd::Session {
-            cmd: SessionCmd::Inputs(a),
-        } => cal::session_inputs(cli, a, out).await,
-        Cmd::Session { cmd } => session::session(cli, cmd, out).await,
+        Cmd::Stream {
+            cmd: StreamCmd::Inputs(a),
+        } => cal::stream_inputs(cli, a, out).await,
+        Cmd::Stream { cmd } => stream::stream(cli, cmd, out).await,
+        Cmd::Session { cmd } => {
+            let c = connect(cli, false).await?;
+            sessions::session(cli, &c, cmd, out).await
+        }
         Cmd::Gen { cmd } => gen_::run(cli, cmd, out).await,
         Cmd::Meas { cmd } => meas::meas(cli, cmd, out).await,
         Cmd::Math { cmd } => math::run(cli, cmd, out).await,
@@ -210,7 +214,7 @@ pub(crate) fn find_trace<'s>(s: &'s State, r: &MeasRef) -> Result<&'s TraceMeta,
     resolve(&s.traces, r, "trace", |t| t.id.0, |t| &t.edit.name)
 }
 
-/// The open session's sample rate.
+/// The open stream's sample rate.
 pub(crate) fn rate(s: &State) -> Option<u32> {
-    s.session.open.as_ref().map(|o| o.sample_rate_hz)
+    s.stream.open.as_ref().map(|o| o.sample_rate_hz)
 }

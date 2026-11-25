@@ -409,7 +409,7 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                                             let m = meters.get(&c).cloned().unwrap_or_else(
                                                 ac2_scene::meter::MeterReading::none,
                                             );
-                                            super::session::meter(ui, &m, ch);
+                                            super::stream::meter(ui, &m, ch);
                                         }
                                     }
                                 }

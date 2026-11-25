@@ -33,7 +33,7 @@ def stamp(grid, protection=WEAK_REFERENCE):
     return {
         "seq": 1234,
         "audio_sample": 48000 * 3600,
-        "session_epoch": 2,
+        "stream_epoch": 2,
         "daemon_incarnation": 0x5EED5EED5EED5EED,
         "config_rev": 40,
         "config_applied_at": 48000 * 3500,
@@ -526,9 +526,9 @@ def frames():
                 (arr("clip", "bitmask", "u32"), [CLIP | HELD, 0]),
             ],
         ),
-        "session_levels": frame(
-            "session/levels",
-            "session_levels",
+        "stream_levels": frame(
+            "stream/levels",
+            "stream_levels",
             None,
             {
                 "channels": [0, 1, 2],
@@ -584,10 +584,10 @@ def frames():
             ],
             protection=0,
         ),
-        "session_gonio": gonio_frame("session/gonio", "session_gonio"),
+        "stream_gonio": gonio_frame("stream/gonio", "stream_gonio"),
         "preview_gonio": gonio_frame("preview/gonio", "preview_gonio"),
         "preview_levels": frame(
-            "session/preview",
+            "stream/preview",
             "preview_levels",
             None,
             {
@@ -642,8 +642,8 @@ def frames():
                     "audio": {
                         "load": 0.125,
                         "peak": 0.5,
-                        "session_load": None,
-                        "session_peak": 0.75,
+                        "stream_load": None,
+                        "stream_peak": 0.75,
                         "xruns": 3,
                     },
                 },

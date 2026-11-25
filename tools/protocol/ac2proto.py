@@ -30,10 +30,10 @@ _BINS_TOPIC = re.compile(r"^bins/(0|[1-9][0-9]*)/([0-9])$")
 
 # Input-meter topics and the frame kind each carries.
 _METER_TOPICS = {
-    "session/levels": "session_levels",
-    "session/preview": "preview_levels",
+    "stream/levels": "stream_levels",
+    "stream/preview": "preview_levels",
     "source/levels": "source_levels",
-    "session/gonio": "session_gonio",
+    "stream/gonio": "stream_gonio",
     "preview/gonio": "preview_gonio",
 }
 
@@ -296,7 +296,7 @@ META = {
                  ("predicted", ("opt", [("duration", None), ("estimate", None), ("at_most", None),
                                         ("limit", None), ("judgement", None)]))],
     "levels": _LEVELS,
-    "session_levels": [("channels", None), ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS)),
+    "stream_levels": [("channels", None), ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS)),
                        ("loudness", ("list", _LOUDNESS))],
     "source_levels": [("channels", None), ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS)),
                       ("loudness", ("list", _LOUDNESS)), ("sample_rate_hz", None),
@@ -305,7 +305,7 @@ META = {
                        ("inputs", ("list", _PREVIEW_INPUT)), ("pairs", ("list", _PAIR)),
                        ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS)),
                        ("loudness", ("list", _LOUDNESS))],
-    "session_gonio": [("pairs", ("list", _GONIO_PAIR))],
+    "stream_gonio": [("pairs", ("list", _GONIO_PAIR))],
     "preview_gonio": [("pairs", ("list", _GONIO_PAIR))],
     "timing": [("status", _TIMING_STATUS),
                ("window", ("opt", [("capture_start", None), ("offset", None), ("psr", None),
@@ -313,11 +313,11 @@ META = {
     "ka": [("rev", None), ("daemon_wall_ns", None), ("timing", _TIMING_STATE),
            ("generator", [("owner", None), ("owner_local", None), ("armed", None), ("firing", None)]),
            ("health", [("host", None), ("cpu", None),
-                       ("audio", ("opt", [("load", None), ("peak", None), ("session_load", None),
-                                          ("session_peak", None), ("xruns", None)]))])],
+                       ("audio", ("opt", [("load", None), ("peak", None), ("stream_load", None),
+                                          ("stream_peak", None), ("xruns", None)]))])],
 }
 HEADER = [
-    ("v", None), ("form", None), ("kind", None), ("seq", None), ("audio_sample", None), ("session_epoch", None),
+    ("v", None), ("form", None), ("kind", None), ("seq", None), ("audio_sample", None), ("stream_epoch", None),
     ("daemon_incarnation", None), ("config_rev", None), ("config_applied_at", None),
     ("capture_wall_ns", None), ("grid_id", None), ("protection", None), ("n", None),
     ("arrays", ("list", [("name", None), ("unit", None), ("elem", None)])),
@@ -338,7 +338,7 @@ DELTA_HEADER = [
     ("capture_wall_ns", None), ("protection", None), ("crc", None), ("meta", None),
 ]
 # Header fields a delta inherits from its base.
-_STATIC = ("kind", "session_epoch", "daemon_incarnation", "config_rev", "config_applied_at",
+_STATIC = ("kind", "stream_epoch", "daemon_incarnation", "config_rev", "config_applied_at",
            "grid_id", "n", "arrays")
 
 

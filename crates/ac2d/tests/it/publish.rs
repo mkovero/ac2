@@ -23,8 +23,8 @@ fn stalled_subscriber_recovers(listen: Listen) {
     init_log();
     let h = Daemon::start(config(realtime_rig(), listen)).unwrap();
     let mut c = Client::connect(h.context(), h.ctrl_endpoint());
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     c.ok(Command::MeasCreate {
         config: spl("meter", 0),
@@ -106,8 +106,8 @@ fn late_subscriber_gets_latest_slot() {
     let h = Daemon::start(config(backend.clone(), inproc("late"))).unwrap();
     // Levels are only metered out while someone receives them.
     let (mut c, early) = connect(&h, &[b"d/1/spl", b"d/1/levels"]);
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     c.ok(Command::MeasCreate {
         config: spl("meter", 0),
@@ -145,16 +145,16 @@ fn late_subscriber_gets_latest_slot() {
 }
 
 /// Captured audio is handed on in batches, not per device period: meters and measurements
-/// must still publish at their rates (30 Hz session meters, 20 Hz SPL),
+/// must still publish at their rates (30 Hz stream meters, 20 Hz SPL),
 /// and every frame of a topic must cover newer audio than the one before.
 #[test]
 fn batched_hand_off_keeps_publish_rates() {
     init_log();
     let backend = realtime_rig();
     let h = Daemon::start(config(backend, inproc("rates"))).unwrap();
-    let (mut c, sub) = connect(&h, &[b"session/levels", b"d/1/spl"]);
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    let (mut c, sub) = connect(&h, &[b"stream/levels", b"d/1/spl"]);
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     c.ok(Command::MeasCreate {
         config: spl("meter", 0),
@@ -163,8 +163,8 @@ fn batched_hand_off_keeps_publish_rates() {
     // Settle: the first frames of each topic arrive.
     sub.frame(T, |f| matches!(f.data, FrameData::Spl(_)))
         .expect("spl frames");
-    sub.frame(T, |f| matches!(f.data, FrameData::SessionLevels(_)))
-        .expect("session meter frames");
+    sub.frame(T, |f| matches!(f.data, FrameData::StreamLevels(_)))
+        .expect("stream meter frames");
     let window = Duration::from_secs(3);
     let t0 = Instant::now();
     let (mut levels, mut spl) = (0u32, 0u32);
@@ -175,8 +175,8 @@ fn batched_hand_off_keeps_publish_rates() {
         };
         let at = f.stamp.audio_sample.0;
         match f.data {
-            FrameData::SessionLevels(_) => {
-                assert!(at > last_levels, "session meters went back in time");
+            FrameData::StreamLevels(_) => {
+                assert!(at > last_levels, "stream meters went back in time");
                 last_levels = at;
                 levels += 1;
             }
@@ -190,7 +190,7 @@ fn batched_hand_off_keeps_publish_rates() {
     }
     let secs = t0.elapsed().as_secs_f64();
     let (lr, sr) = (f64::from(levels) / secs, f64::from(spl) / secs);
-    assert!((25.0..=33.0).contains(&lr), "session meters at {lr:.1} Hz");
+    assert!((25.0..=33.0).contains(&lr), "stream meters at {lr:.1} Hz");
     // SPL frames are capped at 20 Hz (the meter's interval figures hold every peak).
     assert!((15.0..=21.0).contains(&sr), "spl at {sr:.1} Hz");
     h.shutdown();
@@ -207,8 +207,8 @@ fn a_slow_spectrum_goes_when_it_is_formed() {
     cfg.publish_fps = 10;
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/spec"]);
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     c.ok(Command::MeasCreate {
         config: MeasConfig {
@@ -261,8 +261,8 @@ fn a_live_spectrum_frames_every_hop_once_its_last_block_is_in() {
     let backend = manual_rig();
     let h = Daemon::start(config(backend.clone(), inproc("frame-hop"))).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/spec", b"d/2/spec"]);
-    c.ok(Command::SessionOpen {
-        config: session(false),
+    c.ok(Command::StreamOpen {
+        config: stream(false),
     });
     for (name, resolution) in [
         ("one fft", SpecResolution::Fixed { fft_len: 4096 }),

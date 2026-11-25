@@ -42,7 +42,7 @@ pub fn curve_state(u: &CurveUse<'_>) -> String {
     }
 }
 
-/// The curve part of an input's row in the session dialog and the input setup view:
+/// The curve part of an input's row in the stream dialog and the input setup view:
 /// `curve 90°`, `curve off`, `choose a curve: 0°, 90°`, `curve 90° not stored`,
 /// `no curve stored` (the row names the mic already).
 pub fn curve_row(u: &CurveUse<'_>) -> String {

@@ -85,10 +85,7 @@ fn curve_authorized_ok_unauthorized_refused_on_both_sockets() {
         "plain refused"
     );
     // The authorized client is unaffected.
-    assert!(matches!(
-        c.ok(Command::SessionStatus),
-        ReplyBody::Session(_)
-    ));
+    assert!(matches!(c.ok(Command::StreamStatus), ReplyBody::Stream(_)));
     h.shutdown();
 
     // A restart reuses the stored key pair.

@@ -21,8 +21,8 @@ fn bins_measures_on_the_ninety_sixth_grid() {
     cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
-    c.ok(Command::SessionOpen {
-        config: session(true),
+    c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     let mut m = transfer("main");
     if let MeasKind::Transfer { config } = &mut m.kind {

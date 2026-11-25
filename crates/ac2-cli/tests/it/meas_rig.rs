@@ -1,5 +1,5 @@
 //! `ac2 meas new … --start` against a real daemon on the simulated rig: on an input the
-//! open session does not capture it creates nothing, so a retry cannot make a duplicate.
+//! open stream does not capture it creates nothing, so a retry cannot make a duplicate.
 #![allow(clippy::unwrap_used)]
 
 use ac2_client::Endpoints;
@@ -31,16 +31,12 @@ async fn meas_new_start_on_an_uncaptured_input_creates_nothing() {
         a
     };
 
-    // No session: a started measurement waits for one, whatever inputs it names.
+    // No stream: a started measurement waits for one, whatever inputs it names.
     let m = ok(&ep, &tf("early", true)).await;
     assert_eq!(m["running"], true, "{m}");
     ok(&ep, &["meas", "rm", "early"]).await;
 
-    ok(
-        &ep,
-        &["session", "open", "--backend", "fake", "--in", "1-4"],
-    )
-    .await;
+    ok(&ep, &["stream", "open", "--backend", "fake", "--in", "1-4"]).await;
     let before = ok(&ep, &["meas", "list"]).await;
     let (code, e) = ac2(&ep, &tf("TF 2", true)).await;
     assert_eq!(code, 1, "{e}");
@@ -57,7 +53,7 @@ async fn meas_new_start_on_an_uncaptured_input_creates_nothing() {
     assert_eq!(code, 1, "{e}");
     assert_eq!(e["error"]["code"], "invalid", "{e}");
     assert_eq!(
-        e["error"]["msg"], "invalid: input 5 is not captured by the session",
+        e["error"]["msg"], "invalid: input 5 is not captured by the stream",
         "{e}"
     );
     h.shutdown();

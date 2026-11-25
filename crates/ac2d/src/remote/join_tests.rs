@@ -4,7 +4,7 @@ use ac2_audio::BlockFlags;
 
 use ac2_proto::PROTO_VERSION;
 use ac2_proto::frame::AudioHeader;
-use ac2_proto::model::{CalStatus, Clocks, SourceInput, SourceSession, StampMap};
+use ac2_proto::model::{CalStatus, Clocks, SourceInput, SourceStream, StampMap};
 use ac2_proto::units::DaemonIncarnation;
 
 use super::*;
@@ -26,7 +26,7 @@ fn stamp(local_sample: u64) -> u64 {
 
 const INC: StreamIncarnation = StreamIncarnation {
     daemon: DaemonIncarnation(7),
-    epoch: SessionEpoch(1),
+    epoch: StreamEpoch(1),
 };
 
 fn source(map_offset_ns: u64) -> Box<SourceState> {
@@ -42,7 +42,7 @@ fn source(map_offset_ns: u64) -> Box<SourceState> {
                 ppm: 0.0,
             }),
         },
-        session: Some(SourceSession {
+        stream: Some(SourceStream {
             incarnation: INC,
             sample_rate_hz: RATE,
             buffer_frames: BLOCK,
@@ -99,7 +99,7 @@ impl Rig {
             link_offset: None,
             system_synced: Arc::new(AtomicBool::new(true)),
             to_control,
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
         });
         Self {
             joiner,
@@ -377,7 +377,7 @@ fn a_source_at_another_rate_or_replaying_gives_no_audio() {
         }
     );
     let mut s = source(0);
-    if let Some(ss) = &mut s.session {
+    if let Some(ss) = &mut s.stream {
         ss.replaying = true;
     }
     r.link.try_send(LinkFrame::Source(s)).expect("queued");
@@ -391,7 +391,7 @@ fn a_source_at_another_rate_or_replaying_gives_no_audio() {
 #[test]
 fn a_gap_marks_only_the_input_it_is_in() {
     let mut s = source(0);
-    if let Some(ss) = &mut s.session {
+    if let Some(ss) = &mut s.stream {
         let first = ss.inputs[0].clone();
         ss.inputs.push(SourceInput {
             channel: 4,
@@ -494,7 +494,7 @@ fn audio_before_the_source_state_waits_to_anchor() {
 }
 
 /// Audio before this rig's first block is not anchored against an empty present (which
-/// would put it a whole session index away): the frames after the first block anchor.
+/// would put it a whole stream index away): the frames after the first block anchor.
 #[test]
 fn audio_before_the_first_local_block_waits_to_anchor() {
     let mut r = Rig::new(false);

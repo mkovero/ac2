@@ -13,7 +13,7 @@ use ac2_proto::model::{
     TimeWeighting, Weighting, Window,
 };
 use ac2_proto::topic::{Stream, Topic};
-use ac2_proto::units::{DaemonIncarnation, Hz, MeasId, Rev, SessionEpoch};
+use ac2_proto::units::{DaemonIncarnation, Hz, MeasId, Rev, StreamEpoch};
 use ac2_zmq::{Context, Socket, SocketType};
 
 use super::rta::Rta;
@@ -48,7 +48,7 @@ impl Rig {
             ctx: ctx.clone(),
             endpoint,
             incarnation: DaemonIncarnation(1),
-            epoch: SessionEpoch(1),
+            epoch: StreamEpoch(1),
             seqs: Arc::new(Seqs::default()),
             interest: Arc::new(Interest::default()),
             fps: 60,
@@ -176,7 +176,7 @@ fn a_kept_answer_follows_the_subscriptions() {
     assert!(!r.em.wants(SPEC));
     r.env.interest.subscribe(b"d/1/");
     assert!(r.em.wants(SPEC));
-    assert!(!r.em.wants(Topic::SessionLevels));
+    assert!(!r.em.wants(Topic::StreamLevels));
     r.subscribe(SPEC);
     r.env.interest.unsubscribe(b"d/1/");
     assert!(r.em.wants(SPEC));
@@ -509,7 +509,7 @@ fn capture_works_with_nobody_subscribed() {
     };
     assert_eq!(spec.level.len(), 4096 / 2 + 1);
     assert!(spec.level[100].is_finite());
-    assert_eq!(f.stamp.session_epoch, SessionEpoch(1));
+    assert_eq!(f.stamp.stream_epoch, StreamEpoch(1));
     // Every bin, on the FFT's own grid, not the live display columns.
     assert_eq!(
         f.stamp.grid_id,
@@ -535,7 +535,7 @@ fn spl() -> Spl {
                 position: None,
             },
             config_rev: Rev(1),
-            epoch: ac2_proto::units::SessionEpoch(1),
+            epoch: ac2_proto::units::StreamEpoch(1),
         },
         FS,
         0,
