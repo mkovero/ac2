@@ -296,9 +296,11 @@ fn slow_marks_alone_agree_after_a_minute() {
 /// B's stamps start 4 ms late and settle with a 0.5 s time constant, and its stream starts
 /// 3 s before A's, so the marks pair only after the error is gone: B's own line reads some
 /// 4 ppm at its first statements, fitted over that start, and within the rule a window
-/// later. The minute it read beyond in is unclassed; no count starts, and agreement comes
-/// at the next close. Streams that start together, the marks fitted over the error too,
-/// are not covered here: the cross-rig figure would read it as well.
+/// later. The minute it read beyond in is unclassed, so no count starts at its close: the
+/// test ends some seconds past that close, since a count could only have started there.
+/// That agreement follows at the next close is the hold's own rule, tested without real
+/// time. Streams that start together, the marks fitted over the error too, are not covered
+/// here: the cross-rig figure would read it as well.
 #[test]
 fn slow_an_own_line_beyond_while_young_starts_no_count() {
     let mut t = rigs_with(
@@ -316,13 +318,13 @@ fn slow_an_own_line_beyond_while_young_starts_no_count() {
         let r = remote(&mut t.ca);
         let s = standing(&r);
         assert_eq!(s.and_then(|s| s.counting), None, "{r:#?}");
-        if s.is_some_and(|s| s.clock.relation == PeerRelation::Agree) {
-            assert!(marks_for(&r) < 150.0, "{r:#?}");
+        // The first minute of marks has closed, with room for the report that follows it.
+        if marks_for(&r) >= 70.0 {
             break;
         }
         assert!(
-            t0.elapsed() < Duration::from_secs(200),
-            "no agreement: {r:#?}"
+            t0.elapsed() < Duration::from_secs(150),
+            "the first minute never closed: {r:#?}"
         );
         std::thread::sleep(Duration::from_millis(500));
     }
