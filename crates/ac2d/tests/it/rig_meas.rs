@@ -614,7 +614,6 @@ fn a_rig_meter_changed_while_starting_keeps_the_paired_rigs() {
         rig: RigId(0x00ab_cdef_0123_4567),
         name: "rig-b".into(),
         ctrl: "tcp://127.0.0.1:9".into(),
-        data: "tcp://127.0.0.1:10".into(),
         key: ac2_zmq::KeyPair::generate().unwrap().public.to_z85(),
     };
     let mut rj = rig_json(dir.path());

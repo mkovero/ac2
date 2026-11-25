@@ -399,7 +399,7 @@ fn a_new_series_makes_every_line_young_again() {
     r.run(0.0, 200.0);
     assert_eq!(r.shown(200.0), PeerRelation::Agree);
     // The other rig reopens: a new series; its line, stated all along, reads beyond.
-    r.epoch = SessionEpoch(2);
+    r.epoch = StreamEpoch(2);
     r.own_ppm = 3.0;
     let c = first_close(&mut r, 200.0, 265.0);
     assert!(!c.closed.unwrap().classed);
