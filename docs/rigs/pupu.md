@@ -58,15 +58,18 @@ binaries in `~/ac2-test/bin`, the previous set in `~/ac2-test/bin.prev`. Wrap ev
    shutdown flushes the autosave and SPL logs), then `cp -f bin.new/* bin/` on both (`cp`, not a
    directory swap, keeps `ac2-jack-dut` in pupu's `bin/` for `tools/crosscheck`).
 4. Start the daemon on pupu: `systemctl --user start ac2d` (flags in
-   `~/.config/systemd/user/ac2d.service`: `--listen tcp://0.0.0.0 --name pupu --max-level -50`).
+   `~/.config/systemd/user/ac2d.service`: `--listen tcp://0.0.0.0 --name pupu --max-level -20`).
    Check `journalctl --user -u ac2d -n 30`: "autosave restored … no audio session opened" is
    normal.
-   `--max-level -50` is the **hard bound**: the system max level in force can be lowered (or
-   raised again up to −50) from any client — Settings › Audio I/O, or
+   `--max-level -20` is the **hard bound**: the system max level in force can be lowered (or
+   raised again up to −20) from any client — Settings › Audio I/O, or
    `bin/ac2 --remote 192.168.9.27 gen ceiling -60dbfs` — and is kept in
    `~/.config/ac2/rig.json`, so a restart comes up at min(kept, bound). A restart with a
    higher `--max-level` does not raise a level that was lowered; raise it explicitly
    (`gen ceiling -50dbfs --yes`). The daemon log's `ac2d::audit` lines say who changed it.
+   Since 2026-11-25 the bound is −20 dBFS while the system max level stays −50 dBFS (kept in
+   `rig.json`) until raised in Settings › Audio I/O; a `rig.json` without a kept level would
+   come up at the bound, so the level must be kept there before the bound is raised.
 5. Reopen audio (from ketunkolo):
    `bin/ac2 --remote 192.168.9.27 session open --backend jack --in 1-8 --outputs 6 --loopback-out 5 --loopback-in 7 --mic "1=MM1 34804" --mic "2=Vilppu behringer #3"`.
    Use the inputs and outputs the operator had (lately `--in 1-10`; the old autosave's
