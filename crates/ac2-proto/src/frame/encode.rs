@@ -14,22 +14,33 @@ enum Col<'a> {
     F(&'a [f32]),
     /// Values coded relative to the same column's `mag`, the second slice.
     OnMag(&'a [f32], &'a [f32]),
+    Owned(Vec<f32>),
     U(Vec<u32>),
     I(Vec<i8>),
 }
 
-/// The programme-meter columns of a stream or preview levels frame.
-fn programme_cols<'a>(
-    cols: &mut Vec<(ArrayDesc, Col<'a>)>,
-    ppm: &'a [f32],
-    true_peak: &'a [f32],
-    max: &'a [f32],
-    overs: &'a [u32],
-) {
-    cols.push((desc(ArrayName::Ppm, Unit::Dbfs), Col::F(ppm)));
-    cols.push((desc(ArrayName::TruePeak, Unit::Dbtp), Col::F(true_peak)));
-    cols.push((desc(ArrayName::Max, Unit::Dbfs), Col::F(max)));
-    cols.push((desc(ArrayName::Overs, Unit::Count), Col::U(overs.to_vec())));
+impl Col<'_> {
+    fn len(&self) -> usize {
+        match self {
+            Col::F(v) | Col::OnMag(v, _) => v.len(),
+            Col::Owned(v) => v.len(),
+            Col::U(v) => v.len(),
+            Col::I(v) => v.len(),
+        }
+    }
+}
+
+/// A levels frame's arrays ([`super::levels::cols`]) as columns.
+fn levels_cols<'a>(cols: &mut Vec<(ArrayDesc, Col<'a>)>, f: &super::levels::LevelsRef<'a>) {
+    use super::levels::Values;
+    cols.extend(super::levels::cols(f).into_iter().map(|(d, v)| {
+        let c = match v {
+            Values::F(v) => Col::F(v),
+            Values::Owned(v) => Col::Owned(v),
+            Values::U(v) => Col::U(v),
+        };
+        (d, c)
+    }));
 }
 
 /// Every pair's points in turn, as one x and one y column.
@@ -158,33 +169,57 @@ pub(super) fn quantise(frame: &Frame) -> Result<CodedFrame, EncodeError> {
             FrameMeta::Levels(f.meta.clone())
         }
         FrameData::StreamLevels(f) => {
-            cols.push((desc(ArrayName::Peak, Unit::Dbfs), Col::F(&f.peak)));
-            cols.push((desc(ArrayName::Rms, Unit::Dbfs), Col::F(&f.rms)));
-            cols.push((
-                desc(ArrayName::Clip, Unit::Bitmask),
-                Col::U(mask_slice(&f.clip)),
-            ));
-            programme_cols(&mut cols, &f.ppm, &f.true_peak, &f.max, &f.overs);
+            levels_cols(
+                &mut cols,
+                &super::levels::LevelsRef {
+                    ballistic: f.meta.ballistic,
+                    peak: &f.peak,
+                    rms: &f.rms,
+                    clip: &f.clip,
+                    ppm: &f.ppm,
+                    true_peak: &f.true_peak,
+                    max: &f.max,
+                    overs: &f.overs,
+                    pair_levels: &f.pair_levels,
+                    loudness: &f.loudness,
+                },
+            );
             FrameMeta::StreamLevels(f.meta.clone())
         }
         FrameData::PreviewLevels(f) => {
-            cols.push((desc(ArrayName::Peak, Unit::Dbfs), Col::F(&f.peak)));
-            cols.push((desc(ArrayName::Rms, Unit::Dbfs), Col::F(&f.rms)));
-            cols.push((
-                desc(ArrayName::Clip, Unit::Bitmask),
-                Col::U(mask_slice(&f.clip)),
-            ));
-            programme_cols(&mut cols, &f.ppm, &f.true_peak, &f.max, &f.overs);
+            levels_cols(
+                &mut cols,
+                &super::levels::LevelsRef {
+                    ballistic: f.meta.ballistic,
+                    peak: &f.peak,
+                    rms: &f.rms,
+                    clip: &f.clip,
+                    ppm: &f.ppm,
+                    true_peak: &f.true_peak,
+                    max: &f.max,
+                    overs: &f.overs,
+                    pair_levels: &f.pair_levels,
+                    loudness: &f.loudness,
+                },
+            );
             FrameMeta::PreviewLevels(f.meta.clone())
         }
         FrameData::SourceLevels(f) => {
-            cols.push((desc(ArrayName::Peak, Unit::Dbfs), Col::F(&f.peak)));
-            cols.push((desc(ArrayName::Rms, Unit::Dbfs), Col::F(&f.rms)));
-            cols.push((
-                desc(ArrayName::Clip, Unit::Bitmask),
-                Col::U(mask_slice(&f.clip)),
-            ));
-            programme_cols(&mut cols, &f.ppm, &f.true_peak, &f.max, &f.overs);
+            levels_cols(
+                &mut cols,
+                &super::levels::LevelsRef {
+                    ballistic: f.meta.ballistic,
+                    peak: &f.peak,
+                    rms: &f.rms,
+                    clip: &f.clip,
+                    ppm: &f.ppm,
+                    true_peak: &f.true_peak,
+                    max: &f.max,
+                    overs: &f.overs,
+                    pair_levels: &f.pair_levels,
+                    loudness: &f.loudness,
+                },
+            );
             FrameMeta::SourceLevels(f.meta.clone())
         }
         FrameData::StreamGonio(f) => {
@@ -199,34 +234,37 @@ pub(super) fn quantise(frame: &Frame) -> Result<CodedFrame, EncodeError> {
         FrameData::Ka(m) => FrameMeta::Ka(m.clone()),
     };
 
-    let n = match cols.first() {
-        None => 0,
-        Some((_, Col::F(v) | Col::OnMag(v, _))) => v.len(),
-        Some((_, Col::U(v))) => v.len(),
-        Some((_, Col::I(v))) => v.len(),
-    };
+    // Every array has one element per column, pair or source: `n` is the column arrays'
+    // length, and each array must have the count its name belongs to.
+    let n = cols
+        .iter()
+        .find(|(d, _)| d.name.per() == super::ArrayPer::Column)
+        .map_or(0, |(_, c)| c.len());
     if n > MAX_N as usize {
         return Err(EncodeError::TooManyElements(n));
     }
-    for (d, c) in &cols {
-        let got = match c {
-            Col::F(v) | Col::OnMag(v, _) => v.len(),
-            Col::U(v) => v.len(),
-            Col::I(v) => v.len(),
-        };
-        if got != n {
+    for (d, c) in &mut cols {
+        let got = c.len();
+        let expected = meta.count(d.name.per(), n as u32).unwrap_or(usize::MAX);
+        if got != expected {
             return Err(EncodeError::Length {
                 name: d.name,
-                expected: n,
+                expected,
                 got,
             });
         }
+        d.len = got as u32;
     }
 
-    let mut codes = Vec::with_capacity(cols.iter().map(|(d, _)| array_size(d.elem, n)).sum());
+    let mut codes = Vec::with_capacity(
+        cols.iter()
+            .map(|(d, _)| array_size(d.elem, d.len as usize))
+            .sum(),
+    );
     for (d, c) in &cols {
         match c {
             Col::F(v) => packing::put_f32(&mut codes, d.elem, d.unit == Unit::Deg, v),
+            Col::Owned(v) => packing::put_f32(&mut codes, d.elem, d.unit == Unit::Deg, v),
             Col::OnMag(v, mag) => {
                 let at = codes.len();
                 packing::put_f32(&mut codes, d.elem, false, v);

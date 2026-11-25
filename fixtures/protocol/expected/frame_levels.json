@@ -17,17 +17,20 @@
    {
     "name": "peak",
     "unit": "dbfs",
-    "elem": "f32"
+    "elem": "i16",
+    "len": 2
    },
    {
     "name": "rms",
     "unit": "dbfs",
-    "elem": "f32"
+    "elem": "i16",
+    "len": 2
    },
    {
     "name": "clip",
     "unit": "bitmask",
-    "elem": "u32"
+    "elem": "u32",
+    "len": 2
    }
   ],
   "meta": {
@@ -41,7 +44,7 @@
  },
  "arrays": {
   "peak": [
-   -0.10000000149011612,
+   -0.1,
    -18.0
   ],
   "rms": [

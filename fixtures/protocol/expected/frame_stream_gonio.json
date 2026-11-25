@@ -17,12 +17,14 @@
    {
     "name": "gonio_x",
     "unit": "gonio_unit",
-    "elem": "i8"
+    "elem": "i8",
+    "len": 256
    },
    {
     "name": "gonio_y",
     "unit": "gonio_unit",
-    "elem": "i8"
+    "elem": "i8",
+    "len": 256
    }
   ],
   "meta": {

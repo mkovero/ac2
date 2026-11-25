@@ -4,7 +4,7 @@
 //!
 //! Precision budget of the 16-bit encodings, against what a display shows of them:
 //!
-//! - `i16`: hundredths of the array's unit (dB, dBFS, dB SPL, degrees), so at most
+//! - `i16`: hundredths of the array's unit (dB, dBFS, dBTP, dB SPL, LUFS, LU, degrees), so at most
 //!   0.005 dB or 0.005° off. Level readouts show 0.1 dB and phase readouts whole degrees;
 //!   a group delay fitted to the phase over even the narrowest low-frequency span moves by
 //!   well under its 0.01 ms readout step. Degrees are wrapped to [−180°, 180°), which a
@@ -56,7 +56,7 @@
 //! is one more byte and exact. The goniometer's `i8` points, in contrast, are fresh every
 //! frame and gain nothing from a difference.
 //!
-//! `f32` and `u32` arrays (meters, Leq windows, bitmasks) go as they are,
+//! `f32` and `u32` arrays (Leq windows, correlation, counts, bitmasks) go as they are,
 //! little-endian: they are small or must stay exact, and deflate still takes out runs such
 //! as all-zero bitmasks.
 
@@ -574,7 +574,51 @@ pub(crate) fn get_delta(out: &mut Vec<u8>, elem: Elem, deg: bool, wire: &[u8], b
 
 /// Deflates the concatenated arrays into the payload part.
 pub(crate) fn deflate(raw: &[u8]) -> Vec<u8> {
-    miniz_oxide::deflate::compress_to_vec(raw, LEVEL)
+    use miniz_oxide::deflate::core::{
+        CompressorOxide, TDEFLFlush, TDEFLStatus, compress, create_comp_flags_from_zip_params,
+    };
+    // A compressor holds a few hundred kB of tables: one per thread, reset per frame, so a
+    // frame of a few hundred bytes does not allocate and clear them anew.
+    thread_local! {
+        static COMPRESSOR: std::cell::RefCell<Option<Box<CompressorOxide>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    COMPRESSOR.with(|c| {
+        let mut c = c.borrow_mut();
+        let comp = match c.as_mut() {
+            Some(comp) => {
+                comp.reset();
+                comp
+            }
+            // Raw deflate (window bits 0: no zlib wrapper), default strategy.
+            None => c.insert(Box::new(CompressorOxide::new(
+                create_comp_flags_from_zip_params(LEVEL.into(), 0, 0),
+            ))),
+        };
+        let mut out = vec![0; (raw.len() / 2).max(64)];
+        let (mut input, mut at) = (raw, 0);
+        loop {
+            let (status, read, wrote) = compress(comp, input, &mut out[at..], TDEFLFlush::Finish);
+            at += wrote;
+            input = &input[read.min(input.len())..];
+            match status {
+                TDEFLStatus::Done => {
+                    out.truncate(at);
+                    return out;
+                }
+                TDEFLStatus::Okay => {
+                    if out.len() - at < 64 {
+                        out.resize(out.len() * 2, 0);
+                    }
+                }
+                // A compressor given its whole input and room to write fails only on a bug in
+                // it; a frame that cannot be compressed is not one this side may send.
+                TDEFLStatus::BadParam | TDEFLStatus::PutBufFailed => {
+                    unreachable!("deflate failed: {status:?}")
+                }
+            }
+        }
+    })
 }
 
 /// Inflates a payload part that must hold exactly `expected` bytes; `None` if it is not

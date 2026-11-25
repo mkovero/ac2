@@ -12,7 +12,7 @@ pub const MAX_HEADER_BYTES: usize = 8192;
 /// Largest `n` (columns / points / channels).
 pub const MAX_N: u32 = 1 << 16;
 /// Most arrays in one frame.
-pub const MAX_ARRAYS: usize = 12;
+pub const MAX_ARRAYS: usize = 20;
 /// Parts of one frame: topic, body (header and payload).
 pub const MAX_PARTS: usize = 2;
 /// Largest whole frame (all parts), bytes.
@@ -26,7 +26,9 @@ mod decode;
 mod encode;
 mod error;
 mod flags;
+mod levels;
 mod meta;
+mod per_frame;
 mod schema;
 mod wire;
 
@@ -48,10 +50,10 @@ pub use flags::{ClipFlags, LeqFlags, ProtectionFlags, ValidityMask};
 pub use meta::{
     AudioHealth, BandLeqMeta, BandWindowState, DaemonHealth, FrameHeader, FrameMeta, GenSummary,
     GonioMeta, GonioPairMeta, HARMONIC_DB_MIN, HarmonicLevel, HarmonicReading, HarmonicUnreadable,
-    IrMeta, KaMeta, LeqMeta, LeqPeak, LeqRun, LevelsMark, LevelsMeta, LoudnessSource, MathState,
-    OperandState, OperandStatus, PairLevels, PreviewLevelsMeta, RtaMeta, SourceLevelsMeta,
-    SourceLoudness, SpecBand, SpecBands, SpecHarmonics, SpecMeta, SplMeta, StreamLevelsMeta,
-    TfMeta, TimingMeta, TimingWindow,
+    IrMeta, KaMeta, LeqMeta, LeqPeak, LeqRun, LevelsMark, LevelsMeta, LoudnessSource,
+    LoudnessSourceMeta, MathState, MeterPair, OperandState, OperandStatus, PairLevels,
+    PreviewLevelsMeta, RtaMeta, SourceLevelsMeta, SourceLoudness, SpecBand, SpecBands,
+    SpecHarmonics, SpecMeta, SplMeta, StreamLevelsMeta, TfMeta, TimingMeta, TimingWindow,
 };
-pub use schema::{ArrayDesc, ArrayName, Elem, FrameKind, Unit};
+pub use schema::{ArrayDesc, ArrayName, ArrayPer, Elem, FrameKind, Unit};
 pub use wire::{DeltaFrame, Form, WireFrame, decode_frame, decode_wire, encode_delta, encode_key};

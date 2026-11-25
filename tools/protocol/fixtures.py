@@ -200,12 +200,18 @@ def check():
                 p.same(held["header"], keys[i]["header"])
                 p.same(p.values(held), p.values(keys[i]))
             # The first delta: on the frame after its base, or on its base with one code
-            # changed (the last: never a `bfp16` exponent, which a delta may not use).
+            # changed: the last of an array whose delta reads the base (`f32` and `i8` arrays
+            # go as they are, and a `bfp16` exponent is not a code a delta uses).
             _, d = p.decode_wire(msgs[1])
             bad = [(keys[1], "wrong base")]
-            if keys[0]["codes"]:
-                c = keys[0]["codes"]
-                bad.append(({**keys[0], "codes": c[:-1] + bytes([c[-1] ^ 1])}, "patched base"))
+            h0, at = keys[0]["header"], 0
+            for desc in h0["arrays"]:
+                at += p.array_size(desc["elem"], desc["len"])
+                if desc["elem"] not in ("f32", "i8", "bfp16") and desc["len"] > 0:
+                    c = keys[0]["codes"]
+                    patched = c[: at - 1] + bytes([c[at - 1] ^ 1]) + c[at:]
+                    bad.append(({**keys[0], "codes": patched}, "patched base"))
+                    break
             for base, what in bad:
                 try:
                     p.apply(d, base)

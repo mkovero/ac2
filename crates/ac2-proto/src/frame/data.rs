@@ -7,8 +7,9 @@ use crate::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, StreamEpoch, Wal
 
 use super::{
     BandLeqMeta, BinsFrame, ClipFlags, FrameKind, GonioMeta, GonioPairMeta, IrMeta, KaMeta,
-    LeqFlags, LeqMeta, LevelsMeta, PreviewLevelsMeta, ProtectionFlags, RtaMeta, SourceLevelsMeta,
-    SpecMeta, SplMeta, StreamLevelsMeta, TfMeta, TimingMeta, ValidityMask,
+    LeqFlags, LeqMeta, LevelsMeta, LoudnessSource, LoudnessSourceMeta, PairLevels,
+    PreviewLevelsMeta, ProtectionFlags, RtaMeta, SourceLevelsMeta, SourceLoudness, SpecMeta,
+    SplMeta, StreamLevelsMeta, TfMeta, TimingMeta, ValidityMask,
 };
 
 /// Header fields shared by every kind.
@@ -178,11 +179,15 @@ pub struct LevelsFrame {
 /// Meters of every input of the open stream, independent of measurements. Beside the
 /// sample peak, RMS and clip, the programme meters of docs/design/programme-meter.md §3:
 /// the chosen ballistic's reading, the true peak, the daemon's max hold and over count per
-/// channel; the pair readings (correlation) are in `meta.pair_levels`.
+/// channel; per pair its correlation, per loudness source its loudness.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StreamLevelsFrame {
-    /// Channels, the ballistic in force and the pairs' correlation.
+    /// Channels, the ballistic in force, the pairs and the loudness sources.
     pub meta: StreamLevelsMeta,
+    /// One per pair of `meta.pairs`, in its order.
+    pub pair_levels: Vec<PairLevels>,
+    /// One per source of `meta.sources`, in its order.
+    pub loudness: Vec<SourceLoudness>,
     /// Peak per channel, dBFS (sample peak); NaN: no reading (a remote input whose samples
     /// went missing this interval), where −∞ is digital silence.
     pub peak: Vec<f32>,
@@ -194,7 +199,7 @@ pub struct StreamLevelsFrame {
     /// RMS-scaled mean for VU); where VU is chosen but not offered on the input
     /// ([`crate::cal::offers_vu`]) the true peak, so a rig setting never blanks a bar. Under
     /// a loudness ballistic ([`Ballistic::is_loudness`]) each input's true peak, dBTP: the
-    /// loudness is per source, in `meta.loudness`. A remote input's is its sample peak, the
+    /// loudness is per source, in `loudness`. A remote input's is its sample peak, the
     /// one peak its block statistics give.
     ///
     /// [`Ballistic::is_loudness`]: crate::model::Ballistic::is_loudness
@@ -217,8 +222,12 @@ pub struct StreamLevelsFrame {
 /// rig.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceLevelsFrame {
-    /// Channels, ballistic, pairs, loudness, rate and the timing mark.
+    /// Channels, ballistic, pairs, loudness sources, rate and the timing mark.
     pub meta: SourceLevelsMeta,
+    /// As [`StreamLevelsFrame::pair_levels`].
+    pub pair_levels: Vec<PairLevels>,
+    /// As [`StreamLevelsFrame::loudness`].
+    pub loudness: Vec<SourceLoudness>,
     /// As [`StreamLevelsFrame::peak`].
     pub peak: Vec<f32>,
     /// As [`StreamLevelsFrame::rms`].
@@ -239,8 +248,12 @@ pub struct SourceLevelsFrame {
 /// [`StreamLevelsFrame`] over the kinds and pairs `stream.preview` declared.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewLevelsFrame {
-    /// Device and channels.
+    /// Device, channels, pairs and loudness sources.
     pub meta: PreviewLevelsMeta,
+    /// One per declared pair of `meta.pairs`, in its order.
+    pub pair_levels: Vec<PairLevels>,
+    /// As [`StreamLevelsFrame::loudness`].
+    pub loudness: Vec<SourceLoudness>,
     /// Peak per channel, dBFS (sample peak).
     pub peak: Vec<f32>,
     /// RMS per channel, dBFS.
@@ -287,6 +300,35 @@ pub struct GonioFrame {
     /// Pairs, in the declared order.
     pub pairs: Vec<GonioPair>,
 }
+
+/// Looking a pair's or a source's readings up by its identity in the metadata, which the
+/// value arrays follow index for index.
+macro_rules! levels_lookup {
+    ($($t:ty),*) => {$(
+        impl $t {
+            /// The readings of the pair `left`, `right`, if the frame meters it.
+            pub fn pair(&self, left: u16, right: u16) -> Option<&PairLevels> {
+                let i = self
+                    .meta
+                    .pairs
+                    .iter()
+                    .position(|p| p.left == left && p.right == right)?;
+                self.pair_levels.get(i)
+            }
+
+            /// The loudness of `source` and its metadata, if the frame carries it.
+            pub fn source(
+                &self,
+                source: LoudnessSource,
+            ) -> Option<(&LoudnessSourceMeta, &SourceLoudness)> {
+                let i = self.meta.sources.iter().position(|s| s.source == source)?;
+                Some((&self.meta.sources[i], self.loudness.get(i)?))
+            }
+        }
+    )*};
+}
+
+levels_lookup!(StreamLevelsFrame, SourceLevelsFrame, PreviewLevelsFrame);
 
 impl GonioFrame {
     /// The header meta: every pair's channels and gain.

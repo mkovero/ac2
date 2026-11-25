@@ -17,37 +17,104 @@
    {
     "name": "peak",
     "unit": "dbfs",
-    "elem": "f32"
+    "elem": "i16",
+    "len": 2
    },
    {
     "name": "rms",
     "unit": "dbfs",
-    "elem": "f32"
+    "elem": "i16",
+    "len": 2
    },
    {
     "name": "clip",
     "unit": "bitmask",
-    "elem": "u32"
+    "elem": "u32",
+    "len": 2
    },
    {
     "name": "ppm",
-    "unit": "dbfs",
-    "elem": "f32"
+    "unit": "dbtp",
+    "elem": "i16",
+    "len": 2
    },
    {
     "name": "true_peak",
     "unit": "dbtp",
-    "elem": "f32"
+    "elem": "i16",
+    "len": 2
    },
    {
     "name": "max",
-    "unit": "dbfs",
-    "elem": "f32"
+    "unit": "dbtp",
+    "elem": "i16",
+    "len": 2
    },
    {
     "name": "overs",
     "unit": "count",
-    "elem": "u32"
+    "elem": "u32",
+    "len": 2
+   },
+   {
+    "name": "pair_corr",
+    "unit": "correlation",
+    "elem": "f32",
+    "len": 1
+   },
+   {
+    "name": "pair_quiet",
+    "unit": "side",
+    "elem": "u32",
+    "len": 1
+   },
+   {
+    "name": "lufs_m",
+    "unit": "lufs",
+    "elem": "i16",
+    "len": 1
+   },
+   {
+    "name": "lufs_s",
+    "unit": "lufs",
+    "elem": "i16",
+    "len": 1
+   },
+   {
+    "name": "lufs_m_max",
+    "unit": "lufs",
+    "elem": "i16",
+    "len": 1
+   },
+   {
+    "name": "lufs_s_max",
+    "unit": "lufs",
+    "elem": "i16",
+    "len": 1
+   },
+   {
+    "name": "lufs_i",
+    "unit": "lufs",
+    "elem": "i16",
+    "len": 1
+   },
+   {
+    "name": "lra",
+    "unit": "lu",
+    "elem": "i16",
+    "len": 1
+   },
+   {
+    "name": "tp_max",
+    "unit": "dbtp",
+    "elem": "i16",
+    "len": 1
+   },
+   {
+    "name": "loud_s",
+    "unit": "seconds",
+    "elem": "f32",
+    "len": 1
    }
   ],
   "meta": {
@@ -80,29 +147,13 @@
      }
     ],
     "ballistic": "true_peak",
-    "pair_levels": [
-     {
-      "left": 0,
-      "right": 1,
-      "correlation": null,
-      "quiet": "right"
-     }
-    ],
-    "loudness": [
+    "sources": [
      {
       "source": {
        "type": "pair",
        "left": 0,
        "right": 1
       },
-      "momentary": -23.25,
-      "short_term": -22.75,
-      "integrated": -23.0,
-      "range": 6.25,
-      "max_momentary": -18.5,
-      "max_short_term": -20.125,
-      "max_true_peak": -1.25,
-      "duration": 45.0,
       "since": 1789999955000000000
      }
     ]
@@ -137,6 +188,36 @@
   "overs": [
    1,
    0
+  ],
+  "pair_corr": [
+   NaN
+  ],
+  "pair_quiet": [
+   2
+  ],
+  "lufs_m": [
+   -23.25
+  ],
+  "lufs_s": [
+   -22.75
+  ],
+  "lufs_m_max": [
+   -18.5
+  ],
+  "lufs_s_max": [
+   -20.12
+  ],
+  "lufs_i": [
+   -23.0
+  ],
+  "lra": [
+   6.25
+  ],
+  "tp_max": [
+   -1.25
+  ],
+  "loud_s": [
+   45.0
   ]
  }
 }

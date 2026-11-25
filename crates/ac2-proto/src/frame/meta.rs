@@ -469,14 +469,12 @@ pub struct LevelsMeta {
     pub channels: Vec<u16>,
 }
 
-/// One stereo pair's correlation this frame (docs/design/programme-meter.md §4).
+/// One stereo pair's correlation this frame (docs/design/programme-meter.md §4); the pair
+/// is the one at the same index of its frame's `meta.pairs`. On the wire the arrays
+/// `pair_corr` and `pair_quiet`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PairLevels {
-    /// Zero-based device input channel of the left side.
-    pub left: u16,
-    /// Zero-based device input channel of the right side.
-    pub right: u16,
     /// Normalised zero-lag correlation over the rig's window, −1 … 1 (mono +1, wide 0,
     /// reversed −1); `None` while a side is below the gate.
     pub correlation: Option<f32>,
@@ -485,13 +483,23 @@ pub struct PairLevels {
     pub quiet: Option<PairSide>,
 }
 
+/// A pair of inputs the meters read together: zero-based device input channels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MeterPair {
+    /// Left side.
+    pub left: u16,
+    /// Right side.
+    pub right: u16,
+}
+
 /// What a loudness figure is measured over (docs/design/programme-meter.md §6.1): a
 /// declared pair with both inputs captured (stereo, channel weights 1, 1), or one captured
 /// input not in a pair (weight 1, so a mono signal reads 3 LU below the same on a pair).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LoudnessSource {
-    /// A declared pair; zero-based device input channels, as in [`PairLevels`].
+    /// A declared pair; zero-based device input channels, as in [`MeterPair`].
     Pair {
         /// Zero-based device input channel of the left side.
         left: u16,
@@ -505,12 +513,23 @@ pub enum LoudnessSource {
     },
 }
 
-/// One source's BS.1770 / EBU Tech 3341 and 3342 loudness this frame.
+/// A loudness source and when it was last reset: what stands between configuration
+/// changes and resets, so it is metadata, not an array.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoudnessSourceMeta {
+    /// What it is measured over.
+    pub source: LoudnessSource,
+    /// The daemon's clock at the reset, for the "since" line only.
+    pub since: WallNs,
+}
+
+/// One source's BS.1770 / EBU Tech 3341 and 3342 loudness this frame; the source is the one
+/// at the same index of its frame's `meta.sources`. On the wire the arrays `lufs_m`,
+/// `lufs_s`, `lufs_i`, `lra`, `lufs_m_max`, `lufs_s_max`, `tp_max` and `loud_s`, in f32.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceLoudness {
-    /// What it is measured over.
-    pub source: LoudnessSource,
     /// Momentary loudness (the last 400 ms); −∞ on silence or before a window lies wholly
     /// after the source's start or a discontinuity.
     pub momentary: Lufs,
@@ -531,25 +550,27 @@ pub struct SourceLoudness {
     /// Metered samples since the reset, as time: the range is settling below 60 s, and it
     /// must not depend on a wall clock that NTP may step.
     pub duration: Seconds,
-    /// The daemon's clock at the reset, for the "since" line only.
-    pub since: WallNs,
 }
 
-/// Stream input meters metadata.
+/// Stream input meters metadata: what stands until the configuration changes. Every
+/// reading is an array (`StreamLevelsFrame`), so a delta carries no metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StreamLevelsMeta {
     /// Device input channel of each column.
     pub channels: Vec<u16>,
     /// What the bars read (the rig's `levels.ballistic`), so a frame is self-describing:
-    /// under a peak detector `ppm` and `max` are its reading; under `momentary` /
-    /// `short_term` they are each input's true peak in dBTP and the bars read `loudness`.
+    /// under a peak detector `ppm` and `max` are its reading (dBFS); under `momentary` /
+    /// `short_term` they are each input's true peak (dBTP) and the bars read the sources'
+    /// loudness.
     pub ballistic: Ballistic,
-    /// Every declared pair whose both inputs are captured, in `stream.inputs` order.
-    pub pair_levels: Vec<PairLevels>,
-    /// Every loudness source: pairs first in `pair_levels` order, then unpaired line and
-    /// digital inputs ascending by channel; none for mic inputs.
-    pub loudness: Vec<SourceLoudness>,
+    /// Every declared pair whose both inputs are captured, in `stream.inputs` order: one
+    /// element of each pair array per pair.
+    pub pairs: Vec<MeterPair>,
+    /// Every loudness source: pairs first in `pairs` order, then unpaired line and digital
+    /// inputs ascending by channel; none for mic inputs. One element of each source array
+    /// per source.
+    pub sources: Vec<LoudnessSourceMeta>,
 }
 
 /// A rig's own input meters for another rig: [`StreamLevelsMeta`] over its captured inputs
@@ -561,14 +582,14 @@ pub struct SourceLevelsMeta {
     pub channels: Vec<u16>,
     /// As [`StreamLevelsMeta::ballistic`].
     pub ballistic: Ballistic,
-    /// As [`StreamLevelsMeta::pair_levels`].
-    pub pair_levels: Vec<PairLevels>,
-    /// As [`StreamLevelsMeta::loudness`].
-    pub loudness: Vec<SourceLoudness>,
+    /// As [`StreamLevelsMeta::pairs`].
+    pub pairs: Vec<MeterPair>,
+    /// As [`StreamLevelsMeta::sources`].
+    pub sources: Vec<LoudnessSourceMeta>,
     /// The stream's nominal sample rate, Hz.
     pub sample_rate_hz: u32,
     /// The newest block's timing; `None` where the rig stamps no capture times or its stamp
-    /// clock is not yet mapped onto its system clock.
+    /// clock is not yet mapped onto its system clock. The one field a delta carries.
     pub mark: Option<LevelsMark>,
 }
 
@@ -600,14 +621,12 @@ pub struct PreviewLevelsMeta {
     pub channels: Vec<u16>,
     /// What is on the inputs, as `stream.preview` declared them.
     pub inputs: Vec<PreviewInput>,
-    /// Pairs among them, as declared.
+    /// Pairs among them, as declared: one element of each pair array per pair.
     pub pairs: Vec<Pair>,
     /// As [`StreamLevelsMeta::ballistic`].
     pub ballistic: Ballistic,
-    /// As [`StreamLevelsMeta::pair_levels`], one per declared pair.
-    pub pair_levels: Vec<PairLevels>,
-    /// As [`StreamLevelsMeta::loudness`].
-    pub loudness: Vec<SourceLoudness>,
+    /// As [`StreamLevelsMeta::sources`].
+    pub sources: Vec<LoudnessSourceMeta>,
 }
 
 /// One pair of a goniometer frame: which inputs, and the gain its points are relative to.
@@ -765,6 +784,24 @@ pub enum FrameMeta {
 }
 
 impl FrameMeta {
+    /// The elements of an array that has one per `per`: `n` per column, the metadata's
+    /// pairs or sources; `None` for a kind without them.
+    pub(super) fn count(&self, per: super::ArrayPer, n: u32) -> Option<usize> {
+        use super::ArrayPer;
+        let (pairs, sources) = match self {
+            Self::StreamLevels(m) => (m.pairs.len(), m.sources.len()),
+            Self::SourceLevels(m) => (m.pairs.len(), m.sources.len()),
+            Self::PreviewLevels(m) => (m.pairs.len(), m.sources.len()),
+            _ if per == ArrayPer::Column => return Some(n as usize),
+            _ => return None,
+        };
+        Some(match per {
+            ArrayPer::Column => n as usize,
+            ArrayPer::Pair => pairs,
+            ArrayPer::Source => sources,
+        })
+    }
+
     pub(super) fn kind(&self) -> FrameKind {
         match self {
             Self::Tf(_) => FrameKind::Tf,
@@ -821,7 +858,7 @@ pub struct FrameHeader {
     pub grid_id: Option<GridId>,
     /// Protection state.
     pub protection: ProtectionFlags,
-    /// Elements per array.
+    /// Columns: the length of every column array.
     pub n: u32,
     /// Array parts, in part order.
     pub arrays: Vec<ArrayDesc>,

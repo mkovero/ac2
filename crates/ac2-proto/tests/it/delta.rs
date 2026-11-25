@@ -91,7 +91,7 @@ fn every_kind_deltas() {
                 Elem::F32 | Elem::U32 => 4,
                 Elem::I16 | Elem::I16MagOffset | Elem::U16 | Elem::Bfp16 => 2,
                 Elem::I8 | Elem::U8 => 1,
-            } * base.n as usize
+            } * d.len as usize
                 + usize::from(d.elem == Elem::Bfp16);
             let codes = &mut x.codes[at..at + k];
             match d.elem {
@@ -198,11 +198,8 @@ fn a_base_that_does_not_fit_forces_a_keyframe() {
     g.stamp.grid_id = None;
     misfits.push(coded(&g));
     let mut g = f.clone();
-    g.stamp.config_rev = Rev(g.stamp.config_rev.0 + 1);
-    misfits.push(coded(&g));
-    let mut g = f.clone();
     if let FrameData::Tf(t) = &mut g.data {
-        t.meta.delay = Seconds(0.5);
+        t.meta.mic_curve = !t.meta.mic_curve;
     }
     misfits.push(coded(&g));
     // Another array set: the average's range band goes.
@@ -239,12 +236,19 @@ fn a_base_that_does_not_fit_forces_a_keyframe() {
     for (i, m) in misfits.iter().enumerate() {
         assert_eq!(encode_delta(m, &base), Ok(None), "misfit {i}");
     }
-    // Only `filled` changed: a delta.
+    // Only per-frame fields and the configuration stamp changed (a delay step): a delta,
+    // which carries them.
     let mut g = f.clone();
+    g.stamp.config_rev = Rev(g.stamp.config_rev.0 + 1);
+    g.stamp.config_applied_at = SampleIndex(g.stamp.config_applied_at.0 + 48);
     if let FrameData::Tf(t) = &mut g.data {
         t.meta.filled = 0.25;
+        t.meta.delay = Seconds(0.5);
+        t.meta.nudged = Seconds(0.25);
     }
-    assert!(encode_delta(&coded(&g), &base).expect("encodes").is_some());
+    let x = coded(&g);
+    let d = encode_delta(&x, &base).expect("encodes").expect("fits");
+    assert_eq!(wire(&d).apply(Some(&base)).expect("applies"), x);
 }
 
 fn any_f32_bits() -> impl Strategy<Value = f32> {

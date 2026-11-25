@@ -17,12 +17,14 @@
    {
     "name": "level",
     "unit": "db_spl",
-    "elem": "i16"
+    "elem": "i16",
+    "len": 3
    },
    {
     "name": "validity",
     "unit": "bitmask",
-    "elem": "u32"
+    "elem": "u32",
+    "len": 3
    }
   ],
   "meta": {

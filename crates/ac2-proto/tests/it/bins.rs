@@ -106,13 +106,17 @@ fn a_stage_frame_roundtrips_as_key_and_delta() {
     assert!(b.mag[3].is_nan() && b.phase[9].is_nan() && b.coh[3].is_nan());
     assert_eq!(b.meta.first_bin, 88);
 
-    // Blocks and effective averages move from frame to frame: a delta carries them.
+    // Blocks, effective averages and the delay (a nudge) move from frame to frame: a delta
+    // carries them, and the configuration stamp the nudge moved.
     let base = CodedFrame::from_frame(&f).unwrap();
     let mut next = f.clone();
     next.stamp.seq += 1;
+    next.stamp.config_rev.0 += 1;
     if let FrameData::Bins(b) = &mut next.data {
         b.meta.blocks += 1;
         b.meta.eff_avg = 10.25;
+        b.meta.delay.0 += 0.001;
+        b.meta.nudged.0 += 0.001;
         b.mag[0] += 0.5;
     }
     let x = CodedFrame::from_frame(&next).unwrap();
@@ -127,7 +131,7 @@ fn a_stage_frame_roundtrips_as_key_and_delta() {
     // Any static field goes as a keyframe.
     let mut moved = next.clone();
     if let FrameData::Bins(b) = &mut moved.data {
-        b.meta.delay.0 += 0.001;
+        b.meta.mic_curve = !b.meta.mic_curve;
     }
     let m = CodedFrame::from_frame(&moved).unwrap();
     assert!(encode_delta(&m, &base).unwrap().is_none());

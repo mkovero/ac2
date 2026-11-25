@@ -6,6 +6,7 @@ cross-language fixtures prove the document, not just one codebase.
 
 from __future__ import annotations
 
+import copy
 import math
 import re
 import struct
@@ -16,7 +17,7 @@ import msgpack
 PROTO_VERSION = 105
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
-MAX_ARRAYS = 12
+MAX_ARRAYS = 20
 MAX_PARTS = 2
 MAX_FRAME_BYTES = 2 << 20
 MAX_TOPIC_BYTES = 32
@@ -253,12 +254,11 @@ _HARMONIC_READING = ("tagged", {
 _PEAK = [("level", None), ("judgement", None)]
 # A block's sample index with its capture time on system time, and the capture's breaks so far.
 _LEVELS_MARK = [("sample", None), ("system_ns", None), ("breaks", None)]
-_PAIR_LEVELS = [("left", None), ("right", None), ("correlation", None), ("quiet", None)]
-_LOUDNESS = [("source", ("tagged", {"pair": [("left", None), ("right", None)],
-                                     "input": [("channel", None)]})),
-             ("momentary", None), ("short_term", None), ("integrated", None), ("range", None),
-             ("max_momentary", None), ("max_short_term", None), ("max_true_peak", None),
-             ("duration", None), ("since", None)]
+_METER_PAIR = [("left", None), ("right", None)]
+_LOUDNESS_SOURCE = [("source", ("tagged", {"pair": [("left", None), ("right", None)],
+                                            "input": [("channel", None)]})),
+                    ("since", None)]
+_HARMONICS = ("opt", [("f0", None), ("on_bin", None), ("reading", _HARMONIC_READING)])
 _GONIO_PAIR = [("left", None), ("right", None), ("gain_dbfs", None)]
 META = {
     "tf": [("delay", None), ("nudged", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
@@ -280,7 +280,7 @@ META = {
                                                      ("age", None)])),
                                 ("unresolved", [("resolution", None),
                                                 ("ranges", ("list", [("lo_hz", None), ("hi_hz", None)]))])])),
-             ("harmonics", ("opt", [("f0", None), ("on_bin", None), ("reading", _HARMONIC_READING)]))],
+             ("harmonics", _HARMONICS)],
     "spl": [("scale", None), ("weighting", None), ("time_weighting", None), ("peak_weighting", None),
             ("level", None), ("lmax", None), ("lmin", None), ("leq", None), ("lpeak", None),
             ("duration", None), ("cal", _CAL), ("mic_curve", None), ("position", ("opt", _POSITION))],
@@ -295,15 +295,14 @@ META = {
                  ("predicted", ("opt", [("duration", None), ("estimate", None), ("at_most", None),
                                         ("limit", None), ("judgement", None)]))],
     "levels": _LEVELS,
-    "stream_levels": [("channels", None), ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS)),
-                       ("loudness", ("list", _LOUDNESS))],
-    "source_levels": [("channels", None), ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS)),
-                      ("loudness", ("list", _LOUDNESS)), ("sample_rate_hz", None),
+    "stream_levels": [("channels", None), ("ballistic", None), ("pairs", ("list", _METER_PAIR)),
+                      ("sources", ("list", _LOUDNESS_SOURCE))],
+    "source_levels": [("channels", None), ("ballistic", None), ("pairs", ("list", _METER_PAIR)),
+                      ("sources", ("list", _LOUDNESS_SOURCE)), ("sample_rate_hz", None),
                       ("mark", ("opt", _LEVELS_MARK))],
     "preview_levels": [("backend", None), ("device", None), ("channels", None),
                        ("inputs", ("list", _PREVIEW_INPUT)), ("pairs", ("list", _PAIR)),
-                       ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS)),
-                       ("loudness", ("list", _LOUDNESS))],
+                       ("ballistic", None), ("sources", ("list", _LOUDNESS_SOURCE))],
     "stream_gonio": [("pairs", ("list", _GONIO_PAIR))],
     "preview_gonio": [("pairs", ("list", _GONIO_PAIR))],
     "timing": [("status", _TIMING_STATUS),
@@ -319,26 +318,96 @@ HEADER = [
     ("v", None), ("form", None), ("kind", None), ("seq", None), ("audio_sample", None), ("stream_epoch", None),
     ("daemon_incarnation", None), ("config_rev", None), ("config_applied_at", None),
     ("capture_wall_ns", None), ("grid_id", None), ("protection", None), ("n", None),
-    ("arrays", ("list", [("name", None), ("unit", None), ("elem", None)])),
+    ("arrays", ("list", [("name", None), ("unit", None), ("elem", None), ("len", None)])),
     ("meta", ("meta", META)),
     ("crc", None),
 ]
 FORM_KEY, FORM_DELTA = 0, 1
 # What a delta carries of the metadata, per kind; every other kind nothing (nil).
+_GONIO_DELTA = [("gains", None)]
 DELTA_META = {
-    "tf": [("filled", None), ("settling", ("opt", [("lo_hz", None), ("hi_hz", None)]))],
-    "bins": [("blocks", None), ("eff_avg", None)],
+    "tf": [("filled", None), ("settling", ("opt", [("lo_hz", None), ("hi_hz", None)])),
+           ("delay", None), ("nudged", None), ("align", _ALIGN)],
+    "bins": [("blocks", None), ("eff_avg", None), ("delay", None), ("nudged", None)],
     "spl": [("level", None), ("lmax", None), ("lmin", None), ("leq", None), ("lpeak", None),
             ("duration", None)],
+    "spec": [("ages", None), ("harmonics", _HARMONICS)],
+    "stream_gonio": _GONIO_DELTA,
+    "preview_gonio": _GONIO_DELTA,
     "source_levels": [("mark", ("opt", _LEVELS_MARK))],
 }
 DELTA_HEADER = [
     ("v", None), ("form", None), ("seq", None), ("base", None), ("audio_sample", None),
-    ("capture_wall_ns", None), ("protection", None), ("meta", None), ("crc", None),
+    ("capture_wall_ns", None), ("protection", None), ("config_rev", None),
+    ("config_applied_at", None), ("meta", None), ("crc", None),
 ]
 # Header fields a delta inherits from its base.
-_STATIC = ("kind", "stream_epoch", "daemon_incarnation", "config_rev", "config_applied_at",
-           "grid_id", "n", "arrays")
+_STATIC = ("kind", "stream_epoch", "daemon_incarnation", "grid_id", "n", "arrays")
+# Header fields a delta carries.
+_DELTA_STAMP = ("seq", "audio_sample", "capture_wall_ns", "protection", "config_rev",
+                "config_applied_at")
+# What an array has one element per, by name: a pair of `pairs`, a source of `sources`;
+# every other array one per column (`n`).
+_PER_PAIR = ("pair_corr", "pair_quiet")
+_PER_SOURCE = ("lufs_m", "lufs_s", "lufs_m_max", "lufs_s_max", "lufs_i", "lra", "tp_max", "loud_s")
+
+
+def array_count(name: str, n: int, meta: dict):
+    """The element count of array `name` in a frame of `n` columns and `meta` (the one-key
+    map); None where the kind has no such count."""
+    (kind, m), = meta.items()
+    if name in _PER_PAIR:
+        return len(m["pairs"]) if kind.endswith("_levels") and kind != "levels" else None
+    if name in _PER_SOURCE:
+        return len(m["sources"]) if kind.endswith("_levels") and kind != "levels" else None
+    return n
+
+
+def per_frame(kind: str, m: dict):
+    """The per-frame part of metadata `m` of `kind` (named), or None for a kind without."""
+    if kind not in DELTA_META:
+        return None
+    if kind == "tf":
+        align = m["math"]["align"] if m["math"] is not None else None
+        return {"filled": m["filled"], "settling": m["settling"], "delay": m["delay"],
+                "nudged": m["nudged"], "align": align}
+    if kind == "spec":
+        ages = [b["age"] for b in m["bands"]["bands"]] if m["bands"] is not None else []
+        return {"ages": ages, "harmonics": m["harmonics"]}
+    if kind in ("stream_gonio", "preview_gonio"):
+        return {"gains": [q["gain_dbfs"] for q in m["pairs"]]}
+    return {f: m[f] for f, _ in DELTA_META[kind]}
+
+
+def with_per_frame(kind: str, m: dict, pf):
+    """Metadata `m` with the per-frame part `pf`; DecodeError when it does not fit."""
+    m = copy.deepcopy(m)
+    if kind not in DELTA_META:
+        if pf is not None:
+            raise DecodeError("per-frame metadata on a kind without any")
+        return m
+    if kind == "tf":
+        for f in ("filled", "settling", "delay", "nudged"):
+            m[f] = pf[f]
+        if m["math"] is not None:
+            m["math"]["align"] = pf["align"]
+        elif pf["align"] is not None:
+            raise DecodeError("an alignment on a frame without math")
+    elif kind == "spec":
+        bands = m["bands"]["bands"] if m["bands"] is not None else []
+        if len(bands) != len(pf["ages"]):
+            raise DecodeError("ages of another band count")
+        for b, age in zip(bands, pf["ages"]):
+            b["age"] = age
+        m["harmonics"] = pf["harmonics"]
+    elif kind in ("stream_gonio", "preview_gonio"):
+        if len(m["pairs"]) != len(pf["gains"]):
+            raise DecodeError("gains of another pair count")
+        for q, g in zip(m["pairs"], pf["gains"]):
+            q["gain_dbfs"] = g
+    else:
+        m.update(pf)
+    return m
 
 
 def positional(t, x):
@@ -701,10 +770,10 @@ def _inflate(payload: bytes, expected: int) -> bytes:
     return raw
 
 
-def _split(descs: list, n: int, b: bytes) -> list:
+def _split(descs: list, b: bytes) -> list:
     out, off = [], 0
     for d in descs:
-        k = array_size(d["elem"], n)
+        k = array_size(d["elem"], d["len"])
         out.append(b[off : off + k])
         off += k
     return out
@@ -731,7 +800,7 @@ def _on_mag(descs: list, parts: list, sign: int):
 def values(c: dict) -> dict:
     """The arrays of coded frame `c`, by name."""
     h = c["header"]
-    parts = _split(h["arrays"], h["n"], c["codes"])
+    parts = _split(h["arrays"], c["codes"])
     _on_mag(h["arrays"], parts, 1)
     return {d["name"]: _values(d, b) for d, b in zip(h["arrays"], parts)}
 
@@ -748,38 +817,43 @@ def encode_key(c: dict) -> list:
     payload = b""
     if h["arrays"]:
         payload = _deflate(b"".join(_intra(d, b) for d, b in
-                                    zip(h["arrays"], _split(h["arrays"], h["n"], c["codes"]))))
+                                    zip(h["arrays"], _split(h["arrays"], c["codes"]))))
     return [c["topic"].encode(), _body(positional(HEADER, wire), payload)]
 
 
 def _per_frame(h: dict):
     (kind, m), = h["meta"].items()
-    fields = DELTA_META.get(kind)
-    return None if fields is None else positional(fields, {f: m[f] for f, _ in fields})
+    pf = per_frame(kind, m)
+    return None if pf is None else positional(DELTA_META[kind], pf)
 
 
-def _static_meta(h: dict) -> bytes:
-    """The metadata without the per-frame fields, as bytes (NaN-safe)."""
+def _fits_meta(h: dict, b: dict) -> bool:
+    """Whether `h`'s metadata is `b`'s with `h`'s per-frame part (as bytes: NaN-safe)."""
     (kind, m), = h["meta"].items()
-    drop = {f for f, _ in DELTA_META.get(kind, [])}
-    return msgpack.packb(positional(META[kind], {k: (None if k in drop else v) for k, v in m.items()}))
+    (_, bm), = b["meta"].items()
+    try:
+        as_base = with_per_frame(kind, bm, per_frame(kind, m))
+    except DecodeError:
+        return False
+    return msgpack.packb(positional(META[kind], m)) == msgpack.packb(positional(META[kind], as_base))
 
 
 def encode_delta(c: dict, base: dict):
     """A delta of `c` on `base`; None if `base` does not fit, so `c` goes as a keyframe."""
     h, b = c["header"], base["header"]
     if (c["topic"] != base["topic"] or any(h[k] != b[k] for k in _STATIC)
-            or len(c["codes"]) != len(base["codes"]) or _static_meta(h) != _static_meta(b)):
+            or len(c["codes"]) != len(base["codes"]) or not _fits_meta(h, b)):
         return None
     raw = []
-    for d, x, y in zip(h["arrays"], _split(h["arrays"], h["n"], c["codes"]),
-                       _split(b["arrays"], b["n"], base["codes"])):
+    for d, x, y in zip(h["arrays"], _split(h["arrays"], c["codes"]),
+                       _split(b["arrays"], base["codes"])):
         w = _delta(d, x, y)
         if w is None:
             return None
         raw.append(w)
     head = [PROTO_VERSION, FORM_DELTA, h["seq"], b["seq"], h["audio_sample"], h["capture_wall_ns"],
-            h["protection"], _per_frame(h), zlib.crc32(c["codes"])]
+            h["protection"], h["config_rev"], h["config_applied_at"], _per_frame(h),
+            zlib.crc32(c["codes"])]
     payload = _deflate(b"".join(raw)) if h["arrays"] else b""
     return [c["topic"].encode(), _body(head, payload)]
 
@@ -833,12 +907,15 @@ def decode_wire(parts: list):
             raise DecodeError(f"elem {d['elem']!r}")
     if h["kind"] != expected_kind or list(h["meta"].keys()) != [h["kind"]]:
         raise DecodeError("kind mismatch")
+    for d in descs:
+        if not isinstance(d["len"], int) or d["len"] > MAX_N or d["len"] != array_count(d["name"], n, h["meta"]):
+            raise DecodeError(f"{d['name']}: {d['len']!r} elements")
     if expected_kind == "bins" and h["meta"]["bins"]["stage"] != topic["stage"]:
         raise DecodeError("stage mismatch")
     codes = b""
     if descs:
-        expected = sum(array_size(d["elem"], n) for d in descs)
-        codes = b"".join(_unintra(d, w) for d, w in zip(descs, _split(descs, n, _inflate(payload, expected))))
+        expected = sum(array_size(d["elem"], d["len"]) for d in descs)
+        codes = b"".join(_unintra(d, w) for d, w in zip(descs, _split(descs, _inflate(payload, expected))))
     crc = h.pop("crc")
     h.pop("form")
     if zlib.crc32(codes) != crc:
@@ -860,15 +937,14 @@ def apply(delta: dict, base: dict) -> dict:
     else:
         raw = b""
     codes = b"".join(_undelta(x, w, y) for x, w, y in zip(
-        b["arrays"], _split(b["arrays"], b["n"], raw), _split(b["arrays"], b["n"], base["codes"])))
+        b["arrays"], _split(b["arrays"], raw), _split(b["arrays"], base["codes"])))
     if zlib.crc32(codes) != d["crc"]:
         raise DecodeError("crc")
     h = dict(b)
-    for k in ("seq", "audio_sample", "capture_wall_ns", "protection"):
+    for k in _DELTA_STAMP:
         h[k] = d[k]
-    if d["meta"] is not None:
-        (kind, m), = b["meta"].items()
-        h["meta"] = {kind: {**m, **d["meta"]}}
+    (kind, m), = b["meta"].items()
+    h["meta"] = {kind: with_per_frame(kind, m, d["meta"])}
     return {"topic": base["topic"], "header": h, "codes": codes}
 
 
