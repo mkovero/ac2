@@ -714,7 +714,7 @@ fn slow_the_measurement_tree_from_an_empty_daemon() -> R {
     };
     assert_eq!(
         c.lines[0],
-        "transfer function · running · it has 2 stored traces and 1 math trace."
+        "transfer function · stopped · it has 2 stored traces and 1 math trace."
     );
     assert_eq!(c.index, ac2_scene::meas_list::KEEP);
     d.key("Enter");
