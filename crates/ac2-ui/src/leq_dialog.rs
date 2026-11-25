@@ -734,18 +734,6 @@ impl LeqDialog {
         self.notice = Some(ac2_scene::osc::CHANGED_ELSEWHERE.to_owned());
     }
 
-    /// The meter committed again with what Enter writes unchanged (its panes, colour or
-    /// offset, a start, a job restart): the dialog takes that commit's `edit_rev`, as Enter
-    /// then overwrites nothing the dialog has not seen.
-    pub fn follow(&mut self, m: &Measurement) {
-        let same = m.config.name == self.name
-            && m.config.scope == self.base_scope
-            && matches!(&m.config.kind, MeasKind::Spl { config } if *config == self.base);
-        if m.id == self.meas && m.edit_rev > self.base_rev && same {
-            self.base_rev = m.edit_rev;
-        }
-    }
-
     /// The `meas.update` Enter sends: on the rev the dialog was opened on, with the scope
     /// the dialog chose.
     pub fn command(&self) -> Result<ac2_proto::Command, String> {

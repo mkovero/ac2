@@ -6,7 +6,7 @@ use crate::common;
 use std::time::Duration;
 
 use ac2_proto::event::{Change, Patch};
-use ac2_proto::model::{EqEdit, FinderBand, MeasConfig, Measurement};
+use ac2_proto::model::{EqEdit, FinderBand, MeasConfig, Measurement, PaneLayout};
 use ac2_proto::units::{Db, MeasId, Rev, Seconds};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, Request};
 use ac2d::{Daemon, Handle};
@@ -43,18 +43,15 @@ fn stale(e: &ProtoError, meas: MeasId) -> Rev {
     }
 }
 
-/// A whole-config write on a base another commit has moved is refused with the current
-/// token, and leaves the measurement as it was.
+/// A whole-config write on a base another configuration change has moved is refused with
+/// the current token, and leaves the measurement as it was.
 #[test]
 fn a_stale_base_is_refused_and_changes_nothing() {
     let (h, mut c, _sub) = start("edit-stale");
     let m = c.measurement(Command::MeasCreate {
         config: transfer("main"),
     });
-    let moved = c.measurement(Command::MeasOffset {
-        meas: m.id,
-        offset: Db(2.0),
-    });
+    let moved = c.measurement(update(&m, m.edit_rev, transfer("moved")));
     assert!(moved.edit_rev > m.edit_rev);
     let rev = c.state_rev();
     let e = c
@@ -66,8 +63,9 @@ fn a_stale_base_is_refused_and_changes_nothing() {
     h.shutdown();
 }
 
-/// An accepted edit is one commit of the measurement, and its token is that commit's rev,
-/// in the reply as in the state; a field edit with no base moves it as well.
+/// An accepted configuration change is one commit of the measurement, and its token is
+/// that commit's rev, in the reply, the event and the state; a whole-config write made on
+/// the reply's token goes through.
 #[test]
 fn an_accepted_edit_raises_the_token_once() {
     let (h, mut c, sub) = start("edit-once");
@@ -75,24 +73,155 @@ fn an_accepted_edit_raises_the_token_once() {
         config: spl("meter", 0),
     });
     let before = c.state_rev();
-    let after = c.measurement(Command::MeasColour {
-        meas: m.id,
-        colour: None,
-    });
+    let after = c.measurement(update(&m, m.edit_rev, spl("renamed", 0)));
     assert_eq!(after.edit_rev, Rev(before.0 + 1));
     assert_eq!(c.state_rev(), after.edit_rev);
     assert_eq!(c.meas(m.id).edit_rev, after.edit_rev);
     let e = sub
         .event(T, |e| e.rev == after.edit_rev)
-        .expect("the colour's event");
+        .expect("the update's event");
     assert!(
         matches!(&e.change, Change::Measurement(Patch::Set(x)) if x.edit_rev == e.rev),
         "{e:?}"
     );
-    // The whole-config write made on the reply's token goes through.
-    let renamed = c.measurement(update(&m, after.edit_rev, spl("renamed", 0)));
+    let again = c.measurement(update(&m, after.edit_rev, spl("again", 0)));
+    assert_eq!(again.config.name, "again");
+    assert_eq!(again.edit_rev, c.state_rev());
+    h.shutdown();
+}
+
+/// Every commit of a measurement that leaves its configuration leaves its token: a start
+/// and a stop, its colour, offset and panes, its EQ sets, and its panes pruned when a
+/// measurement they draw is deleted. (A stream reopened on another grid commits the
+/// measurement the same way; the fake device offers one rate only.) A whole-config write made before all of them goes through after them.
+#[test]
+fn commits_that_leave_the_configuration_leave_the_token() {
+    use ac2_proto::model::layout;
+    let (h, mut c, _sub) = start("edit-fields");
+    let m = c.measurement(Command::MeasCreate {
+        config: transfer("main"),
+    });
+    let other = c.measurement(Command::MeasCreate {
+        config: transfer("other"),
+    });
+    let token = m.edit_rev;
+    let committed = |c: &mut Client, cmd: Command, what: &str| {
+        let rev = c.state_rev();
+        c.ok(cmd);
+        assert!(c.state_rev() > rev, "{what}: committed");
+        assert_eq!(c.edit_rev(m.id), token, "{what}: the token stays");
+    };
+    committed(&mut c, Command::MeasStart { meas: m.id }, "start");
+    committed(
+        &mut c,
+        Command::MeasColour {
+            meas: m.id,
+            colour: Some(ac2_proto::model::ColourFamily::Neutral),
+        },
+        "colour",
+    );
+    committed(
+        &mut c,
+        Command::MeasOffset {
+            meas: m.id,
+            offset: Db(3.0),
+        },
+        "offset",
+    );
+    let eq = |edit| Command::MeasEq { meas: m.id, edit };
+    committed(
+        &mut c,
+        eq(EqEdit::New {
+            name: None,
+            realisation: None,
+            peak_q: None,
+            sections: Vec::new(),
+        }),
+        "a new EQ set",
+    );
+    let set = c.meas(m.id).eq[0].clone();
+    committed(
+        &mut c,
+        eq(EqEdit::Put {
+            set: set.id,
+            base: set.rev,
+            body: ac2_proto::model::EqBody {
+                enabled: !set.body.enabled,
+                ..set.body.clone()
+            },
+        }),
+        "an EQ put",
+    );
+    committed(
+        &mut c,
+        eq(EqEdit::Delete { set: set.id }),
+        "an EQ set deleted",
+    );
+    let mut l = ac2_proto::samples::pane_layout();
+    let mut pane = l.panes_mut()[0].clone();
+    pane.kind = layout::PaneKind::Transfer;
+    pane.content = layout::PaneContent::Curves {
+        entries: vec![layout::PaneEntry {
+            rig: layout::RigRef::ThisRig,
+            what: layout::EntryRef::Group { meas: other.id },
+        }],
+    };
+    let layout = PaneLayout::Pane {
+        pane: Box::new(pane),
+    };
+    committed(
+        &mut c,
+        Command::MeasLayout {
+            meas: m.id,
+            layout: Some(layout.clone()),
+        },
+        "its panes",
+    );
+    committed(
+        &mut c,
+        Command::MeasDelete {
+            meas: other.id,
+            traces: ac2_proto::model::OwnedTraces::Delete,
+        },
+        "a measurement its panes draw deleted",
+    );
+    assert_ne!(c.meas(m.id).layout, Some(layout), "its panes were pruned");
+    committed(&mut c, Command::MeasStop { meas: m.id }, "stop");
+    let renamed = c.measurement(update(&m, token, transfer("renamed")));
     assert_eq!(renamed.config.name, "renamed");
-    assert_eq!(renamed.edit_rev, c.state_rev());
+    assert!(renamed.edit_rev > token);
+    h.shutdown();
+}
+
+/// A display-only change is a configuration change: another client's write made before it
+/// is refused, as it would overwrite the change unseen.
+#[test]
+fn a_display_change_elsewhere_refuses_a_write_made_before_it() {
+    let (h, mut a, _sub) = start("edit-display");
+    let mut b = Client::connect(h.context(), h.ctrl_endpoint());
+    let config = |style| MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
+        name: "spectrum".into(),
+        kind: ac2_proto::model::MeasKind::Spectrum {
+            config: ac2_proto::model::SpectrumConfig {
+                display: ac2_proto::model::SpectrumDisplay {
+                    style,
+                    ..ac2_proto::model::SpectrumConfig::on_input(1).display
+                },
+                ..ac2_proto::model::SpectrumConfig::on_input(1)
+            },
+        },
+    };
+    use ac2_proto::model::SpectrumStyle;
+    let m = a.measurement(Command::MeasCreate {
+        config: config(SpectrumStyle::Bars),
+    });
+    let by_a = a.measurement(update(&m, m.edit_rev, config(SpectrumStyle::Line)));
+    assert!(by_a.edit_rev > m.edit_rev);
+    let e = b
+        .call(update(&m, m.edit_rev, config(SpectrumStyle::Bars)))
+        .expect_err("made before a's style");
+    assert_eq!(stale(&e, m.id), by_a.edit_rev);
     h.shutdown();
 }
 

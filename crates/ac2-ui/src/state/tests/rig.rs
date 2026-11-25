@@ -210,29 +210,30 @@ fn a_conflict_on_apply_keeps_the_leq_page_and_its_edits() {
     assert!(t.st.overlay.leq().is_none());
 }
 
-/// The open page follows a commit that leaves the meter's configuration as it was (its
-/// panes laid out meanwhile, by this app or another): Enter names the newer token. A
-/// configuration changed elsewhere it does not follow, so Enter is refused for it.
+/// The open page keeps the token it was made on: a commit that leaves the meter's
+/// configuration (its colour set meanwhile) leaves the token too, so Enter goes on it; a
+/// configuration changed elsewhere moves the token, and Enter, still on the old one, is
+/// refused for it.
 #[test]
-fn the_leq_page_follows_a_commit_that_leaves_its_configuration() {
+fn the_leq_page_keeps_its_token_over_commits_that_leave_the_configuration() {
     let mut t = T::new();
     t.conn(mirror(with_spl()));
     t.type_key("Shift+L", "L");
     let opened = t.st.overlay.leq().expect("open").base_rev;
     let mut s = with_spl();
-    s.measurements[2].edit_rev = Rev(opened.0 + 1);
     s.measurements[2].colour = Some(ac2_proto::model::ColourFamily::Neutral);
     t.conn(mirror(s.clone()));
-    assert_eq!(
-        t.st.overlay.leq().expect("open").base_rev,
-        Rev(opened.0 + 1)
-    );
     s.measurements[2].edit_rev = Rev(opened.0 + 2);
     s.measurements[2].config.name = "Renamed".into();
     t.conn(mirror(s));
+    assert_eq!(t.st.overlay.leq().expect("open").base_rev, opened);
+    let r = t.key("Enter");
+    let Some((Command::MeasUpdate { base, .. }, _)) = call(&r) else {
+        panic!("{r:?}")
+    };
     assert_eq!(
-        t.st.overlay.leq().expect("open").base_rev,
-        Rev(opened.0 + 1)
+        *base, opened,
+        "made on what the page showed, for the daemon to refuse"
     );
 }
 

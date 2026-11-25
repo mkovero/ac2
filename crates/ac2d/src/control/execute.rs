@@ -456,6 +456,7 @@ impl Control {
             config,
             config_rev: Rev(self.store.rev().0 + 1),
             edit_rev: Rev(self.store.rev().0 + 1),
+            rev: Rev(self.store.rev().0 + 1),
             running: false,
             grid_id,
             colour: None,

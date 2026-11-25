@@ -43,6 +43,7 @@ fn transfer(id: u32, name: &str) -> Measurement {
         },
         config_rev: Rev(1),
         edit_rev: Rev(1),
+        rev: Rev(1),
         running: false,
         grid_id: None,
         colour: None,

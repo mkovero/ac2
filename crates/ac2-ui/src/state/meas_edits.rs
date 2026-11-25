@@ -1,19 +1,22 @@
-//! An edit made on a base waits for the edits of its measurement in flight. Every commit of
-//! a measurement moves its `edit_rev`, so a `meas.update` (or an EQ `put`) made before the
-//! last edit's reply would be refused as stale: it waits for the replies of the edits before
-//! it and goes on the `edit_rev` the last reply carries. The edits that carry no base
-//! (colour, offset, layout, the other EQ edits, start, stop) are last write wins and go at
-//! once, unless a based edit waits ahead of them: the daemon executes one client's requests
-//! in the order sent.
+//! An edit made on a base waits for the edits of its measurement in flight. A `meas.update`
+//! moves the measurement's `edit_rev` (only a change of its configuration does), and an EQ
+//! edit its set's `rev`, so a `meas.update` (or an EQ `put`) made before the reply of the
+//! one before it would be refused as stale: it waits for the replies of the edits before it
+//! and goes on the token the newer (by the measurement's `rev`, moved by every commit) of
+//! the last reply and the mirror carries. The edits that carry no base (colour, offset,
+//! layout, the other EQ edits, start, stop) are last write wins and go at once, unless a
+//! based edit waits ahead of them: the daemon executes one client's requests in the order
+//! sent.
 //!
 //! The next edit is made on what this app will have made of the measurement: the newer of
 //! the mirror and the last reply, with the configuration of the newest `meas.update` sent
 //! or waiting ([`AppState::meas`] reads it). A step key pressed twice before the first
 //! step's reply steps twice; a toggle pressed twice ends where it began. A waiting edit then
-//! only takes the newer `edit_rev`, and only when the replies show that nothing but this
-//! app's own edits came between; otherwise it goes as made and the daemon refuses it.
+//! only takes the newer token, and only when what it replaces is still what it was made on
+//! (nothing but this app's own edits changed it); otherwise it goes as made and the daemon
+//! refuses it.
 //!
-//! A `stale_meas` refusal means another client or the daemon committed the measurement in
+//! A `stale_meas` refusal means another client or the daemon changed the configuration in
 //! between: it is said, and the edits waiting behind it are dropped, as they were made on
 //! what the operator saw before that change. So are the edits waiting when the link goes
 //! down or another daemon answers: the ids they name may be another measurement's now. Each
@@ -95,7 +98,7 @@ impl Chain {
 
     fn refresh(&mut self, mirror: Option<&Measurement>) {
         self.view = mirror.and_then(|m| {
-            let known = self.known.as_ref().filter(|k| k.edit_rev > m.edit_rev);
+            let known = self.known.as_ref().filter(|k| k.rev > m.rev);
             let intent = self.intent();
             if known.is_none() && intent.is_none_or(|c| *c == m.config) {
                 return None;
@@ -150,7 +153,10 @@ impl AppState {
     }
 
     fn send_next_edit(&mut self, id: MeasId, out: &mut Vec<Request>) {
-        let Some(chain) = self.rig.meas_edits.chains.get_mut(&id) else {
+        let rig = &mut self.rig;
+        let mirror = (rig.mirror.as_ref().and_then(|m| m.state.as_deref()))
+            .and_then(|s| s.measurements.iter().find(|m| m.id == id));
+        let Some(chain) = rig.meas_edits.chains.get_mut(&id) else {
             return;
         };
         while chain
@@ -161,7 +167,10 @@ impl AppState {
             let Some(q) = chain.queued.pop_front() else {
                 return;
             };
-            let cmd = made_on(chain.known.as_ref(), q.built_on.as_ref(), q.cmd);
+            // The reply and the event of one commit come apart: the mirror may already hold
+            // what the last reply said, and the chain then forgot the reply.
+            let newest = [chain.known.as_ref(), mirror].into_iter().flatten();
+            let cmd = made_on(newest, q.built_on.as_ref(), q.cmd);
             chain.sent.push_back(match &cmd {
                 Command::MeasUpdate { config, .. } => Some(config.clone()),
                 _ => None,
@@ -178,7 +187,7 @@ impl AppState {
             let mirror = self.rig.mirrored_meas(*id);
             if c.known
                 .as_ref()
-                .is_some_and(|k| mirror.is_none_or(|m| m.edit_rev >= k.edit_rev))
+                .is_some_and(|k| mirror.is_none_or(|m| m.rev >= k.rev))
             {
                 c.known = None;
             }
@@ -205,7 +214,7 @@ impl AppState {
             chain.sent.pop_front();
             match &result {
                 Ok(Some(m)) => {
-                    if chain.known.as_ref().is_none_or(|k| k.edit_rev < m.edit_rev) {
+                    if chain.known.as_ref().is_none_or(|k| k.rev < m.rev) {
                         chain.known = Some((**m).clone());
                     }
                 }
@@ -314,33 +323,33 @@ fn based(cmd: &Command) -> bool {
     )
 }
 
-/// `cmd`, made on `built_on`, on the newer measurement `known` the replies of this app's
-/// edits carry: only when its base is `built_on`'s (a base deliberately older stays, for
-/// the daemon to refuse) and what it replaces is as it was made on (nothing but this app's
-/// own edits came between). Otherwise as made.
-fn made_on(known: Option<&Measurement>, built_on: Option<&Measurement>, cmd: Command) -> Command {
-    let (Some(k), Some(b)) = (known, built_on) else {
+/// `cmd`, made on `built_on`, on the newest of `newer` (the last reply of this app's edits,
+/// the mirror) when that is newer than `built_on`: only when its base is `built_on`'s (a base
+/// deliberately older stays, for the daemon to refuse) and what it replaces is as it was
+/// made on (nothing but this app's own edits changed it). Otherwise as made.
+fn made_on<'a>(
+    newer: impl Iterator<Item = &'a Measurement>,
+    built_on: Option<&Measurement>,
+    cmd: Command,
+) -> Command {
+    let Some(b) = built_on else {
         return cmd;
     };
-    if k.edit_rev <= b.edit_rev {
-        return cmd;
-    }
+    let newest = newer.max_by_key(|k| k.rev).filter(|k| k.rev > b.rev);
     match cmd {
-        Command::MeasUpdate { meas, base, config }
-            if base == b.edit_rev && k.config == b.config =>
-        {
-            Command::MeasUpdate {
-                meas,
-                base: k.edit_rev,
-                config,
-            }
+        Command::MeasUpdate { meas, base, config } => {
+            let base = match newest {
+                Some(k) if base == b.edit_rev && k.config == b.config => k.edit_rev,
+                _ => base,
+            };
+            Command::MeasUpdate { meas, base, config }
         }
         Command::MeasEq {
             meas,
             edit: EqEdit::Put { set, base, body },
         } => {
             let was = b.eq.iter().find(|s| s.id == set);
-            let now = k.eq.iter().find(|s| s.id == set);
+            let now = newest.and_then(|k| k.eq.iter().find(|s| s.id == set));
             let base = match (was, now) {
                 (Some(w), Some(n)) if w.rev == base && w.body == n.body => n.rev,
                 _ => base,

@@ -4,7 +4,7 @@
 use crate::harness::{Driver, R, on_rig};
 use crate::window::{MAIN_L, Rig};
 use ac2_proto::Command;
-use ac2_proto::model::{ColourFamily, MeasKind, SmoothingFraction};
+use ac2_proto::model::{MeasConfig, MeasKind, SmoothingFraction};
 use ac2_ui::state::{AppState, Msg, PaneKind};
 
 fn smoothing(s: &AppState) -> Option<SmoothingFraction> {
@@ -49,18 +49,24 @@ fn steps_pressed_faster_than_the_replies_each_count() -> R {
     Ok(())
 }
 
-/// Another client commits Main L while the app's steps wait: the app says it changed
-/// elsewhere, and its next step goes and lands.
+/// Another client changes Main L's configuration after the app last saw it, and the app
+/// steps twice on what it saw: it says it changed elsewhere, and its next step goes and
+/// lands.
 #[test]
-fn a_commit_elsewhere_between_steps_holds_nothing_back() -> R {
+fn a_change_elsewhere_between_steps_holds_nothing_back() -> R {
     let rig = Rig::start()?;
     let mut d = on_main_l(&rig)?;
-    d.key("K");
-    d.key("K");
-    rig.cli.call(Command::MeasColour {
+    let m = rig.meas(MAIN_L)?;
+    rig.call(Command::MeasUpdate {
         meas: MAIN_L,
-        colour: Some(ColourFamily::Hue { index: 2 }),
+        base: m.edit_rev,
+        config: MeasConfig {
+            name: "Main L (FOH)".into(),
+            ..m.config
+        },
     })?;
+    d.key("K");
+    d.key("K");
     d.until("the change elsewhere said", |s| {
         s.toasts
             .list

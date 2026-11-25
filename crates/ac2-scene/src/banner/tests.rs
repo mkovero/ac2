@@ -243,6 +243,7 @@ fn no_delay_estimate_says_why() {
         },
         config_rev: Rev(1),
         edit_rev: Rev(1),
+        rev: Rev(1),
         running: true,
         grid_id: None,
         colour: None,

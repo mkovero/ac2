@@ -735,14 +735,20 @@ a stored trace or math trace filed under a rig measurement is saved in a session
 owner (as an import), and a load replaces it like any other.
 
 `meas.update` carries `base`, the measurement's `edit_rev` the edit was made on. Another
-`edit_rev` (a commit of the measurement since, by any client or the daemon) is `conflict`
+`edit_rev` (its configuration changed since, by any client or the daemon) is `conflict`
 with `detail: stale_meas {meas, edit_rev}` (the current `edit_rev`): the client re-reads the
-measurement rather than overwrite that commit. Every commit of the measurement moves
-`edit_rev` (configuration, name, colour, offset, layout, EQ sets, running); `meas.colour`,
-`meas.offset`, `meas.layout` and `meas.eq` other than `put` take no base and are last write
-wins. Every reply that carries a measurement carries it as committed, so a client making
-several edits in a row takes the next `base` from the reply before (the event may come
-later).
+measurement rather than overwrite that change. `edit_rev` is the rev of the commit that
+created the measurement or last changed its `config` (name, kind with all its settings,
+display ones included, scope); the daemon stamps it on every commit by comparing the
+configuration with the stored one, so a commit that leaves it (running, `grid_id`, colour,
+offset, layout, EQ sets: a start or stop, a job restarted or moved to another grid, panes
+laid out or pruned) leaves `edit_rev`, and a `meas.update` made before it still goes
+through: it writes none of those fields. `meas.colour`, `meas.offset`, `meas.layout` and
+`meas.eq` take no `edit_rev` base and are last write wins (`meas.eq put` names its set's
+`rev`). Every reply that carries a measurement carries it as committed, so a client making
+several configuration edits in a row takes the next `base` from the reply before, or from
+its mirror when the event came first: the measurement's `rev`, moved by every commit of it,
+says which of the two is the newer.
 
 `meas.update` replaces the configuration and restarts a running job (averages start over;
 a spectrum's new `resolution` (§3.2 *Spectrum resolution*) or `window` included: frames of
@@ -2269,8 +2275,9 @@ The classification is one exhaustive match over the commands in `ac2-proto`
 The mirrored `State` holds: `stream` (`epoch`, `open: OpenStream | nil`, `stopped:
 AudioStopped | nil`; §4.1.1),
 `measurements` (`id`, `config`, `config_rev` (the rev of the last commit that changed
-what its job computes), `edit_rev` (the rev of its last commit, whatever changed: the
-`base` of `meas.update`), `running`, `grid_id`, `colour`, `layout`, `offset`, `eq`),
+what its job computes), `edit_rev` (the rev of the commit that created it or last
+changed its `config`: the `base` of `meas.update`), `rev` (the rev of its last commit,
+whatever changed: which of two copies, a reply and the mirror's, is the newer; never a base), `running`, `grid_id`, `colour`, `layout`, `offset`, `eq`),
 `delays` (`Delay`, §3.2 delay finder: one per transfer measurement, sorted by `meas`),
 `delay_findings` (`DelayFinding`: a transfer measurement's last finding, sorted by `meas`),
 `traces` (`TraceMeta`: `id`, `edit` {name, colour, visible, locked, order, offset,

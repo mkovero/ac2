@@ -26,7 +26,7 @@ pub fn target(cmd: &Command) -> Option<MeasId> {
 /// Why a measurement edit was not applied.
 #[derive(Clone, Debug, PartialEq)]
 pub enum MeasRefusal {
-    /// Made on an `edit_rev` another commit has moved: the measurement changed meanwhile.
+    /// Made on an `edit_rev` another commit has moved: its configuration changed meanwhile.
     Stale(String),
     /// Another `conflict` (an EQ set's rev moved).
     Conflict(String),

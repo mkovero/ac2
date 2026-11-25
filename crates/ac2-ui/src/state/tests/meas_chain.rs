@@ -33,6 +33,7 @@ fn a_second_update_is_made_on_the_first_ones_reply() {
     // The reply: committed under a newer token, which the mirror does not hold yet.
     let committed = Measurement {
         edit_rev: Rev(before.edit_rev.0 + 1),
+        rev: Rev(before.edit_rev.0 + 1),
         config: sent,
         ..before.clone()
     };
@@ -102,6 +103,7 @@ fn commit(t: &mut T, r: &[Request]) -> Vec<Request> {
     };
     let m = Measurement {
         edit_rev: Rev(base.0 + 1),
+        rev: Rev(base.0 + 1),
         config: config.clone(),
         ..t.st.rig.meas(*meas).expect("mirrored").clone()
     };
@@ -188,6 +190,71 @@ fn a_cycle_round_before_any_reply_ends_where_it_began() {
     }
     assert_eq!(seen[2], start, "{seen:?}");
     assert_ne!(seen[0], seen[1]);
+}
+
+/// The mirror's copy of measurement 1 replaced by `m`.
+fn mirrored(t: &mut T, m: &Measurement) -> Vec<Request> {
+    let mut s = t.st.daemon().expect("mirrored").clone();
+    let i = (s.measurements.iter().position(|x| x.id == m.id)).expect("listed");
+    s.measurements[i] = m.clone();
+    t.conn(mirror(s))
+}
+
+/// A step made while its measurement's panes are being stored waits for that call, then goes
+/// on the token it was made on: storing panes leaves the configuration, so it leaves the
+/// token, whether the layout's event comes before its reply or after.
+#[test]
+fn an_update_made_while_a_layout_is_in_flight_goes_on_its_token() {
+    let mut t = T::new();
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
+    let before = t.st.meas(MeasId(1)).expect("Main L").clone();
+    let n = t.key("N");
+    let Some((Command::MeasLayout { layout, .. }, what)) = calls(&n)
+        .into_iter()
+        .find(|(c, _)| matches!(c, Command::MeasLayout { .. }))
+    else {
+        panic!("no meas.layout in {n:?}")
+    };
+    let laid_out = Measurement {
+        layout: layout.clone(),
+        rev: Rev(before.rev.0 + 1),
+        ..before.clone()
+    };
+    let what = what.to_owned();
+    assert!(update(&t.key("K")).is_none(), "waits for the layout");
+    // The event first, then the reply: the order the local pair often brings them in.
+    let mut r = mirrored(&mut t, &laid_out);
+    r.extend(t.conn(ConnEvent::MeasEdited {
+        meas: MeasId(1),
+        what,
+        result: Ok(Some(Box::new(laid_out))),
+    }));
+    assert_eq!(update(&r).map(|u| u.0), Some(before.edit_rev), "{r:?}");
+}
+
+/// A second step waiting on the first, whose event reaches the mirror before its reply: the
+/// reply is then no news, and the second goes on the token the mirror shows.
+#[test]
+fn a_waiting_update_takes_the_token_the_mirror_shows_before_the_reply() {
+    let mut t = T::new();
+    let before = t.st.meas(MeasId(1)).expect("Main L").clone();
+    let first = t.key("K");
+    let (_, sent) = update(&first).expect("goes at once");
+    let committed = Measurement {
+        edit_rev: Rev(before.edit_rev.0 + 1),
+        rev: Rev(before.edit_rev.0 + 1),
+        config: sent.clone(),
+        ..before
+    };
+    let what = update_what(&first);
+    assert!(update(&t.key("Alt+K")).is_none(), "waits for the first");
+    let mut r = mirrored(&mut t, &committed);
+    r.extend(t.conn(ConnEvent::MeasEdited {
+        meas: MeasId(1),
+        what,
+        result: Ok(Some(Box::new(committed.clone()))),
+    }));
+    assert_eq!(update(&r).map(|u| u.0), Some(committed.edit_rev), "{r:?}");
 }
 
 /// A layout call dropped behind a stale refusal is answered: the next layout of the
@@ -298,8 +365,7 @@ fn a_leq_apply_on_an_older_rev_goes_as_made() {
     }
     t.conn(mirror(s.clone()));
     assert!(update(&t.key("Enter")).is_none(), "waits for the colour");
-    let mut m = s.measurements[2].clone();
-    m.edit_rev = Rev(opened.0 + 6);
+    let m = s.measurements[2].clone();
     let r = t.conn(ConnEvent::MeasEdited {
         meas: MeasId(4),
         what: calls(&colour)[0].1.to_owned(),

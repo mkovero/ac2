@@ -105,12 +105,13 @@
             "scope": "session"
           },
           "config_rev": 3,
-          "edit_rev": 6,
+          "edit_rev": 3,
           "eq": [],
           "grid_id": "12070133294201089888",
           "id": 1,
           "layout": null,
           "offset": 0.0,
+          "rev": 6,
           "running": true
         },
         {
@@ -144,12 +145,13 @@
             "scope": "session"
           },
           "config_rev": 7,
-          "edit_rev": 9,
+          "edit_rev": 7,
           "eq": [],
           "grid_id": "12070133294201089888",
           "id": 2,
           "layout": null,
           "offset": 0.0,
+          "rev": 9,
           "running": true
         },
         {
@@ -181,12 +183,13 @@
             "scope": "session"
           },
           "config_rev": 10,
-          "edit_rev": 11,
+          "edit_rev": 10,
           "eq": [],
           "grid_id": "18085098523030766332",
           "id": 3,
           "layout": null,
           "offset": 0.0,
+          "rev": 11,
           "running": true
         },
         {
@@ -252,12 +255,13 @@
             "scope": "session"
           },
           "config_rev": 12,
-          "edit_rev": 14,
+          "edit_rev": 12,
           "eq": [],
           "grid_id": null,
           "id": 4,
           "layout": null,
           "offset": 0.0,
+          "rev": 14,
           "running": true
         }
       ],
@@ -377,11 +381,11 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-13984649"
+              "since": "now-10936656"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-13984649"
+              "since": "now-10936656"
             }
           },
           "started_at": null,
@@ -389,31 +393,31 @@
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-13984649",
+              "since": "now-10936656",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-13984649",
+              "since": "now-10936656",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-13984649",
+              "since": "now-10936656",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-13984649",
+              "since": "now-10936656",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-13984649",
+              "since": "now-10936656",
               "weighting": "a"
             }
           ]
@@ -454,7 +458,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-53490211",
+          "opened_at": "now-51610462",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -631,7 +635,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-5325273"
+        "saved_at": "now-4671453"
       }
     },
     "traces": []
