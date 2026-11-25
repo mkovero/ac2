@@ -4,7 +4,6 @@
 use std::time::Instant;
 
 use ac2_scene::autosave::AutosaveTone;
-use ac2_scene::format;
 use ac2_scene::recording::RecordingTone;
 use ac2_scene::stim_item::{StimInputs, StimItem};
 use ac2_scene::top_bar::{Bar, BarAudio, BarInputs, BarLink, BarSession, Note, Place, Tone};
@@ -46,22 +45,7 @@ impl App {
             ac2_scene::stimulus::holder(o, generator.owner_local, &st.rig_name(st.active()))
         });
         let state = st.stim_state()?;
-        let level = st.rig.stimulus.level.map_or_else(
-            || "no level".to_string(),
-            |l| format!("{} dBFS", format::signed(l.0, 1)),
-        );
-        let prefix = if st.rig.sweep.plan.is_some() {
-            "sweep ".to_owned()
-        } else {
-            ac2_scene::stimulus::level_prefix(st.generator_signal().as_ref())
-        };
-        let outputs = ac2_scene::rig::stimulus_outputs(
-            &st.rig.stimulus.outputs,
-            st.daemon()
-                .map(|s| s.outputs.as_slice())
-                .unwrap_or_default(),
-        );
-        let plays = format!("{prefix}{level} → {outputs}");
+        let plays = st.stim_plays();
         let tip = ac2_scene::stimulus::level_tip(&key_hint(self, CommandId::StimulusLevel));
         let next = self.stimulus_next_hint();
         let rig = st.many_rigs().then(|| st.rig_name(st.active()));
@@ -72,6 +56,7 @@ impl App {
             off_keys: next.as_ref().map(|(_, short)| short.as_str()),
             keys: st.overlay == crate::state::Overlay::None,
             run: st.own_stim() == crate::state::OwnStim::Run,
+            elsewhere: st.own_stim() == crate::state::OwnStim::Elsewhere,
             rig: rig.as_deref(),
             next_long: next.as_ref().map(|(long, _)| long.as_str()),
             tip: &tip,
@@ -80,13 +65,14 @@ impl App {
 
     /// What Space (or the level key) starts next on the focused view, long and short. With
     /// a window open the window has Space and Enter; only the missing level is said then.
-    /// Nothing while a sweep runs: its progress strip says it.
+    /// Nothing while a sweep or dynamics run runs: its progress says it.
     fn stimulus_next_hint(&self) -> Option<(String, String)> {
         let st = &self.state;
-        let running = st
-            .daemon()
-            .and_then(|s| s.sweep.as_ref())
-            .is_some_and(|r| r.active());
+        // A run between its last step and its result still holds Space inert.
+        let running = st.daemon().is_some_and(|s| {
+            s.sweep.as_ref().is_some_and(|r| r.active())
+                || s.dynamics.as_ref().is_some_and(|r| r.active())
+        }) || st.own_stim() == crate::state::OwnStim::Run;
         let window = st.overlay != crate::state::Overlay::None;
         st.stimulus_next()
             .filter(|_| !running)
@@ -223,10 +209,11 @@ impl App {
     /// The stop at the bar's right end; `None` while nothing is armed or playing.
     pub fn bar_stop(&self) -> Option<BarStop> {
         let st = &self.state;
-        let running = st
-            .daemon()
-            .and_then(|s| s.sweep.as_ref())
-            .is_some_and(|r| r.active());
+        // A run between its last step and its result still holds Space inert.
+        let running = st.daemon().is_some_and(|s| {
+            s.sweep.as_ref().is_some_and(|r| r.active())
+                || s.dynamics.as_ref().is_some_and(|r| r.active())
+        }) || st.own_stim() == crate::state::OwnStim::Run;
         let elsewhere = st.live_elsewhere();
         if !(running || st.stimulus_live() || !elsewhere.is_empty()) {
             return None;

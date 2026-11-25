@@ -297,9 +297,10 @@ impl AppState {
             StimPhase::Stopping => {
                 self.toast("stopping… arms the re-sweep once the stop is done (Esc cancels)");
             }
-            StimPhase::Armed => self.toast(format!(
-                "armed: a run of {} · Enter plays the sweep · Esc stops",
-                self.rig.sweep.plan.as_ref().map_or("", |p| p.name.as_str())
+            StimPhase::Armed => self.toast(ac2_scene::stim_item::armed_sweep_toast(
+                &ac2_scene::stim_item::sweep_run_of(
+                    self.rig.sweep.plan.as_ref().map_or("", |p| p.name.as_str()),
+                ),
             )),
             _ => {}
         }
@@ -657,19 +658,13 @@ impl AppState {
         true
     }
 
-    /// This app holds the stimulus lease, armed or playing: its own arm landed, or the
-    /// mirror names this client as the owner of a live generator.
+    /// This connection holds the stimulus lease, armed or playing: its own arm landed.
     pub(super) fn holds_stimulus(&self) -> bool {
         match self.rig.stimulus.phase {
             StimPhase::Armed | StimPhase::FireRequested | StimPhase::Firing => true,
-            StimPhase::Stopping => false,
-            StimPhase::Idle | StimPhase::Arming => self.daemon().is_some_and(|s| {
-                (s.generator.armed || s.generator.firing)
-                    && s.generator
-                        .owner
-                        .as_ref()
-                        .is_some_and(|o| Some(o) == self.my_client_id())
-            }),
+            // No lease this connection holds: an arm not yet granted, a stop on its way, or
+            // one the mirror shows under this name from an earlier connection.
+            StimPhase::Stopping | StimPhase::Idle | StimPhase::Arming => false,
         }
     }
 

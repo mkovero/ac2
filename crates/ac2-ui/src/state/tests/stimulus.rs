@@ -701,10 +701,11 @@ fn a_stimulus_this_app_does_not_hold_keeps_playing() {
     let mut t = T::new();
     t.put(PaneKind::Transfer);
     assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
-    // This client's lease as only the mirror shows it.
+    // A lease under this client's name that only the mirror shows (an earlier
+    // connection's): this connection holds none to end; Space stops it.
     s.generator.owner = Some(ClientId("c1".into()));
     t.conn(mirror(s));
-    assert_eq!(meas_stop(&t.key("S")), (STIM_TOO.into(), true));
+    assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
 }
 
 #[test]

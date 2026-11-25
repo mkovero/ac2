@@ -132,6 +132,9 @@ impl AppState {
                     .map(|m| m.config.name.clone())
                     .collect();
                 self.rig.choice.meas_seen.extend(seen);
+                if !self.mirror_lease_mine() {
+                    self.rig.stimulus.stopped_unmirrored = false;
+                }
                 let ids: Vec<MeasId> = self.measurements().iter().map(|m| m.id).collect();
                 if let Some(p) = self.rig.pending.select
                     && ids.contains(&p)
@@ -810,6 +813,7 @@ impl RigState {
         // Nor is a stop of this app's on its way to take transfers with it or be announced.
         self.stimulus.stop_transfers = false;
         self.stimulus.stop_announced = false;
+        self.stimulus.stopped_unmirrored = false;
         // Nor has it rebuilt any history: the log may have moved on meanwhile.
         self.leq.logs.clear();
         self.forget_layout_calls();
@@ -840,6 +844,7 @@ impl RigState {
         // Nor is a stop of this app's on its way to take transfers with it or be announced.
         self.stimulus.stop_transfers = false;
         self.stimulus.stop_announced = false;
+        self.stimulus.stopped_unmirrored = false;
     }
 
     /// Drops what is kept by an id the mirror no longer lists: live edits, folds, fetched

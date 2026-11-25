@@ -7,6 +7,8 @@
 //! Before the daemon's state is mirrored, and while the rig is unreachable, there is no
 //! item: there is no generator known to state, and a guessed `STIM OFF` could be wrong.
 
+use ac2_proto::units::Dbfs;
+
 use crate::top_bar::Tone;
 
 /// The generator of the rig shown, as the bar says it.
@@ -60,6 +62,9 @@ pub struct StimInputs<'a> {
     /// A sweep or dynamics run plays or is about to: a second Space or Enter must not
     /// discard it, so only Esc ends it.
     pub run: bool,
+    /// The generator is under this client's name but was not armed by this run of the app
+    /// (an earlier connection's lease): Space stops it, Enter cannot fire it.
+    pub elsewhere: bool,
     /// More than one rig: the rig shown, by name, so the keys are read as acting on it.
     pub rig: Option<&'a str>,
     /// The long form of what Space or Enter starts next, for the hover.
@@ -131,6 +136,59 @@ pub fn armed_toast(plays: &str) -> String {
     format!("armed: {plays} · {ARMED_KEYS}")
 }
 
+/// Armed under this client's name from elsewhere: the one key that acts on it.
+pub const ELSEWHERE_ARMED_KEYS: &str = "Space disarms";
+/// Playing under this client's name from elsewhere.
+pub const ELSEWHERE_PLAYING_KEYS: &str = "Space stops";
+/// Enter with nothing armed.
+pub const NOT_ARMED: &str = "not armed: Space arms first";
+/// Enter on a stimulus armed under this client's name by an earlier connection: this
+/// connection holds no lease to fire it under.
+pub const ARMED_ELSEWHERE: &str = "armed elsewhere under this name: Space disarms";
+
+/// What plays and where: `pink −20.0 dBFS → out 1, 2` (`prefix` names a signal other than
+/// pink, with its trailing space), `no level` before one is typed.
+pub fn plays(prefix: &str, level: Option<Dbfs>, outputs: &str) -> String {
+    let level = level.map_or_else(
+        || "no level".to_owned(),
+        |l| format!("{} dBFS", crate::format::signed(l.0, 1)),
+    );
+    format!("{prefix}{level} → {outputs}")
+}
+
+/// The toast once a sweep is armed: `armed: sweep −30.0 dBFS → out 1 · Enter plays the
+/// sweep · Esc stops`.
+pub fn armed_sweep_toast(what: &str) -> String {
+    format!("armed: {what} · Enter plays the sweep · Esc stops")
+}
+
+/// What a re-sweep arms, for [`armed_sweep_toast`]: `a run of Sweep 1`.
+pub fn sweep_run_of(name: &str) -> String {
+    format!("a run of {name}")
+}
+
+/// The toast once a dynamics run is armed.
+pub fn armed_dynamics_toast(plays: &str, name: &str) -> String {
+    format!("armed: {plays} · Enter plays the run of {name} · Esc stops")
+}
+
+/// The toast once a sweep run plays: `sweep playing: 2 × 3.5 s · Esc stops (and discards
+/// it)`.
+pub fn sweep_started(repeats: u8, seconds: f64) -> String {
+    format!(
+        "sweep playing: {repeats} × {} s · {RUN_KEYS}",
+        crate::format::fixed(seconds, 1)
+    )
+}
+
+/// The toast once a dynamics run plays.
+pub fn dynamics_started(name: &str, longest_s: f64) -> String {
+    format!(
+        "dynamics run playing: {name} · at most {} · {RUN_KEYS}",
+        crate::format::duration(longest_s)
+    )
+}
+
 /// A sweep or dynamics run playing or about to: what ends it.
 pub const RUN_KEYS: &str = "Esc stops (and discards it)";
 
@@ -158,7 +216,11 @@ pub fn stim_item(i: &StimInputs<'_>) -> StimItem {
         // Arming, a second Space does nothing and Enter has nothing to fire yet: only the
         // stop stands beside it.
         (_, Some(_), _) | (_, _, false) | (StimState::Stopping | StimState::Arming, ..) => None,
+        (StimState::Armed, ..) if i.elsewhere => Some(ELSEWHERE_ARMED_KEYS.to_owned()),
         (StimState::Armed, ..) => Some(ARMED_KEYS.to_owned()),
+        (StimState::FirePending | StimState::Firing, ..) if i.elsewhere => {
+            Some(ELSEWHERE_PLAYING_KEYS.to_owned())
+        }
         (StimState::FirePending | StimState::Firing, ..) if i.run => Some(RUN_KEYS.to_owned()),
         (StimState::FirePending | StimState::Firing, ..) => Some(PLAYING_KEYS.to_owned()),
     };
@@ -193,6 +255,7 @@ mod tests {
             off_keys: Some("Space arms"),
             keys: true,
             run: false,
+            elsewhere: false,
             rig: None,
             next_long: None,
             tip: "L types the level",
@@ -343,5 +406,38 @@ mod tests {
         assert!(text(i).ends_with(" · Esc stops (and discards it)"));
         i.state = StimState::Armed;
         assert!(text(i).ends_with(" · Enter fires · Space disarms"));
+    }
+
+    /// Under this client's name from an earlier connection: only Space acts on it.
+    #[test]
+    fn a_lease_from_elsewhere_offers_space_alone() {
+        let mut i = at(StimState::Armed);
+        i.elsewhere = true;
+        assert_eq!(text(i), "ARMED pink −20.0 dBFS → out 1, 2 · Space disarms");
+        i.state = StimState::Firing;
+        assert_eq!(text(i), "FIRING pink −20.0 dBFS → out 1, 2 · Space stops");
+    }
+
+    #[test]
+    fn what_plays_and_the_run_toasts() {
+        assert_eq!(plays("", Some(Dbfs(-20.0)), "out 1"), "−20.0 dBFS → out 1");
+        assert_eq!(plays("white ", None, "out 2"), "white no level → out 2");
+        assert_eq!(
+            armed_sweep_toast(&sweep_run_of("Sweep 1")),
+            "armed: a run of Sweep 1 · Enter plays the sweep · Esc stops"
+        );
+        assert_eq!(
+            armed_dynamics_toast("sine 1000 Hz −14.0 dBFS → out 1", "Studer VCA"),
+            "armed: sine 1000 Hz −14.0 dBFS → out 1 · Enter plays the run of Studer VCA · Esc \
+             stops"
+        );
+        assert_eq!(
+            sweep_started(2, 3.5),
+            "sweep playing: 2 × 3.5 s · Esc stops (and discards it)"
+        );
+        assert!(
+            dynamics_started("Studer VCA", 30.0)
+                .starts_with("dynamics run playing: Studer VCA · at most ")
+        );
     }
 }

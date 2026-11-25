@@ -142,27 +142,125 @@ fn the_bar_says_stopping_while_the_stop_is_in_flight() {
     }
 }
 
-/// A lease the mirror shows as this client's while the local phase is idle (a reconnect):
-/// the bar offers Enter fires, and Enter fires; playing, Enter stops.
+/// A lease the mirror shows under this client's name that this run of the app did not arm
+/// (an earlier connection's): this connection holds none, so Enter cannot fire it and says
+/// so, Space stops it, and the bar offers Space alone.
 #[test]
-fn the_keys_follow_a_lease_the_mirror_shows() {
+fn a_lease_from_elsewhere_is_stopped_never_fired() {
+    use ac2_scene::stim_item::{ARMED_ELSEWHERE, StimState};
+    for firing in [false, true] {
+        let mut t = T::new();
+        t.pink_at(-20.0);
+        mirror_mine(&mut t, true, firing);
+        assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
+        assert_eq!(t.st.own_stim(), crate::state::OwnStim::Elsewhere);
+        assert!(!t.st.holds_stimulus());
+        let shown = if firing {
+            StimState::Firing
+        } else {
+            StimState::Armed
+        };
+        assert_eq!(t.st.stim_state(), Some(shown));
+        assert!(t.key("Enter").is_empty(), "firing {firing}");
+        assert_eq!(t.last_toast(), ARMED_ELSEWHERE);
+        assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
+        assert!(only_stop(&t.key("Space")), "firing {firing}");
+    }
+}
+
+/// A fire the daemon refuses leaves the stimulus armed as this app armed it.
+#[test]
+fn a_refused_fire_returns_to_armed() {
+    let mut t = T::new();
+    play(&mut t, false);
+    t.key("Enter");
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::FireRequested);
+    t.conn(ConnEvent::Stimulus(StimEvent::Failed(
+        "no stimulus lease held".into(),
+    )));
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
+}
+
+/// Armed locally before the mirror says so, the bar says ARMED (never `STIM OFF · Space
+/// arms` while Space would disarm). A stop landed before the mirror agrees reads as a
+/// stop, and the keys wait for the mirror.
+#[test]
+fn the_bar_follows_the_local_phase_where_the_mirror_lags() {
     use ac2_scene::stim_item::StimState;
     let mut t = T::new();
-    t.pink_at(-20.0);
-    mirror_mine(&mut t, true, false);
-    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
+    play(&mut t, false);
     assert_eq!(t.st.stim_state(), Some(StimState::Armed));
-    let r = t.key("Enter");
-    assert!(
-        matches!(r.as_slice(), [Request::StimSet(d)] if d.firing),
-        "{r:?} {}",
-        t.last_toast()
-    );
+    t.key("Enter");
+    assert_eq!(t.st.stim_state(), Some(StimState::FirePending));
+    t.conn(ConnEvent::Stimulus(StimEvent::Set { firing: true }));
+    mirror_mine(&mut t, true, true);
+    t.key("Space");
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert_eq!(t.st.stim_state(), Some(StimState::Stopping));
+    assert!(t.key("Space").is_empty());
+    assert!(t.key("Enter").is_empty());
+    mirror_mine(&mut t, false, false);
+    assert_eq!(t.st.stim_state(), Some(StimState::Off));
+    assert!(matches!(
+        t.key("Space").as_slice(),
+        [Request::StimArm { .. }]
+    ));
+}
+
+/// What the item says plays: this app's own as it set it; another client's as the daemon
+/// holds it, whatever level this app has typed.
+#[test]
+fn what_plays_is_the_daemons_for_a_stimulus_not_armed_here() {
     let mut t = T::new();
     t.pink_at(-20.0);
+    t.remirror(|s| {
+        s.generator.owner = Some(ClientId("c2".into()));
+        s.generator.armed = true;
+        s.generator.settings = Some(ac2_proto::model::GeneratorSettings {
+            signal: ac2_proto::model::Signal::White,
+            level: Dbfs(-30.0),
+            band: None,
+            outputs: vec![1],
+        });
+    });
+    assert!(
+        t.st.stim_plays().starts_with("white −30.0 dBFS → "),
+        "{}",
+        t.st.stim_plays()
+    );
+    let mut t = T::new();
+    play(&mut t, false);
+    assert!(
+        t.st.stim_plays().starts_with("−20.0 dBFS → "),
+        "{}",
+        t.st.stim_plays()
+    );
+}
+
+/// The take-over acts only on another client's stimulus: on this app's own, playing or
+/// stopping, it arms nothing.
+#[test]
+fn the_take_over_needs_another_clients_stimulus() {
+    let take = |t: &mut T| {
+        t.st.apply(Msg::Command(CommandId::StimulusTakeOver), &t.keys)
+    };
+    let mut t = T::new();
+    play(&mut t, true);
     mirror_mine(&mut t, true, true);
-    assert_eq!(t.st.stim_state(), Some(StimState::Firing));
-    assert!(only_stop(&t.key("Enter")));
+    assert!(take(&mut t).is_empty());
+    t.key("Space");
+    assert!(take(&mut t).is_empty());
+    let mut t = T::new();
+    t.pink_at(-20.0);
+    t.remirror(|s| {
+        s.generator.owner = Some(ClientId("c2".into()));
+        s.generator.armed = true;
+    });
+    let r = take(&mut t);
+    assert!(
+        matches!(r.as_slice(), [Request::StimArm { force: true, .. }]),
+        "{r:?}"
+    );
 }
 
 /// The prompt opens on the level set: typing starts from an empty line.
@@ -366,6 +464,34 @@ fn another_clients_stimulus_stops_but_takes_no_transfer() {
         let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
         assert!(meas_stops(&r).is_empty(), "{key}: {r:?}");
     }
+}
+
+/// Esc after Space is the same stop: it is sent (the panic stop is never held back), and
+/// the transfers stop once, in one toast.
+#[test]
+fn a_second_stop_keeps_what_the_first_asked() {
+    let mut t = T::new();
+    with_transfers(&mut t);
+    play(&mut t, true);
+    assert!(only_stop(&t.key("Space")));
+    assert!(only_stop(&t.key("Escape")));
+    let n = t.st.toasts.list.len();
+    let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert_eq!(meas_stops(&r), [MeasId(1), MeasId(5)]);
+    assert_eq!(t.st.toasts.list.len(), n + 1);
+    assert_eq!(t.last_toast(), "stimulus stopped · Main L, TF 2 stopped");
+}
+
+/// A stimulus under this name from elsewhere, stopped here, stops no transfer: this run of
+/// the app did not start it.
+#[test]
+fn a_lease_from_elsewhere_stops_no_transfer() {
+    let mut t = T::new();
+    with_transfers(&mut t);
+    mirror_mine(&mut t, true, true);
+    assert!(only_stop(&t.key("Space")));
+    let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert!(meas_stops(&r).is_empty(), "{r:?}");
 }
 
 fn settings_of(t: &T) -> &crate::settings::Settings {

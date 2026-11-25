@@ -683,15 +683,14 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   0 % · 0 xruns · 85 fps | untitled · unsaved changes`.
   - **Where the daemon runs:** `local` for the daemon on this computer, `remote: <host>`
     for one reached over the network, and just `remote` when the host is called what the
-    rig is (rig *pupu* on host `pupu`: `remote (STIM OFF) · …`). A host reads by its name
+    rig is (rig *pupu* on host `pupu`: `remote · …`). A host reads by its name
     without the mDNS `.local` (`pupu`, never `pupu.local`, which would read as local), or
     as the address you typed until the rig's advert has been seen (in *Connect a rig…*, or
     by the browse for a rig whose link is down);
     the hover has the daemon's version and full address, which Settings › Connection
     also shows. A click opens Settings › Connection.
-  - **The stimulus** in brackets: `(STIM OFF)`, or `(ARMED pink −24 dBFS → Main L)`,
-    `(FIRING …)` in the warning colours; *held by alice* after it when another client
-    holds the generator.
+  - **The stimulus** is not on the line: it is fixed at the bar's right end, beside the
+    stop ([Stimulus](#stimulus) has its states).
   - **Link trouble takes this part over:** `connecting to pupu…`, `remote: pupu · not
     responding`, `remote: pupu · syncing`, `remote: pupu · has not authorized this app`,
     or the error and *retrying*.
@@ -1016,13 +1015,16 @@ accident:
   | playing | `FIRING pink −24.0 dBFS → out 1, 2 · Space or Enter stops` |
   | a sweep or dynamics run playing | `FIRING sweep −30.0 dBFS → out 1 · Esc stops (and discards it)` |
   | stopping | `STOPPING…` (also while the daemon still says it plays) |
-  | another client's | `FIRING pink −24.0 dBFS → out 1, 2 · held by alice` |
+  | another client's | `FIRING white −30.0 dBFS → out 2 · held by alice` (what the daemon plays) |
+  | under this app's name from an earlier connection | `ARMED pink −24.0 dBFS → out 1, 2 · Space disarms` (Enter cannot fire it: this connection holds no lease; it says `armed elsewhere under this name: Space disarms`) |
 
   followed by **■ Stop stimulus: Shift+Esc** while armed or playing. Off, the hover says
   what Space would arm. With several rigs it names the rig shown (`pupu: STIM OFF · Space
   arms`), and every rig in the background whose stimulus is armed or playing has a chip in
   the top bar beside the stop: **▶ kettu −24 dBFS** playing, *kettu armed −24 dBFS* armed,
-  with *· held by alice* when another client holds it;
+  with *· held by alice* when another client holds it. *Take over stimulus* (palette) arms
+  this view's stimulus in place of another client's; with no other client holding the
+  generator it does nothing;
   closing a rig or quitting the app stops and releases what each rig holds, all at once.
   Before the rig's state has arrived, and while it is unreachable, the item is not shown;
 - one client holds the stimulus at a time (a refreshed lease); if it disappears the daemon
@@ -1101,17 +1103,19 @@ The noise is there to excite transfer functions. When **S** (or the palette) sto
 delete removes, the last running transfer measurement, the app also stops the stimulus it
 holds, armed or playing, as Esc does: `Main L stopped · stimulus stopped (no transfer
 measurement left running)`. SPL meters, spectra and RTAs do not keep it playing; a sweep
-and another client's stimulus are never stopped this way; `ac2 meas stop` stops only the
+and another client's stimulus are never stopped this way, nor one under this app's name
+that an earlier connection armed (Space stops that); `ac2 meas stop` stops only the
 measurement (a script gets no side effect it did not ask for).
 
 ### Stopping the stimulus stops its transfers
 
-The other way round, on by default: when this app stops its own stimulus while it plays
-(Esc, Shift+Esc, Space or Enter, the palette's *stim stop*), the running transfer
+The other way round, on by default: when this app stops the noise or sine it started
+while it plays (Esc, Shift+Esc, Space or Enter, the palette's *stim stop*), the running transfer
 measurements whose reference is the stimulus loopback input stop with it, since from then
 on their reference carries nothing: `stimulus stopped · TF 1, TF 2 stopped`. A transfer on
 another reference (mic to mic, another rig's input) keeps running. Disarming what never
-played stops no measurement, nor does a sweep run's own end, another client's stop or a
+played stops no measurement, nor does a sweep or dynamics run (ended or aborted), another
+client's stimulus or its stop, one under this app's name from an earlier connection, or a
 lease that ran out. Stopping one of two transfers with **S** still stops only that one.
 Turn it off in Settings › Audio I/O, row *Stop transfers with the stimulus*.
 

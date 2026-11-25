@@ -353,7 +353,7 @@ impl AppState {
             C::WarningToasts => self.toggle_warning_toasts(),
 
             C::StimulusArm => self.space_key(keymap, out),
-            C::StimulusTakeOver => self.space(true, keymap, out),
+            C::StimulusTakeOver => self.take_over(keymap, out),
             C::StimulusFire => self.enter_key(out),
             C::StimulusStop | C::StopAnywhere => self.stop_stimulus_here(out),
             C::LevelUp => self.step_level(1.0, out),

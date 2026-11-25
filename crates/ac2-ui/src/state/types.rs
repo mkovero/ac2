@@ -312,6 +312,9 @@ pub struct Stimulus {
     /// The stop in flight is this app's own, sent while the stimulus played, with the
     /// preference on: once it lands, the transfers measuring against the loopback stop.
     pub stop_transfers: bool,
+    /// This app's stop has landed but the mirror still shows the generator under this
+    /// client's name: the bar says it stops, and the keys wait, until the mirror agrees.
+    pub stopped_unmirrored: bool,
 }
 
 impl Default for Stimulus {
@@ -325,6 +328,7 @@ impl Default for Stimulus {
             phase: StimPhase::Idle,
             stop_announced: false,
             stop_transfers: false,
+            stopped_unmirrored: false,
         }
     }
 }

@@ -175,8 +175,9 @@ pub struct SweepUi {
     pub shown: Option<TraceId>,
     /// The lease is being given back after a finished sweep: its stop is no operator stop.
     pub releasing: bool,
-    /// The dialog's sweep was submitted while a stop was in flight: it arms once the stop
-    /// has landed.
+    /// A sweep was asked for while a stop was in flight (a sweep walk's capture, which is
+    /// its own key, not Space): it arms once the stop has landed, not into the lease the
+    /// stop is releasing.
     pub arm_after_stop: bool,
     /// The mirrored run's step (any client's run) and when this client first saw it, in
     /// `now_s`: the progress strip counts the time within a step from it.
