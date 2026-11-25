@@ -198,18 +198,18 @@ async fn slow_leq_set_watch_and_export() {
     assert!(n >= 12, "{summary}");
     let csv = std::fs::read_to_string(&file).unwrap();
     let mut it = csv.lines();
-    assert_eq!(it.next(), Some("# ac2 spl log v2"));
+    assert_eq!(it.next(), Some("# ac2 spl log v3"));
     assert!(csv.contains("# name: FOH SPL"));
     assert!(csv.contains("# mic: M30"));
     let rows: Vec<&str> = csv
         .lines()
-        .filter(|l| !l.starts_with('#') && !l.starts_with("start_utc"))
+        .filter(|l| !l.starts_with('#') && !l.starts_with("second,"))
         .collect();
     assert_eq!(rows.len() as u64, n);
     // The newest seconds: calibrated, the tone at 94 dB SPL (A).
     let f: Vec<&str> = rows.last().unwrap().split(',').collect();
-    assert_eq!(f[3], "dB SPL");
-    assert!((f[4].parse::<f64>().unwrap() - 94.0).abs() < 0.2, "{f:?}");
+    assert_eq!(f[7], "dB SPL");
+    assert!((f[8].parse::<f64>().unwrap() - 94.0).abs() < 0.2, "{f:?}");
 
     // The run in watch's JSON: the whole log's clock from its first second and its total.
     let run_json = &last["run"];
@@ -365,9 +365,9 @@ async fn slow_leq_set_watch_and_export() {
     let (code, csv) = run(&ep, &["spl", "leq", "export"]).await;
     assert_eq!(code, 0);
     let f: Vec<&str> = csv.lines().last().unwrap().split(',').collect();
-    assert!((f[4].parse::<f64>().unwrap() - 94.0).abs() < 0.2, "{f:?}");
-    assert!((f[7].parse::<f64>().unwrap() - 97.0).abs() < 0.2, "{f:?}");
-    assert_eq!((f[10], f[11]), ("3.0000", "1.0000"), "{f:?}");
+    assert!((f[8].parse::<f64>().unwrap() - 94.0).abs() < 0.2, "{f:?}");
+    assert!((f[11].parse::<f64>().unwrap() - 97.0).abs() < 0.2, "{f:?}");
+    assert_eq!((f[14], f[15]), ("3.0000", "1.0000"), "{f:?}");
 
     lease.end().await.unwrap();
     drop(c);
