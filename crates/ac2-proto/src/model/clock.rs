@@ -19,6 +19,51 @@ pub struct Clocks {
     /// clock's reading; `None` while no stream whose stamp clock can be read beside the
     /// system clock is open.
     pub stamp_map: Option<StampMap>,
+    /// The host keeps its clock across power-off in a battery-backed RTC: on Linux, the
+    /// kernel set the system clock from one at boot (`/sys/class/rtc/rtc*/hctosys`); on
+    /// macOS and Windows always. Without one an unsynced clock says nothing about the time
+    /// of day.
+    pub rtc: bool,
+}
+
+/// The host's time zone as the OS gives it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TimeZone {
+    /// IANA name (`Europe/Helsinki`); `None` when the OS gives only an offset (a POSIX
+    /// `TZ` rule).
+    pub name: Option<String>,
+    /// Offset from UTC in force now, s east.
+    pub utc_offset_s: i32,
+}
+
+impl Default for TimeZone {
+    fn default() -> Self {
+        Self::UTC
+    }
+}
+
+impl TimeZone {
+    /// UTC with no name: what a daemon states before it read its host's zone.
+    pub const UTC: Self = Self {
+        name: None,
+        utc_offset_s: 0,
+    };
+
+    /// The zone as a log header names it: its IANA name, else its offset `±hh:mm`.
+    pub fn label(&self) -> String {
+        match &self.name {
+            Some(n) => n.clone(),
+            None => offset_label(self.utc_offset_s),
+        }
+    }
+}
+
+/// `±hh:mm` of an offset east of UTC, s.
+pub fn offset_label(east_s: i32) -> String {
+    let sign = if east_s < 0 { '-' } else { '+' };
+    let a = east_s.unsigned_abs();
+    format!("{sign}{:02}:{:02}", a / 3600, (a % 3600) / 60)
 }
 
 /// A device's sample clock.
@@ -91,6 +136,7 @@ impl Default for Clocks {
             system: SystemClock::NotStated,
             capture: None,
             stamp_map: None,
+            rtc: true,
         }
     }
 }

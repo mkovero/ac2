@@ -6,6 +6,7 @@
 //! <dir>/traces/<id>-<hash>.csv       one ac2 CSV per trace (columns; header repeats metadata)
 //! <dir>/spl/<name>.csv               one per-second log per SPL meter ([`ac2_proto::spl_log`])
 //! <dir>/spl/<name>.bands.csv         its band meter's per-second log ([`crate::band_log`])
+//! <dir>/spl/<name>.csv.mark          the SPL log's high-water mark ([`crate::log_mark`])
 //! ```
 //!
 //! A sweep trace's CSV holds all of it: distortion curves as columns, analysis facts in its
@@ -166,6 +167,8 @@ pub struct SavedSplLog {
     pub rows: Vec<SplLogRow>,
     /// The band meter's rows, oldest first (empty when it never ran).
     pub bands: Vec<BandLogRow>,
+    /// Its high-water mark: written beside the log when set; read back from beside it.
+    pub mark: Option<crate::log_mark::LogMark>,
 }
 
 /// Where a loaded SPL log came from, for appending to it.
@@ -181,6 +184,8 @@ pub struct SplLogOnDisk {
     pub complete_len: u64,
     /// Where its band log was read from.
     pub bands: Option<BandLogOnDisk>,
+    /// Why its high-water mark could not be read (missing, unreadable); `None` when read.
+    pub mark_fault: Option<String>,
 }
 
 /// Where a loaded band log came from, for appending to it.
@@ -243,6 +248,18 @@ pub enum SessionError {
         path: PathBuf,
         /// Error.
         msg: String,
+    },
+    /// A log of another format version: not damaged, but not read by this build.
+    #[error("{path}: {what} version {found}; this build reads version {reads} only")]
+    LogVersion {
+        /// Path.
+        path: PathBuf,
+        /// "SPL log" or "band log".
+        what: &'static str,
+        /// Version in its first line.
+        found: u32,
+        /// The version this build reads.
+        reads: u32,
     },
     /// Present but unreadable.
     #[error("{path}: damaged session: {msg}")]
@@ -397,6 +414,9 @@ fn save_into(dir: &Path, s: &Session, mode: &Mode<'_>) -> Result<Manifest, Sessi
             &dir.join(&file),
             spl_log::export_csv(&l.info, &l.rows).as_bytes(),
         )?;
+        if let Some(m) = &l.mark {
+            crate::log_mark::write(&dir.join(crate::log_mark::rel_of(&file)), m)?;
+        }
         let bands = if l.bands.is_empty() {
             None
         } else {
@@ -488,6 +508,7 @@ fn files_of(m: &Manifest) -> Vec<String> {
         .iter()
         .map(|t| t.file.clone())
         .chain(m.spl_logs.iter().map(|l| l.file.clone()))
+        .chain(m.spl_logs.iter().map(|l| crate::log_mark::rel_of(&l.file)))
         .chain(m.spl_logs.iter().filter_map(|l| l.bands.clone()))
         .collect()
 }
@@ -580,6 +601,9 @@ pub struct Dropped {
     pub file: String,
     /// What was wrong with it.
     pub reason: String,
+    /// A log of another format version (the version found): set aside under that name
+    /// rather than as damaged.
+    pub old_version: Option<u32>,
 }
 
 /// What a [`Dropped`] file held.
@@ -620,10 +644,30 @@ fn keep<T>(
                 kind,
                 file: file.to_owned(),
                 reason: e.to_string(),
+                old_version: match e {
+                    SessionError::LogVersion { found, .. } => Some(found),
+                    _ => None,
+                },
             });
             Ok(None)
         }
         (Err(e), None) => Err(e),
+    }
+}
+
+/// A log that did not read: of another version, or damaged.
+fn log_error(path: &Path, what: &'static str, e: spl_log::SplLogError) -> SessionError {
+    match e {
+        spl_log::SplLogError::Version { found, reads } => SessionError::LogVersion {
+            path: path.to_owned(),
+            what,
+            found,
+            reads,
+        },
+        e => SessionError::Corrupt {
+            path: path.to_owned(),
+            msg: e.to_string(),
+        },
     }
 }
 
@@ -750,12 +794,9 @@ fn load_inner(
             });
         }
         let p = dir.join(f);
-        let read = fs::read(&p).map_err(io(&p)).and_then(|bytes| {
-            spl_log::import_csv(&bytes).map_err(|e| SessionError::Corrupt {
-                path: p.clone(),
-                msg: e.to_string(),
-            })
-        });
+        let read = fs::read(&p)
+            .map_err(io(&p))
+            .and_then(|bytes| spl_log::import_csv(&bytes).map_err(|e| log_error(&p, "SPL log", e)));
         // A meter whose log is lost keeps running with an empty one, which the daemon
         // writes to a new file.
         let Some(read) = keep(read, DroppedKind::SplLog, f, &mut dropped)? else {
@@ -766,10 +807,7 @@ fn load_inner(
             Some(bf) => {
                 let bp = dir.join(bf);
                 let read = fs::read(&bp).map_err(io(&bp)).and_then(|bytes| {
-                    band_log::import_csv(&bytes).map_err(|e| SessionError::Corrupt {
-                        path: bp.clone(),
-                        msg: e.to_string(),
-                    })
+                    band_log::import_csv(&bytes).map_err(|e| log_error(&bp, "band log", e))
                 });
                 match keep(read, DroppedKind::BandLog, bf, &mut dropped)? {
                     Some(read) => {
@@ -784,12 +822,20 @@ fn load_inner(
                 }
             }
         };
+        let (mark, mark_fault) = match crate::log_mark::read(&crate::log_mark::path_of(&p)) {
+            crate::log_mark::MarkRead::Read(m) => (Some(m), None),
+            crate::log_mark::MarkRead::Missing => (None, Some("no high-water mark".to_owned())),
+            crate::log_mark::MarkRead::Unreadable(e) => {
+                (None, Some(format!("high-water mark unreadable: {e}")))
+            }
+        };
         on_disk.push(SplLogOnDisk {
             meas: l.meas,
             file: f.clone(),
             rows: read.rows.len() as u64,
             complete_len: read.complete_len as u64,
             bands: bands_on_disk,
+            mark_fault,
         });
         spl_logs.push(SavedSplLog {
             info: SplLogInfo {
@@ -797,9 +843,12 @@ fn load_inner(
                 name: sm.config.name.clone(),
                 input: config.input,
                 mic: None,
+                zone: read.info.zone,
+                started: read.info.started,
             },
             rows: read.rows,
             bands,
+            mark,
         });
     }
     Ok((

@@ -261,27 +261,33 @@ fn session_spl_log_rows_are_checked() {
     let log = dir.join(&m.spl_logs[0].file);
     let good = std::fs::read_to_string(&log).unwrap();
     for (what, col, v) in [
-        ("nan level", 4, "nan"),
-        ("inf level", 5, "inf"),
-        ("level past f32", 6, "1000"),
-        ("nothing measured", 2, "0"),
-        ("start past the clock", 1, "18446744073709551615"),
-        ("position", 10, "1e9"),
+        ("nan level", 8, "nan"),
+        ("inf level", 9, "inf"),
+        ("level past f32", 10, "1000"),
+        ("nothing measured", 6, "0"),
+        ("start past the clock", 3, "18446744073709551615"),
+        ("position", 14, "1e9"),
+        ("clock", 4, "maybe"),
+        ("gap", 5, "sometimes"),
     ] {
-        let t = with_field(&good, "start_utc,", col, v);
+        let t = with_field(&good, "second,", col, v);
         std::fs::write(&log, t).unwrap();
         let msg = corrupt(&dir, what);
         assert!(msg.contains("line"), "{what}: {msg}");
     }
     // −∞ (a second without energy) is a level the meter writes.
-    std::fs::write(&log, with_field(&good, "start_utc,", 8, "-inf")).unwrap();
+    std::fs::write(&log, with_field(&good, "second,", 12, "-inf")).unwrap();
     session::load(&dir).unwrap();
     std::fs::write(&log, &good).unwrap();
 
     let bands = dir.join(m.spl_logs[0].bands.as_ref().unwrap());
     let good = std::fs::read_to_string(&bands).unwrap();
-    for (what, col, v) in [("nan band", 9, "nan"), ("correction", 5, "20")] {
-        std::fs::write(&bands, with_field(&good, "start_utc,", col, v)).unwrap();
+    for (what, col, v) in [
+        ("nan band", 14, "nan"),
+        ("correction", 10, "20"),
+        ("utc offset", 8, "90000"),
+    ] {
+        std::fs::write(&bands, with_field(&good, "second,", col, v)).unwrap();
         corrupt(&dir, what);
     }
 }

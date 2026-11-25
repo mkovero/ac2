@@ -413,10 +413,12 @@ pub struct BandWindowState {
     pub elapsed: Seconds,
     /// Seconds of those measured.
     pub measured: Seconds,
-    /// The limit the window is judged by: night while it holds a night second.
-    pub period: crate::model::BandPeriod,
-    /// The limit its headroom figures are computed against (once the horizon has passed).
-    pub period_after_horizon: crate::model::BandPeriod,
+    /// The limit the window is judged by: night while it holds a night second; `None`
+    /// (can't tell) while it holds a second whose time of day was not known.
+    pub period: Option<crate::model::BandPeriod>,
+    /// The limit its headroom figures are computed against (once the horizon has passed);
+    /// `None` while the time of day is not known.
+    pub period_after_horizon: Option<crate::model::BandPeriod>,
 }
 
 /// A peak limit's state: the highest second within the hold, judged against the limit.

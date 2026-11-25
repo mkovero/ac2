@@ -270,6 +270,10 @@ pub enum LeqJudgement {
     NoLimit,
     /// A limit is set but the meter reads dBFS: nothing is judged.
     NotCalibrated,
+    /// A day and a night limit are set but which is in force cannot be told: the clock is
+    /// unsynced on a host without an RTC, so the time of day is not known. Nothing is
+    /// judged.
+    CantTell,
     /// More than the warn margin below the limit (or nothing measured yet).
     Ok,
     /// Within the warn margin below the limit, or at it.

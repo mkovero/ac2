@@ -255,6 +255,12 @@ pub fn sync_dir(dir: &Path) -> io::Result<()> {
 /// `<name>.damaged-<unix seconds>` beside it (`-2`, `-3`… when taken), the directory synced.
 /// Returns where it went.
 pub fn set_aside_damaged(path: &Path) -> io::Result<PathBuf> {
+    set_aside_as(path, "damaged")
+}
+
+/// Moves a file out of the way, keeping it, as [`set_aside_damaged`] but to
+/// `<name>.<tag>-<unix seconds>`: `tag` says why (`v2` for a file of format version 2).
+pub fn set_aside_as(path: &Path, tag: &str) -> io::Result<PathBuf> {
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?
@@ -263,10 +269,10 @@ pub fn set_aside_damaged(path: &Path) -> io::Result<PathBuf> {
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    let mut to = path.with_file_name(format!("{name}.damaged-{t}"));
+    let mut to = path.with_file_name(format!("{name}.{tag}-{t}"));
     let mut n = 2;
     while to.exists() {
-        to = path.with_file_name(format!("{name}.damaged-{t}-{n}"));
+        to = path.with_file_name(format!("{name}.{tag}-{t}-{n}"));
         n += 1;
     }
     fs::rename(path, &to)?;

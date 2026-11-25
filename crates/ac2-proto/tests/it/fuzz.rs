@@ -275,8 +275,8 @@ proptest! {
                     HistorySpan::Newest { seconds: u32::from(idx) }
                 } else {
                     HistorySpan::Range {
-                        from: WallNs(u64::from(idx)),
-                        to: WallNs(u64::from(meas)),
+                        from: u64::from(idx),
+                        to: u64::from(meas),
                         step_s: u32::from(idx),
                     }
                 },

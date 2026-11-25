@@ -4,14 +4,21 @@
 //! windows by wall time.
 //!
 //! ```text
-//! # ac2 band log v1
+//! # ac2 band log v2
 //! # meas: 4
 //! # name: FOH SPL
 //! # input: 2
 //! # mic: M30
-//! start_utc,start_ns,measured_s,unit,period,correction_db,sensitivity_db,z20hz,z25hz,…,z10000hz
-//! 2026-10-03T21:57:25.000Z,1790000245000000000,1,dB SPL,day,5,120.02,61.25,…,30.10
+//! # zone: Europe/Helsinki
+//! # started: 2026-10-03T21:50:00.000Z
+//! second,run,start_utc,start_ns,clock,gap,measured_s,unit,utc_offset_s,period,correction_db,sensitivity_db,z20hz,z25hz,…,z10000hz
+//! 0,0,2026-10-03T21:57:25.000Z,1790000245000000000,synced,known,1,dB SPL,10800,day,5,120.02,61.25,…,30.10
 //! ```
+//!
+//! `second`, `run`, `clock` and `gap` are the SPL log's ([`ac2_proto::spl_log`]): the same
+//! index keys a second in both logs. `utc_offset_s` is the zone's offset in force when the
+//! period was judged, so a logged period can be checked afterwards across a daylight-saving
+//! change; `period` is empty when the time of day was not known (can't tell).
 //!
 //! The 28 band levels (20 Hz … 10 kHz) are the unweighted band Leq of the second, in the
 //! row's unit (dB SPL when a sensitivity was in force, else dBFS) to 0.01 dB, **without**
@@ -23,17 +30,22 @@
 use std::fmt::Write as _;
 
 use ac2_proto::model::{
-    BAND_COUNT, BAND_NOMINAL_HZ, BandLogAverage, BandLogSecond, BandPeriod, SplBandLog,
+    BAND_COUNT, BAND_NOMINAL_HZ, BandLogAverage, BandLogSecond, BandPeriod, LogClock, LogGap,
+    SplBandLog,
 };
 use ac2_proto::units::{Db, DbSpl, MeasId, Seconds, WallNs};
 
-use ac2_proto::spl_log::{SplLogError, SplLogInfo, utc_iso};
+use ac2_proto::spl_log::{self, LogRead, LogRow, RowKey, SplLogError, SplLogInfo};
 
+/// The version this build writes and reads.
+pub const VERSION: u32 = 2;
 /// First line of every band log file.
-pub const HEADER_LINE: &str = "# ac2 band log v1";
-const FIXED_COLUMNS: &str =
-    "start_utc,start_ns,measured_s,unit,period,correction_db,sensitivity_db";
-const FIXED: usize = 7;
+pub const HEADER_LINE: &str = "# ac2 band log v2";
+/// What the first line of a band log of any version starts with.
+pub const HEADER_PREFIX: &str = "# ac2 band log v";
+const FIXED_COLUMNS: &str = "second,run,start_utc,start_ns,clock,gap,measured_s,unit,\
+                             utc_offset_s,period,correction_db,sensitivity_db";
+const FIXED: usize = 12;
 
 /// Largest §13 correction, dB: impulse +10 dB with tonal +6 dB
 /// ([`ac2_proto::model::BandCorrection::db`]).
@@ -42,7 +54,7 @@ pub const MAX_CORRECTION_DB: f64 = 16.0;
 /// Checks a row against what the band meter writes: a second with something measured (a
 /// row is only written when `measured > 0`), band levels per [`ac2_proto::spl_log::level_ok`],
 /// a correction within 0 … [`MAX_CORRECTION_DB`], a finite sensitivity, a start within
-/// [`ac2_proto::spl_log::MAX_START_NS`].
+/// [`ac2_proto::spl_log::MAX_START_NS`], a zone offset within the ±18 h any zone can have.
 pub fn check_row(r: &BandLogRow) -> Result<(), &'static str> {
     if !(r.measured.0 > 0.0 && r.measured.0 <= 1.0) {
         return Err("measured_s outside (0, 1]");
@@ -63,22 +75,36 @@ pub fn check_row(r: &BandLogRow) -> Result<(), &'static str> {
     if r.sensitivity.is_some_and(|s| !s.0.is_finite()) {
         return Err("sensitivity_db not finite");
     }
+    if r.utc_offset_s.unsigned_abs() > 18 * 3600 {
+        return Err("utc_offset_s outside ±18 h");
+    }
     Ok(())
 }
 
 /// One logged second of the band meter.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BandLogRow {
-    /// Wall time of the second's start.
+    /// The row's key, as the SPL log's.
+    pub second: u64,
+    /// Its run.
+    pub run: u32,
+    /// Wall time of the second's start, as read (an annotation).
     pub start: WallNs,
+    /// What `start` rests on.
+    pub clock: LogClock,
+    /// On a run's first row, how the distance to the row before is known.
+    pub gap: Option<LogGap>,
     /// Time measured within it (0 … 1 s).
     pub measured: Seconds,
+    /// The zone's offset in force when `period` was judged, s east of UTC.
+    pub utc_offset_s: i32,
     /// Band Leq per band of [`BAND_NOMINAL_HZ`], dBFS, uncorrected (−∞: no energy).
     pub levels: [f32; BAND_COUNT],
     /// §13 correction in force (dB, ≥ 0).
     pub correction: Db,
-    /// Limit set of the second's local start.
-    pub period: BandPeriod,
+    /// Limit set of the second's local start; `None`: can't tell (the time of day was not
+    /// known).
+    pub period: Option<BandPeriod>,
     /// dB SPL of 0 dBFS in force, if calibrated.
     pub sensitivity: Option<Db>,
 }
@@ -107,27 +133,17 @@ fn level(v: f64) -> String {
     }
 }
 
-fn period_name(p: BandPeriod) -> &'static str {
+fn period_name(p: Option<BandPeriod>) -> &'static str {
     match p {
-        BandPeriod::Day => "day",
-        BandPeriod::Night => "night",
+        Some(BandPeriod::Day) => "day",
+        Some(BandPeriod::Night) => "night",
+        None => "",
     }
 }
 
 /// The header lines, through the column header.
 pub fn header(info: &SplLogInfo) -> String {
-    let mut s = String::with_capacity(400);
-    s.push_str(HEADER_LINE);
-    s.push('\n');
-    let _ = writeln!(s, "# meas: {}", info.meas.0);
-    let _ = writeln!(s, "# name: {}", info.name.replace('\n', " "));
-    let _ = writeln!(s, "# input: {}", u32::from(info.input) + 1);
-    if let Some(m) = &info.mic {
-        let _ = writeln!(s, "# mic: {}", m.replace('\n', " "));
-    }
-    s.push_str(&columns());
-    s.push('\n');
-    s
+    spl_log::header_with(HEADER_LINE, info, &columns())
 }
 
 /// Appends one row's line, newline included.
@@ -136,12 +152,21 @@ pub fn push_row(s: &mut String, r: &BandLogRow) {
         Some(Db(o)) => ("dB SPL", o),
         None => ("dBFS", 0.0),
     };
+    spl_log::push_key(
+        s,
+        &RowKey {
+            second: r.second,
+            run: r.run,
+            start: r.start,
+            clock: r.clock,
+            gap: r.gap,
+        },
+    );
     let _ = write!(
         s,
-        "{},{},{},{unit},{},{},{}",
-        utc_iso(r.start.0),
-        r.start.0,
+        "{},{unit},{},{},{},{}",
         r.measured.0,
+        r.utc_offset_s,
         period_name(r.period),
         r.correction.0,
         r.sensitivity
@@ -165,98 +190,23 @@ pub fn export_csv(info: &SplLogInfo, rows: &[BandLogRow]) -> String {
 }
 
 /// A band log read back.
-#[derive(Debug, Clone, PartialEq)]
-pub struct BandLogRead {
-    /// Rows, oldest first.
-    pub rows: Vec<BandLogRow>,
-    /// Bytes up to the end of the last whole row: where an append carries on.
-    pub complete_len: usize,
-    /// Bytes after it (a torn row, zeros, garbage), cut off before the next append.
-    pub tail: usize,
+pub type BandLogRead = LogRead<BandLogRow>;
+
+impl LogRow for BandLogRow {
+    fn key(&self) -> (u64, u32, Option<LogGap>) {
+        (self.second, self.run, self.gap)
+    }
 }
 
-/// Reads rows back (the header lines are checked, not returned). A log grows a line at a
-/// time and a power cut keeps an unpredictable part of the last appends: a torn last row,
-/// zeros a file system extended the file with (possibly after a torn row, possibly with
-/// newlines among them), bytes that are not text. The rows before the first such line are
-/// the log; that line and everything after it are the tail, cut off
-/// before the next append ([`BandLogRead::complete_len`]). Only a log whose header lines are
-/// unreadable is an error.
+/// Reads a band log back ([`spl_log::read_log`]: header, rows, where an append carries on).
 pub fn import_csv(bytes: &[u8]) -> Result<BandLogRead, SplLogError> {
-    let whole = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
-    let cols = columns();
-    let mut rows = Vec::new();
-    let mut header = false;
-    let mut seen_columns = false;
-    let mut complete_len = 0;
-    let mut off = 0;
-    for (i, raw) in bytes[..whole].split_inclusive(|&b| b == b'\n').enumerate() {
-        let line = i + 1;
-        let start = off;
-        off += raw.len();
-        let text = std::str::from_utf8(raw).map(str::trim_end);
-        if !header {
-            match text {
-                Ok(l) if l == HEADER_LINE => header = true,
-                _ => return Err(SplLogError::Header),
-            }
-            complete_len = off;
-            continue;
-        }
-        if let Ok(l) = text
-            && (l.is_empty() || l.starts_with('#'))
-        {
-            complete_len = off;
-            continue;
-        }
-        if !seen_columns {
-            if text != Ok(cols.as_str()) {
-                return Err(SplLogError::Line {
-                    line,
-                    msg: "expected the column header".to_owned(),
-                });
-            }
-            seen_columns = true;
-            complete_len = off;
-            continue;
-        }
-        // What a cut leaves past the last whole row: zeros (a file system that committed the
-        // length before the data) or bytes that are not text. A whole line of text that is
-        // not a row was written so, and is an error.
-        let junk = raw.contains(&0) || text.is_err();
-        let parsed = match text {
-            Ok(l) => parse_row(l, line),
-            Err(_) => Err(SplLogError::Header),
-        };
-        match parsed {
-            Ok(row) => {
-                check_row(&row).map_err(|msg| SplLogError::Line {
-                    line,
-                    msg: msg.to_owned(),
-                })?;
-                rows.push(row);
-                complete_len = off;
-            }
-            Err(_) if junk => {
-                complete_len = start;
-                break;
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    if !header {
-        return Err(SplLogError::Header);
-    }
-    if !seen_columns {
-        return Err(SplLogError::Line {
-            line: 1,
-            msg: "no column header".into(),
-        });
-    }
-    Ok(BandLogRead {
-        rows,
-        complete_len,
-        tail: bytes.len() - complete_len,
+    spl_log::read_log(bytes, HEADER_PREFIX, VERSION, &columns(), |l, line| {
+        let row = parse_row(l, line)?;
+        check_row(&row).map_err(|msg| SplLogError::Line {
+            line,
+            msg: msg.to_owned(),
+        })?;
+        Ok(row)
     })
 }
 
@@ -269,26 +219,35 @@ fn parse_row(l: &str, line: usize) -> Result<BandLogRow, SplLogError> {
     if f.len() != FIXED + BAND_COUNT {
         return Err(bad(&format!("expected {} fields", FIXED + BAND_COUNT)));
     }
-    let start: u64 = f[1].parse().map_err(|_| bad("bad start_ns"))?;
-    let measured: f64 = f[2].parse().map_err(|_| bad("bad measured_s"))?;
+    let key = spl_log::parse_key(&f, line)?;
+    let measured: f64 = f[6].parse().map_err(|_| bad("bad measured_s"))?;
     if !(0.0..=1.0).contains(&measured) {
         return Err(bad("measured_s outside 0…1"));
     }
-    let period = match f[4] {
-        "day" => BandPeriod::Day,
-        "night" => BandPeriod::Night,
-        _ => return Err(bad("period is day or night")),
+    let utc_offset_s: i32 = f[8].parse().map_err(|_| bad("bad utc_offset_s"))?;
+    if utc_offset_s.unsigned_abs() > 18 * 3600 {
+        return Err(bad("utc_offset_s beyond ±18 h"));
+    }
+    let period = match f[9] {
+        "day" => Some(BandPeriod::Day),
+        "night" => Some(BandPeriod::Night),
+        "" => None,
+        _ => return Err(bad("period is day, night or empty")),
     };
-    let correction: f64 = f[5].parse().map_err(|_| bad("bad correction_db"))?;
+    let correction: f64 = f[10].parse().map_err(|_| bad("bad correction_db"))?;
     if !correction.is_finite() {
         return Err(bad("bad correction_db"));
     }
-    let sensitivity = if f[6].is_empty() {
+    let sensitivity = if f[11].is_empty() {
         None
     } else {
-        Some(f[6].parse::<f64>().map_err(|_| bad("bad sensitivity_db"))?)
+        Some(
+            f[11]
+                .parse::<f64>()
+                .map_err(|_| bad("bad sensitivity_db"))?,
+        )
     };
-    match (f[3], sensitivity) {
+    match (f[7], sensitivity) {
         ("dB SPL", Some(_)) | ("dBFS", None) => {}
         _ => return Err(bad("unit and sensitivity disagree")),
     }
@@ -303,8 +262,13 @@ fn parse_row(l: &str, line: usize) -> Result<BandLogRow, SplLogError> {
         *o = (v - off) as f32;
     }
     let row = BandLogRow {
-        start: WallNs(start),
+        second: key.second,
+        run: key.run,
+        start: key.start,
+        clock: key.clock,
+        gap: key.gap,
         measured: Seconds(measured),
+        utc_offset_s,
         levels,
         correction: Db(correction),
         period,
@@ -408,8 +372,13 @@ pub fn span_average(rows: &[BandLogRow]) -> SpanAverage {
 pub fn wire_row(r: &BandLogRow) -> BandLogSecond {
     let o = r.sensitivity.map_or(0.0, |s| s.0);
     BandLogSecond {
+        second: r.second,
+        run: r.run,
         start: r.start,
+        clock: r.clock,
+        gap: r.gap,
         measured: r.measured,
+        utc_offset_s: r.utc_offset_s,
         period: r.period,
         correction: r.correction,
         sensitivity: r.sensitivity,
@@ -473,6 +442,8 @@ mod tests {
             name: "FOH SPL".into(),
             input: 1,
             mic: Some("M30".into()),
+            zone: "Europe/Helsinki".into(),
+            started: WallNs(1_790_000_000_000_000_000),
         }
     }
 
@@ -484,19 +455,29 @@ mod tests {
         a[27] = f32::NEG_INFINITY;
         vec![
             BandLogRow {
+                second: 0,
+                run: 0,
                 start: WallNs(1_790_000_245_000_000_000),
+                clock: LogClock::Synced,
+                gap: Some(LogGap::Known),
                 measured: Seconds(1.0),
+                utc_offset_s: 10_800,
                 levels: a,
                 correction: Db(5.0),
-                period: BandPeriod::Night,
+                period: Some(BandPeriod::Night),
                 sensitivity: Some(Db(120.02)),
             },
             BandLogRow {
+                second: 1,
+                run: 0,
                 start: WallNs(1_790_000_246_000_000_000),
+                clock: LogClock::Synced,
+                gap: None,
                 measured: Seconds(0.25),
+                utc_offset_s: 7200,
                 levels: [-80.5; BAND_COUNT],
                 correction: Db(0.0),
-                period: BandPeriod::Day,
+                period: None,
                 sensitivity: None,
             },
         ]
@@ -506,12 +487,21 @@ mod tests {
     fn round_trip_to_a_hundredth() {
         let text = export_csv(&info(), &rows());
         assert!(text.contains(",z31.5hz,"), "{text}");
-        assert!(text.contains(",dB SPL,night,5,120.0200,60.02,"), "{text}");
+        assert!(
+            text.contains(",dB SPL,10800,night,5,120.0200,60.02,"),
+            "{text}"
+        );
+        // A daylight-saving change between the rows: each keeps the offset it was judged
+        // in; the second's period is can't tell.
+        assert!(text.contains(",0.25,dBFS,7200,,0,,"), "{text}");
         let back = import_csv(text.as_bytes()).unwrap();
         assert_eq!(back.complete_len, text.len());
         assert_eq!(back.rows.len(), 2);
         for (a, b) in back.rows.iter().zip(rows()) {
-            assert_eq!(a.start, b.start);
+            assert_eq!(
+                (a.second, a.run, a.start, a.clock, a.gap, a.utc_offset_s),
+                (b.second, b.run, b.start, b.clock, b.gap, b.utc_offset_s)
+            );
             assert_eq!(a.measured, b.measured);
             assert_eq!(a.correction, b.correction);
             assert_eq!(a.period, b.period);
@@ -539,23 +529,27 @@ mod tests {
             (r.rows.len(), r.complete_len, r.tail),
             (1, one, z.len() - one)
         );
-        assert!(import_csv(b"# ac2 spl log v2\n").is_err());
+        assert!(import_csv(b"# ac2 spl log v3\n").is_err());
+        assert_eq!(
+            import_csv(b"# ac2 band log v1\n# meas: 1\n"),
+            Err(SplLogError::Version { found: 1, reads: 2 })
+        );
         let bad = text.replace(",night,", ",evening,");
         assert!(matches!(
             import_csv(bad.as_bytes()),
-            Err(SplLogError::Line { line: 7, .. })
+            Err(SplLogError::Line { line: 9, .. })
         ));
     }
 
     #[test]
     fn a_span_averages_energy_over_the_time_measured() {
         let row = |start_s: u64, measured: f64, l: f32, sens: Option<f64>| BandLogRow {
+            second: start_s,
             start: WallNs(start_s * 1_000_000_000),
             measured: Seconds(measured),
             levels: [l; BAND_COUNT],
-            correction: Db(5.0),
-            period: BandPeriod::Night,
             sensitivity: sens.map(Db),
+            ..rows()[0]
         };
         // 1 s at 70 dB SPL and 0.5 s at 80: (10^7 + 0.5·10^8) / 1.5.
         let mut rows = vec![
@@ -593,6 +587,7 @@ mod tests {
     fn a_span_reply_steps_and_bounds_its_rows() {
         let rows: Vec<BandLogRow> = (0..7200u64)
             .map(|i| BandLogRow {
+                second: i,
                 start: WallNs(i * 1_000_000_000),
                 ..rows()[0]
             })

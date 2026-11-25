@@ -324,6 +324,7 @@ pub(super) fn recording_file() -> RecordingFile {
 pub fn clocks() -> Clocks {
     Clocks {
         system: SystemClock::Synced { maxerror_us: 3027 },
+        rtc: true,
         capture: Some(DeviceClock {
             device: DeviceId("system".into()),
             rate: SampleClock::Measured {
@@ -544,8 +545,11 @@ pub(super) fn spl_history() -> SplHistory {
         ],
         scale: LevelScale::DbSpl,
         step_s: 1,
+        first_second: Some(0),
+        last_second: Some(121),
         log_start: Some(WallNs(1_790_000_000_000_000_000)),
         log_until: Some(WallNs(1_790_000_122_000_000_000)),
+        second: vec![120, 121],
         at: vec![
             WallNs(1_790_000_121_000_000_000),
             WallNs(1_790_000_122_000_000_000),
@@ -574,9 +578,14 @@ pub(super) fn spl_band_log() -> SplBandLog {
             levels: Some(average),
         },
         rows: vec![BandLogSecond {
+            second: 3_600,
+            run: 2,
             start: WallNs(1_789_500_000_000_000_000),
+            clock: LogClock::Derived,
+            gap: Some(LogGap::Unknown),
             measured: Seconds(1.0),
-            period: BandPeriod::Night,
+            utc_offset_s: 10_800,
+            period: Some(BandPeriod::Night),
             correction: Db(5.0),
             sensitivity: Some(Db(120.0)),
             levels,
@@ -587,11 +596,16 @@ pub(super) fn spl_band_log() -> SplBandLog {
 pub(super) fn spl_log_page() -> SplLogPage {
     SplLogPage {
         meas: MeasId(4),
+        started_at: WallNs(1_790_000_000_000_000_000),
         from: 120,
         total: 122,
         rows: vec![
             SplLogRow {
+                second: 120,
+                run: 1,
                 start: WallNs(1_790_000_120_000_000_000),
+                clock: LogClock::Synced,
+                gap: Some(LogGap::Known),
                 measured: Seconds(1.0),
                 laeq: Dbfs(-26.5),
                 lceq: Dbfs(-24.25),
@@ -605,7 +619,11 @@ pub(super) fn spl_log_page() -> SplLogPage {
                 }),
             },
             SplLogRow {
+                second: 121,
+                run: 1,
                 start: WallNs(1_790_000_121_000_000_000),
+                clock: LogClock::NotStated,
+                gap: None,
                 measured: Seconds(0.5),
                 laeq: Dbfs(f64::NEG_INFINITY),
                 lceq: Dbfs(-90.0),
@@ -907,6 +925,10 @@ pub fn rig() -> Rig {
             over_threshold: Dbtp(-1.0),
             correlation_gate: Dbfs(-50.0),
             loudness_target: Lufs(-16.0),
+        },
+        zone: TimeZone {
+            name: Some("Europe/Helsinki".into()),
+            utc_offset_s: 10_800,
         },
         osc: OutputStatus {
             sent: 12,

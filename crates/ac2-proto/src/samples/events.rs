@@ -117,6 +117,7 @@ pub fn events() -> Vec<Event> {
                 system: SystemClock::Unsynced {
                     maxerror_us: 16_000_000,
                 },
+                rtc: false,
                 capture: Some(DeviceClock {
                     device: DeviceId("system".into()),
                     rate: SampleClock::Measuring,
@@ -128,6 +129,7 @@ pub fn events() -> Vec<Event> {
             93,
             Change::Clocks(Clocks {
                 system: SystemClock::NotStated,
+                rtc: true,
                 capture: Some(DeviceClock {
                     device: DeviceId("soundcheck.wav".into()),
                     rate: SampleClock::Synthetic,
