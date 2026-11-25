@@ -244,8 +244,9 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
         "the same settings"
     );
 
-    // The transfer view: Space and Enter play pink noise on the sweep's outputs (the
-    // speaker and the loopback); the measurement gets signal.
+    // The transfer view: Space and Enter play pink noise on the sweep's outputs, the
+    // session's stimulus output (out 1, which feeds the loopback and the simulated rig's
+    // speaker); the measurement gets signal.
     d.until("the lease given back", |s| {
         s.daemon().is_some_and(|x| x.generator.owner.is_none())
             && s.rig.stimulus.phase == StimPhase::Idle
@@ -255,7 +256,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
     assert_eq!(
         hint(&d.st).as_deref(),
-        Some("Space arms: pink −26 dBFS → out 2, 1")
+        Some("Space arms: pink −26 dBFS → out 1")
     );
     d.key("Space");
     d.until("armed with the noise", |s| {
@@ -263,7 +264,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     })?;
     assert_eq!(
         hint(&d.st).as_deref(),
-        Some("Enter fires: pink −26 dBFS → out 2, 1")
+        Some("Enter fires: pink −26 dBFS → out 1")
     );
     d.key("Enter");
     d.until("pink noise playing", |s| {
