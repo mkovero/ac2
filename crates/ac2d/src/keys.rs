@@ -205,14 +205,11 @@ fn not_trusted(path: &Path) -> io::Result<Option<&'static str>> {
     Ok(None)
 }
 
-/// The converter that gives a list in the shape before roles a role on every line.
-pub(crate) const CONVERTER: &str = "tools/proto-next/convert.py --auth";
-
 /// Loads the authorized-clients list; a missing file is created empty (no client can
 /// connect until one is added). Lines that do not parse are dropped and the file rewritten
-/// without them, the original set aside and reported. A list in the shape before roles is
+/// without them, the original set aside and reported. A list whose key lines name no role is
 /// set aside whole and an empty one started: guessing a role for its keys would either lock
-/// out every operator or give every viewer control, so the converter decides, once.
+/// out every operator or give every viewer control, so the person who adds them decides.
 pub(crate) fn load_or_create_authorized(
     path: &Path,
 ) -> Result<(AuthorizedKeys, Option<Damage>), KeyFileError> {
@@ -243,9 +240,11 @@ pub(crate) fn load_or_create_authorized(
                     kind: StateFile::AuthorizedClients,
                     path: path.to_owned(),
                     reason: format!(
-                        "no role on its lines (the shape before roles): convert the set-aside \
-                         file with `{CONVERTER} {}` and put it back with the daemon stopped; \
-                         no network client can connect until then",
+                        "its lines name a client and a key but no role, and every line needs \
+                         one: `<name> <key> operator`, `<name> <key> viewer` or \
+                         `<name> <key> rig=<rig id>`; give each line of {} its role and put it \
+                         back with the daemon stopped (or add the clients again with \
+                         `ac2 auth`); no network client can connect until then",
                         to.display()
                     ),
                     set_aside_as: Some(to),
@@ -381,7 +380,7 @@ mod tests {
     }
 
     #[test]
-    fn a_list_before_roles_is_set_aside_whole_naming_the_converter() {
+    fn a_list_without_roles_is_set_aside_whole_saying_what_a_line_needs() {
         let dir = tempfile::tempdir().expect("tempdir");
         let p = dir.path().join("authorized_clients");
         let app = KeyPair::generate().expect("gen");
@@ -390,7 +389,8 @@ mod tests {
         let (keys, d) = load_or_create_authorized(&p).expect("load");
         assert!(keys.is_empty());
         let d = d.expect("damage");
-        assert!(d.reason.contains(CONVERTER), "{}", d.reason);
+        assert!(d.reason.contains("no role"), "{}", d.reason);
+        assert!(d.reason.contains("`<name> <key> operator`"), "{}", d.reason);
         assert_eq!(
             fs::read_to_string(d.set_aside_as.expect("aside")).expect("kept"),
             old
