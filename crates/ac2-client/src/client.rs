@@ -895,12 +895,15 @@ async fn run_sync(
 ) {
     let mut tick = tokio::time::interval(Duration::from_millis(100));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // When the welcome a rejoin asked for is (next) due: until one arrives, the role shown
+    // may be the one the key no longer has.
+    let mut rejoin: Option<Instant> = None;
     loop {
-        // Ticks only while the mirror has something to retry or check; otherwise the task
-        // sleeps until the next keepalive or event.
-        let ticking = mirror.needs_tick();
+        // Ticks only while the mirror or a rejoin has something to retry or check; otherwise
+        // the task sleeps until the next keepalive or event.
+        let ticking = mirror.needs_tick() || rejoin.is_some();
         let now = Instant::now();
-        let (mut need, received) = tokio::select! {
+        let (mut need, mut received) = tokio::select! {
             msg = rx.recv() => match msg {
                 None => return,
                 Some(SyncIn::Event(e)) => (mirror.on_event(*e, now), true),
@@ -908,18 +911,26 @@ async fn run_sync(
                     (mirror.on_ka(&stamp, *meta, at, local_wall_ns), true)
                 }
                 Some(SyncIn::Resync) => (mirror.on_resync_required(now), true),
+                // Only the welcome: the state itself is unchanged by a role.
                 Some(SyncIn::Rejoined) => {
-                    // Only the welcome: the state itself is unchanged by a role.
-                    if let Ok(w) = hello(&core, &name).await
-                        && let Ok(mut slot) = welcome.lock()
-                    {
-                        *slot = w;
-                    }
+                    rejoin = Some(now);
                     (None, true)
                 }
             },
             _ = tick.tick(), if ticking => (mirror.on_tick(Instant::now()), false),
         };
+        if rejoin.is_some_and(|at| Instant::now() >= at) {
+            match hello(&core, &name).await {
+                Ok(w) => {
+                    if let Ok(mut slot) = welcome.lock() {
+                        *slot = w;
+                    }
+                    rejoin = None;
+                    received = true;
+                }
+                Err(_) => rejoin = Some(Instant::now() + crate::mirror::RETRY_INTERVAL),
+            }
+        }
         if !received && need.is_none() {
             continue;
         }
