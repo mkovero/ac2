@@ -1,16 +1,15 @@
-pupu   ac2d 0.1.0 (build 0.1.0+202486c60e44)
+pupu   ac2d 0.1.0+202486c6
 
 AUDIO     open · jack · 96 kHz · 256 samples
   in      1–8 · ac2 on ac2pi-0ab1c6 in 1
-          Wait for remote inputs (link offset): default (15 ms)
+          link offset 15 ms
   out     6
   clock   one clock · drift +1.3 ppm over 2.0 s
-          sample clock +1 ppm against the system clock (last minute)
-          system clock synced, OS bound ±2.5 ms
+          +1 ppm vs system clock · system clock synced ±2.5 ms
 
 RIGS
 ! ac2 on ac2pi-0ab1c6   CLOCKS NOT LOCKED +7.8 ppm                link up, 3.2 Mbit/s
-!                       in 1 streaming · 1 late frames in the last hour · 0 slips
+!                       in 1 streaming · 1 late in last hour · 0 slips
   ac2 on ketunkolo      measuring clocks… · −0.69 ppm over 60 s   levels only · link up
 
 MEASUREMENTS

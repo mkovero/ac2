@@ -68,6 +68,28 @@ pub fn status_lines(c: &Clocks) -> [String; 2] {
     ]
 }
 
+/// `ac2 status`'s short line: `+1 ppm vs system clock · system clock synced ±2.5 ms`.
+pub fn status_short(c: &Clocks) -> String {
+    let sample = match c.capture.as_ref().map(|c| c.rate) {
+        None => "no audio open".to_owned(),
+        Some(SampleClock::Measuring) => "sample clock measuring…".to_owned(),
+        Some(SampleClock::Measured { ppm, against, .. }) => {
+            let basis = match (against, &c.system) {
+                (ClockBasis::SystemClock, SystemClock::Synced { .. }) => "system clock",
+                _ => "this computer's clock",
+            };
+            format!("{} ppm vs {basis}", format::signed(ppm, 0))
+        }
+        Some(SampleClock::Synthetic) => "no sample clock (a replay)".to_owned(),
+    };
+    let system = match c.system {
+        SystemClock::Synced { maxerror_us } => format!("synced {}", bound(maxerror_us)),
+        SystemClock::Unsynced { maxerror_us } => format!("unsynced {}", bound(maxerror_us)),
+        SystemClock::NotStated => "not stated".to_owned(),
+    };
+    format!("{sample} · system clock {system}")
+}
+
 /// The OS's error bound, µs, as `±3.0 ms`: microseconds under 0.1 ms, seconds from 1 s.
 fn bound(us: u32) -> String {
     match us {
@@ -192,5 +214,14 @@ mod tests {
         );
         let c = clocks(Some(SampleClock::Measuring), SystemClock::NotStated);
         assert_eq!(status_lines(&c)[0], "sample clock measuring…");
+        assert_eq!(
+            status_short(&c),
+            "sample clock measuring… · system clock not stated"
+        );
+        let c = clocks(measured(6.0), SystemClock::Synced { maxerror_us: 3027 });
+        assert_eq!(
+            status_short(&c),
+            "+6 ppm vs system clock · system clock synced ±3.0 ms"
+        );
     }
 }

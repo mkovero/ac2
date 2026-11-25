@@ -298,11 +298,26 @@ pub fn anchor_text(a: &Anchor) -> &'static str {
     }
 }
 
-/// A remote input's late frames and slips: `0 late frames in the last hour · 0 slips`.
+/// `1 late frame`, `2 late frames`: a count with its noun.
+fn counted(n: u64, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// A remote input's late frames and slips: `1 late frame in the last hour · 0 slips`.
 pub fn input_counts(st: &RemoteInputStatus) -> String {
     format!(
-        "{} late frames in the last hour · {} slips",
-        st.late_frames_hour, st.slips
+        "{} in the last hour · {}",
+        counted(u64::from(st.late_frames_hour), "late frame", "late frames"),
+        counted(u64::from(st.slips), "slip", "slips")
+    )
+}
+
+/// `ac2 status`'s short form: `1 late in last hour · 0 slips`.
+pub fn input_counts_short(st: &RemoteInputStatus) -> String {
+    format!(
+        "{} late in last hour · {}",
+        st.late_frames_hour,
+        counted(u64::from(st.slips), "slip", "slips")
     )
 }
 
@@ -457,8 +472,11 @@ pub fn rig_block(
     if !sts.is_empty() {
         let late: u64 = sts.iter().map(|s| u64::from(s.late_frames_hour)).sum();
         let slips: u64 = sts.iter().map(|s| u64::from(s.slips)).sum();
-        audio.push(format!("{late} late frames in the last hour"));
-        audio.push(format!("{slips} slips"));
+        audio.push(format!(
+            "{} in the last hour",
+            counted(late, "late frame", "late frames")
+        ));
+        audio.push(counted(slips, "slip", "slips"));
         let margin = sts
             .iter()
             .filter_map(|s| s.arrival_margin)
@@ -640,7 +658,7 @@ mod tests {
                  synced; a lock is not proven below 2 ppm",
                 "last change 19:20",
                 "link up, 3.1 Mbit/s · window 256 KiB",
-                "10 ms link offset · 2 late frames in the last hour · 1 slips · arrival margin \
+                "10 ms link offset · 2 late frames in the last hour · 1 slip · arrival margin \
                  4.2 ms",
             ]
         );

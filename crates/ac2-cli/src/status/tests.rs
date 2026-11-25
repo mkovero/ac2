@@ -440,7 +440,7 @@ fn a_daemon_with_no_session_open_says_closed() {
     let t = page("ac2 on studio", &st, false);
     assert_eq!(
         t,
-        "ac2 on studio   ac2d 0.1.0 (build 0.1.0+202486c60e44)\n\
+        "ac2 on studio   ac2d 0.1.0+202486c6\n\
          \n\
          AUDIO   closed\n\
          \n\
@@ -507,7 +507,7 @@ fn a_stale_local_daemon_says_how_to_restart_it() {
     });
     assert!(
         t.starts_with(
-            "pupu      ac2d 0.1.0 (build 0.1.0+202486c60e44)\n\
+            "pupu      ac2d 0.1.0+202486c6\n\
              ! STALE   daemon build 0.1.0+aaaa, this ac2 is 0.1.0+bbbb\n\
              !         restart it: `ac2 daemon stop && ac2 daemon start`\n"
         ),
@@ -521,4 +521,14 @@ fn consecutive_channels_collapse_to_ranges() {
     assert_eq!(channel_ranges(&[0, 1, 4, 6, 7, 8]), "1, 2, 5, 7–9");
     assert_eq!(channel_ranges(&[3]), "4");
     assert_eq!(channel_ranges(&[]), "");
+}
+
+#[test]
+fn the_header_cuts_the_build_to_its_commit() {
+    assert_eq!(
+        server_short("ac2d 0.1.0 (build 0.1.0+202486c60e44)"),
+        "ac2d 0.1.0+202486c6"
+    );
+    assert_eq!(server_short("ac2d 0.1.0 (build abc)"), "ac2d abc");
+    assert_eq!(server_short("some daemon"), "some daemon");
 }

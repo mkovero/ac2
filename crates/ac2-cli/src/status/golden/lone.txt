@@ -1,11 +1,10 @@
-ac2 on studio   ac2d 0.1.0 (build 0.1.0+202486c60e44)
+ac2 on studio   ac2d 0.1.0+202486c6
 
 AUDIO     open · jack · 96 kHz · 256 samples
   in      1, 2
   out     6
   clock   one clock · drift +1.3 ppm over 2.0 s
-          sample clock +1 ppm against the system clock (last minute)
-          system clock synced, OS bound ±2.5 ms
+          +1 ppm vs system clock · system clock synced ±2.5 ms
 
 INPUTS
   1      mic MM1 34804   90° · 114.0 dB SPL at 1.00 kHz · 3 d ago

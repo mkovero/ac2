@@ -16,19 +16,35 @@ AUDIO     open · jack · 96 kHz · 256 samples
 
 RIGS
 ! ac2 on ac2pi-0ab1c6   CLOCKS NOT LOCKED +7.8 ppm                link up, 3.2 Mbit/s
-!                       in 1 streaming, placed by capture time · 1 late frames in the last hour · 0 slips
-                        CLOCKS NOT LOCKED: ac2 on ac2pi-0ab1c6's interface runs +7.8 ppm off its system clock
-                        link up, 3.2 Mbit/s · window 256 KiB
-                        15 ms link offset · 1 late frames in the last hour · 0 slips · arrival margin 3.4 ms
-                        levels: CLOCKS NOT LOCKED: ac2 on ac2pi-0ab1c6 runs +7.7 ppm against this rig over 60 s · marks for 15 min 17 s · 96 kHz, 1 input · link up
+!                       in 1 streaming, placed by capture time
+                        1 late frame in the last hour
+                        0 slips
+                        CLOCKS NOT LOCKED: its interface runs +7.8 ppm off its system clock
+                        link up, 3.2 Mbit/s
+                        window 256 KiB
+                        15 ms link offset
+                        1 late frame in the last hour
+                        0 slips
+                        arrival margin 3.4 ms
+                        levels: CLOCKS NOT LOCKED: it runs +7.7 ppm against this rig over 60 s
+                        marks for 15 min 17 s
+                        96 kHz, 1 input
+                        link up
   ac2 on ketunkolo      measuring clocks… · −0.69 ppm over 60 s   levels only · link up
-                        levels: measuring clocks… · ac2 on ketunkolo runs −0.69 ppm against this rig over 60 s · beyond 2 ppm for 2 min running · a verdict at 10, agree after 2 min below 1.8 · marks for 15 min 58 s · 96 kHz, 8 inputs · link up
-                        measured from the rigs' level frames, no audio streamed
+                        levels: measuring clocks…
+                        it runs −0.69 ppm against this rig over 60 s
+                        beyond 2 ppm for 2 min running
+                        a verdict at 10, agree after 2 min below 1.8
+                        marks for 15 min 58 s
+                        96 kHz, 8 inputs
+                        link up
+                        from the rigs' level frames
 
 MEASUREMENTS
 ! Reference -> usb-behku   Clocks not locked: averaging stopped   meas from ac2 on ac2pi-0ab1c6
-                           delay −145.062 ms · includes the clock offset between pupu and ac2 on ac2pi-0ab1c6 (not measured)
-                           Reference -> usb-behku stopped: ac2 on ac2pi-0ab1c6's interface runs +7.8 ppm against its host. Lock it to the reference its host is disciplined from.
+                           delay −145.062 ms
+                           includes the clock offset between pupu and ac2 on ac2pi-0ab1c6 (not measured)
+                           stopped: ac2 on ac2pi-0ab1c6's interface runs +7.8 ppm off
 
 INPUTS
   1+2                        mic MM1 34804   pair   L 90° · electrical ±1 dB · 43 d ago

@@ -56,18 +56,54 @@ pub fn text(i: &Input<'_>) -> String {
         .as_ref()
         .map(|o| o.config.remote_inputs.as_slice())
         .unwrap_or_default();
-    render(
-        &[
-            header(i),
-            audio(i, remote_inputs),
-            rigs(i, remote_inputs),
-            measurements(i),
-            inputs(i, remote_inputs),
-            autosave(i),
-        ],
-        // `-v` keeps each of the scene's sentences whole on its line.
-        if i.verbose { usize::MAX } else { PAGE },
-    )
+    let mut sections = [
+        header(i),
+        audio(i, remote_inputs),
+        rigs(i, remote_inputs),
+        measurements(i),
+        inputs(i, remote_inputs),
+        autosave(i),
+    ];
+    if i.verbose {
+        // The rigs' and measurements' lines list facts; an input's calibration line is one.
+        for s in sections
+            .iter_mut()
+            .filter(|s| s.heading == "RIGS" || s.heading == "MEASUREMENTS")
+        {
+            for r in &mut s.rows {
+                r.more = one_fact_per_line(&r.more);
+            }
+        }
+    }
+    // `-v` keeps each fact whole on its own line, however long.
+    render(&sections, if i.verbose { usize::MAX } else { PAGE })
+}
+
+/// `-v`'s lines under a row, split at their ` · ` separators: one fact per line.
+fn one_fact_per_line(lines: &[Line]) -> Vec<Line> {
+    lines
+        .iter()
+        .flat_map(|l| {
+            // The mark stays with the line's first fact, which says the trouble.
+            l.text
+                .split(" · ")
+                .enumerate()
+                .map(|(k, t)| Line::trouble(t, l.trouble && k == 0))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// The daemon's version and build, its commit cut to 8 hex digits:
+/// `ac2d 0.1.0+202486c6`; as the daemon said it when it says no build id.
+fn server_short(server: &str) -> String {
+    let Some(id) = crate::cmd::daemon::parse_build_id(server) else {
+        return server.to_owned();
+    };
+    match id.split_once('+') {
+        Some((v, hash)) => format!("ac2d {v}+{}", hash.get(..8).unwrap_or(hash)),
+        None => format!("ac2d {id}"),
+    }
 }
 
 fn header(i: &Input<'_>) -> Section {
@@ -106,7 +142,11 @@ fn header(i: &Input<'_>) -> Section {
     }
     Section {
         heading: w.name.clone(),
-        summary: Some(Line::plain(w.server.clone())),
+        summary: Some(Line::plain(if i.verbose {
+            w.server.clone()
+        } else {
+            server_short(&w.server)
+        })),
         rows,
     }
 }
@@ -199,10 +239,11 @@ fn audio(i: &Input<'_>, remote: &[RemoteInput]) -> Section {
         },
     ]);
     if !remote.is_empty() {
-        in_row = in_row.more(Line::plain(ac2_scene::cross_rig::link_offset_line(
-            o.config.link_offset,
-            &st.remote,
-        )));
+        in_row = in_row.more(Line::plain(if i.verbose {
+            ac2_scene::cross_rig::link_offset_line(o.config.link_offset, &st.remote)
+        } else {
+            ac2_scene::cross_rig::link_offset_short(o.config.link_offset, &st.remote)
+        }));
     }
     rows.push(in_row);
     if o.replay.is_none() {
@@ -260,8 +301,12 @@ fn clock_row(i: &Input<'_>, o: &ac2_proto::model::OpenSession) -> Row {
     if i.verbose {
         row = row.more(Line::plain(long));
     }
-    for l in ac2_scene::clock::status_lines(&i.state.clocks) {
-        row = row.more(Line::plain(l));
+    if i.verbose {
+        for l in ac2_scene::clock::status_lines(&i.state.clocks) {
+            row = row.more(Line::plain(l));
+        }
+    } else {
+        row = row.more(Line::plain(ac2_scene::clock::status_short(&i.state.clocks)));
     }
     row
 }
@@ -351,10 +396,10 @@ fn rigs(i: &Input<'_>, remote: &[RemoteInput]) -> Section {
                 } else {
                     l
                 };
-                row = row.more(Line::plain(l));
+                row = row.more(Line::plain(unnamed(&l, &rig.name)));
             }
             if let Some(k) = standing {
-                row = row.more(Line::plain(levels_line(k, &rig.name)));
+                row = row.more(Line::plain(unnamed(&levels_line(k, &rig.name), &rig.name)));
             }
         }
         rows.push(row);
@@ -373,7 +418,7 @@ fn rigs(i: &Input<'_>, remote: &[RemoteInput]) -> Section {
         ])
         .trouble(relation_trouble(&s.clock.relation) || link_trouble(&s.link));
         if i.verbose {
-            row = row.more(Line::plain(levels_line(k, &s.name)));
+            row = row.more(Line::plain(unnamed(&levels_line(k, &s.name), &s.name)));
             row = row.more(Line::plain(ac2_scene::standing::FROM_LEVELS));
         }
         rows.push(row);
@@ -385,8 +430,14 @@ fn rigs(i: &Input<'_>, remote: &[RemoteInput]) -> Section {
     }
 }
 
-/// A remote input under its rig: `in 1 streaming · 1 late frames in the last hour · 0
-/// slips`; placed on arrival is said (the normal placing, by capture time, is not, but
+/// A line under rig `name`'s row with the rig said as *it*: the row already names it.
+fn unnamed(line: &str, name: &str) -> String {
+    line.replace(&format!("{name}'s "), "its ")
+        .replace(&format!("{name} runs "), "it runs ")
+}
+
+/// A remote input under its rig: `in 1 streaming · 1 late in last hour · 0 slips` (its
+/// mark as the app colours it: a late frame is a fault there too); placed on arrival is said (the normal placing, by capture time, is not, but
 /// for `-v`); a link not up says why no audio comes.
 fn input_line(r: &RemoteState, x: &RemoteInput, link: &RemoteLink, verbose: bool) -> Line {
     let name = format!("in {}", u32::from(x.channel) + 1);
@@ -400,7 +451,7 @@ fn input_line(r: &RemoteState, x: &RemoteInput, link: &RemoteLink, verbose: bool
             if let Some(a @ ac2_proto::model::Anchor::Arrival { .. }) = &st.anchor {
                 t.push_str(&format!(", {}", br::anchor_text(a)));
             }
-            format!("{name} {t} · {}", br::input_counts(st))
+            format!("{name} {t} · {}", br::input_counts_short(st))
         }
         _ => format!("{name}: {}", state.text),
     };
@@ -449,6 +500,9 @@ fn measurements(i: &Input<'_>) -> Section {
         if i.verbose
             && let Some(b) = ac2_scene::cross_rig::banner(label, x, r, ours)
         {
+            let b = b
+                .strip_prefix(&format!("{label} "))
+                .map_or(b.clone(), str::to_owned);
             row = row.more(Line::plain(b));
         }
         rows.push(row);

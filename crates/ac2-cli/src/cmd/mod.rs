@@ -5,7 +5,7 @@ mod artnet;
 mod auth;
 mod bands;
 mod cal;
-mod daemon;
+pub(crate) mod daemon;
 mod delay;
 mod devsel;
 mod discover;
