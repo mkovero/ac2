@@ -193,8 +193,9 @@ pub struct StandingRig {
     /// changes only when a shown digit does.
     pub clock: PeerClock,
     /// When this rig began pairing the marks counted now (its wall time, placed again only
-    /// when off by over 2 s), since both rigs' sessions (re)started or the last hole in the
-    /// marks of over a minute; `None` while none come.
+    /// when off by over 2 s), since both rigs' sessions (re)started, the last hole in the
+    /// marks of over a minute or the last report the judge could not tell from (marks late
+    /// or ahead, a system clock unsynced); `None` while none come and through such a spell.
     pub marks_since: Option<WallNs>,
     /// The minutes counted toward a verdict since a minute closed beyond the rule; `None`
     /// while not counting, or once a verdict is reached.

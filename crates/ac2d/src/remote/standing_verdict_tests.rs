@@ -156,6 +156,7 @@ fn input(raw: Raw, event: Event, live: Option<(f64, f64)>) -> Input {
         event,
         live,
         line: None,
+        young_beyond: false,
         now: Duration::ZERO,
     }
 }

@@ -23,74 +23,116 @@ pub(crate) fn meter_period() -> Duration {
     Duration::from_secs_f64(1.0 / f64::from(METER_FPS))
 }
 
-/// Interval between two `source/levels` frames: two meter periods. Another rig fits the
-/// cross-rig rate on their marks keeping one per 50 ms (`remote::join::CROSS_STEP_S`), so
-/// at the meter rate it kept every second mark anyway; at half the rate it keeps every one,
-/// the same points, and the link carries half the bytes.
+/// Meter frames a `source/levels` frame spans.
+const SOURCE_SPAN: u32 = 2;
+
+/// Interval between two `source/levels` frames: [`SOURCE_SPAN`] meter periods. Another rig
+/// fits the cross-rig rate on their marks at a point per 50 ms
+/// (`remote::join::CROSS_STEP_S`); a mark every 67 ms gives that fit a point each, and the
+/// slope's error falls with the span, not with the point count.
 pub(crate) fn source_period() -> Duration {
-    meter_period() * 2
+    meter_period() * SOURCE_SPAN
 }
 
 /// A rig's own meters over the meter frames since its last `source/levels` frame, so a
-/// transient between two of them still reaches the other rig.
+/// transient in any of them still reaches the other rig.
 #[derive(Default)]
 struct SourceHeld {
-    /// Peak and true peak, the highest; clip, any; RMS as power summed over `n` frames.
+    /// Peak, true peak and the ballistic slot, the highest; clip, any; RMS as power summed
+    /// over `n` frames.
     peak: Vec<f32>,
     true_peak: Vec<f32>,
+    ppm: Vec<f32>,
     clip: Vec<ClipFlags>,
     power: Vec<f32>,
     n: u32,
 }
 
+/// One meter frame's columns that a `source/levels` frame holds over its span.
+struct Interval<'a> {
+    peak: &'a [f32],
+    true_peak: &'a [f32],
+    ppm: &'a [f32],
+    clip: &'a [ClipFlags],
+    rms: &'a [f32],
+}
+
 impl SourceHeld {
-    fn add(&mut self, peak: &[f32], true_peak: &[f32], clip: &[ClipFlags], rms: &[f32]) {
-        // Meter frames are close to one period each, so RMS over two is the mean of their
-        // powers.
-        let power = rms.iter().map(|r| 10f32.powf(r / 10.0));
-        if self.n == 0 || self.peak.len() != peak.len() {
-            self.peak = peak.to_vec();
-            self.true_peak = true_peak.to_vec();
-            self.clip = clip.to_vec();
+    fn add(&mut self, i: Interval<'_>) {
+        // Meter frames are close to one period each, so RMS over the span is the mean of
+        // their powers.
+        let power = i.rms.iter().map(|r| 10f32.powf(r / 10.0));
+        if self.n == 0 || self.peak.len() != i.peak.len() {
+            self.peak = i.peak.to_vec();
+            self.true_peak = i.true_peak.to_vec();
+            self.ppm = i.ppm.to_vec();
+            self.clip = i.clip.to_vec();
             self.power = power.collect();
             self.n = 1;
             return;
         }
-        let high = |a: &mut f32, b: f32| {
-            *a = if a.is_nan() || b.is_nan() {
-                f32::NAN
-            } else {
-                a.max(b)
+        let high = |held: &mut Vec<f32>, new: &[f32]| {
+            for (a, b) in held.iter_mut().zip(new) {
+                *a = if a.is_nan() || b.is_nan() {
+                    f32::NAN
+                } else {
+                    a.max(*b)
+                };
             }
         };
-        self.peak
-            .iter_mut()
-            .zip(peak)
-            .for_each(|(a, b)| high(a, *b));
-        self.true_peak
-            .iter_mut()
-            .zip(true_peak)
-            .for_each(|(a, b)| high(a, *b));
+        high(&mut self.peak, i.peak);
+        high(&mut self.true_peak, i.true_peak);
+        // The ballistic slot is the interval's highest reading (for the peak types a raw
+        // peak with no decay of its own): the span's is the highest of its intervals.
+        high(&mut self.ppm, i.ppm);
         self.clip
             .iter_mut()
-            .zip(clip)
+            .zip(i.clip)
             .for_each(|(a, b)| *a = a.with(*b));
         self.power.iter_mut().zip(power).for_each(|(a, b)| *a += b);
         self.n += 1;
     }
 
-    /// The held meters (peak, true peak, clip, RMS dBFS), starting again.
-    fn take(&mut self) -> (Vec<f32>, Vec<f32>, Vec<ClipFlags>, Vec<f32>) {
-        let n = self.n.max(1) as f32;
-        self.n = 0;
-        let rms = self.power.iter().map(|p| 10.0 * (p / n).log10()).collect();
-        (
-            std::mem::take(&mut self.peak),
-            std::mem::take(&mut self.true_peak),
-            std::mem::take(&mut self.clip),
-            rms,
-        )
+    /// Whether the held meters span a whole `source/levels` frame.
+    fn full(&self) -> bool {
+        self.n >= SOURCE_SPAN
     }
+
+    /// A meter frame's interval, `wanted`: whether `source/levels` is read now; the frame's
+    /// columns once they span a whole one.
+    fn offer(&mut self, wanted: bool, i: Interval<'_>) -> Option<Held> {
+        if !wanted {
+            // Nobody reads them: what was held belongs to no frame, and must not merge into
+            // the first of the next subscription.
+            *self = Self::default();
+            return None;
+        }
+        self.add(i);
+        self.full().then(|| self.take())
+    }
+
+    /// The held meters, starting again.
+    fn take(&mut self) -> Held {
+        let n = self.n.max(1) as f32;
+        let rms = self.power.iter().map(|p| 10.0 * (p / n).log10()).collect();
+        let h = std::mem::take(self);
+        Held {
+            peak: h.peak,
+            true_peak: h.true_peak,
+            ppm: h.ppm,
+            clip: h.clip,
+            rms,
+        }
+    }
+}
+
+/// What a `source/levels` frame carries of the meter frames it spans.
+struct Held {
+    peak: Vec<f32>,
+    true_peak: Vec<f32>,
+    ppm: Vec<f32>,
+    clip: Vec<ClipFlags>,
+    rms: Vec<f32>,
 }
 
 pub(crate) struct SessionLevels {
@@ -102,7 +144,6 @@ pub(crate) struct SessionLevels {
     config_rev: Rev,
     wall: u64,
     cadence: Cadence,
-    source: Cadence,
     held: SourceHeld,
 }
 
@@ -136,7 +177,6 @@ impl SessionLevels {
             config_rev,
             wall: 0,
             cadence: Cadence::new(meter_period(), early),
-            source: Cadence::new(source_period(), early),
             held: SourceHeld::default(),
         }
     }
@@ -178,34 +218,36 @@ impl SessionLevels {
         let mut r = self.programme.take(gonio);
         // Another rig reads this rig's own inputs only, published whether or not an app
         // watches: its clocks are related to this one's through the mark.
-        if e.wants(Topic::SourceLevels) {
-            self.held.add(&peak, &r.true_peak, &clip, &rms);
-            if self.source.is_ready(now) {
-                self.source.take(now);
-                // The ballistic reading carries its own decay and `max` and `overs` hold
-                // since a reset: the newest frame's say all of the interval.
-                let (peak, true_peak, clip, rms) = self.held.take();
-                e.send(
-                    stamp,
-                    FrameData::SourceLevels(SourceLevelsFrame {
-                        meta: SourceLevelsMeta {
-                            channels: meta.channels.clone(),
-                            ballistic: r.ballistic,
-                            pair_levels: r.pair_levels.clone(),
-                            loudness: r.loudness.clone(),
-                            sample_rate_hz: self.sample_rate,
-                            mark,
-                        },
-                        peak,
-                        rms,
-                        clip,
-                        ppm: r.ppm.clone(),
-                        true_peak,
-                        max: r.max.clone(),
-                        overs: r.overs.clone(),
-                    }),
-                );
-            }
+        let interval = Interval {
+            peak: &peak,
+            true_peak: &r.true_peak,
+            ppm: &r.ppm,
+            clip: &clip,
+            rms: &rms,
+        };
+        if let Some(h) = self.held.offer(e.wants(Topic::SourceLevels), interval) {
+            // `max` and `overs` hold since a reset, and the pairs' and sources' loudness are
+            // running readings: the newest frame's say all of the span.
+            e.send(
+                stamp,
+                FrameData::SourceLevels(SourceLevelsFrame {
+                    meta: SourceLevelsMeta {
+                        channels: meta.channels.clone(),
+                        ballistic: r.ballistic,
+                        pair_levels: r.pair_levels.clone(),
+                        loudness: r.loudness.clone(),
+                        sample_rate_hz: self.sample_rate,
+                        mark,
+                    },
+                    peak: h.peak,
+                    rms: h.rms,
+                    clip: h.clip,
+                    ppm: h.ppm,
+                    true_peak: h.true_peak,
+                    max: r.max.clone(),
+                    overs: r.overs.clone(),
+                }),
+            );
         }
         let (mut channels, mut peak, mut rms, mut clip) = (meta.channels, peak, rms, clip);
         // The programme meters run on the local inputs; a remote input's ballistic reads its
@@ -268,24 +310,77 @@ pub(crate) fn meter_stamp(levels: &LevelsMeter, config_rev: Rev, wall_ns: u64) -
 mod tests {
     use super::*;
 
-    /// Two meter frames into one `source/levels` frame: the higher peak, either clip, and
-    /// the RMS of the two intervals together.
+    fn interval<'a>(
+        peak: &'a [f32],
+        true_peak: &'a [f32],
+        ppm: &'a [f32],
+        clip: &'a [ClipFlags],
+        rms: &'a [f32],
+    ) -> Interval<'a> {
+        Interval {
+            peak,
+            true_peak,
+            ppm,
+            clip,
+            rms,
+        }
+    }
+
+    /// Two meter frames into one `source/levels` frame: the higher peak, true peak and
+    /// ballistic slot, either clip, and the RMS of the two intervals together.
     #[test]
     fn a_source_frame_holds_the_meter_frames_it_spans() {
         let mut h = SourceHeld::default();
-        h.add(&[-6.0], &[-5.5], &[ClipFlags::NONE], &[-20.0]);
-        h.add(&[-12.0], &[-11.0], &[ClipFlags::CLIP], &[f32::NEG_INFINITY]);
-        let (peak, true_peak, clip, rms) = h.take();
+        // A click in the first interval, silence in the second: under a true-peak ballistic
+        // the slot is the interval's raw peak, so the second alone would read −40.
+        h.add(interval(
+            &[-6.0],
+            &[-3.0],
+            &[-3.0],
+            &[ClipFlags::NONE],
+            &[-20.0],
+        ));
+        assert!(!h.full());
+        h.add(interval(
+            &[-12.0],
+            &[-40.0],
+            &[-40.0],
+            &[ClipFlags::CLIP],
+            &[f32::NEG_INFINITY],
+        ));
+        assert!(h.full());
+        let t = h.take();
         assert_eq!(
-            (peak, true_peak, clip),
-            (vec![-6.0], vec![-5.5], vec![ClipFlags::CLIP])
+            (t.peak, t.true_peak, t.ppm, t.clip),
+            (vec![-6.0], vec![-3.0], vec![-3.0], vec![ClipFlags::CLIP])
         );
         // Half the time at −20 dBFS, half silent: 3 dB down.
-        assert!((rms[0] - (-20.0 - 3.0103)).abs() < 1e-3, "{rms:?}");
+        assert!((t.rms[0] - (-20.0 - 3.0103)).abs() < 1e-3, "{:?}", t.rms);
         // Taken: the next frame starts afresh.
-        h.add(&[-30.0], &[-29.0], &[ClipFlags::NONE], &[-40.0]);
-        let (peak, _, clip, rms) = h.take();
-        assert_eq!((peak, clip), (vec![-30.0], vec![ClipFlags::NONE]));
-        assert!((rms[0] + 40.0).abs() < 1e-4, "{rms:?}");
+        h.add(interval(
+            &[-30.0],
+            &[-29.0],
+            &[-29.0],
+            &[ClipFlags::NONE],
+            &[-40.0],
+        ));
+        assert!(!h.full());
+        let t = h.take();
+        assert_eq!((t.peak, t.clip), (vec![-30.0], vec![ClipFlags::NONE]));
+        assert!((t.rms[0] + 40.0).abs() < 1e-4, "{:?}", t.rms);
+    }
+
+    /// A clip held when the topic stops being read does not reach the first frame after
+    /// it is read again.
+    #[test]
+    fn what_was_held_goes_when_nobody_reads_source_levels() {
+        let mut h = SourceHeld::default();
+        let loud = || interval(&[0.0], &[0.5], &[0.5], &[ClipFlags::CLIP], &[-3.0]);
+        let quiet = || interval(&[-30.0], &[-29.0], &[-29.0], &[ClipFlags::NONE], &[-40.0]);
+        assert!(h.offer(true, loud()).is_none());
+        assert!(h.offer(false, quiet()).is_none());
+        assert!(h.offer(true, quiet()).is_none());
+        let t = h.offer(true, quiet()).expect("a whole span");
+        assert_eq!((t.peak, t.clip), (vec![-30.0], vec![ClipFlags::NONE]));
     }
 }

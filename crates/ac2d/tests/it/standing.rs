@@ -293,12 +293,14 @@ fn slow_marks_alone_agree_after_a_minute() {
     t.b.shutdown();
 }
 
-/// B's stamps start 4 ms late and settle with a 0.5 s time constant, as a stamp filter
-/// does at a stream's start: B's own line reads some 4 ppm at its first statements, fitted
-/// over that start, and within the rule a window later. The first verdict still comes about
-/// a minute in, with no count: a line that young classes no minute.
+/// B's stamps start 4 ms late and settle with a 0.5 s time constant, and its stream starts
+/// 3 s before A's, so the marks pair only after the error is gone: B's own line reads some
+/// 4 ppm at its first statements, fitted over that start, and within the rule a window
+/// later. The minute it read beyond in is unclassed; no count starts, and agreement comes
+/// at the next close. Streams that start together, the marks fitted over the error too,
+/// are not covered here: the cross-rig figure would read it as well.
 #[test]
-fn slow_a_start_up_stamp_error_still_agrees_in_about_a_minute() {
+fn slow_an_own_line_beyond_while_young_starts_no_count() {
     let mut t = rigs_with(
         FS,
         Some(StartStampError {
@@ -315,11 +317,11 @@ fn slow_a_start_up_stamp_error_still_agrees_in_about_a_minute() {
         let s = standing(&r);
         assert_eq!(s.and_then(|s| s.counting), None, "{r:#?}");
         if s.is_some_and(|s| s.clock.relation == PeerRelation::Agree) {
-            assert!(marks_for(&r) < 90.0, "{r:#?}");
+            assert!(marks_for(&r) < 150.0, "{r:#?}");
             break;
         }
         assert!(
-            t0.elapsed() < Duration::from_secs(150),
+            t0.elapsed() < Duration::from_secs(200),
             "no agreement: {r:#?}"
         );
         std::thread::sleep(Duration::from_millis(500));

@@ -209,10 +209,10 @@ in its meta; of the order of 100 kbit/s for eight inputs (off the layout; 1a mea
   block's sample index and its capture stamp **put on system time by the source** (block
   stamps are on the backend's clock, JACK's `CLOCK_MONOTONIC_RAW`, `ac2-audio`
   `stamp.rs`; the source applies its own map). No stamp or no map: no timing in the frame.
-  It goes at half the meter rate, 15 a second, its peaks, true peaks and clips the highest
-  over the two meter frames it spans and its RMS their mean power: the clock fit keeps a
-  mark per 50 ms, so at 30 a second it kept every second one; at 15 it keeps every one, the
-  same points, for half the bytes (about 14 kB/s for eight inputs).
+  It goes every second meter frame, 15 a second: its peaks, true peaks, clips and ballistic
+  slot the highest of the two meter intervals it spans, its RMS their mean power. The clock
+  fit keeps a point per 50 ms; a mark every 67 ms gives it one each, and the slope's error
+  falls with the span, not the point count (about 14 kB/s for eight inputs).
 - The session rig subscribes it on every link whose rig has a session; a frame waiting
   for credit is replaced by the newer one (a hole, not an error).
 - **`peer/<rig>/levels`** (new): what the session rig serves its apps, that peer's frame
@@ -339,16 +339,18 @@ session opens; with streams on demand that minute would come at every start.
   again. Each closed minute keeps two facts: its cross-rig figure, and the worst own line
   either rig stated over it (the rig and its value), so an own line beyond the rule between
   closes is not lost by being back within at the close. A rig's own line counts there only
-  once it has been stated a whole minute without going back to measuring: until then every
-  reading is a fit still spanning the stream's first seconds, so a start that reads beyond
-  the rule withholds *agree* through the judge but starts no count. A minute is beyond when either is
+  once it has been stated for its window, a statement period and 2 s (67 s) without going
+  back to measuring or the series restarting: until then every reading is a fit that may
+  still span the stream's first seconds. A minute in which such a young line read beyond
+  the rule, and that is within on all else, is unclassed: no count starts from it and no
+  *agree* rests on it (a clean pair with young lines still agrees at the first close). A minute is beyond when either is
   over 2 ppm, settled when both are below 1.8. *Agree* once a whole minute closes within
   the rule with no count running and the judge agreeing at the close, never beside a shown
   figure beyond the rule; between closes, after anything took it away, once the judge
   agrees three reports running. A minute closing beyond starts a count, *measuring* with
-  the count while it runs, with both ways out of it (*beyond 2 ppm for 4 min running · not
-  locked at 10, agree after 2 min running within*; *beyond 2 ppm in 1 of 2 min · a verdict
-  at 10, agree after 2 min running within*). At ten
+  the count while it runs, with both ways out of it (*beyond 2 ppm for 4 min running · a
+  verdict at 10, agree after 2 min below 1.8*; *beyond 2 ppm in 1 of 2 min · a verdict at
+  10, agree after 2 min below 1.8*). At ten
   counted: all ten cross figures beyond, one sign, is *not locked* by the cross-rig rate;
   else all ten own lines beyond, one rig and one sign, *not locked* by that rig's own line;
   else all ten beyond on one line or the other, each line keeping its sign (a free

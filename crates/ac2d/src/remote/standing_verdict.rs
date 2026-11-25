@@ -48,6 +48,8 @@ use ac2_proto::units::{RigId, Seconds, WallNs};
 use super::peer_clock::{BOUND_PPM, Evidence, judge, own_line, same_kind};
 use super::standing::{Minutes, StandingReport};
 use super::{MAX_LINK_OFFSET_S, link_offset};
+use crate::capture_clock::WINDOW_S;
+use crate::fanout::CLOCK_EVERY_S;
 
 /// Measured minutes in a row a *not locked* verdict needs. chrony slews a measured offset
 /// over about three of its update intervals; to read past 2 ppm through ten minutes running,
@@ -89,12 +91,16 @@ const SINCE_STEP_NS: u64 = 2_000_000_000;
 /// A closed minute's figure is a fit over this, s.
 const MINUTE_S: f64 = 60.0;
 /// A rig's own line classes a minute only once it has been stated this long without a
-/// break. The line is a fit over the last minute of the stream; until a whole window has
-/// passed since it was first stated, every reading still spans the stream's first seconds,
-/// whatever the device and its stamps did while starting, so a line that reads beyond the
-/// rule then and settles within it is the start, not a rate. Through the judge such a
-/// reading still withholds agreement; it only starts no count.
-const LINE_SETTLED: Duration = Duration::from_secs(60);
+/// break: its window, a statement period (the reading in state may be the one before, whose
+/// window still reaches back that far) and [`LINE_SLACK_S`]. Until then every reading is a
+/// fit that still spans the stream's first seconds, whatever the device and its stamps did
+/// while starting, so a reading beyond the rule then may be the start, not a rate: the minute
+/// it falls in is left unclassed (see [`Hold::step`]), and the judge withholds agreement.
+pub(crate) const LINE_SETTLED: Duration =
+    Duration::from_secs((WINDOW_S + CLOCK_EVERY_S + LINE_SLACK_S) as u64);
+/// The other rig's statement reaches this one in its state, sent on change over the link
+/// and read at each report a second apart, s.
+const LINE_SLACK_S: f64 = 2.0;
 
 /// How far past the link offset the marks arrive, s: the one in force when set (`set`),
 /// else the longest any link may run, since the operator may need that much and this rig
@@ -254,8 +260,10 @@ pub(super) struct Input {
     pub(super) event: Event,
     /// The live long-window figure, (ppm, span s).
     pub(super) live: Option<(f64, f64)>,
-    /// The worse of the two rigs' own lines now.
+    /// The worse of the two rigs' own lines now, of those stated [`LINE_SETTLED`].
     pub(super) line: Option<Line>,
+    /// A line stated for less than that reads beyond the rule now.
+    pub(super) young_beyond: bool,
     /// Time since the daemon's start.
     pub(super) now: Duration,
 }
@@ -284,6 +292,10 @@ pub(super) struct Hold {
     figure: Option<(f64, f64)>,
     /// The worst own line while the open minute was open.
     worst: Option<Line>,
+    /// A young own line read beyond the rule while the open minute was open.
+    young: bool,
+    /// Whether the minute that closed at the last report was classed; `None`: none closed.
+    classed: Option<bool>,
     /// Agreeing reports in a row.
     agrees: u32,
     /// Since when no minute closed, and whether a hole kept one from closing since.
@@ -305,6 +317,8 @@ impl Default for Hold {
             shown: PeerRelation::Measuring,
             figure: None,
             worst: None,
+            young: false,
+            classed: None,
             agrees: 0,
             open_from: None,
             gapped: false,
@@ -323,9 +337,12 @@ impl Hold {
             event,
             live,
             line,
+            young_beyond,
             now,
         } = input;
         self.forget(now);
+        // A minute that closes in a report the judge cannot use is not classed either.
+        self.classed = matches!(event, Event::Close(_)).then_some(false);
         if event == Event::Restart {
             self.start_again();
             self.starts.clear();
@@ -355,6 +372,7 @@ impl Hold {
         } else {
             0
         };
+        self.young |= young_beyond;
         if let Some(l) = line
             && self.worst.is_none_or(|w| l.ppm.abs() > w.ppm.abs())
         {
@@ -367,14 +385,27 @@ impl Hold {
             Event::Close(p) => {
                 // The figure shown is the one the minute was classed by, or none.
                 let p = p.map(hundredths).filter(|_| self.wait != Wait::Discard);
-                if self.wait == Wait::Discard {
+                // A young line beyond the rule may be its stream's start or a rate: a minute
+                // within on all else is neither within nor beyond. One beyond on its cross
+                // figure or a settled line is beyond whatever the young line read.
+                let unclassed = self.young
+                    && p.is_some_and(|cross| {
+                        Minute {
+                            cross,
+                            line: self.worst,
+                        }
+                        .within()
+                    });
+                if self.wait == Wait::Discard || unclassed {
                     self.last = None;
                 } else {
                     self.close(p, now);
                 }
+                self.classed = Some(self.wait != Wait::Discard && p.is_some() && !unclassed);
                 self.wait = Wait::Nothing;
                 self.figure = p.map(|p| (p, MINUTE_S));
                 self.worst = None;
+                self.young = false;
                 self.open_from = None;
                 self.gapped = false;
                 true
@@ -385,6 +416,7 @@ impl Hold {
                 }
                 self.figure = None;
                 self.worst = None;
+                self.young = false;
                 self.gapped = true;
                 false
             }
@@ -448,6 +480,7 @@ impl Hold {
         self.wait = Wait::Nothing;
         self.figure = None;
         self.worst = None;
+        self.young = false;
         self.agrees = 0;
         self.open_from = None;
         self.gapped = false;
@@ -601,6 +634,10 @@ fn place_since(was: Option<WallNs>, wall: WallNs, streaming: Duration) -> WallNs
     }
 }
 
+/// The judge's relation changes are logged at most once in this long per rig: a figure at
+/// the rule can turn it every report.
+const RAW_LOG_EVERY: Duration = Duration::from_secs(10);
+
 /// The standing relation with one paired rig: the hold, the feed's minutes as last seen and
 /// the system-time disagreements' persistence.
 #[derive(Debug)]
@@ -613,10 +650,14 @@ pub(crate) struct StandingWatch {
     /// Since when each rig's own line has been stated measured, time since the daemon's
     /// start.
     stated: Vec<(RigId, Duration)>,
+    /// Each rig's worst own reading while the open minute was open, settled or not.
+    readings: Vec<Reading>,
     /// The last report the judge could not tell from: the marks counted begin after it.
     stopped: Option<Duration>,
-    /// The judge's relation at the last report.
+    /// The judge's relation as last logged, when, and the changes not logged since.
     raw: Option<PeerRelation>,
+    raw_logged: Option<Duration>,
+    raw_unlogged: u32,
 }
 
 /// What a standing entry shows: figures to 0.01 ppm, whole seconds and whole milliseconds,
@@ -629,19 +670,42 @@ pub(crate) struct Shown {
     pub(crate) counting: Option<MinuteCount>,
     /// When the marks counted now began, this rig's wall time.
     pub(crate) marks_since: Option<WallNs>,
-    /// The judge's relation, before any hold, when it changed kind at this report.
-    pub(crate) raw_changed: Option<PeerRelation>,
+    /// The judge's relation, before any hold, to log now, with the changes of it not
+    /// logged since the last.
+    pub(crate) raw_changed: Option<(PeerRelation, u32)>,
     /// A minute that closed at this report.
     pub(crate) closed: Option<Closed>,
 }
 
-/// A minute as it closed, for the log: its cross-rig figure (`None`: thin), the worst own
-/// line that classed it and the judge's relation then.
+/// A rig's own line as read, ppm, and whether it was stated for less than
+/// [`LINE_SETTLED`] then.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Reading {
+    pub(crate) rig: RigId,
+    pub(crate) ppm: f64,
+    pub(crate) young: bool,
+}
+
+/// A minute as it closed, for the log: its cross-rig figure (`None`: thin), each rig's worst
+/// own reading over it, whether the hold classed it and the judge's relation then.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Closed {
     pub(crate) cross: Option<f64>,
-    pub(crate) worst: Option<Line>,
+    pub(crate) lines: Vec<Reading>,
+    pub(crate) classed: bool,
     pub(crate) raw: PeerRelation,
+}
+
+/// Whether two judge relations are the same for the log: of a kind, and a not-locked one
+/// for the same reason.
+fn same_raw(a: &PeerRelation, b: &PeerRelation) -> bool {
+    same_kind(a, b)
+        && match (a, b) {
+            (PeerRelation::NotLocked { reason: x }, PeerRelation::NotLocked { reason: y }) => {
+                std::mem::discriminant(x) == std::mem::discriminant(y)
+            }
+            _ => true,
+        }
 }
 
 impl StandingWatch {
@@ -653,18 +717,21 @@ impl StandingWatch {
             ahead: Persist::default(),
             since: None,
             stated: Vec::new(),
+            readings: Vec::new(),
             stopped: None,
             raw: None,
+            raw_logged: None,
+            raw_unlogged: 0,
         }
     }
 
-    /// The worse of the two rigs' own lines that have been stated for [`LINE_SETTLED`];
-    /// `restart`: the minutes start a new series, and every line's time starts with it.
-    fn settled_line(&mut self, e: &Evidence<'_>, restart: bool, now: Duration) -> Option<Line> {
+    /// Each rig's own line now, with whether it is young; `restart`: the minutes start a new
+    /// series, and every line's time starts with it.
+    fn lines(&mut self, e: &Evidence<'_>, restart: bool, now: Duration) -> Vec<Reading> {
         if restart {
             self.stated.clear();
         }
-        let mut worst: Option<Line> = None;
+        let mut out = Vec::new();
         // A rig whose clocks are not heard keeps its time: nothing says its line broke.
         for (rig, c) in [Some(e.ours), e.theirs.1.map(|c| (e.theirs.0, c))]
             .into_iter()
@@ -681,13 +748,51 @@ impl StandingWatch {
                     now
                 }
             };
-            if now.saturating_sub(since) >= LINE_SETTLED
-                && worst.is_none_or(|w| ppm.abs() > w.ppm.abs())
-            {
-                worst = Some(Line { rig, ppm });
+            out.push(Reading {
+                rig,
+                ppm,
+                young: now.saturating_sub(since) < LINE_SETTLED,
+            });
+        }
+        out
+    }
+
+    /// Keeps each rig's worst reading over the open minute.
+    fn keep(&mut self, now: &[Reading]) {
+        for r in now {
+            let r = Reading {
+                ppm: hundredths(r.ppm),
+                ..*r
+            };
+            match self.readings.iter_mut().find(|x| x.rig == r.rig) {
+                Some(x) if r.ppm.abs() > x.ppm.abs() => *x = r,
+                Some(_) => {}
+                None => self.readings.push(r),
             }
         }
-        worst
+    }
+
+    /// The judge's relation to log at `now`: a change, at most once per [`RAW_LOG_EVERY`];
+    /// changes held back are logged with their count once that has passed.
+    fn raw_log(&mut self, judged: PeerRelation, now: Duration) -> Option<(PeerRelation, u32)> {
+        let changed = self.raw.is_none_or(|was| !same_raw(&was, &judged));
+        if !changed && self.raw_unlogged == 0 {
+            return None;
+        }
+        let due = self
+            .raw_logged
+            .is_none_or(|t| now.saturating_sub(t) >= RAW_LOG_EVERY);
+        if !due {
+            self.raw_unlogged += u32::from(changed);
+            if changed {
+                self.raw = Some(judged);
+            }
+            return None;
+        }
+        let held = std::mem::take(&mut self.raw_unlogged);
+        self.raw = Some(judged);
+        self.raw_logged = Some(now);
+        Some((judged, held))
     }
 
     /// Judges `e` (its `late` and `disagree` before persistence) at `now` (time since the
@@ -702,44 +807,49 @@ impl StandingWatch {
         e.late = self.late.update(e.late, now);
         e.disagree = self.ahead.update(e.disagree, now);
         let event = Event::of(&mut self.seen, minutes);
-        let line = self.settled_line(&e, event == Event::Restart, now);
+        let lines = self.lines(&e, event == Event::Restart, now);
+        let line = lines
+            .iter()
+            .filter(|r| !r.young)
+            .map(|r| Line {
+                rig: r.rig,
+                ppm: r.ppm,
+            })
+            .max_by(|a, b| a.ppm.abs().total_cmp(&b.ppm.abs()));
+        let young_beyond = lines.iter().any(|r| r.young && r.ppm.abs() > BOUND_PPM);
         let judged = quantise(judge(&e));
         let raw = Raw::of(judged);
-        let raw_changed = self
-            .raw
-            .replace(judged)
-            .is_none_or(|was| !same_kind(&was, &judged))
-            .then_some(judged);
-        let closed = match event {
-            Event::Close(cross) => Some(Closed {
-                cross: cross.map(hundredths),
-                // As the hold folds it, this report's line with the minute's.
-                worst: [
-                    self.hold.worst,
-                    line.map(|l| Line {
-                        ppm: hundredths(l.ppm),
-                        ..l
-                    }),
-                ]
-                .into_iter()
-                .flatten()
-                .max_by(|a, b| a.ppm.abs().total_cmp(&b.ppm.abs())),
-                raw: judged,
-            }),
-            _ => None,
-        };
+        let raw_changed = self.raw_log(judged, now);
+        if matches!(raw, Raw::Agree | Raw::NotAgree) {
+            self.keep(&lines);
+        }
         let input = Input {
             raw,
             event,
             live: e.long,
             line,
+            young_beyond,
             now,
         };
         let relation = self.hold.step(input);
+        let closed = match event {
+            Event::Close(cross) => Some(Closed {
+                cross: cross.map(hundredths),
+                lines: std::mem::take(&mut self.readings),
+                classed: self.hold.classed == Some(true),
+                raw: judged,
+            }),
+            Event::Gap | Event::Restart => {
+                self.readings.clear();
+                None
+            }
+            Event::None => None,
+        };
         // What the judge cannot tell from drops the count and the open minute: the marks
         // counted begin after it, though the windows kept them.
         if matches!(raw, Raw::Stop(_)) {
             self.stopped = Some(now);
+            self.readings.clear();
         }
         let counted = e
             .streaming_for

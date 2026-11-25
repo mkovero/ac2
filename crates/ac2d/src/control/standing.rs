@@ -125,21 +125,43 @@ impl Control {
     }
 }
 
-/// What the hold was given, logged as it happens: the judge's relation when it changes
-/// kind, the minutes as they close. Once a minute or on a change, so bounded by itself; with
-/// the shown relation's log it tells a verdict held back from one the evidence withheld.
+/// What the hold was given, logged as it happens: each minute as it closes, and the
+/// judge's relation as it changes (bounded by the watch). With the shown relation's own line
+/// it tells a verdict the hold kept back from one the evidence withheld.
 fn log_raw(name: &str, shown: &Shown) {
-    if let Some(raw) = &shown.raw_changed {
-        tracing::info!("clocks with {name} from levels, judged before the hold: {raw:?}");
+    if let Some((raw, unlogged)) = &shown.raw_changed {
+        let held = if *unlogged > 0 {
+            format!(" ({unlogged} changes not logged before it)")
+        } else {
+            String::new()
+        };
+        tracing::info!("clocks with {name} from levels, judged before the hold: {raw:?}{held}");
     }
     if let Some(c) = &shown.closed {
-        let cross = c.cross.map_or("thin".into(), |p| format!("{p:+.2} ppm"));
-        let worst = c.worst.map_or("none settled".into(), |l| {
-            format!("rig {} {:+.2} ppm", l.rig, l.ppm)
-        });
-        tracing::debug!(
-            "clocks with {name} from levels: minute closed at {cross}, worst own line {worst}, \
-             judged {:?}",
+        let cross = c
+            .cross
+            .map_or("too thin to fit".into(), |p| format!("{p:+.2} ppm"));
+        let lines: Vec<String> = c
+            .lines
+            .iter()
+            .map(|l| {
+                format!(
+                    "rig {} {:+.2} ppm{}",
+                    l.rig,
+                    l.ppm,
+                    if l.young { " (young)" } else { "" }
+                )
+            })
+            .collect();
+        let lines = if lines.is_empty() {
+            "none".into()
+        } else {
+            lines.join(", ")
+        };
+        tracing::info!(
+            "clocks with {name} from levels: minute closed at {cross}, worst own lines {lines}, \
+             {}, judged {:?}",
+            if c.classed { "classed" } else { "not classed" },
             c.raw
         );
     }

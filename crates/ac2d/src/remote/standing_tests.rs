@@ -8,7 +8,9 @@ use ac2_proto::model::{
 use ac2_proto::units::{Rev, RigId, SampleIndex, Seconds, WallNs};
 
 use super::super::peer_clock::Evidence;
-use super::super::standing_verdict::{HOLD_MINUTES, Shown, StandingWatch, late};
+use super::super::standing_verdict::{
+    HOLD_MINUTES, LINE_SETTLED, Reading, Shown, StandingWatch, late,
+};
 use super::*;
 
 const RATE: u32 = 48_000;
@@ -305,20 +307,28 @@ fn marks_alone_agree_once_the_first_minute_closes_within() {
 }
 
 /// A line first stated over windows that still hold the stream's start: beyond the rule
-/// at the first close, within soon after. It withholds agreement while beyond and starts
-/// no count.
+/// through the first close, within after it. That minute is unclassed: no count starts,
+/// and agreement comes at the next close.
 #[test]
 fn a_young_own_line_beyond_the_rule_starts_no_count() {
     let mut r = Rigs::new(0.0);
     r.own_from = 55.0;
     r.own_ppm = 2.6;
     let mut agreed = None;
-    r.run_checking(0.0, 70.0, |t, _, shown| {
+    r.run_checking(0.0, 60.5, |t, _, shown| {
         assert_eq!(shown.counting, None, "{t} s");
         assert_eq!(shown.relation, PeerRelation::Measuring, "{t} s");
+        if let Some(c) = &shown.closed {
+            assert!(!c.classed, "{t} s: {c:?}");
+            assert!(c.lines.contains(&Reading {
+                rig: RigId(2),
+                ppm: 2.6,
+                young: true
+            }));
+        }
     });
     r.own_ppm = 0.4;
-    r.run_checking(70.0, 200.0, |t, _, shown| {
+    r.run_checking(60.5, 200.0, |t, _, shown| {
         assert_eq!(shown.counting, None, "{t} s");
         if shown.relation == PeerRelation::Agree {
             agreed.get_or_insert(t);
@@ -326,8 +336,93 @@ fn a_young_own_line_beyond_the_rule_starts_no_count() {
             assert!(agreed.is_none(), "{t} s: {shown:?}");
         }
     });
-    // Three agreeing reports after the line came within, not two more minutes.
-    assert!(agreed.is_some_and(|t| t < 75.0), "{agreed:?}");
+    // The second close, not two more minutes after a count.
+    assert!(
+        agreed.is_some_and(|t| (119.0..122.0).contains(&t)),
+        "{agreed:?}"
+    );
+}
+
+/// A clean pair whose lines are first stated at 55 s still agrees at the first close.
+#[test]
+fn a_clean_pair_agrees_at_the_first_close_while_its_lines_are_young() {
+    let mut r = Rigs::new(0.0);
+    r.own_from = 55.0;
+    r.own_ppm = 0.4;
+    let mut agreed = None;
+    r.run_checking(0.0, 90.0, |t, _, shown| {
+        if shown.relation == PeerRelation::Agree {
+            agreed.get_or_insert(t);
+        }
+    });
+    assert!(
+        agreed.is_some_and(|t| (59.0..62.0).contains(&t)),
+        "{agreed:?}"
+    );
+}
+
+/// A line that goes back to measuring every 50 s never settles: every minute it reads
+/// beyond the rule in is unclassed, so agreement never shows, not even for part of one.
+#[test]
+fn a_line_that_keeps_restarting_beyond_the_rule_never_agrees() {
+    let mut r = Rigs::new(0.0);
+    r.own_ppm = 3.0;
+    let mut t0 = 0.0;
+    while t0 < 600.0 {
+        r.own_from = t0 + 5.0;
+        r.run_checking(t0, t0 + 50.0, |t, _, shown| {
+            assert_ne!(shown.relation, PeerRelation::Agree, "{t} s");
+            assert_eq!(shown.counting, None, "{t} s");
+        });
+        t0 += 50.0;
+    }
+}
+
+/// [`Rigs::run_checking`] from `from` to `to`, handing back what was shown at the first
+/// close.
+fn first_close(r: &mut Rigs, from: f64, to: f64) -> Shown {
+    let mut close = None;
+    r.run_checking(from, to, |_, _, shown| {
+        if shown.closed.is_some() {
+            close.get_or_insert(shown.clone());
+        }
+    });
+    close.unwrap()
+}
+
+/// A line's age is counted from the series it is read in: a new series makes an old line
+/// young again, and it classes a minute only once it is settled in that series.
+#[test]
+fn a_new_series_makes_every_line_young_again() {
+    let mut r = Rigs::new(0.0);
+    r.own_ppm = 0.4;
+    r.run(0.0, 200.0);
+    assert_eq!(r.shown(200.0), PeerRelation::Agree);
+    // The other rig reopens: a new series; its line, stated all along, reads beyond.
+    r.epoch = SessionEpoch(2);
+    r.own_ppm = 3.0;
+    let c = first_close(&mut r, 200.0, 265.0);
+    assert!(!c.closed.unwrap().classed);
+    assert_eq!(c.counting, None);
+    let c = first_close(&mut r, 265.0, 330.0);
+    assert!(c.closed.unwrap().classed);
+    assert_eq!(c.counting.map(|c| c.beyond), Some(1));
+}
+
+/// The settling time: a line stated a moment short of it at a close leaves the minute
+/// unclassed, one stated for it classes the minute.
+#[test]
+fn a_line_settles_exactly_at_its_window_a_statement_and_the_slack() {
+    let settled = LINE_SETTLED.as_secs_f64();
+    for (short, classed) in [(0.5, false), (-0.5, true)] {
+        let mut r = Rigs::new(0.0);
+        r.own_ppm = 3.0;
+        // The second close is at 120 s.
+        r.own_from = 120.0 - settled + short;
+        r.run(0.0, 70.0);
+        let c = first_close(&mut r, 70.0, 130.0);
+        assert_eq!(c.closed.unwrap().classed, classed, "{short}");
+    }
 }
 
 /// The same line beyond once it has been stated a whole window classes the minute.
@@ -355,8 +450,10 @@ fn a_settled_own_line_beyond_the_rule_counts() {
             needed: HOLD_MINUTES as u32
         })
     );
-    let worst = shown.closed.unwrap().worst.unwrap();
-    assert_eq!((worst.rig, worst.ppm), (RigId(2), 2.6));
+    let closed = shown.closed.unwrap();
+    assert!(closed.classed);
+    let line = closed.lines.iter().find(|l| l.rig == RigId(2)).unwrap();
+    assert_eq!((line.ppm, line.young), (2.6, false));
 }
 
 #[test]
@@ -441,13 +538,16 @@ fn minutes_on_both_sides_or_of_both_signs_are_not_steady() {
 
 #[test]
 fn a_rigs_own_line_beyond_the_rule_waits_its_ten_minutes() {
+    // Stated from the start, the line is still young at the first close: that minute is
+    // unclassed and the ten run from the second.
+    let end = held_at() + MINUTE;
     let mut r = Rigs::new(0.0);
     r.own_ppm = 4.0;
-    r.run(0.0, held_at() - 5.0);
-    assert_eq!(r.shown(held_at() - 5.0), PeerRelation::Measuring);
-    r.run(held_at() - 5.0, held_at() + 5.0);
+    r.run(0.0, end - 5.0);
+    assert_eq!(r.shown(end - 5.0), PeerRelation::Measuring);
+    r.run(end - 5.0, end + 5.0);
     assert_eq!(
-        r.shown(held_at() + 5.0),
+        r.shown(end + 5.0),
         PeerRelation::NotLocked {
             reason: NotLockedReason::OwnClock {
                 rig: RigId(2),

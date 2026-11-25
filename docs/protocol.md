@@ -2276,8 +2276,9 @@ next minute closes; otherwise the closed minute's own figure (the one it was cla
 to the live one only when that is more than 1 ppm away, so a steady pair's entry changes
 once a minute at most), `marks_since` (`WallNs` \| nil: this rig's wall time less how long the
 marks counted now have been paired, placed again only when off by over 2 s; nil while none
-come; either rig's new session or daemon, or a hole in the marks of over a minute, starts it
-again; a shorter hole (over 2 s by their own sample index or system time, not by arrival)
+come and while the judge cannot tell from them (marks late or ahead, a system clock
+unsynced); either rig's new session or daemon, a hole in the marks of over a minute, or the
+end of such a spell starts it again; a shorter hole (over 2 s by their own sample index or system time, not by arrival)
 breaks the windows and the open minute but not this), `counting` (`MinuteCount` \| nil
 {`beyond`, `counted`, `needed`}: while a count runs and has no verdict, the minutes counted,
 those of them beyond the rule, and the number a verdict needs)}], one per paired rig, with or without remote
@@ -2431,12 +2432,15 @@ The kind a topic carries (§5.3 `kind`, and the `meta` key):
 | `ka` | `ka` |
 | `evt`, `audio/<channel>` | none (not a frame of §5.2) |
 
-`source/levels` is formed while a session is open whether or not anyone subscribes, at half
-the meter rate (15 a second; peaks, true peaks and clips the highest over the two meter
-intervals a frame spans, RMS their mean power), and sent only to connections admitted as a rig; anyone else subscribing to it
+`source/levels` is formed while a session is open whether or not anyone subscribes, every
+second meter frame (15 a second), and sent only to connections admitted as a rig; anyone else subscribing to it
 receives nothing. A paired rig subscribes it whenever its link is up, with or without remote
 inputs: each frame's `mark` (§5.4) pairs with this rig's own capture at the same system
 time, and that pairing over a minute is the clock relation in `remote.standing` (§4.1).
+A frame spans the two meter intervals since the one before: `peak`, `true_peak`, `clip` and
+`ppm` are the highest of the two, `rms` their mean power; `max`, `overs`, `pair_levels` and
+`loudness` are the newest interval's, as they hold or run on their own. Its period is two
+meter periods, so a reader must not count a ballistic's decay in frames.
 
 ### 5.2 Layout
 

@@ -15,7 +15,7 @@ use ac2_proto::model::{ClockBasis, SampleClock};
 use ac2_proto::units::Seconds;
 
 /// The device's stamps are fitted over the last minute of audio, a point kept per 50 ms.
-const WINDOW_S: f64 = 60.0;
+pub(crate) const WINDOW_S: f64 = 60.0;
 const STEP_S: f64 = 0.05;
 /// A pair of clock reads kept per 250 ms of disciplined time: each read is good to a
 /// microsecond or so, so a minute of them reads the stamp clock to well under 0.1 ppm.

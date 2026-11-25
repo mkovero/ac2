@@ -284,7 +284,7 @@ pub(crate) struct Fanout {
 
 /// The capture clock is measured over the last minute of stamps (`docs/design/multi-rig.md`
 /// §4, [`CaptureClock`]) and read every 5 s of audio.
-const CLOCK_EVERY_S: f64 = 5.0;
+pub(crate) const CLOCK_EVERY_S: f64 = 5.0;
 
 /// Time to wait for the final fade-out before tearing the stream down regardless.
 const STOP_TIMEOUT: Duration = Duration::from_millis(300);
