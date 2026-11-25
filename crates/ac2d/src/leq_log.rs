@@ -20,6 +20,8 @@ use ac2_proto::model::{
 use ac2_proto::units::{MeasId, WallNs};
 use ac2_traces::band_log::BandLogRow;
 
+pub(crate) mod runs;
+
 const NS: u64 = 1_000_000_000;
 
 /// Rows taken off the oldest end between exact recomputes of the total: subtracting what
@@ -28,12 +30,15 @@ const NS: u64 = 1_000_000_000;
 const EXACT_EVERY: u32 = 3600;
 
 /// One meter's log: the newest [`SplLogPage::RETAINED_ROWS`] rows and how many were logged,
-/// with the whole log's total kept as rows come and go.
+/// with the whole log's total kept as rows come and go. Rows are keyed by their second
+/// index ([`SplLogRow::second`]); wall times are annotations ([`runs`]).
 #[derive(Debug)]
 pub(crate) struct LeqLog {
     /// Unique among the logs of this process: the autosave tells logs apart by it, the
     /// one that replaced a meter's log included.
     id: u64,
+    /// When the log started: its identity to clients ([`SplLogPage::started_at`]).
+    started: WallNs,
     rows: VecDeque<SplLogRow>,
     /// Whole seconds without a row before each row (none before the oldest).
     missing_before: VecDeque<u64>,
@@ -50,6 +55,8 @@ pub(crate) struct LeqLog {
     bands: VecDeque<BandLogRow>,
     /// Band rows logged so far.
     band_total: u64,
+    /// Runs, indices and the high-water mark.
+    runs: runs::Runs,
 }
 
 /// The log as a whole: from its oldest kept second to its newest.
@@ -59,12 +66,22 @@ pub(crate) struct LogRun {
     pub(crate) until: WallNs,
     /// Measured time, s.
     pub(crate) measured: f64,
-    /// Time between `started_at` and `until` not measured, s.
+    /// Seconds between the oldest and the newest index not measured (an unknown gap
+    /// counts none: its length is not known).
     pub(crate) gaps: f64,
     /// At the retention: older seconds were (or may have been) dropped.
     pub(crate) trimmed: bool,
     /// LAeq, LCeq, LZeq over the measured time, dBFS.
     pub(crate) levels_dbfs: [f64; 3],
+}
+
+/// The oldest and newest second a log holds, with their wall annotations.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Extent {
+    pub(crate) first: u64,
+    pub(crate) last: u64,
+    pub(crate) start: WallNs,
+    pub(crate) until: WallNs,
 }
 
 /// A log shared between the control thread and the meter's job.
@@ -75,11 +92,18 @@ pub(crate) fn lock(l: &SharedLog) -> std::sync::MutexGuard<'_, LeqLog> {
     l.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Now on the wall clock to the millisecond: a log's start, which its file's header holds
+/// at that resolution, so a log read back keeps the identity it was served under.
+fn started_now() -> WallNs {
+    WallNs(crate::util::wall_ns() / 1_000_000 * 1_000_000)
+}
+
 impl Default for LeqLog {
     fn default() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         Self {
             id: NEXT.fetch_add(1, Ordering::Relaxed),
+            started: started_now(),
             rows: VecDeque::new(),
             missing_before: VecDeque::new(),
             missing: 0,
@@ -89,6 +113,7 @@ impl Default for LeqLog {
             epoch: 0,
             bands: VecDeque::new(),
             band_total: 0,
+            runs: runs::Runs::default(),
         }
     }
 }
@@ -99,16 +124,29 @@ impl LeqLog {
         self.id
     }
 
-    /// A log holding `rows` and band rows `bands` (a loaded session's), numbered from 0.
-    pub(crate) fn from_rows(rows: Vec<SplLogRow>, bands: Vec<BandLogRow>) -> Self {
-        let mut l = Self::default();
-        for r in rows {
-            l.push(r);
+    /// When the log started (its identity to clients).
+    pub(crate) fn started(&self) -> WallNs {
+        self.started
+    }
+
+    /// A log read back (a loaded session's, the autosave's, the rig log directory's), its
+    /// rows numbered from 0: the first run of this process starts from its last row and
+    /// its high-water mark ([`runs`]). A mark that is missing, unreadable or below the log
+    /// leaves the rows served but never written unknown: the log takes a new start, so
+    /// clients drop what they cached, and the next run's gap is unknown.
+    pub(crate) fn restored(l: ac2_traces::session::SavedSplLog) -> Self {
+        let mut log = Self {
+            started: l.info.started,
+            ..Self::default()
+        };
+        for r in l.rows {
+            log.push(r);
         }
-        for b in bands {
-            l.push_band(b);
+        for b in l.bands {
+            log.push_band(b);
         }
-        l
+        runs::restore(&mut log, l.info.meas, l.mark);
+        log
     }
 
     /// Appends a band row, dropping the oldest beyond the retention.
@@ -137,7 +175,7 @@ impl LeqLog {
         self.bands.iter().skip(skip).copied().collect()
     }
 
-    /// The band rows starting in `[from, until)`.
+    /// The band rows starting in `[from, until)` (wall time, as logged).
     pub(crate) fn band_rows_in(&self, from: WallNs, until: WallNs) -> Vec<BandLogRow> {
         self.bands
             .iter()
@@ -146,26 +184,46 @@ impl LeqLog {
             .collect()
     }
 
-    /// The band seconds of the `seconds` before `now` (wall ns), placed by wall time and
-    /// with the §13 correction each was logged with applied: what rebuilds the band windows
-    /// ([`Placed::seconds`]).
+    /// The band seconds of the `seconds` indices before `now` (a second index), placed by
+    /// index and with the §13 correction each was logged with applied, never across an
+    /// unknown gap: what rebuilds the band windows ([`Placed::seconds`], whose times are
+    /// the indices in ns). A second whose period was can't tell is placed as day; the
+    /// band meter keeps the can't-tell apart ([`Self::newest_cant_tell`]).
     pub(crate) fn place_bands(&self, now: u64, seconds: u32) -> Placed {
-        let from = now.saturating_sub(u64::from(seconds) * NS + NS);
+        let from = now
+            .saturating_sub(u64::from(seconds) + 1)
+            .max(self.runs.floor);
         Placed::new(
             self.bands
                 .iter()
                 .rev()
-                .take_while(|r| r.start.0 >= from)
-                .map(|r| (r.start.0, band_second(r), conv_period(r.period))),
-            now,
+                .take_while(|r| r.second >= from)
+                .map(|r| {
+                    let p = r.period.map_or(Period::Day, conv_period);
+                    (r.second * NS, band_second(r), p)
+                }),
+            now * NS,
             seconds,
         )
     }
 
-    /// An empty log, the next of the meter after `self`.
+    /// The newest band second before `now` whose period was can't tell, within the
+    /// windows' reach (not across an unknown gap).
+    pub(crate) fn newest_cant_tell(&self, now: u64) -> Option<u64> {
+        self.bands
+            .iter()
+            .rev()
+            .take_while(|r| r.second >= self.runs.floor && r.second < now)
+            .find(|r| r.period.is_none())
+            .map(|r| r.second)
+    }
+
+    /// An empty log, the next of the meter after `self`: a new start, second 0 and run 0
+    /// (the meter's job starts a run on it when it sees the new epoch).
     pub(crate) fn next(&self) -> Self {
         Self {
             epoch: self.epoch + 1,
+            runs: self.runs.fresh(),
             ..Self::default()
         }
     }
@@ -176,15 +234,16 @@ impl LeqLog {
     }
 
     /// Appends a row, dropping the oldest beyond the retention.
-    pub(crate) fn push(&mut self, r: SplLogRow) {
+    fn push(&mut self, r: SplLogRow) {
         if self.rows.len() >= SplLogPage::RETAINED_ROWS {
             self.pop_oldest();
         }
-        // Rows are a second apart; a longer step is seconds without a row.
-        let missing = self.rows.back().map_or(0, |p| {
-            let step = (r.start.0.saturating_sub(p.start.0) + NS / 2) / NS;
-            step.saturating_sub(1)
-        });
+        // Indices of seconds without a row between two rows; an unknown gap advanced the
+        // index by one, so it adds none.
+        let missing = self
+            .rows
+            .back()
+            .map_or(0, |p| r.second.saturating_sub(p.second).saturating_sub(1));
         self.missing += missing;
         self.missing_before.push_back(missing);
         self.sum.add(&row_second(&r));
@@ -219,7 +278,7 @@ impl LeqLog {
         self.total
     }
 
-    /// Wall time of the oldest row held.
+    /// Wall time of the oldest row held, as logged.
     pub(crate) fn started_at(&self) -> Option<WallNs> {
         self.rows.front().map(|r| r.start)
     }
@@ -228,7 +287,7 @@ impl LeqLog {
     pub(crate) fn run(&self) -> Option<LogRun> {
         let (first, last) = (self.rows.front()?, self.rows.back()?);
         let measured = self.sum.measured();
-        // Each row is a second slot: what it did not measure is gap, as is every second
+        // Each row is a second slot: what it did not measure is gap, as is every index
         // between rows.
         let gaps = (self.rows.len() as f64 - measured).max(0.0) + self.missing as f64;
         Some(LogRun {
@@ -262,11 +321,11 @@ impl LeqLog {
         (self.rows.iter().skip(skip).copied().collect(), first == 0)
     }
 
-    /// The rows held that start at or after `from_ns` and before `until_ns` (wall time),
-    /// oldest first, and whether the first of them is the log's first row.
-    pub(crate) fn rows_between(&self, from_ns: u64, until_ns: u64) -> (Vec<SplLogRow>, bool) {
-        let lo = self.rows.partition_point(|r| r.start.0 < from_ns);
-        let hi = self.rows.partition_point(|r| r.start.0 < until_ns);
+    /// The rows held whose index lies in `from ..= to`, oldest first, and whether the
+    /// first of them is the log's first row.
+    pub(crate) fn rows_in(&self, from: u64, to: u64) -> (Vec<SplLogRow>, bool) {
+        let lo = self.rows.partition_point(|r| r.second < from);
+        let hi = self.rows.partition_point(|r| r.second <= to);
         let first = self.total - self.rows.len() as u64 + lo as u64;
         (
             self.rows.range(lo..hi.max(lo)).copied().collect(),
@@ -274,12 +333,15 @@ impl LeqLog {
         )
     }
 
-    /// Start of the oldest second held and end of the newest; `None` while empty.
-    pub(crate) fn extent(&self) -> Option<(WallNs, WallNs)> {
-        Some((
-            self.rows.front()?.start,
-            WallNs(self.rows.back()?.start.0 + NS),
-        ))
+    /// The oldest and newest second held; `None` while empty.
+    pub(crate) fn extent(&self) -> Option<Extent> {
+        let (a, z) = (self.rows.front()?, self.rows.back()?);
+        Some(Extent {
+            first: a.second,
+            last: z.second,
+            start: a.start,
+            until: WallNs(z.start.0 + NS),
+        })
     }
 
     /// Up to `max` rows from row number `from` (or the oldest held).
@@ -290,30 +352,38 @@ impl LeqLog {
         let skip = (from - oldest) as usize;
         SplLogPage {
             meas,
+            started_at: self.started,
             from,
             total: self.total,
             rows: self.rows.iter().skip(skip).take(n).copied().collect(),
         }
     }
 
-    /// Refills `ring` with the seconds of the log that fall in the `ring.capacity()`
-    /// seconds before `now`, placed by wall time; seconds without a row are gaps. The
-    /// windows then count as elapsed from the oldest row inside that span
-    /// ([`RollingLeq::refill`], which a client's replay of the log follows too). `peaks`
-    /// gets the rows of the newest [`PEAK_HOLD_S`] seconds before `now`, so a restarted
-    /// job judges its peak limits on what was just logged.
+    /// Refills `ring` with the rows whose index lies within the `ring.capacity()` seconds
+    /// before `now` (the index of the second about to start), never across an unknown gap;
+    /// indices without a row are gaps. The windows then count as elapsed from the oldest
+    /// row inside that span ([`RollingLeq::refill`], which a client's replay of the log
+    /// follows too). `peaks` gets the rows of the newest [`PEAK_HOLD_S`] indices before
+    /// `now` under the same rule, so a restarted job judges its peak limits on what was
+    /// just logged. After a power cut with an unset clock the windows start over: a level
+    /// of unknown age is never presented as recent.
     pub(crate) fn rebuild(&self, ring: &mut RollingLeq, peaks: &mut RecentPeaks, now: u64) {
+        let floor = self.runs.floor;
         ring.refill(
-            self.rows.iter().rev().map(|r| (r.start.0, row_second(r))),
-            now,
+            self.rows
+                .iter()
+                .rev()
+                .take_while(|r| r.second >= floor)
+                .map(|r| (r.second * NS, row_second(r))),
+            now * NS,
         );
         peaks.clear();
-        let from = now.saturating_sub(PEAK_HOLD_S as u64 * NS);
+        let from = now.saturating_sub(PEAK_HOLD_S as u64).max(floor);
         let recent = self
             .rows
             .iter()
             .rev()
-            .take_while(|r| r.start.0 >= from)
+            .take_while(|r| r.second >= from)
             .collect::<Vec<_>>();
         for r in recent.into_iter().rev() {
             peaks.push(&row_second(r));
@@ -450,223 +520,4 @@ pub(crate) fn window_states(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use ac2_core::leq::WindowSpec;
-    use ac2_core::weighting::Weighting;
-    use ac2_proto::units::{Db, Dbfs, Seconds};
-
-    fn row(t: u64, level: f64) -> SplLogRow {
-        SplLogRow {
-            start: WallNs(t),
-            measured: Seconds(1.0),
-            laeq: Dbfs(level),
-            lceq: Dbfs(level),
-            lzeq: Dbfs(level),
-            lcpeak: Dbfs(level + 12.0),
-            lafmax: Dbfs(level + 2.0),
-            sensitivity: Some(Db(120.0)),
-            position: None,
-        }
-    }
-
-    #[test]
-    fn pages_and_retention() {
-        let mut l = LeqLog::default();
-        for k in 0..10 {
-            l.push(row(k * NS, -20.0));
-        }
-        let p = l.page(MeasId(1), 3, 4);
-        assert_eq!((p.from, p.total, p.rows.len()), (3, 10, 4));
-        assert_eq!(p.rows[0].start, WallNs(3 * NS));
-        let p = l.page(MeasId(1), 50, 4);
-        assert_eq!((p.from, p.rows.len()), (10, 0));
-        let (t, start) = l.tail(4);
-        assert_eq!((t.len(), t[0].start, start), (4, WallNs(6 * NS), false));
-        let (t, start) = l.tail(40);
-        assert_eq!((t.len(), start), (10, true));
-        assert_eq!(l.started_at(), Some(WallNs(0)));
-    }
-
-    /// Rows placed by wall time: a two-minute pause becomes a gap, the windows count
-    /// elapsed time from the oldest row in the span, and the Leq is over measured time.
-    #[test]
-    fn rebuild_by_wall_time() {
-        let t0 = 1_790_000_000 * NS;
-        let mut l = LeqLog::default();
-        for k in 0..60 {
-            l.push(row(t0 + k * NS, -20.0));
-        }
-        for k in 180..240 {
-            l.push(row(t0 + k * NS + NS / 10, -30.0));
-        }
-        let specs = [
-            WindowSpec {
-                seconds: 600,
-                weighting: Weighting::A,
-            },
-            WindowSpec {
-                seconds: 60,
-                weighting: Weighting::A,
-            },
-        ];
-        let mut r = RollingLeq::new(&specs, 60);
-        let mut peaks = RecentPeaks::default();
-        l.rebuild(&mut r, &mut peaks, t0 + 240 * NS);
-        // The newest ten seconds' maxima: -30 dBFS rows, +12 dB peaks.
-        assert!((peaks.max_dbfs()[0] + 18.0).abs() < 1e-9);
-        let v = r.value(0);
-        assert_eq!(v.elapsed, 240);
-        assert!((v.measured - 120.0).abs() < 1e-9);
-        assert!(v.incomplete());
-        let want = 10.0 * ((10f64.powf(-2.0) + 10f64.powf(-3.0)) / 2.0).log10();
-        assert!((v.leq_dbfs - want).abs() < 1e-9, "{}", v.leq_dbfs);
-        let v = r.value(1);
-        assert!((v.leq_dbfs + 30.0).abs() < 1e-9);
-        assert!(!v.incomplete());
-        // Nothing within the span: empty windows, no peaks.
-        l.rebuild(&mut r, &mut peaks, t0 + 5000 * NS);
-        assert_eq!(r.pushed(), 0);
-        assert!(peaks.max_dbfs()[0].is_nan());
-    }
-
-    /// Brute force over `rows`: span, measured time, gaps and LAeq.
-    fn brute(rows: &[SplLogRow]) -> (u64, u64, f64, f64, f64) {
-        let start = rows[0].start.0;
-        let until = rows[rows.len() - 1].start.0 + NS;
-        let m: f64 = rows.iter().map(|r| r.measured.0).sum();
-        let e: f64 = rows
-            .iter()
-            .map(|r| 10f64.powf(r.laeq.0 / 10.0) / 2.0 * r.measured.0)
-            .sum();
-        let slots = (until - start + NS / 2) / NS;
-        (
-            start,
-            until,
-            m,
-            slots as f64 - m,
-            10.0 * (2.0 * e / m).log10(),
-        )
-    }
-
-    /// The whole log's total is the energy average over the measured time, exactly; a
-    /// missing stretch (the meter stopped, a lost second) and partial seconds count as
-    /// gaps, never as silence.
-    #[test]
-    fn run_total_and_gaps_match_brute_force() {
-        let t0 = 1_790_000_000 * NS;
-        let mut l = LeqLog::default();
-        assert_eq!(l.run(), None);
-        let mut rows = Vec::new();
-        let mut t = t0;
-        for k in 0..5000u64 {
-            // Two pauses (12 s and 5 min), some lost seconds and partial ones.
-            t += match k {
-                1000 => 13 * NS,
-                3000 => 301 * NS,
-                _ if k % 97 == 0 && k > 0 => 2 * NS,
-                _ if k > 0 => NS,
-                _ => 0,
-            };
-            let level = -40.0 + 30.0 * ((k as f64) * 0.37).sin();
-            let mut r = row(t + (k % 3) * NS / 50, level);
-            if k % 41 == 0 {
-                r.measured = Seconds(0.3);
-            }
-            rows.push(r);
-            l.push(r);
-        }
-        let run = l.run().expect("rows");
-        let (start, until, m, gaps, laeq) = brute(&rows);
-        assert_eq!(run.started_at, WallNs(start));
-        assert!(run.until.0.abs_diff(until) < NS / 10);
-        assert!((run.measured - m).abs() < 1e-9);
-        assert!((run.gaps - gaps).abs() < 1e-6, "{} vs {gaps}", run.gaps);
-        assert!(run.gaps > 12.0 + 300.0, "{}", run.gaps);
-        assert!(
-            (run.levels_dbfs[0] - laeq).abs() < 1e-9,
-            "{run:?} vs {laeq}"
-        );
-        assert!(!run.trimmed);
-        // Reloaded from its rows (a daemon restart): the same run, from the same start.
-        let again = LeqLog::from_rows(l.rows(), Vec::new()).run().expect("rows");
-        assert_eq!(again.started_at, run.started_at);
-        assert!((again.levels_dbfs[0] - run.levels_dbfs[0]).abs() < 1e-9);
-        assert!((again.gaps - run.gaps).abs() < 1e-9);
-    }
-
-    /// At the retention the oldest rows go: the run starts at the oldest kept second, says
-    /// it is trimmed, and its total and gaps cover only what is kept.
-    #[test]
-    fn trimmed_log_runs_from_the_oldest_kept_second() {
-        let t0 = 1_790_000_000 * NS;
-        let n = SplLogPage::RETAINED_ROWS as u64 + 5000;
-        let mut l = LeqLog::default();
-        let mut rows = Vec::new();
-        for k in 0..n {
-            // A ten-second pause early on: trimmed away later.
-            let t = t0 + k * NS + if k >= 100 { 10 * NS } else { 0 };
-            let level = if k < 4000 {
-                -5.0
-            } else {
-                -60.0 + (k % 10) as f64
-            };
-            let r = row(t, level);
-            rows.push(r);
-            l.push(r);
-        }
-        assert_eq!(l.total(), n);
-        let kept = &rows[rows.len() - SplLogPage::RETAINED_ROWS..];
-        let run = l.run().expect("rows");
-        assert!(run.trimmed);
-        assert_eq!(run.started_at, kept[0].start);
-        let (_, _, m, gaps, laeq) = brute(kept);
-        assert!((run.measured - m).abs() < 1e-6);
-        assert!(run.gaps.abs() < 1e-6 && gaps.abs() < 1e-6, "{}", run.gaps);
-        // The loud first 4000 s left no residue once trimmed away.
-        assert!(
-            (run.levels_dbfs[0] - laeq).abs() < 1e-9,
-            "{} vs {laeq}",
-            run.levels_dbfs[0]
-        );
-        // A full log reloaded is still the last 48 h.
-        assert!(
-            LeqLog::from_rows(l.rows(), Vec::new())
-                .run()
-                .expect("rows")
-                .trimmed
-        );
-    }
-
-    #[test]
-    fn next_log_is_empty_and_numbered_on() {
-        let mut l = LeqLog::default();
-        l.push(row(NS, -20.0));
-        let n = l.next();
-        assert_eq!((n.epoch(), n.total(), n.run()), (1, 0, None));
-    }
-
-    #[test]
-    fn states_keep_unchanged_windows() {
-        let mut a = LeqConfig::default_windows();
-        let t = WallNs(5);
-        let old: Vec<LeqWindowState> = a
-            .windows
-            .iter()
-            .map(|w| LeqWindowState {
-                duration: w.duration,
-                weighting: w.weighting,
-                judgement: LeqJudgement::NoLimit,
-                since: WallNs(1),
-            })
-            .collect();
-        let before = a.clone();
-        a.windows[3].limit = Some(ac2_proto::units::DbSpl(99.0));
-        let s = window_states(&a, Some(&before), &old, true, t);
-        assert_eq!(s[0].since, WallNs(1));
-        assert_eq!(s[3].judgement, LeqJudgement::Ok);
-        assert_eq!(s[3].since, t);
-        let s = window_states(&a, Some(&before), &old, false, t);
-        assert_eq!(s[3].judgement, LeqJudgement::NotCalibrated);
-    }
-}
+mod tests;

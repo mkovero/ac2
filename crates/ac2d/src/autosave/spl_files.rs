@@ -11,6 +11,10 @@
 //! Each meter has two files: its A/C/Z log ([`ac2_proto::spl_log`]) and its band meter's
 //! log beside it ([`ac2_traces::band_log`]), kept the same way from the same shared log.
 //!
+//! Beside each A/C/Z log the thread keeps its high-water mark ([`ac2_traces::log_mark`]),
+//! written when the meter's job asks for one (a run's start, the next reservation) and
+//! exact when the file is closed: the job wakes the thread through the log's waker.
+//!
 //! A file is written whole only when it starts (a new meter, a loaded session, a new log),
 //! after a failed append, and when it has grown [`COMPACT_SLACK`] rows past the retention
 //! (once a day of logging), each time renamed into place complete.
@@ -27,9 +31,11 @@ use ac2_proto::model::{LogWriteFailure, MeterLog, SplLogPage};
 use ac2_proto::spl_log::{self, SplLogInfo};
 use ac2_proto::units::{MeasId, WallNs};
 use ac2_traces::band_log;
+use ac2_traces::log_mark::{self, LogMark};
 use ac2_traces::session::{SPL_DIR, SavedMeasurement, SavedSplLogFile};
 
 use crate::control::ControlMsg;
+use crate::leq_log::runs::Waker;
 use crate::leq_log::{self, SharedLog};
 
 /// How often logged rows are appended to their files. The kernel holds them in memory
@@ -107,6 +113,12 @@ impl Kind {
 
     /// The whole file's text of what the log holds, and its row count.
     fn whole(self, l: &leq_log::LeqLog, info: &SplLogInfo) -> (String, u64) {
+        // The log's own start: a new log (`spl.log_new`) starts its file before the control
+        // thread hands the thread its new header.
+        let info = &SplLogInfo {
+            started: l.started(),
+            ..info.clone()
+        };
         match self {
             Kind::Spl => {
                 let rows = l.rows();
@@ -179,6 +191,9 @@ struct LogFile {
     written: u64,
     rows_in_file: u64,
     unsynced: bool,
+    /// The A/C/Z file's mark as last written, moved with the file when it is rewritten
+    /// under a new name.
+    mark: Option<LogMark>,
 }
 
 /// The write thread's SPL log files.
@@ -194,6 +209,8 @@ pub(crate) struct SplFiles {
     /// Where each log's failure and recovery are reported (the control thread, which
     /// shows them to clients).
     report: Option<Sender<ControlMsg>>,
+    /// Handed to every log kept, to wake this thread when its job asks for a mark.
+    waker: Option<Waker>,
 }
 
 impl SplFiles {
@@ -206,7 +223,14 @@ impl SplFiles {
             bytes: 0,
             failing: BTreeMap::new(),
             report: None,
+            waker: None,
         }
+    }
+
+    /// Every log kept wakes the thread through `w` when its job asks for a mark.
+    pub(crate) fn waking(mut self, w: Waker) -> Self {
+        self.waker = Some(w);
+        self
     }
 
     /// Reports each log's failure and recovery to `to`.
@@ -274,7 +298,13 @@ impl SplFiles {
                     written: 0,
                     rows_in_file: 0,
                     unsynced: false,
+                    mark: None,
                 };
+                if kind == Kind::Spl
+                    && let Some(w) = &self.waker
+                {
+                    leq_log::lock(&s.log).attach(w.clone());
+                }
                 let resumed = resume.is_some_and(|r| self.resume(&mut f, r));
                 if !resumed {
                     self.start(s.meas, &mut f);
@@ -376,6 +406,9 @@ impl SplFiles {
             Ok(file) => {
                 self.bytes += text.len() as u64;
                 f.id = id;
+                if f.rel.as_ref() != Some(&rel) {
+                    self.move_mark(f, &rel);
+                }
                 f.rel = Some(rel);
                 f.file = Some(file);
                 f.written = total;
@@ -472,6 +505,9 @@ impl SplFiles {
                 let _ = file.sync_all();
             }
             f.unsynced = false;
+            // The ended log's mark stays beside its file; the new log's comes when its job
+            // starts a run on it.
+            f.mark = None;
             self.start(meas, f);
             return;
         }
@@ -524,7 +560,8 @@ impl SplFiles {
     }
 
     fn close(&mut self, mut f: LogFile) {
-        if f.file.is_some() && leq_log::lock(&f.log).id() == f.id {
+        let current = leq_log::lock(&f.log).id() == f.id;
+        if f.file.is_some() && current {
             let meas = f.info.meas;
             self.append(meas, &mut f);
         }
@@ -532,6 +569,72 @@ impl SplFiles {
             && f.unsynced
         {
             let _ = file.sync_all();
+        }
+        if f.kind == Kind::Spl {
+            // A clean stop: the mark exact at the last index served, after the rows it
+            // covers are synced.
+            let exact = {
+                let mut l = leq_log::lock(&f.log);
+                l.detach();
+                current.then(|| l.exact_mark()).flatten()
+            };
+            if let (Some(m), Some(rel)) = (exact, &f.rel) {
+                let p = log_mark::path_of(&self.dir.join(rel));
+                if let Err(e) = log_mark::write(&p, &m) {
+                    tracing::warn!("autosave: high-water mark {}: {e}", p.display());
+                }
+            }
+        }
+    }
+
+    /// Writes the marks the logs' jobs asked for, beside their A/C/Z files.
+    pub(crate) fn marks(&mut self) {
+        let keys: Vec<(MeasId, Kind)> = self
+            .files
+            .keys()
+            .filter(|(_, k)| *k == Kind::Spl)
+            .copied()
+            .collect();
+        for k in keys {
+            let Some(mut f) = self.files.remove(&k) else {
+                continue;
+            };
+            // A mark asked for a new log (`spl.log_new`) belongs beside its new file.
+            if leq_log::lock(&f.log).id() != f.id {
+                self.append(k.0, &mut f);
+            }
+            let want = leq_log::lock(&f.log).take_want();
+            if let Some(m) = want {
+                let result = match &f.rel {
+                    Some(rel) => {
+                        let p = log_mark::path_of(&self.dir.join(rel));
+                        log_mark::write(&p, &m).map_err(|e| e.to_string())
+                    }
+                    None => Err("the log has no file".to_owned()),
+                };
+                if result.is_ok() {
+                    f.mark = Some(m.clone());
+                }
+                leq_log::lock(&f.log).mark_written(k.0, &m, result);
+            }
+            self.files.insert(k, f);
+        }
+    }
+
+    /// The A/C/Z file of `f` is now `rel`: its mark is written beside it and the old one
+    /// removed, so a mark never lies beside a file it does not bound.
+    fn move_mark(&self, f: &LogFile, rel: &str) {
+        if f.kind != Kind::Spl {
+            return;
+        }
+        if let Some(m) = &f.mark {
+            let p = log_mark::path_of(&self.dir.join(rel));
+            if let Err(e) = log_mark::write(&p, m) {
+                tracing::warn!("autosave: high-water mark {}: {e}", p.display());
+            }
+        }
+        if let (Some(_), Some(old)) = (&f.mark, &f.rel) {
+            let _ = fs::remove_file(log_mark::path_of(&self.dir.join(old)));
         }
     }
 

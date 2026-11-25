@@ -74,6 +74,7 @@ mod request;
 pub(crate) mod rig;
 mod rig_meas;
 mod roles;
+mod salvage_logs;
 mod sim;
 mod standing;
 mod startup;

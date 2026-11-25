@@ -397,6 +397,7 @@ fn an_old_session_refuses_to_load_and_salvages_its_traces() {
     )
     .unwrap();
     std::fs::write(sdir.join("traces/99-junk.csv"), "# ac2 trace export v0\n").unwrap();
+    let logs = salvage_logs(&sdir);
     c.ok(Command::FileNew { discard: true });
     let e = c
         .call(Command::FileLoad {
@@ -410,11 +411,83 @@ fn an_old_session_refuses_to_load_and_salvages_its_traces() {
     });
     assert_eq!(s.version, Some(19));
     assert_eq!(s.imported.len(), 2, "{s:?}");
-    assert_eq!(s.refused.len(), 1, "{s:?}");
-    assert_eq!(s.refused[0].file, "traces/99-junk.csv");
+    let refused: Vec<&str> = s.refused.iter().map(|r| r.file.as_str()).collect();
+    assert_eq!(refused, ["traces/99-junk.csv", "spl/5-old.csv"], "{s:?}");
+    assert!(s.refused[1].reason.contains("version 2"), "{s:?}");
     assert_eq!(traces(c).len(), 2);
     assert!(working(c).dirty, "salvaged traces are unsaved");
+
+    // The current-version log is a stopped session meter on the logged input, holding it.
+    assert_eq!(s.spl_logs.len(), 1, "{s:?}");
+    let st = c.state();
+    let m = st
+        .measurements
+        .iter()
+        .find(|m| m.id == s.spl_logs[0])
+        .unwrap();
+    assert_eq!(m.config.name, "FOH (salvaged)");
+    assert_eq!(m.config.scope, MeasScope::Session);
+    assert!(!m.running);
+    let MeasKind::Spl { config } = &m.config.kind else {
+        panic!("{m:?}")
+    };
+    assert_eq!(config.input, 3);
+    let hist = match c.ok(Command::SplHistoryGet {
+        meas: m.id,
+        span: HistorySpan::Newest { seconds: 60 },
+    }) {
+        ac2_proto::ReplyBody::SplHistory(h) => h,
+        r => panic!("{r:?}"),
+    };
+    assert_eq!(
+        (hist.first_second, hist.last_second),
+        (Some(0), Some(logs - 1))
+    );
     h.shutdown();
+}
+
+/// Writes a current-version SPL log with its band log, and one of version 2, into the
+/// session at `sdir`; the current log's row count.
+fn salvage_logs(sdir: &Path) -> u64 {
+    use ac2_proto::spl_log::{SplLogInfo, export_csv};
+    let t0 = 1_790_000_000_000_000_000u64;
+    let info = SplLogInfo {
+        meas: MeasId(5),
+        name: "FOH".into(),
+        input: 3,
+        mic: None,
+        zone: "Europe/Helsinki".into(),
+        started: WallNs(t0),
+    };
+    let n = 30u64;
+    let rows: Vec<SplLogRow> = (0..n)
+        .map(|k| SplLogRow {
+            second: k,
+            run: 0,
+            start: WallNs(t0 + k * 1_000_000_000),
+            clock: LogClock::Synced,
+            gap: (k == 0).then_some(LogGap::Known),
+            measured: Seconds(1.0),
+            laeq: Dbfs(-30.0),
+            lceq: Dbfs(-28.0),
+            lzeq: Dbfs(-27.0),
+            lcpeak: Dbfs(-12.0),
+            lafmax: Dbfs(-25.0),
+            sensitivity: Some(Db(120.0)),
+            position: None,
+        })
+        .collect();
+    let spl = sdir.join("spl");
+    std::fs::create_dir_all(&spl).unwrap();
+    std::fs::write(spl.join("4-5.csv"), export_csv(&info, &rows)).unwrap();
+    std::fs::write(
+        spl.join("4-5.bands.csv"),
+        ac2_traces::band_log::export_csv(&info, &[]),
+    )
+    .unwrap();
+    let old = export_csv(&info, &rows).replacen("# ac2 spl log v3", "# ac2 spl log v2", 1);
+    std::fs::write(spl.join("5-old.csv"), old).unwrap();
+    n
 }
 
 #[test]
@@ -717,7 +790,11 @@ fn a_session_with_crafted_logs_or_trace_data_refuses_to_load() {
     };
     let (spl_id, tf_id) = (id_of("spl"), id_of("transfer"));
     let row = |k: u64, laeq: f64| SplLogRow {
+        second: k,
+        run: 0,
         start: WallNs(1_790_000_000_000_000_000 + k * 1_000_000_000),
+        clock: ac2_proto::model::LogClock::Synced,
+        gap: (k == 0).then_some(ac2_proto::model::LogGap::Known),
         measured: Seconds(1.0),
         laeq: Dbfs(laeq),
         lceq: Dbfs(-23.25),
@@ -734,6 +811,8 @@ fn a_session_with_crafted_logs_or_trace_data_refuses_to_load() {
                 name: "FOH".into(),
                 input: 0,
                 mic: None,
+                zone: "UTC".into(),
+                started: WallNs(1_790_000_000_000_000_000),
             },
             &[row(0, -25.0), row(1, laeq)],
         )

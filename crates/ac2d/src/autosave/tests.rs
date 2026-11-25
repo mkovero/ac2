@@ -22,7 +22,7 @@ fn data(at: u64) -> SessionData {
     }
 }
 
-fn meter() -> SavedMeasurement {
+pub(super) fn meter() -> SavedMeasurement {
     SavedMeasurement {
         id: MeasId(1),
         config: MeasConfig {
@@ -51,16 +51,20 @@ fn meter() -> SavedMeasurement {
     }
 }
 
-fn with_meter(at: u64) -> SessionData {
+pub(super) fn with_meter(at: u64) -> SessionData {
     SessionData {
         measurements: vec![meter()],
         ..data(at)
     }
 }
 
-fn row(k: u64) -> SplLogRow {
+pub(super) fn row(k: u64) -> SplLogRow {
     SplLogRow {
+        second: k,
+        run: 0,
         start: WallNs(T0 + k * NS),
+        clock: ac2_proto::model::LogClock::Synced,
+        gap: (k == 0).then_some(ac2_proto::model::LogGap::Known),
         measured: Seconds(1.0),
         laeq: Dbfs(-30.0 - (k % 17) as f64 * 0.37),
         lceq: Dbfs(-28.0),
@@ -75,11 +79,11 @@ fn row(k: u64) -> SplLogRow {
 fn push(log: &SharedLog, from: u64, n: u64) {
     let mut l = leq_log::lock(log);
     for k in from..from + n {
-        l.push(row(k));
+        l.push_row(row(k));
     }
 }
 
-fn spec(log: &SharedLog, resume: Option<Resume>) -> LogSpec {
+pub(super) fn spec(log: &SharedLog, resume: Option<Resume>) -> LogSpec {
     LogSpec {
         meas: MeasId(1),
         log: log.clone(),
@@ -88,6 +92,8 @@ fn spec(log: &SharedLog, resume: Option<Resume>) -> LogSpec {
             name: "x".into(),
             input: 0,
             mic: None,
+            zone: "UTC".into(),
+            started: WallNs(T0),
         },
         resume,
         resume_bands: None,
@@ -336,15 +342,20 @@ fn restore_reads_past_a_cut_append_and_carries_on() {
     );
 }
 
-fn band_row(k: u64) -> ac2_traces::band_log::BandLogRow {
+pub(super) fn band_row(k: u64) -> ac2_traces::band_log::BandLogRow {
     let mut levels = [-70.0f32; ac2_proto::model::BAND_COUNT];
     levels[5] = -60.0 - (k % 7) as f32 * 0.25;
     ac2_traces::band_log::BandLogRow {
+        second: k,
+        run: 0,
         start: WallNs(T0 + k * NS),
+        clock: ac2_proto::model::LogClock::Synced,
+        gap: (k == 0).then_some(ac2_proto::model::LogGap::Known),
         measured: Seconds(1.0),
+        utc_offset_s: 0,
         levels,
         correction: Db(if k.is_multiple_of(2) { 0.0 } else { 5.0 }),
-        period: ac2_proto::model::BandPeriod::Night,
+        period: Some(ac2_proto::model::BandPeriod::Night),
         sensitivity: Some(Db(120.0)),
     }
 }
@@ -352,8 +363,8 @@ fn band_row(k: u64) -> ac2_traces::band_log::BandLogRow {
 fn push_bands(log: &SharedLog, from: u64, n: u64) {
     let mut l = leq_log::lock(log);
     for k in from..from + n {
-        l.push(row(k));
-        l.push_band(band_row(k));
+        l.push_row(row(k));
+        l.push_band_row(band_row(k));
     }
 }
 
@@ -454,12 +465,15 @@ fn a_new_log_gets_a_new_file_and_long_logs_are_compacted() {
         files.append_all();
     }
     let lines = || fs::read_to_string(&second).expect("log").lines().count() as u64;
-    assert_eq!(lines(), 5 + retained + spl_files::COMPACT_SLACK);
+    let head = ac2_proto::spl_log::export_csv(&spec(&log, None).info, &[])
+        .lines()
+        .count() as u64;
+    assert_eq!(lines(), head + retained + spl_files::COMPACT_SLACK);
     // One more: rewritten.
     push(&log, 200 + retained + spl_files::COMPACT_SLACK, 1);
     files.append_all();
     // Header lines, then the retained rows.
-    assert_eq!(lines(), retained + 5);
+    assert_eq!(lines(), head + retained);
     assert_eq!(files.path_of(MeasId(1)), Some(second));
 }
 

@@ -25,6 +25,7 @@ const ON_SYSTEM_TIME: GateBasis = GateBasis {
 fn clocks(system: SystemClock, ppm: f64) -> Clocks {
     Clocks {
         system,
+        rtc: true,
         capture: Some(DeviceClock {
             device: DeviceId("fake".into()),
             rate: SampleClock::Measured {

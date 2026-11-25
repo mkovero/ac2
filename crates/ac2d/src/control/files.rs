@@ -43,6 +43,7 @@ pub(super) fn session_err(e: SessionError) -> ProtoError {
         SessionError::NotASession(_) | SessionError::BadName(_) | SessionError::Corrupt { .. } => {
             invalid(msg)
         }
+        SessionError::LogVersion { .. } => perr(ErrorCode::Unsupported, msg),
         SessionError::Io { .. } => internal(msg),
     }
 }
@@ -370,8 +371,9 @@ impl Control {
         }
     }
 
-    /// `file.salvage`: each trace file of the session through `trace.import`'s reader. A
-    /// worker reads the files (an upload unpacked first); [`Self::finish_salvage`] imports.
+    /// `file.salvage`: each trace file of the session through `trace.import`'s reader, and
+    /// each SPL log of this build's log version as a stopped meter ([`super::salvage_logs`]).
+    /// A worker reads the files (an upload unpacked first); [`Self::finish_salvage`] imports.
     pub(super) fn begin_salvage(
         &mut self,
         client: &Peer,
@@ -402,6 +404,7 @@ impl Control {
             dir,
             version,
             files,
+            logs,
         } = read?;
         let mut imported = Vec::new();
         let mut refused = Vec::new();
@@ -435,18 +438,22 @@ impl Control {
                 }),
             }
         }
+        let (spl_logs, log_refused) = self.import_salvaged_logs(logs);
+        refused.extend(log_refused);
         if let Some(t) = transfer {
             self.transfers.remove(t);
         }
         tracing::info!(
-            "salvaged {} traces from {} ({} refused)",
+            "salvaged {} traces and {} SPL logs from {} ({} refused)",
             imported.len(),
+            spl_logs.len(),
             dir,
             refused.len()
         );
         Ok(ReplyBody::Salvage(Salvage {
             version,
             imported,
+            spl_logs,
             refused,
         }))
     }
@@ -578,10 +585,7 @@ impl Control {
 
         // In with the new: the SPL logs first, so a meter's job carries on from its log.
         for l in data.spl_logs {
-            self.set_spl_log(
-                l.info.meas,
-                crate::leq_log::LeqLog::from_rows(l.rows, l.bands),
-            );
+            self.set_spl_log(l.info.meas, crate::leq_log::LeqLog::restored(l));
         }
         // Traces first: a math trace's stored operands must be there when it starts.
         for t in data.traces {
@@ -680,11 +684,13 @@ pub(super) enum Source {
 }
 
 /// What `file.salvage`'s worker read: where from (for the log), the session's format
-/// version, and each trace file (`traces/<file>`) with its content or why it was not read.
+/// version, each trace file (`traces/<file>`) with its content or why it was not read, and
+/// each SPL log (`spl/<file>`).
 pub(crate) struct SalvageRead {
     dir: String,
     version: Option<u32>,
     files: Vec<(String, Result<Vec<u8>, String>)>,
+    logs: Vec<super::salvage_logs::SalvagedLog>,
 }
 
 /// The trace files of session directory `dir`. Disk work.
@@ -718,6 +724,7 @@ fn read_traces(dir: &Path) -> Result<SalvageRead, ProtoError> {
         dir: dir.display().to_string(),
         version,
         files,
+        logs: super::salvage_logs::read_logs(dir),
     })
 }
 

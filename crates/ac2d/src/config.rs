@@ -124,6 +124,23 @@ pub enum LocalClock {
 }
 
 impl LocalClock {
+    /// The zone's offset from UTC in force at the wall time `wall_ns` (Unix ns), s east.
+    pub fn offset_s(self, wall_ns: u64) -> i32 {
+        match self {
+            LocalClock::Host => {
+                use chrono::{Offset, TimeZone};
+                let secs = i64::try_from(wall_ns / 1_000_000_000).unwrap_or(i64::MAX);
+                match chrono::Local.timestamp_opt(secs, 0) {
+                    chrono::LocalResult::Single(t) | chrono::LocalResult::Ambiguous(t, _) => {
+                        t.offset().fix().local_minus_utc()
+                    }
+                    chrono::LocalResult::None => 0,
+                }
+            }
+            LocalClock::FixedOffset { east_s } => east_s,
+        }
+    }
+
     /// Seconds since local midnight of the wall time `wall_ns` (Unix ns).
     pub fn seconds_of_day(self, wall_ns: u64) -> u32 {
         let secs = i64::try_from(wall_ns / 1_000_000_000).unwrap_or(i64::MAX);

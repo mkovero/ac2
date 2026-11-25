@@ -40,6 +40,7 @@ chrono = { workspace = true, features = ["clock"] }
 clap = { workspace = true, features = ["derive"] }
 ctrlc = { workspace = true, features = ["termination"] }
 getrandom = { workspace = true }
+iana-time-zone = "0.1"
 # The host's interfaces, to bind the network on one by name and notice its address go.
 if-addrs = { workspace = true }
 # OSC cues: encoding only; the socket is ours (non-blocking, never on the audio thread).
@@ -54,8 +55,11 @@ sysinfo = { workspace = true, features = ["system"] }
 tracing = { workspace = true }
 
 # The system clock's status (adjtimex, read-only; src/sysclock.rs).
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_WindowsProgramming"] }
 
 [dev-dependencies]
 ac2d = { path = ".", features = ["fault-injection"] }

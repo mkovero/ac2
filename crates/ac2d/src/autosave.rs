@@ -34,6 +34,7 @@ mod spl_files;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -50,6 +51,7 @@ use self::spl_files::SplFiles;
 pub(crate) use self::spl_files::{LogSpec, Resume};
 use crate::control::ControlMsg;
 use crate::damage::Damage;
+use crate::leq_log::runs::Waker;
 
 /// Quiet time after the last change before a write: a burst of edits (a slot moved, a
 /// rename, a delay typed) becomes one write.
@@ -174,18 +176,29 @@ fn whole(e: &SessionError, path: &Path, to: Option<PathBuf>, what: &str) -> Dama
 
 /// Moves the files a lenient read left out (`dropped`, relative to `dir`) out of the
 /// autosave, where the next write would delete them as unnamed: into `<dir>.damaged-files/`,
-/// each named `<file>.damaged-<time>`.
+/// each named `<file>.damaged-<time>`; a log of another format version, which is not
+/// damaged, into `<dir>.old-version-files/` as `<file>.v<version>-<time>`, plain CSV of
+/// its own version.
 pub(crate) fn set_dropped_aside(dir: &Path, dropped: Vec<Dropped>) -> Vec<Damage> {
-    let into = sibling(dir, "", ".damaged-files");
+    let damaged = sibling(dir, "", ".damaged-files");
+    let old = sibling(dir, "", ".old-version-files");
     dropped
         .into_iter()
         .map(|d| {
+            let into = if d.old_version.is_some() {
+                &old
+            } else {
+                &damaged
+            };
             let from = dir.join(&d.file);
-            let moved = fs::create_dir_all(&into)
+            let moved = fs::create_dir_all(into)
                 .and_then(|()| {
                     let flat = into.join(d.file.replace(['/', '\\'], "_"));
                     fs::rename(&from, &flat)?;
-                    ac2_paths::set_aside_damaged(&flat)
+                    match d.old_version {
+                        Some(v) => ac2_paths::set_aside_as(&flat, &format!("v{v}")),
+                        None => ac2_paths::set_aside_damaged(&flat),
+                    }
                 })
                 .and_then(|to| ac2_paths::sync_dir(dir).map(|()| to));
             let (set_aside_as, what) = match moved {
@@ -198,6 +211,9 @@ pub(crate) fn set_dropped_aside(dir: &Path, dropped: Vec<Dropped>) -> Vec<Damage
             };
             let what = match d.kind {
                 DroppedKind::Trace => format!("{what}; the trace is not restored"),
+                DroppedKind::SplLog if d.old_version.is_some() => {
+                    format!("{what} as plain CSV of its own version; the meter starts a new log")
+                }
                 DroppedKind::SplLog => format!("{what}; the meter starts a new log"),
                 DroppedKind::BandLog => format!("{what}; the meter starts without band history"),
             };
@@ -327,12 +343,17 @@ enum Job {
     /// recovery copy put in place or removed): in the order asked, after the writes asked
     /// before it, and finished before shutdown like a write.
     Run(Box<dyn FnOnce() + Send>),
+    /// A meter's job asked for its log's high-water mark.
+    Marks,
 }
 
 /// The write thread: one write at a time, each result reported to the control thread, the
 /// SPL logs appended in between.
 pub(crate) struct Writer {
     tx: Option<Sender<Job>>,
+    /// The logs' wakers send through this; emptied before shutdown, so a log that outlives
+    /// the thread holds no sender keeping its channel open.
+    wake: Arc<Mutex<Option<Sender<Job>>>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -349,10 +370,19 @@ impl Writer {
         name: &str,
     ) -> std::io::Result<Self> {
         let (tx, rx) = mpsc::channel::<Job>();
+        let wake = Arc::new(Mutex::new(Some(tx.clone())));
+        let w = Arc::clone(&wake);
+        let waker = Waker(Arc::new(move || {
+            if let Some(tx) = w.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
+                let _ = tx.send(Job::Marks);
+            }
+        }));
         let thread = std::thread::Builder::new()
             .name(name.into())
             .spawn(move || {
-                let mut files = SplFiles::new(dir.clone(), Instant::now()).reporting(done.clone());
+                let mut files = SplFiles::new(dir.clone(), Instant::now())
+                    .reporting(done.clone())
+                    .waking(waker);
                 loop {
                     let job = match files.due() {
                         Some(at) => rx.recv_timeout(at.saturating_duration_since(Instant::now())),
@@ -380,6 +410,7 @@ impl Writer {
                             }
                         }
                         Ok(Job::Run(work)) => work(),
+                        Ok(Job::Marks) => files.marks(),
                         Err(RecvTimeoutError::Timeout) => files.tick(Instant::now()),
                         Err(RecvTimeoutError::Disconnected) => break,
                     }
@@ -388,6 +419,7 @@ impl Writer {
             })?;
         Ok(Self {
             tx: Some(tx),
+            wake,
             thread: Some(thread),
         })
     }
@@ -398,6 +430,7 @@ impl Writer {
 
     /// Finishes the queued writes, appends and syncs the SPL logs, and ends the thread.
     fn finish(&mut self) {
+        *self.wake.lock().unwrap_or_else(PoisonError::into_inner) = None;
         self.tx = None;
         if let Some(t) = self.thread.take() {
             let _ = t.join();
@@ -520,5 +553,7 @@ impl Autosaver {
     }
 }
 
+#[cfg(test)]
+mod log_tests;
 #[cfg(test)]
 mod tests;

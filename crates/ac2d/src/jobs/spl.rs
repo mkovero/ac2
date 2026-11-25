@@ -8,25 +8,22 @@
 //! the meter: the log and the windows carry on through it.
 
 mod bands;
+mod frames;
 #[cfg(test)]
 mod gap_tests;
+mod runs;
 
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use ac2_core::leq::{
-    Headroom, Judgement, Latch, PEAK_HOLD_S, RecentPeaks, RollingLeq, Second, WindowSpec, judge,
-    judge_window,
+    Judgement, Latch, PEAK_HOLD_S, RecentPeaks, RollingLeq, Second, WindowSpec, judge, judge_window,
 };
 use ac2_core::mic_curve::Correction;
-use ac2_core::spectrum::power_dbfs;
-use ac2_core::spl::{Sensitivity, SplMeter, SplMeterConfig};
-use ac2_proto::frame::{
-    BandLeqFrame, FrameData, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, ProtectionFlags,
-    SplFrame, SplMeta,
-};
+use ac2_core::spl::{SplMeter, SplMeterConfig};
+use ac2_proto::frame::{BandLeqFrame, FrameData, LeqPeak, ProtectionFlags};
 use ac2_proto::model::{
-    AlarmSubject, CueSubject, LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LevelScale,
+    AlarmSubject, CueSubject, LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LogClock,
     PeakQuantity, PositionCorrection, SplConfig, SplLogRow,
 };
 use ac2_proto::topic::{Stream, Topic};
@@ -36,10 +33,10 @@ use super::{
     Analysis, Due, Emitter, Flush, JobCmd, JobCtx, LevelsMeter, Pace, StampArgs, channel_f64,
 };
 use crate::calstore::InputCal;
-use crate::config::LocalClock;
 use crate::control::{ControlMsg, Judged};
 use crate::conv;
 use crate::fanout::Block;
+use crate::hostclock::SharedHostClock;
 use crate::leq_log::{self, SharedLog};
 
 const NS: f64 = 1e9;
@@ -70,7 +67,6 @@ pub(crate) struct Spl {
     leq: LeqWindows,
     /// The band meter, while configured.
     band: Option<bands::BandMeter>,
-    local: LocalClock,
     /// Advances whenever the reading may have changed: a block metered, a command.
     generation: u64,
     pace: Pace,
@@ -102,6 +98,9 @@ struct LeqWindows {
     done: Vec<Second>,
     /// A second completed since the last `leq` frame.
     fresh: bool,
+    /// Where the seconds stand in the log; set when the first block arrives.
+    runs: Option<runs::RunIndex>,
+    host: SharedHostClock,
 }
 
 fn same_curve(a: Option<&Arc<Correction>>, b: Option<&Arc<Correction>>) -> bool {
@@ -119,7 +118,7 @@ fn latch_of(j: LeqJudgement) -> Latch {
         LeqJudgement::Ok => Some(Judgement::Ok),
         LeqJudgement::Near => Some(Judgement::Near),
         LeqJudgement::Over => Some(Judgement::Over),
-        LeqJudgement::NoLimit | LeqJudgement::NotCalibrated => None,
+        LeqJudgement::NoLimit | LeqJudgement::NotCalibrated | LeqJudgement::CantTell => None,
     })
 }
 
@@ -146,8 +145,9 @@ pub(crate) struct LeqSetup {
     pub(crate) judgements: Vec<LeqJudgement>,
     /// The peak limits' judgements likewise ([`PeakQuantity::ALL`] order).
     pub(crate) peak_judgements: [LeqJudgement; 2],
-    /// Local time, for the band limits' day and night.
-    pub(crate) local: LocalClock,
+    /// The host's clocks: the runs' boot clock, the rows' clock column, the band limits'
+    /// day and night.
+    pub(crate) host: SharedHostClock,
 }
 
 /// Index of `q` in [`PeakQuantity::ALL`].
@@ -180,7 +180,14 @@ impl LeqWindows {
             epoch,
             done: Vec::with_capacity(4),
             fresh: false,
+            runs: None,
+            host: setup.host,
         }
+    }
+
+    /// The index of the second about to start (the one starting at `sample`).
+    fn now_index(&self, sample: u64) -> u64 {
+        self.runs.as_ref().map_or(0, |r| r.index_of(sample))
     }
 
     /// Wall clock of sample `s` (ns), from the newest block's.
@@ -189,7 +196,7 @@ impl LeqWindows {
         (self.next_wall as f64 + ds).max(0.0) as u64
     }
 
-    fn set_config(&mut self, cfg: LeqConfig, fs: f64) {
+    fn set_config(&mut self, cfg: LeqConfig) {
         let old_cfg = std::mem::replace(&mut self.cfg, cfg);
         let old = std::mem::take(&mut self.judgements);
         // A window configured as before keeps its judgement, so an unchanged window
@@ -217,7 +224,7 @@ impl LeqWindows {
         }
         self.ring = ring_for(&self.cfg);
         if let Some(start) = self.second_start {
-            let now = self.wall_of(start, fs);
+            let now = self.now_index(start);
             leq_log::lock(&self.log).rebuild(&mut self.ring, &mut self.peaks, now);
         }
         self.fresh = true;
@@ -246,7 +253,7 @@ impl Spl {
             peak_weighting: conv::peak_weighting(cfg.peak_weighting),
         })
         .map_err(|e| e.to_string())?;
-        let local = leq.local;
+        let host = leq.host.clone();
         let leq = LeqWindows::new(cfg.leq.clone(), leq);
         let band = cfg.bands.clone().and_then(|b| {
             bands::BandMeter::new(
@@ -254,7 +261,7 @@ impl Spl {
                 fs,
                 cfg.leq.horizon_seconds().unwrap_or(60),
                 &leq.log,
-                local,
+                host,
             )
         });
         if let Some(c) = &cal.correction {
@@ -275,7 +282,6 @@ impl Spl {
             wall: 0,
             leq,
             band,
-            local,
             generation: 0,
             pace: Pace::new(std::time::Duration::from_secs_f64(1.0 / f64::from(SPL_FPS))),
         })
@@ -297,17 +303,59 @@ impl Spl {
         let meter = &mut self.meter;
         let band = &mut self.band;
         let block_wall = (b.wall_ns as f64 - f64::from(b.frames) / fs * NS).max(0.0) as u64;
+        let per = meter.seconds().samples_per_second();
+        let boot = crate::hostclock::boot_ms();
         match l.second_start {
             None => {
-                // The windows carry on from the log: what it holds from before this job
-                // (another run of the meter, a loaded session) is placed by wall time.
+                // A run starts: the windows carry on from the log, what it holds from
+                // before this job (another run of the meter, a loaded session) placed by
+                // index, never across an unknown gap.
                 l.second_start = Some(b.start_sample);
                 l.next = b.start_sample;
                 l.next_wall = block_wall;
-                leq_log::lock(&l.log).rebuild(&mut l.ring, &mut l.peaks, block_wall);
+                let mut runs = runs::RunIndex::new(l.host.clone(), per);
+                let first = {
+                    let mut log = leq_log::lock(&l.log);
+                    let s = runs.begin(&mut log, b.start_sample, block_wall);
+                    log.rebuild(&mut l.ring, &mut l.peaks, s.first);
+                    s.first
+                };
+                runs.drifted(boot, b.end_sample(), fs);
+                l.runs = Some(runs);
                 if let Some(bm) = band {
                     bm.second_start = Some(b.start_sample);
-                    bm.rebuild(&l.log, block_wall);
+                    bm.rebuild(&l.log, first, block_wall);
+                }
+            }
+            Some(start)
+                if l.runs
+                    .as_mut()
+                    .is_some_and(|r| r.drifted(boot, b.end_sample(), fs)) =>
+            {
+                // The boot clock ran ahead of the audio (a suspend the backend did not
+                // report): the run ends and a new one starts with the gap the boot clock
+                // measured; the windows age by it.
+                let wall = l.wall_of(start, fs);
+                let first = {
+                    let mut log = leq_log::lock(&l.log);
+                    let s = l
+                        .runs
+                        .as_mut()
+                        .map_or(0, |r| r.begin(&mut log, start, wall).first);
+                    log.rebuild(&mut l.ring, &mut l.peaks, s);
+                    s
+                };
+                if let Some(bm) = band {
+                    bm.rebuild(&l.log, first, wall);
+                }
+                if b.start_sample > l.next {
+                    let lost = b.start_sample - l.next;
+                    let done = &mut l.done;
+                    meter.skip(lost, |s| done.push(s));
+                    if let Some(bm) = band {
+                        let done = &mut bm.done;
+                        bm.integ.skip(lost, |s| done.push(s));
+                    }
                 }
             }
             Some(_) if b.start_sample > l.next => {
@@ -370,8 +418,24 @@ impl Spl {
             let start = self.leq.second_start.unwrap_or(0);
             let end = start + per;
             self.leq.second_start = Some(end);
+            let wall = self.leq.wall_of(start, fs);
+            let mut log = leq_log::lock(&self.leq.log);
+            let new_log = log.epoch() != self.leq.epoch;
+            if let (true, Some(runs)) = (new_log, self.leq.runs.as_mut()) {
+                // `spl.log_new`: the new log's first run starts at this second.
+                runs.begin(&mut log, start, wall);
+            }
+            let placed = self
+                .leq
+                .runs
+                .as_mut()
+                .map(|r| r.second(&mut log, start, wall));
             let row = (s.measured > 0.0).then(|| SplLogRow {
-                start: WallNs(self.leq.wall_of(start, fs)),
+                second: placed.map_or(0, |p| p.second),
+                run: placed.map_or(0, |p| p.run),
+                start: WallNs(wall),
+                clock: placed.map_or(LogClock::NotStated, |p| p.clock),
+                gap: None,
                 measured: Seconds(s.measured),
                 laeq: Dbfs(s.level_dbfs(ac2_core::weighting::Weighting::A)),
                 lceq: Dbfs(s.level_dbfs(ac2_core::weighting::Weighting::C)),
@@ -382,13 +446,13 @@ impl Spl {
                 position: self.position(),
             });
             let (epoch, first) = {
-                let mut log = leq_log::lock(&self.leq.log);
                 if let Some(row) = row {
-                    log.push(row);
+                    log.push_row(row);
                 }
                 (log.epoch(), row.is_some() && log.total() == 1)
             };
-            if epoch != self.leq.epoch {
+            drop(log);
+            if new_log {
                 // `spl.log_new` started a new log: the windows and their states start over
                 // with it (the control thread reset the entity to the same states).
                 self.leq.epoch = epoch;
@@ -439,7 +503,18 @@ impl Spl {
                 self.leq.wall_of(start, self.fs),
                 self.leq.wall_of(end, self.fs),
             );
-            changed |= bm.second(s, span, &self.leq.log, self.cal.sensitivity, &mut alarms);
+            let stamp = bands::Stamp {
+                second: self.leq.now_index(start),
+                run: self.leq.runs.as_ref().map_or(0, runs::RunIndex::run),
+            };
+            changed |= bm.second(
+                s,
+                span,
+                stamp,
+                &self.leq.log,
+                self.cal.sensitivity,
+                &mut alarms,
+            );
             at = Some(WallNs(span.1));
         }
         seconds.clear();
@@ -460,14 +535,16 @@ impl Spl {
                 bm.set_light(c);
             }
             (Some(c), _) => {
-                self.band = bands::BandMeter::new(c, self.fs, horizon, &self.leq.log, self.local);
+                let host = self.leq.host.clone();
+                self.band = bands::BandMeter::new(c, self.fs, horizon, &self.leq.log, host);
                 if let (Some(bm), Some(start)) = (&mut self.band, self.leq.second_start) {
                     // On the meter's second grid: the integrator starts as far into the
                     // current second as the meter is, without energy for that part.
                     let into = self.meter.seconds().position();
                     bm.integ.skip(into, |_| {});
                     bm.second_start = Some(start);
-                    bm.rebuild(&self.leq.log, self.leq.wall_of(start, self.fs));
+                    let now = self.leq.now_index(start);
+                    bm.rebuild(&self.leq.log, now, self.leq.wall_of(start, self.fs));
                 }
             }
         }
@@ -669,132 +746,6 @@ impl Spl {
         }
         out
     }
-
-    fn spl_frame(&self) -> SplFrame {
-        let mut l = self.meter.levels();
-        let scale = match self.level_offset() {
-            Some(offset_db) => {
-                l = l.calibrated(Sensitivity { offset_db });
-                // The peak takes the correction's peak difference, not the energy one.
-                l.lpeak += self.peak_offset().unwrap_or(offset_db) - offset_db;
-                LevelScale::DbSpl
-            }
-            None => LevelScale::Dbfs,
-        };
-        SplFrame {
-            meas: self.meas,
-            meta: SplMeta {
-                scale,
-                weighting: self.cfg.weighting,
-                time_weighting: self.cfg.time_weighting,
-                peak_weighting: self.cfg.peak_weighting,
-                level: l.level,
-                lmax: l.lmax,
-                lmin: l.lmin,
-                leq: l.leq,
-                lpeak: l.lpeak,
-                duration: Seconds(l.duration_s),
-                cal: self.cal.status,
-                mic_curve: self.meter.has_correction(),
-                position: self.position(),
-            },
-        }
-    }
-
-    fn leq_frame(&self) -> LeqFrame {
-        let offset = self.level_offset();
-        let o = offset.unwrap_or(0.0);
-        let held = self.leq.peaks.max_dbfs();
-        let peak = |q: PeakQuantity| {
-            self.leq.cfg.peaks.get(q).map(|_| LeqPeak {
-                level: held[q_index(q)] + self.offset_of(q).unwrap_or(0.0),
-                judgement: self.leq.peak_judgements[q_index(q)],
-            })
-        };
-        let n = self.leq.cfg.windows.len();
-        let (logged, run) = {
-            let log = leq_log::lock(&self.leq.log);
-            (log.total(), log.run())
-        };
-        let mut f = LeqFrame {
-            meas: self.meas,
-            meta: LeqMeta {
-                scale: if offset.is_some() {
-                    LevelScale::DbSpl
-                } else {
-                    LevelScale::Dbfs
-                },
-                cal: self.cal.status,
-                mic_curve: self.meter.has_correction(),
-                horizon: self.leq.cfg.horizon,
-                logged,
-                run: run.map(|r| LeqRun {
-                    started_at: r.started_at,
-                    until: r.until,
-                    measured: Seconds(r.measured),
-                    gaps: Seconds(r.gaps),
-                    trimmed: r.trimmed,
-                    // In the meter's scale now, as the windows: the energies are dBFS.
-                    laeq: r.levels_dbfs[0] + o,
-                    lceq: r.levels_dbfs[1] + o,
-                    lzeq: r.levels_dbfs[2] + o,
-                }),
-                lcpeak: peak(PeakQuantity::LcPeak),
-                lafmax: peak(PeakQuantity::LafMax),
-                position: self.position(),
-            },
-            leq: Vec::with_capacity(n),
-            elapsed: Vec::with_capacity(n),
-            measured: Vec::with_capacity(n),
-            allowed: Vec::with_capacity(n),
-            recover: Vec::with_capacity(n),
-            least: Vec::with_capacity(n),
-            over_in: Vec::with_capacity(n),
-            flags: Vec::with_capacity(n),
-        };
-        for (i, w) in self.leq.cfg.windows.iter().enumerate() {
-            let v = self.leq.ring.value(i);
-            let mut flags = LeqFlags::NONE;
-            let (mut allowed, mut recover, mut over_in) = (f32::NAN, f32::NAN, f32::NAN);
-            if let Some(limit) = w.limit {
-                flags = flags.with(LeqFlags::LIMIT);
-                if offset.is_some() {
-                    flags = flags.with(LeqFlags::JUDGED);
-                    let p = ac2_core::leq::mean_square(limit.0 - o);
-                    match self.leq.judgements.get(i) {
-                        Some(LeqJudgement::Over) => flags = flags.with(LeqFlags::OVER),
-                        Some(LeqJudgement::Near) => {
-                            flags = flags.with(LeqFlags::NEAR);
-                            if self.leq.on_course.get(i) == Some(&true) {
-                                flags = flags.with(LeqFlags::ON_COURSE);
-                                over_in = v.over_in(p).map_or(f32::NAN, |t| t as f32);
-                            }
-                        }
-                        _ => {}
-                    }
-                    match self.leq.ring.headroom(i, p) {
-                        Headroom::Allowed { ms } => allowed = (power_dbfs(ms) + o) as f32,
-                        Headroom::CannotRecover { recover_s } => {
-                            flags = flags.with(LeqFlags::CANNOT_RECOVER);
-                            recover = recover_s as f32;
-                        }
-                    }
-                }
-            }
-            if v.incomplete() {
-                flags = flags.with(LeqFlags::INCOMPLETE);
-            }
-            f.leq.push((v.leq_dbfs + o) as f32);
-            f.elapsed.push(v.elapsed as f32);
-            f.measured.push(v.measured as f32);
-            f.allowed.push(allowed);
-            f.recover.push(recover);
-            f.least.push((v.least_dbfs() + o) as f32);
-            f.over_in.push(over_in);
-            f.flags.push(flags);
-        }
-        f
-    }
 }
 
 impl Analysis for Spl {
@@ -852,7 +803,7 @@ impl Analysis for Spl {
                     return;
                 }
                 if leq_changed {
-                    self.leq.set_config(self.cfg.leq.clone(), self.fs);
+                    self.leq.set_config(self.cfg.leq.clone());
                 } else {
                     self.leq.fresh = true;
                 }

@@ -240,6 +240,7 @@ mod tests {
     fn clocks(system: SystemClock, ppm: Option<f64>) -> Clocks {
         Clocks {
             system,
+            rtc: true,
             capture: Some(DeviceClock {
                 device: ac2_proto::model::DeviceId("fake".into()),
                 rate: ppm.map_or(SampleClock::Measuring, |ppm| SampleClock::Measured {

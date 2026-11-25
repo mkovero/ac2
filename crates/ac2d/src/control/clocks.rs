@@ -8,11 +8,17 @@ use ac2_proto::model::{Clocks, DeviceClock, SampleClock, StampMap, SystemClock};
 use ac2_proto::units::StreamEpoch;
 
 use super::Control;
+use crate::config::LocalClock;
+use crate::hostclock::{self, HostClock, SharedHostClock};
 
 /// How often the system clock's status is read. The kernel's bound grows by half a
 /// millisecond a second, so every read differs: reading more often would only commit more
 /// often.
 pub(super) const SYSTEM_EVERY: Duration = Duration::from_secs(5);
+
+/// How often the time zone is read: a DST change or a reconfigured host shows within a
+/// minute.
+pub(super) const ZONE_EVERY: Duration = Duration::from_secs(60);
 
 /// What the clocks entity is made from.
 #[derive(Debug)]
@@ -22,16 +28,21 @@ pub(super) struct ClockWatch {
     /// The newest reading of the capture clock and its stamp map, with the stream they are
     /// of.
     sample: Option<(StreamEpoch, SampleClock, Option<StampMap>)>,
+    /// What the meter jobs read of the clocks, kept current here.
+    pub(super) host: SharedHostClock,
+    next_zone: Instant,
 }
 
 impl ClockWatch {
     /// Starting from the system clock as the initial state has it (read when the store was
     /// made): the next read is a period away.
-    pub(super) fn new(system: SystemClock) -> Self {
+    pub(super) fn new(system: SystemClock, rtc: bool, local: LocalClock) -> Self {
         Self {
             system,
             next_system: Instant::now() + SYSTEM_EVERY,
             sample: None,
+            host: std::sync::Arc::new(HostClock::new(system, rtc, local)),
+            next_zone: Instant::now(),
         }
     }
 }
@@ -56,7 +67,15 @@ impl Control {
     pub(super) fn clocks_tick(&mut self, now: Instant) {
         if now >= self.clocks.next_system {
             self.clocks.system = self.s.system_clock.read();
+            self.clocks.host.set_system(self.clocks.system);
             self.clocks.next_system = now + SYSTEM_EVERY;
+        }
+        if now >= self.clocks.next_zone {
+            self.clocks.next_zone = now + ZONE_EVERY;
+            let zone = hostclock::zone(self.s.local_clock, crate::util::wall_ns());
+            if self.store.state().rig.zone != zone {
+                self.commit_rig(|r| r.zone = zone);
+            }
         }
         let capture = self.stream.as_ref().map(|r| DeviceClock {
             device: r.open.input_device.clone(),
@@ -71,6 +90,7 @@ impl Control {
         });
         let c = Clocks {
             system: self.clocks.system,
+            rtc: self.clocks.host.rtc,
             capture,
             stamp_map: match (&self.stream, self.clocks.sample) {
                 (Some(r), Some((e, _, map))) if e == r.epoch && r.open.replay.is_none() => map,

@@ -35,6 +35,7 @@ fn source(map_offset_ns: u64) -> Box<SourceState> {
         name: "ketunkolo".into(),
         clocks: Clocks {
             system: SystemClock::Synced { maxerror_us: 100 },
+            rtc: true,
             capture: None,
             stamp_map: Some(StampMap {
                 epoch_stamp_ns: 0,

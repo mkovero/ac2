@@ -52,6 +52,7 @@ mod fanout;
 mod firewall;
 mod health;
 mod hop_wake;
+mod hostclock;
 pub mod instance;
 mod io;
 mod jobs;
