@@ -495,8 +495,11 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                             && let Ok(k) = <[u8; 32]>::try_from(&key[..])
                             && let Some(n) = &mut net
                         {
-                            n.peers
-                                .drop_key(&ac2_zmq::PublicKey::from_bytes(k), interest);
+                            n.peers.drop_key(
+                                &n.pair.data,
+                                &ac2_zmq::PublicKey::from_bytes(k),
+                                interest,
+                            );
                         }
                     }
                     TAG_CLEAR => {

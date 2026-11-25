@@ -109,6 +109,9 @@ pub enum ErrorDetail {
         /// Reason.
         reason: MicCurveFileReason,
     },
+    /// `refused`: the client's key is authorized as a viewer, and the command is not one a
+    /// viewer may send.
+    ViewOnly,
     /// `refused`: the calibration store file cannot be read, so it is never written.
     CalStore {
         /// File on the daemon host.

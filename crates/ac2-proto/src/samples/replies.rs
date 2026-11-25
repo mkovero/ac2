@@ -46,6 +46,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             rev: Rev(42),
             rig_id: RigId(0x0123_4567_89ab_cdef),
             name: "ac2 on pupu".into(),
+            role: crate::model::ClientRole::Operator,
         })),
         Ok(ReplyBody::Backends(vec![
             BackendInfo {

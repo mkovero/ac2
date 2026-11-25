@@ -193,6 +193,7 @@ impl App {
                 BarLink::Connected {
                     responding: st.rig.mirror.as_ref().is_some_and(|m| m.responding(now)),
                     synced: st.rig.mirror.as_ref().is_some_and(|m| m.synced()),
+                    view_only: st.view_only(),
                 },
             ),
         };

@@ -115,7 +115,7 @@ async fn unauthorized_client_hears_its_fingerprint() {
     );
     assert!(
         r.stderr.contains(&format!(
-            "run `ac2 server authorize <name> --refused {fp}` (or `--key '"
+            "run `ac2 auth add <name> --refused {fp} --role viewer` (or give the key '"
         )),
         "{}",
         r.stderr
@@ -154,8 +154,9 @@ async fn unauthorized_client_hears_its_fingerprint() {
     );
     let text = on(&local, false, &["server", "info"]).await;
     assert!(
-        text.stdout
-            .contains(&format!("ac2 server authorize <name> --refused {fp}")),
+        text.stdout.contains(&format!(
+            "ac2 auth add <name> --refused {fp} --role viewer|operator"
+        )),
         "{}",
         text.stdout
     );
@@ -163,7 +164,15 @@ async fn unauthorized_client_hears_its_fingerprint() {
     let wrong = on(
         &local,
         false,
-        &["server", "authorize", "laptop", "--refused", "0000-0000"],
+        &[
+            "auth",
+            "add",
+            "laptop",
+            "--refused",
+            "0000-0000",
+            "--role",
+            "operator",
+        ],
     )
     .await;
     assert_eq!(wrong.code, 1);
@@ -173,27 +182,37 @@ async fn unauthorized_client_hears_its_fingerprint() {
         wrong.stderr,
         format!(
             "ac2: no refused key has fingerprint 0000-0000 (refused lately: {first}, {second}); \
-             have the client try again, or give --key KEY (shown by `ac2 auth show` on the \
+             have the client try again, or give its KEY (shown by `ac2 auth show` on the \
              client)\n"
         )
     );
-    let args = ["server", "authorize", "laptop", "--refused", "0000-0000"];
+    let args = [
+        "auth",
+        "add",
+        "laptop",
+        "--refused",
+        "0000-0000",
+        "--role",
+        "operator",
+    ];
     let wrong = on(&local, true, &args).await;
     assert_eq!(wrong.json(&args)["error"]["code"], "not_found");
 
     let args = [
-        "server",
-        "authorize",
+        "auth",
+        "add",
         "laptop",
         "--refused",
         &fp.to_uppercase(),
+        "--role",
+        "operator",
     ];
     let ok = on(&local, true, &args).await;
     assert_eq!(ok.code, 0, "{}", ok.stderr);
     let a = ok.json(&args);
     assert_eq!(a["authorized"]["name"], "laptop");
     assert_eq!(a["authorized"]["fingerprint"], fp.as_str());
-    assert_eq!(a["authorized"]["rig"], serde_json::Value::Null);
+    assert_eq!(a["authorized"]["role"]["type"], "operator");
     let info = on(&local, true, &["server", "info"]).await.json(&[]);
     let refused = info["network"]["refused"].as_array().unwrap();
     assert!(
@@ -227,11 +246,13 @@ async fn unauthorized_client_hears_its_fingerprint() {
         kd,
         "--remote",
         &remote,
-        "server",
-        "authorize",
+        "auth",
+        "add",
         "tablet",
         "--refused",
         &other_fp,
+        "--role",
+        "viewer",
     ])
     .await;
     assert_eq!(r.code, 1, "{}", r.stderr);

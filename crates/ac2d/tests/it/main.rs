@@ -48,6 +48,7 @@ mod remote_inputs;
 mod remote_stimulus;
 mod rig_file;
 mod rig_meas;
+mod roles;
 mod server;
 mod sessions;
 mod sim;

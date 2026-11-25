@@ -53,7 +53,8 @@ fn refused_key_is_logged_once_per_key_and_address() {
     let stranger = KeyPair::generate().unwrap();
     let other = KeyPair::generate().unwrap();
     let mut keys = AuthorizedKeys::new();
-    keys.insert("laptop", laptop.public).unwrap();
+    keys.insert("laptop", laptop.public, ac2_zmq::Role::Operator)
+        .unwrap();
     let authorized = dir.path().join("authorized_clients");
     keys.save(&authorized).unwrap();
     let security = NetworkSecurity {

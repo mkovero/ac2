@@ -8,7 +8,7 @@ use crate::common;
 use std::time::{Duration, Instant};
 
 use ac2_proto::frame::FrameData;
-use ac2_proto::model::SessionRef;
+use ac2_proto::model::{ClientRole, SessionRef};
 use ac2_proto::model::{
     MeasConfig, MeasKind, MeasScope, REMOTE_BASE, RemoteAudio, RemoteInput, RemoteLink,
     RemoteState, RigPeer, SpectrumConfig, StreamConfig, SystemClock,
@@ -79,7 +79,9 @@ pub(super) fn rig_with(
     let d = dir.join(name);
     std::fs::create_dir_all(&d).unwrap();
     let mut authorized = AuthorizedKeys::new();
-    authorized.insert("app", app.public).unwrap();
+    authorized
+        .insert("app", app.public, ac2_zmq::Role::Operator)
+        .unwrap();
     authorized.save(&d.join("authorized_clients")).unwrap();
     if let Some(k) = keys {
         let text = format!(
@@ -465,6 +467,7 @@ fn slow_a_rig_admitted_as_an_app_is_told_so_until_admitted_as_a_rig() {
     cb.ok(Command::AuthAuthorize {
         name: "rig-a".into(),
         key: a_keys.public.to_z85(),
+        role: ac2_proto::model::ClientRole::Operator,
     });
     ca.ok(Command::RigPair {
         peer: RigPeer {
@@ -836,7 +839,8 @@ fn pairing_and_unpairing_touch_one_rig_only() {
 }
 
 /// `auth.revoke_rig` removes the keys admitted as that rig and nothing else: an app
-/// authorized under the same name since keeps its key.
+/// authorized under the same name since keeps its key. A name admitted as a rig is never
+/// taken over by `auth.authorize`.
 #[test]
 fn revoking_a_rig_by_identity_leaves_apps_alone() {
     init_log();
@@ -847,15 +851,15 @@ fn revoking_a_rig_by_identity_leaves_apps_alone() {
     let (mut cb, _) = client(&ctx, &b, &app);
     let (a_id, c_id) = (RigId(0xa), RigId(0xc));
     let key = || KeyPair::generate().unwrap().public.to_z85();
-    let kinds = |c: &mut Client| -> Vec<(String, Option<RigId>)> {
+    let kinds = |c: &mut Client| -> Vec<(String, ClientRole)> {
         let mut v: Vec<_> = c
             .server(Command::ServerInfo)
             .network
             .authorized
             .iter()
-            .map(|a| (a.name.clone(), a.rig))
+            .map(|a| (a.name.clone(), a.role))
             .collect();
-        v.sort();
+        v.sort_by(|a, b| a.0.cmp(&b.0));
         v
     };
     cb.ok(Command::AuthAdmitRig {
@@ -868,14 +872,27 @@ fn revoking_a_rig_by_identity_leaves_apps_alone() {
         rig_id: c_id,
         name: "rig-c".into(),
     });
-    // An app authorized under rig-c's name takes that entry: it is an app's now.
-    cb.ok(Command::AuthAuthorize {
+    let app_over = |c: &mut Client| {
+        c.call(Command::AuthAuthorize {
+            name: "rig-c".into(),
+            key: key(),
+            role: ClientRole::Operator,
+        })
+    };
+    // A rig's name is not an app's to take: the rig is revoked first.
+    let e = app_over(&mut cb).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
+    cb.ok(Command::AuthRevoke {
         name: "rig-c".into(),
-        key: key(),
     });
+    app_over(&mut cb).unwrap();
+    let rig_a = ClientRole::Rig { rig_id: a_id };
     let before = kinds(&mut cb);
-    assert!(before.contains(&("rig-a".into(), Some(a_id))), "{before:?}");
-    assert!(before.contains(&("rig-c".into(), None)), "{before:?}");
+    assert!(before.contains(&("rig-a".into(), rig_a)), "{before:?}");
+    assert!(
+        before.contains(&("rig-c".into(), ClientRole::Operator)),
+        "{before:?}"
+    );
     cb.ok(Command::AuthRevokeRig { rig_id: a_id });
     let e = cb
         .call(Command::AuthRevokeRig { rig_id: c_id })
@@ -883,7 +900,10 @@ fn revoking_a_rig_by_identity_leaves_apps_alone() {
     assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
     let after = kinds(&mut cb);
     assert!(!after.iter().any(|(n, _)| n == "rig-a"), "{after:?}");
-    assert!(after.contains(&("rig-c".into(), None)), "{after:?}");
+    assert!(
+        after.contains(&("rig-c".into(), ClientRole::Operator)),
+        "{after:?}"
+    );
     b.shutdown();
 }
 

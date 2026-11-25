@@ -3,8 +3,8 @@
 //! the authorized client keys and the keys it refused).
 
 use ac2_proto::model::{
-    AuthorizedClient, GenAction, Generator, LocalServer, NetReason, NetReasonKind, OutputSetup,
-    RefusedKey, ServerInfo,
+    AuthorizedClient, ClientRole, GenAction, Generator, LocalServer, NetReason, NetReasonKind,
+    OutputSetup, RefusedKey, ServerInfo,
 };
 use ac2_proto::units::{Dbfs, WallNs};
 
@@ -186,33 +186,37 @@ pub fn reason_kind_text(k: NetReasonKind) -> &'static str {
     }
 }
 
-/// What an authorized key is: an app an operator authorized, or a rig admitted to take
-/// this rig's inputs. Every list of keys says it with the same word.
+/// What an authorized key may do, in one word every list of keys says it with: an
+/// `operator` drives the rig, a `viewer` only looks, a `rig` was admitted to take this rig's
+/// inputs.
 pub fn key_kind(a: &AuthorizedClient) -> &'static str {
-    match a.rig {
-        Some(_) => "rig",
-        None => "app",
+    role_word(&a.role)
+}
+
+/// [`key_kind`] of a role.
+pub fn role_word(r: &ClientRole) -> &'static str {
+    match r {
+        ClientRole::Operator => "operator",
+        ClientRole::Viewer => "viewer",
+        ClientRole::Rig { .. } => "rig",
     }
 }
 
-/// One authorized client: `laptop · app · fingerprint 1a2b-…`, `rig-pupu · rig · may take
-/// this rig's inputs · fingerprint 1a2b-…`.
+/// One authorized client: `laptop · operator · fingerprint 1a2b-…`, `phone · viewer · may
+/// only look · fingerprint …`, `rig-pupu · rig · may take this rig's inputs · fingerprint …`.
 pub fn authorized_row(a: &AuthorizedClient) -> String {
-    match a.rig {
-        // A rig admitted to take this rig's inputs: what it may do, not only who it is.
-        Some(_) => format!(
-            "{} · {} · may take this rig's inputs · fingerprint {}",
-            a.name,
-            key_kind(a),
-            a.fingerprint
-        ),
-        None => format!(
-            "{} · {} · fingerprint {}",
-            a.name,
-            key_kind(a),
-            a.fingerprint
-        ),
-    }
+    // What a viewer or a rig may do, not only who it is: neither drives this rig.
+    let may = match a.role {
+        ClientRole::Operator => "",
+        ClientRole::Viewer => " · may only look",
+        ClientRole::Rig { .. } => " · may take this rig's inputs",
+    };
+    format!(
+        "{} · {}{may} · fingerprint {}",
+        a.name,
+        key_kind(a),
+        a.fingerprint
+    )
 }
 
 /// One refused key: `fingerprint 1a2b-… from 192.168.1.40 · 12 times · 3 min ago`.
@@ -336,11 +340,17 @@ mod tests {
         };
         assert_eq!(
             authorized_row(&authorized[0]),
-            "laptop · app · fingerprint SHA256:b2aa 0c3d 9e41 7f60"
+            "laptop · operator · fingerprint SHA256:b2aa 0c3d 9e41 7f60"
+        );
+        assert_eq!(
+            authorized_row(&authorized[1]),
+            "phone · viewer · may only look · fingerprint SHA256:51d4 77b0 9a2e 3f1c"
         );
         let rig = AuthorizedClient {
             name: "rig-pupu".into(),
-            rig: Some(ac2_proto::units::RigId(7)),
+            role: ClientRole::Rig {
+                rig_id: ac2_proto::units::RigId(7),
+            },
             ..authorized[0].clone()
         };
         assert_eq!(

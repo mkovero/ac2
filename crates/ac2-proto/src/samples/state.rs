@@ -38,13 +38,21 @@ pub fn server_info() -> ServerInfo {
                     name: "laptop".into(),
                     key: "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID".into(),
                     fingerprint: "SHA256:b2aa 0c3d 9e41 7f60".into(),
-                    rig: None,
+                    role: ClientRole::Operator,
+                },
+                AuthorizedClient {
+                    name: "phone".into(),
+                    key: "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf8".into(),
+                    fingerprint: "SHA256:51d4 77b0 9a2e 3f1c".into(),
+                    role: ClientRole::Viewer,
                 },
                 AuthorizedClient {
                     name: "pupu".into(),
                     key: "JTKVSB%%)wK0E.X)V>+}o?pNmC{O&4W4b!Ni{Lh6".into(),
                     fingerprint: "SHA256:7c41 e08a 5f22 b913".into(),
-                    rig: Some(crate::units::RigId(0x7075_7075)),
+                    role: ClientRole::Rig {
+                        rig_id: crate::units::RigId(0x7075_7075),
+                    },
                 },
             ],
             refused: Some(vec![

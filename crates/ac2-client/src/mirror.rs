@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ac2_proto::frame::{DaemonHealth, GenSummary, KaMeta};
-use ac2_proto::model::{State, TimingState};
+use ac2_proto::model::{ClientRole, State, TimingState};
 use ac2_proto::units::{ClientId, DaemonIncarnation, Rev, StreamEpoch};
 use ac2_proto::{Change, Event, FrameStamp, Patch, StateSnapshot};
 
@@ -124,6 +124,8 @@ pub struct MirrorView {
     /// restarted daemon binds a new identity, so "owned by me" must be judged with this,
     /// never with an id kept from an earlier connect.
     pub client_id: Option<ClientId>,
+    /// What this connection may do, from the same `welcome` as `client_id`; `None` with it.
+    pub role: Option<ClientRole>,
 }
 
 impl MirrorView {
@@ -210,6 +212,7 @@ impl Mirror {
             since_requests: self.since_requests,
             incarnation_changes: self.incarnation_changes,
             client_id: None,
+            role: None,
         }
     }
 

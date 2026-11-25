@@ -46,10 +46,12 @@ pub enum BarLink<'a> {
         error: &'a str,
         down: RigDown,
     },
-    /// `responding`: its heartbeat is fresh; `synced`: the mirrored state has caught up.
+    /// `responding`: its heartbeat is fresh; `synced`: the mirrored state has caught up;
+    /// `view_only`: the rig authorized this app's key as a viewer.
     Connected {
         responding: bool,
         synced: bool,
+        view_only: bool,
     },
 }
 
@@ -227,6 +229,14 @@ impl Bar {
     }
 }
 
+/// What the bar says after the place of a rig that authorized this app as a viewer.
+pub const VIEW_ONLY: &str = "view only";
+
+/// Its hover, and what an edit refused on such a rig says.
+pub const VIEW_ONLY_DETAIL: &str = "This rig authorized this app as a viewer: it shows \
+     everything and may stop the generator, and every change is refused. An operator of the \
+     rig changes the role (Settings › Connection, or ac2 auth role).";
+
 /// `local`, `remote: ac2pi-0ab1c6`; a host called as the rig is not said twice: `remote`.
 fn place_text(rig: &str, place: Place<'_>) -> String {
     match place {
@@ -305,9 +315,18 @@ pub fn bar(i: &BarInputs<'_>) -> Bar {
             tone
         }
         None => {
+            let (place, hover) = match i.link {
+                BarLink::Connected {
+                    view_only: true, ..
+                } => (
+                    format!("{place} · {VIEW_ONLY}"),
+                    format!("{VIEW_ONLY_DETAIL}\n{about}"),
+                ),
+                _ => (place, about),
+            };
             line.push(
                 Part::new(Lead::First, place, Tone::Plain)
-                    .hover(about)
+                    .hover(hover)
                     .click(Click::Connection),
             );
             daemon_parts(i, &mut line);

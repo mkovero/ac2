@@ -35,14 +35,14 @@ pub enum CalCmd {
     /// Choose the mic curve an input applies: a label of its mic's curves, or `off`.
     Use {
         /// Input channel.
-        input: Channel,
+        channel: Channel,
         /// Curve label (e.g. 90°), or `off`.
         curve: CurveArg,
     },
     /// List sensitivity and line calibrations, the mic library and what each input uses.
     List,
-    /// Delete a sensitivity calibration (`--input 3 [--mic NAME]`) or a line calibration
-    /// (`--input 3 --line`).
+    /// Delete a sensitivity calibration (`--channel 3 [--mic NAME]`) or a line
+    /// calibration (`--channel 3 --line`).
     Rm(CalRm),
 }
 
@@ -50,7 +50,7 @@ pub enum CalCmd {
 #[derive(Debug, Subcommand)]
 pub enum CalCurveCmd {
     /// Import a mic's magnitude curve (.frd / .txt / CSV) into the mic library. The label
-    /// defaults to the angle the file names (`90°`), else its file name. With `--input`, the
+    /// defaults to the angle the file names (`90°`), else its file name. With `--channel`, the
     /// mic becomes that input's mic, and its only curve its active one.
     Import(CalCurveImport),
     /// Rename a curve (inputs that use it follow).
@@ -78,15 +78,15 @@ pub enum CalCurveCmd {
 pub struct CalCurveImport {
     /// Curve file: frequency and dB per line (further columns ignored).
     pub file: PathBuf,
-    /// Mic name (default: the mic on `--input`).
-    #[arg(long, required_unless_present = "input")]
+    /// Mic name (default: the mic on `--channel`).
+    #[arg(long, required_unless_present = "channel")]
     pub mic: Option<String>,
     /// Label among the mic's curves, e.g. `90°` (default: from the file).
     #[arg(long)]
     pub label: Option<String>,
-    /// Input the mic is on: sets its mic name.
+    /// Input channel the mic is on: sets its mic name.
     #[arg(long)]
-    pub input: Option<Channel>,
+    pub channel: Option<Channel>,
 }
 
 /// `cal rm`.
@@ -94,7 +94,7 @@ pub struct CalCurveImport {
 pub struct CalRm {
     /// Input channel of the calibration.
     #[arg(long)]
-    pub input: Channel,
+    pub channel: Channel,
     /// Mic name of the sensitivity calibration (default: the input's mic name in the
     /// stream's input setup).
     #[arg(long, conflicts_with = "line")]
@@ -112,8 +112,8 @@ pub struct CalRm {
 #[derive(Debug, Args)]
 pub struct CalLine {
     /// Input channel (a `line` input).
-    #[arg(long, visible_alias = "channel")]
-    pub input: Channel,
+    #[arg(long)]
+    pub channel: Channel,
     /// Voltage of the tone measured at the input, RMS, e.g. `1.55v` or `775mv`.
     #[arg(long, value_name = "VOLTS")]
     pub volts: VoltsArg,
@@ -133,7 +133,7 @@ pub enum ElectricalMethodArg {
 pub struct CalElectrical {
     /// Input channel.
     #[arg(long)]
-    pub input: Channel,
+    pub channel: Channel,
     /// Voltage measured at the input, RMS, e.g. `15.03mv`.
     #[arg(long, value_name = "VOLTS")]
     pub volts: VoltsArg,
@@ -174,7 +174,7 @@ pub struct CalElectrical {
 pub struct CalSpl {
     /// Input channel with the calibrator on its mic.
     #[arg(long)]
-    pub input: Channel,
+    pub channel: Channel,
     /// Calibrator level, e.g. `94db`.
     #[arg(long = "ref", value_name = "SPL")]
     pub reference: SplLevel,

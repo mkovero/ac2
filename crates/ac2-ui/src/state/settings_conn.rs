@@ -77,10 +77,13 @@ impl AppState {
                     false,
                 ));
             }
-            ConnAction::Authorize { name, key } => out.push(Request::ServerCall {
-                what: format!("client {name} authorized"),
+            ConnAction::Authorize { name, key, role } => out.push(Request::ServerCall {
+                what: format!(
+                    "client {name} authorized as {}",
+                    ac2_scene::rig::role_word(&role)
+                ),
                 failed: format!("cannot authorize {name}"),
-                cmd: Command::AuthAuthorize { name, key },
+                cmd: Command::AuthAuthorize { name, key, role },
             }),
             ConnAction::Revoke(name) => out.push(Request::ServerCall {
                 what: format!("client {name} revoked"),

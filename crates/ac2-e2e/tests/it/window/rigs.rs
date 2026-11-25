@@ -745,7 +745,11 @@ fn lists_and_admits(rig: &Rig, peer: RigId) -> R<bool> {
     let ReplyBody::Server(info) = rig.call(Command::ServerInfo)? else {
         return Err("server.info: no server info".into());
     };
-    let admits = info.network.authorized.iter().any(|a| a.rig == Some(peer));
+    let admits = info
+        .network
+        .authorized
+        .iter()
+        .any(|a| a.role.rig_id() == Some(peer));
     Ok(lists && admits)
 }
 
@@ -826,7 +830,12 @@ fn pair_with_rig_pairs_both_daemons_in_one_act() -> R {
         let ReplyBody::Server(info) = r.call(Command::ServerInfo)? else {
             return Err("server.info: no server info".into());
         };
-        Ok(!lists && !info.network.authorized.iter().any(|a| a.rig == Some(peer)))
+        Ok(!lists
+            && !info
+                .network
+                .authorized
+                .iter()
+                .any(|a| a.role.rig_id() == Some(peer)))
     };
     let t0 = Instant::now();
     while !(none(&pupu, kettu_id)? && none(&kettu, pupu_id)?) {

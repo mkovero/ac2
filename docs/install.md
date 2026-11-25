@@ -305,8 +305,9 @@ ac2 auth pair 10.0.0.20 --server-key '<the 40-character key from the daemon host
 ```
 
 `auth pair` pins the daemon key and prints this client's key, with the command that
-authorizes it: run `ac2 server authorize <name> --key '<key>'` on the daemon host (it applies
-at once, no restart). Then
+authorizes it: run `ac2 auth add <name> '<key>' --role viewer` on the daemon host (it applies
+at once, no restart; `--role operator` lets the client drive the rig, a viewer only looks
+and may stop the generator). Then
 `ac2 --remote 10.0.0.20 status`, or open the app's connect dialog (`ac2-ui --connect`): paired
 rigs are selectable there, and an unpaired rig offers the same pairing steps. Quote the key:
 Z85 keys can contain `-` and other shell characters, and a key that starts with `-` is still
@@ -326,9 +327,11 @@ every refused key, once per key and address every 10 s:
 refused client key fingerprint 1a2b-3c4d-5e6f-7a8b-9c0d from 10.0.0.31: not in …/authorized_clients; …
 ```
 
-If that fingerprint matches what the client shows, run `ac2 server authorize <name>
---refused <fingerprint>` on the daemon host (`ac2 server info` lists the refused keys); it
-applies to the client's next try, no restart. An app already connected to the rig does it
+If that fingerprint matches what the client shows, run `ac2 auth add <name>
+--refused <fingerprint> --role viewer` (or `--role operator`) on the daemon host (`ac2 auth
+list` lists the refused keys); it applies to the client's next try, no restart. `ac2 auth role
+<name> operator` changes a client's role and `ac2 auth remove <name>` revokes it, both at once
+on its live connections. An app already connected to the rig does it
 too: Settings › Connection lists the refused keys, and **A** on one authorizes
 it ([user guide](user-guide.md#connection)).
 
@@ -343,6 +346,13 @@ Where the keys live (the ac2 config directory, shared by every ac2 program on a 
 `ac2 --key-dir` (or `AC2_KEY_DIR`) override single locations. `ac2 auth show` prints the
 client side. The app's connect dialog pairs into the same `keys/` directory as the CLI, so a
 rig paired with either is paired for both.
+
+`authorized_clients` has a line per key: `<name> <Z85 key> <role>`, the role `operator`,
+`viewer` or `rig=<rig id>` (a rig admitted to take this rig's inputs). Edit it with `ac2 auth`
+rather than by hand. A file from before roles (lines of a name and a key only) is set aside
+whole (`authorized_clients.damaged-<time>`) and the daemon starts with none authorized, saying so in its
+log and in `server info`'s damage: convert the set-aside file with `tools/proto-next/convert.py
+--auth <file>` (every key becomes an operator) and put it back with the daemon stopped.
 
 Discovery is only a convenience. Anyone on the network can advertise any name and any
 fingerprint; ac2 connects only with a key you pinned, and the connection fails if the daemon

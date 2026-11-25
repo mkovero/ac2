@@ -274,6 +274,7 @@ pub fn commands() -> Vec<Command> {
         Command::AuthAuthorize {
             name: "laptop".into(),
             key: "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID".into(),
+            role: crate::model::ClientRole::Viewer,
         },
         Command::AuthRevoke {
             name: "laptop".into(),

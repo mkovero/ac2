@@ -180,10 +180,17 @@ last write wins.
 RigId}`. It replaces `AuthorizedClient.rig: Option<RigId>` with `role: ClientRole`.
 
 **Where it lives.** Every line of the authorized-clients file names its role as a third
-field: `operator`, `view` or `rig=<16 hex>`. A line without one, or with anything else, is
-malformed: as today it is dropped with its reason logged and the file rewritten without it,
-so a lost or truncated field locks that client out rather than granting it control. The
-one-shot deploy converter adds `operator` to today's two-field lines.
+field: `operator`, `viewer` or `rig=<16 hex>` (`viewer`, not `view`: the word the app, the
+CLI and the wire use for the role). A line without one, or with anything else, is
+malformed: as before it is dropped with its reason logged and the file rewritten without it,
+so a lost or truncated field locks that client out rather than granting it control. A file
+in the shape before roles (at least one two-field line, and every key line two fields or a
+rig's) is not read line by line: the daemon sets it aside whole (`.damaged-<time>`, as any
+damaged file), starts with no client authorized and reports a damaged file whose reason
+names `tools/proto-next/convert.py --auth <the set-aside file>`; there is no version marker,
+the role field is the marker. The one-shot deploy converter (`--auth`) adds `operator` to
+the two-field lines, keeps `rig=` lines and the file's mode, keeps the original as `.pre105`,
+and prints no key.
 
 `auth.authorize` (today `server.authorize`) takes `role: ClientRole`, typed and required;
 `auth.admit_rig` stays the only way to `rig`, and `auth.authorize` refuses `rig`
@@ -191,6 +198,8 @@ one-shot deploy converter adds `operator` to today's two-field lines.
 becomes an app; the rig is revoked with `auth.revoke_rig` first. Authorizing a name already
 present otherwise replaces its key and role, as a name given again replaces its key and kind
 today, and drops the old key's connections when either changed; there is no `auth.set_role`.
+Making the requesting client's own key a viewer is `refused`, as revoking it is: an operator
+over the network could otherwise lock itself out.
 
 **Demotion and revocation.** Demoting an operator to viewer does what `auth.revoke` does to
 what it holds: its generator lease is released and its stimulus stopped at once (fading out),
@@ -225,11 +234,27 @@ except `audio/<channel>` and `source/levels` (rigs only, as today, the gate in `
 message. Both are checked in `request.rs` before dedup admission, so a refused request stores
 nothing.
 
-**State.** `welcome` gains `role: ClientRole`: the app greys its controls from it.
-`server.info`'s `authorized[]` shows each client's role. A role change drops the key's
-connections as a revoke does, and a command still in flight is checked against the new role
-(a viewer's is refused `view_only`); the client reconnects and learns its role from
-`welcome`.
+**State.** `welcome` gains `role: ClientRole`: the app refuses edits from it.
+`server.info`'s `authorized[]` shows each client's role. The ZAP handshake carries no role:
+the daemon looks the key's role up in the list at every request (a lookup it already made
+for revocation), which is the role fixed at connection as long as it is unchanged and the
+new one at once when it changes. A role change drops the key's data connections as a revoke
+does, each told `rejoin` first; a command still in flight is checked against the new role (a
+viewer's is refused `view_only`). The client answers `rejoin` by stating its subscriptions
+and saying `hello` again on the same connection, and learns its role from that `welcome`.
+A viewer's transfers are dropped with a demotion or revoke, as its lease is.
+
+**Clients.** The app shows *view only* after the rig's place in the top bar (the hover says
+what it means) and takes every request a viewer may not send out before it goes, with one
+plain warning (`Request::viewer_may_send`, an exhaustive match over the app's requests);
+`ac2-client` refuses such a command unsent with the daemon's own `view_only` error, so the
+CLI says the same. Settings › Connection lists each client's role (`laptop · operator`,
+`phone · viewer · may only look`), takes a role with the name (`tablet viewer`) and changes
+an app's role with ←/→ twice. The CLI's client keys are `ac2 auth add NAME KEY|--refused FP
+--role viewer|operator`, `ac2 auth role NAME viewer|operator` (the same key authorized
+again), `ac2 auth remove NAME`, `ac2 auth list`; `ac2 server` keeps `info` and `network`.
+`--role` is required: nothing defaults to operator. The pairing hint (`ac2 auth pair`, the
+app's connect dialog) offers a viewer line.
 
 **Local pair.** The local endpoints (ipc on every platform, §8) are always `operator`: the
 OS user is the boundary. `server.network` and the `SessionRef.path` forms stay reserved to
@@ -498,9 +523,9 @@ network mode.
 | `Result` as `{"Ok"}` / `{"Err"}` | `{"ok"}` / `{"err"}` (snake_case); `CtrlError::MissingVersion` never reaches the wire: a request without `v` is answered `version_mismatch` | proto, tools/protocol |
 | tag keys `kind` (`InputKind`, `Surface`), `state` (`Recovery`), `shape` (`TargetCurve`), `status` (`BandTransferBand`) | `type` | proto, traces, ac2d (calstore, plans), ui |
 | `TraceEdit.color` | `colour` | proto, ui, cli |
-| `cal.spl.input`, `cal.spl_electrical.input`, `cal.curve_import.input` | `channel: u16` (every `cal.*` names the input by `channel`, as `CalKey`; CLI flags stay `--input`, the operator's word) | proto, ac2d, cli, ui |
+| `cal.spl.input`, `cal.spl_electrical.input`, `cal.curve_import.input` | `channel: u16` (every `cal.*` names the input by `channel`, as `CalKey`; the `ac2 cal` flags follow as `--channel`, lead ruling in `pn-roles`; `meas`, `spl` and `levels` keep `--input`, whose wire fields are not `channel`) | proto, ac2d, cli, ui |
 | `rig.unpair.rig` | `rig_id: RigId` | proto, ac2d, cli, ui |
-| `server.authorize`, `server.revoke` | `auth.authorize`, `auth.revoke` (the CLI keeps `ac2 server authorize`, beside `server info`, which lists the refused keys it takes) | proto, ac2d, cli, ui |
+| `server.authorize`, `server.revoke` | `auth.authorize`, `auth.revoke` (the CLI follows as `ac2 auth add / role / remove / list`, lead ruling in `pn-roles`; `ac2 server` keeps `info` and `network`) | proto, ac2d, cli, ui |
 | `rig.monitor_start {base, on}` | `rig.monitor_at_start {base, on}` | proto, ac2d, cli, ui |
 | `sample_rate: Hz` / `u32` (sweep info, `ir` meta, dynamics, trace, sidecar), `BinsMeta.rate`, `AudioHeader.rate` (`audio/<channel>`), `EqRealisation::Digital.rate`, `EqShape::Biquad.rate` | `sample_rate_hz`; trace export v7, whose reader takes a v6-or-older JSON header line's `sample_rate` / `lo` / `hi` as `sample_rate_hz` / `lo_hz` / `hi_hz` (open question 1) | proto, traces, ac2d, ui, scene |
 | `AlignBand.lo/hi`, `FreqRange.lo/hi`, `BinRange.lo/hi` | `lo_hz`, `hi_hz` (`LevelRange.lo/hi`, a dB axis of the layout, and `MicCurveRef.f_lo/f_hi` stay) | proto, core conv, ui, scene |
@@ -588,6 +613,9 @@ until the last has landed.
    frames take the `tf` stamp already, so they follow without a change of their own.
 6. `pn-roles`: §3 (needs the `auth.*` names of 2). The data socket's rig gate already
    keeps `source/levels` and `audio/<channel>` from every non-rig, a viewer included.
+   Lead rulings taken with it: the CLI's client-key commands move to `ac2 auth add / role /
+   remove / list` (no `ac2 server authorize` kept), and the `ac2 cal` flags whose wire field
+   is `channel` are `--channel` (no `--input` kept).
 7. `pn-ipc`: §8; then an all-OS CI run (`-f all_os=true`) and the Wine AF_UNIX proof.
 8. `pn-big`: §4 and the one history cap; snapshot transfers exempt from `MAX_TRANSFERS`.
 9. `pn-spool`: §5; then an all-OS CI run for the free-space query per OS.

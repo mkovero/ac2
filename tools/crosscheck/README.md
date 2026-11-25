@@ -568,7 +568,7 @@ noted and skipped.
 
 A speaker take's `mic_curve` names its run's `cal/store_excerpt.json`, the curve ac2 had active
 on the mic input. Both analysers measure with it, as each one's user would:
-- **ac2**: `ac2 cal curve import … --input 1` in the private daemon, so its TF carries the
+- **ac2**: `ac2 cal curve import … --channel 1` in the private daemon, so its TF carries the
   curve in its columns (checked from the export's `mic` line).
 - **OSM**: `osm-harness --calibration`, OSM's Measurement calibration, with the curve shifted
   to 0 dB at 1 kHz (where ac2 defines sensitivity; the file REW gets).

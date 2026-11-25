@@ -165,11 +165,10 @@ fn parse_authorized_lenient(text: &str) -> (AuthorizedKeys, Vec<String>) {
     for (i, line) in text.lines().enumerate() {
         let one = AuthorizedKeys::parse(line).and_then(|one| {
             for (name, key) in one.iter() {
-                // A rig line must come back as a rig: an admission read back as an app
-                // leaves the pairing refused after every restart until re-admitted.
-                match one.rig_of(name) {
-                    Some(rig) => keys.insert_rig(name, *key, rig)?,
-                    None => keys.insert(name, *key)?,
+                // Each line keeps its role: an admission read back as anything else
+                // leaves the pairing refused, or a viewer in control, after a restart.
+                if let Some(role) = one.role_of(name) {
+                    keys.insert(name, *key, role)?;
                 }
             }
             Ok(())
@@ -181,15 +180,39 @@ fn parse_authorized_lenient(text: &str) -> (AuthorizedKeys, Vec<String>) {
     (keys, dropped)
 }
 
+/// The converter that gives a list in the shape before roles a role on every line.
+pub(crate) const CONVERTER: &str = "tools/proto-next/convert.py --auth";
+
 /// Loads the authorized-clients list; a missing file is created empty (no client can
 /// connect until one is added). Lines that do not parse are dropped and the file rewritten
-/// without them, the original set aside and reported.
+/// without them, the original set aside and reported. A list in the shape before roles is
+/// set aside whole and an empty one started: guessing a role for its keys would either lock
+/// out every operator or give every viewer control, so the converter decides, once.
 pub(crate) fn load_or_create_authorized(
     path: &Path,
 ) -> Result<(AuthorizedKeys, Option<Damage>), KeyFileError> {
     match fs::read(path) {
         Ok(bytes) => {
             let text = String::from_utf8_lossy(&bytes);
+            if ac2_zmq::is_before_roles(&text) {
+                let to = ac2_paths::set_aside_damaged(path).map_err(io_err(path))?;
+                let keys = AuthorizedKeys::new();
+                ac2_paths::write_private_atomic(path, keys.to_text().as_bytes())
+                    .map_err(io_err(path))?;
+                let d = Damage {
+                    kind: StateFile::AuthorizedClients,
+                    path: path.to_owned(),
+                    reason: format!(
+                        "no role on its lines (the shape before roles): convert the set-aside \
+                         file with `{CONVERTER} {}` and put it back with the daemon stopped; \
+                         no network client can connect until then",
+                        to.display()
+                    ),
+                    set_aside_as: Some(to),
+                };
+                d.log();
+                return Ok((keys, Some(d)));
+            }
             let (keys, dropped) = parse_authorized_lenient(&text);
             let not_utf8 = matches!(text, std::borrow::Cow::Owned(_));
             if dropped.is_empty() && !not_utf8 {
@@ -230,6 +253,7 @@ pub(crate) fn load_or_create_authorized(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ac2_zmq::Role;
 
     #[test]
     fn server_keys_roundtrip_and_are_private() {
@@ -268,8 +292,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let p = dir.path().join("authorized_clients");
         let kp = KeyPair::generate().expect("gen");
-        let good = format!("# list\nlaptop {}\n", kp.public.to_z85());
-        fs::write(&p, format!("{good}phone abc\ntorn")).expect("write");
+        let good = format!("# list\nlaptop {} viewer\n", kp.public.to_z85());
+        fs::write(&p, format!("{good}phone abc operator\ntorn")).expect("write");
         let (keys, d) = load_or_create_authorized(&p).expect("recover");
         assert_eq!(keys.len(), 1);
         let d = d.expect("damage");
@@ -287,27 +311,52 @@ mod tests {
     }
 
     #[test]
-    fn an_admitted_rig_is_still_a_rig_after_a_reload() {
+    fn every_role_is_itself_after_a_reload() {
         let dir = tempfile::tempdir().expect("tempdir");
         let p = dir.path().join("authorized_clients");
         let app = KeyPair::generate().expect("gen");
+        let view = KeyPair::generate().expect("gen");
         let rig = KeyPair::generate().expect("gen");
         let mut keys = AuthorizedKeys::new();
-        keys.insert("laptop", app.public).expect("app");
-        keys.insert_rig("rig-pupu", rig.public, 0x26b1_c286_0000_0001)
+        keys.insert("laptop", app.public, Role::Operator)
+            .expect("app");
+        keys.insert("phone", view.public, Role::Viewer)
+            .expect("viewer");
+        keys.insert("rig-pupu", rig.public, Role::Rig(0x26b1_c286_0000_0001))
             .expect("rig");
         fs::write(&p, keys.to_text()).expect("write");
         let (back, none) = load_or_create_authorized(&p).expect("load");
         assert!(none.is_none());
         assert_eq!(back.rig_of("rig-pupu"), Some(0x26b1_c286_0000_0001));
-        assert_eq!(back.rig_of("laptop"), None);
+        assert_eq!(back.role_of("laptop"), Some(Role::Operator));
+        assert_eq!(back.role_of("phone"), Some(Role::Viewer));
         // Also through the path that rewrites a damaged file.
         fs::write(&p, format!("{}torn", keys.to_text())).expect("torn");
         let (back, d) = load_or_create_authorized(&p).expect("recover");
         assert!(d.is_some());
         assert_eq!(back.rig_of("rig-pupu"), Some(0x26b1_c286_0000_0001));
+        assert_eq!(back.role_of("phone"), Some(Role::Viewer));
         let (again, _) = load_or_create_authorized(&p).expect("reload");
         assert_eq!(again.rig_of("rig-pupu"), Some(0x26b1_c286_0000_0001));
+    }
+
+    #[test]
+    fn a_list_before_roles_is_set_aside_whole_naming_the_converter() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let p = dir.path().join("authorized_clients");
+        let app = KeyPair::generate().expect("gen");
+        let old = format!("# old\nlaptop {}\n", app.public.to_z85());
+        fs::write(&p, &old).expect("write");
+        let (keys, d) = load_or_create_authorized(&p).expect("load");
+        assert!(keys.is_empty());
+        let d = d.expect("damage");
+        assert!(d.reason.contains(CONVERTER), "{}", d.reason);
+        assert_eq!(
+            fs::read_to_string(d.set_aside_as.expect("aside")).expect("kept"),
+            old
+        );
+        let (again, none) = load_or_create_authorized(&p).expect("reload");
+        assert!(again.is_empty() && none.is_none());
     }
 
     #[test]

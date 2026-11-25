@@ -1,5 +1,5 @@
-//! `ac2 server …`: how the daemon serves clients, its network listener switched live, and
-//! the client keys it admits.
+//! `ac2 server …`: how the daemon serves clients and its network listener switched live
+//! (the client keys it admits: `ac2 auth`).
 
 use std::net::IpAddr;
 
@@ -19,20 +19,6 @@ pub enum ServerCmd {
         /// Action; none shows the network.
         #[command(subcommand)]
         cmd: Option<NetworkCmd>,
-    },
-    /// Authorize a client key under NAME: its connections are admitted from now on, network
-    /// on or off. Give the fingerprint of a key the daemon refused (`ac2 server info` lists
-    /// them; the refused client prints its own), or the key itself.
-    #[command(group(ArgGroup::new("which").required(true).args(["refused", "key"])))]
-    Authorize {
-        /// The name its requests carry (1 … 64 characters, no spaces).
-        name: String,
-        /// The fingerprint of a refused key, as listed (`1a2b-3c4d-…`).
-        #[arg(long, value_name = "FINGERPRINT")]
-        refused: Option<String>,
-        /// The client's Z85 public key (40 characters); may start with `-`.
-        #[arg(long, allow_hyphen_values = true)]
-        key: Option<String>,
     },
 }
 

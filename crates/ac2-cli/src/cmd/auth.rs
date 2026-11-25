@@ -1,10 +1,10 @@
-//! `auth pair|show`: client-side key handling for remote mode; `auth admit-rig|peer-add|
+//! `auth pair|show`: client-side key handling for remote mode; `auth add|role|remove|list`
+//! the client keys the daemon admits ([`super::clients`]); `auth admit-rig|peer-add|
 //! peer-remove` trust between rigs, on the daemon ([`super::remote`]).
 //!
 //! Pairing is two-sided and never automatic: this command pins the daemon key the operator
 //! typed in (after comparing fingerprints with what the daemon host shows) and prints this
-//! client's public key, which the operator authorizes on the daemon host (`ac2 server
-//! authorize`).
+//! client's public key, which the operator authorizes on the daemon host (`ac2 auth add`).
 
 use ac2_client::fingerprint;
 use ac2_zmq::PublicKey;
@@ -48,6 +48,17 @@ pub fn sanitize(s: &str) -> String {
 pub(crate) async fn run(cli: &Cli, cmd: &AuthCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     let kd = key_dir(cli);
     match cmd {
+        AuthCmd::Add {
+            name,
+            key,
+            refused,
+            role,
+        } => {
+            super::clients::add(cli, name, key.as_deref(), refused.as_deref(), *role, out).await?;
+        }
+        AuthCmd::Role { name, role } => super::clients::role(cli, name, *role, out).await?,
+        AuthCmd::Remove { name } => super::clients::remove(cli, name, out).await?,
+        AuthCmd::List => super::clients::list(cli, out).await?,
         AuthCmd::AdmitRig { name, key, rig_id } => {
             super::remote::admit_rig(cli, name, key, rig_id, out).await?;
         }
@@ -69,7 +80,8 @@ pub(crate) async fn run(cli: &Cli, cmd: &AuthCmd, out: &mut Out<'_>) -> Result<(
             let (kp, created) = kd.ensure_client_keypair()?;
             let replaced = kd.pin_server(&host.host, server)?;
             let name = sanitize(&name.clone().unwrap_or_else(default_name));
-            let line = format!("{name} {}", kp.public.to_z85());
+            // A line for the file names a role; the least one, the operator raises it.
+            let line = format!("{name} {} viewer", kp.public.to_z85());
             out.emit(
                 &json!({
                     "host": host.host,
@@ -91,7 +103,7 @@ pub(crate) async fn run(cli: &Cli, cmd: &AuthCmd, out: &mut Out<'_>) -> Result<(
                         s.push_str(&format!("\n  replaced the earlier pin {}", fingerprint(&old)));
                     }
                     s.push_str(&format!(
-                        "\nthis client{}\n  key         {}\n  fingerprint {}\nauthorize it on the daemon host:\n  ac2 server authorize {name} --key '{}'",
+                        "\nthis client{}\n  key         {}\n  fingerprint {}\nauthorize it on the daemon host:\n  ac2 auth add {name} '{}' --role viewer   (or --role operator)",
                         if created { " (new keypair)" } else { "" },
                         kp.public.to_z85(),
                         fingerprint(&kp.public),

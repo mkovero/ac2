@@ -102,7 +102,7 @@ fn new_secure_context_rebinds_the_port_of_a_dropped_one() -> TestResult {
     let alice = KeyPair::generate()?;
     let server = KeyPair::generate()?;
     let mut keys = AuthorizedKeys::new();
-    keys.insert("alice", alice.public)?;
+    keys.insert("alice", alice.public, ac2_zmq::Role::Operator)?;
     let client = CurveClient {
         keys: alice,
         server_key: server.public,
@@ -140,7 +140,7 @@ fn local_and_network_routers_share_one_poll_and_routing_ids() -> TestResult {
     let alice = KeyPair::generate()?;
     let server = KeyPair::generate()?;
     let mut keys = AuthorizedKeys::new();
-    keys.insert("alice", alice.public)?;
+    keys.insert("alice", alice.public, ac2_zmq::Role::Operator)?;
     let secure = SecureContext::new("ac2", keys, |_| {})?;
     let net = secure.curve_server_socket(SocketType::Router, &server)?;
     net.bind("tcp://127.0.0.1:*")?;
@@ -190,7 +190,7 @@ fn rebind_while_the_old_pair_closes_elsewhere_succeeds_on_retry() -> TestResult 
     let alice = KeyPair::generate()?;
     let server = KeyPair::generate()?;
     let mut keys = AuthorizedKeys::new();
-    keys.insert("alice", alice.public)?;
+    keys.insert("alice", alice.public, ac2_zmq::Role::Operator)?;
     let client = CurveClient {
         keys: alice,
         server_key: server.public,

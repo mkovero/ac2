@@ -156,7 +156,8 @@ impl Page {
             Page::Display => "↑↓ move · ←→ change · Enter resets the level axes · Esc closes",
             Page::Connection => {
                 "↑↓ move · Enter acts on the line · ←→ or Enter on the ac2d rows · A authorizes a \
-                 refused key (type its name) · Delete revokes a client (twice) · Enter on Pair \
+                 refused key (type its name and viewer or operator) · ←→ on a client changes its \
+                 role (twice) · Delete revokes a client (twice) · Enter on Pair \
                  with rig… lists the rigs held, Enter on one pairs both ways · Delete unpairs a \
                  paired rig (twice) · Esc closes"
             }

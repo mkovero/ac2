@@ -169,6 +169,18 @@ impl Transfers {
         }
     }
 
+    /// How many transfers `client` holds.
+    pub(crate) fn held_by(&mut self, client: &Peer) -> usize {
+        self.prune(Instant::now());
+        self.map.values().filter(|x| x.client == *client).count()
+    }
+
+    /// Drops every transfer of a network key whose role was taken down.
+    pub(crate) fn forget_key(&mut self, key: &ac2_zmq::PublicKey) {
+        self.map
+            .retain(|_, x| x.client.curve().is_none_or(|(_, k)| k != key));
+    }
+
     pub(crate) fn remove(&mut self, id: TransferId) {
         self.map.remove(&id);
     }

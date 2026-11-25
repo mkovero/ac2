@@ -87,8 +87,8 @@ daemon). The top bar starts with the rig shown, by name, with the dot of its lin
 - every rig held, the one shown first in its place; a rig whose daemon stopped answering is
   greyed and reads *unreachable · retrying* (the app keeps reconnecting on its own); one
   whose daemon refuses this app's key reads *has not authorized this app*: Settings ›
-  Connection names this app's key fingerprint and the line to add to `authorized_clients`
-  on that host (then restart its `ac2d`). This is the only place that lists every rig the
+  Connection names this app's key fingerprint and the `ac2 auth add` command to
+  run on that host (it applies at once). This is the only place that lists every rig the
   app holds: choosing one changes the rig shown, and with it the whole measurement list;
 - *Connect a rig…* (also in the palette) opens the connect dialog: *This computer* (its
   `ac2d`, started when none is running), *Simulated rig (no audio)*, a rig it finds or one
@@ -399,7 +399,7 @@ once).
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
 | Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars / scale, what the spectrum and sweep panes show, spectrum glide, 3D quality, invert vertical drag (3D), distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
-| Connection | the daemon, whether the app starts and stops this computer's `ac2d`, this client's id and key, reconnect, another daemon; the daemon's mode, mDNS name, authorized clients (each an *app* or a *rig*) and refused keys; *Paired rigs* and *Pair with rig…* (**Enter**), unpairing (**Delete** twice) | |
+| Connection | the daemon, whether the app starts and stops this computer's `ac2d`, this client's id and key, reconnect, another daemon; the daemon's mode, mDNS name, authorized clients (each an *operator*, a *viewer* or a *rig*; **←/→** twice changes an app's role) and refused keys; *Paired rigs* and *Pair with rig…* (**Enter**), unpairing (**Delete** twice) | |
 | Rig monitor | where the rig's OSC cues and Art-Net universe go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
 
 #### System max level
@@ -476,10 +476,22 @@ forwarded to its loopback (ssh `-L`, a port proxy), counts as local and can turn
 on and authorize a key. Key files there get no ACL of their own; the per-user config
 folder's default ACL protects them.
 
-With a server key the page lists the clients the rig accepts (name, *app* or *rig*, key
-fingerprint: `laptop · app · fingerprint …`, `rig-pupu · rig · may take this rig's inputs ·
-fingerprint …`) and the keys it refused lately (fingerprint, address, how often, when).
-`ac2 server info` lists them the same way (`laptop  app  …`, `rig-pupu  rig <id>  …`).
+With a server key the page lists the clients the rig accepts (name, role, key fingerprint:
+`laptop · operator · fingerprint …`, `phone · viewer · may only look · fingerprint …`,
+`rig-pupu · rig · may take this rig's inputs · fingerprint …`) and the keys it refused lately
+(fingerprint, address, how often, when). `ac2 auth list` and `ac2 server info` list them the
+same way (`laptop  operator  …`, `rig-pupu  rig <id>  …`).
+
+Every app's key is authorized with a role. An **operator** drives the rig. A **viewer** sees
+everything an operator sees (the measurements, the meters, the SPL logs, the traces, which it
+may also export) and may stop the generator, as anyone who hears it may; every change is
+refused. A viewer's app says *view only* after the rig's place in the top bar and refuses an
+edit before sending it, saying why (*not sent: this rig authorized this app as a viewer…*).
+The role is fixed when the app connects: changing it, or revoking the key, drops the
+client's connections at once (it reconnects with the new role), and an operator made a
+viewer loses the generator then and there (the output fades out, a sweep stops). An app on
+the rig's own computer is always an operator. A new key is best authorized as a viewer, and
+made an operator when it is to drive the rig.
 
 *Clocks* gives a line per connected rig (named when there are several), what its daemon
 measures and what its OS says, nothing more:
@@ -501,8 +513,11 @@ measures and what its OS says, nothing more:
 
 `ac2 status` prints the same as `sample clock` and `system clock` lines.
 
-- **A** on a refused key, then a name, authorizes it; the client connects on its next retry.
-- *Authorize a client by its key…* takes a name and the key `ac2 auth show` prints.
+- **A** on a refused key, then a name and its role (`tablet viewer`, `laptop operator`),
+  authorizes it; the client connects on its next retry.
+- *Authorize a client by its key…* takes a name, the key `ac2 auth show` prints and the role.
+- **←/→** twice on an app's line makes an operator a viewer or a viewer an operator. You
+  cannot make your own key a viewer.
 - **Delete** twice revokes a client: its requests are refused at once. You cannot revoke
   your own.
 
@@ -3461,7 +3476,7 @@ daemon's machine stores, in its calibration store:
 - **Sensitivity** (dB SPL of 0 dBFS): per device, input and mic.
 - **Line calibration** (dBu of 0 dBFS): per device and line input. Feed the input a steady
   tone, measure its RMS voltage at the input and give the volts; the daemon measures the
-  tone's level itself, as the electrical calibration does: `ac2 cal line --input 3 --volts
+  tone's level itself, as the electrical calibration does: `ac2 cal line --channel 3 --volts
   1.228v` prints `in 3: 0 dBFS = +13.0 dBu (1.228 V at −9.0 dBFS)` (a +4 dBu tone measured
   at −9 dBFS: full scale +13 dBu). The input's rows then say *dBu · full scale +13.0 dBu*
   with the calibration's age.
@@ -3474,7 +3489,7 @@ again**. SPL is computed from the raw input level with it.
 
 | Method | How |
 |---|---|
-| **acoustic** (the reference method) | a 94 dB (or 114 dB) calibrator on the mic. CLI: `ac2 cal spl --input 3 --ref 94db` (`--freq` when the calibrator is not 1 kHz). App: **C** on the input in the Calibrations view. |
+| **acoustic** (the reference method) | a 94 dB (or 114 dB) calibrator on the mic. CLI: `ac2 cal spl --channel 3 --ref 94db` (`--freq` when the calibrator is not 1 kHz). App: **C** on the input in the Calibrations view. |
 | **electrical** ([below](#calibrating-without-a-calibrator-electrical)) | no calibrator, but a true-RMS voltmeter at the input and the mic's data-sheet sensitivity, with a stated uncertainty (±1 dB). **E** in the Calibrations view, or `ac2 cal electrical`. |
 
 The app's acoustic dialog shows the input's level live and takes the mic name (prefilled),
@@ -3488,7 +3503,7 @@ electrical one, never the other way round unless you say so.
 A measurement mic often comes with one file per incidence angle (0° pointing at the source,
 90° grazing); the wrong one is a few dB of error at high frequencies.
 
-- `ac2 cal curve import 449350_34804_90Grad.txt --input 3` imports a file as a curve of
+- `ac2 cal curve import 449350_34804_90Grad.txt --channel 3` imports a file as a curve of
   input 3's mic (`--mic NAME` names the mic directly).
 - The label comes from the file (an angle in its header or name: *90-degree-curve*,
   `_90Grad`, `0deg` → *90°*, *0°*; else the file name) or `--label`;
@@ -3544,7 +3559,7 @@ input, mic, calibrator level and frequency, reading, age) and every line calibra
 
 CLI: `ac2 cal list` (sensitivity calibrations, then `line calibrations` as `in 3 · +13.0 dBu
 at full scale · 3 h ago · <device>`, the mic library, the inputs), `ac2 cal curve rm --mic
-NAME LABEL`, `ac2 cal rm --input 3` (a sensitivity calibration), `ac2 cal rm --input 3
+NAME LABEL`, `ac2 cal rm --channel 3` (a sensitivity calibration), `ac2 cal rm --channel 3
 --line` (a line calibration).
 
 A calibration store of another format version is set aside (renamed `calibrations.json.v1`,
@@ -3636,7 +3651,7 @@ Example: a beyerdynamic MM1 (15 mV/Pa, 330 Ω) on an RME Fireface 400 mic input 
    one; else empty, and the dialog asks you to type it: *15.0 mV/Pa* or *−36.5 dBV/Pa*) and
    the two impedances (*330 ohm*, *2 k*),
    **Enter**. CLI:
-   `ac2 cal electrical --input 2 --volts 15.03mv --mic-impedance 330ohm --input-impedance 2kohm`
+   `ac2 cal electrical --channel 2 --volts 15.03mv --mic-impedance 330ohm --input-impedance 2kohm`
    (`--sensitivity 15.0mv/pa` if the curve file has none).
 
    ac2 refuses while the level is not steady (retry after a few seconds), without signal,
@@ -3652,7 +3667,7 @@ the data-sheet sensitivity it is paired with is open circuit.
 2. Wire the generator between pins 2 (hot) and 3 (cold, also to pin 1 for an unbalanced
    generator), gain as you will measure with.
 3. Play 1 kHz near what the mic gives (tens of mV), measure the voltage at pins 2–3, and
-   run `ac2 cal electrical --method injected --input 2 --volts 15.0mv --mic-impedance 330ohm
+   run `ac2 cal electrical --method injected --channel 2 --volts 15.0mv --mic-impedance 330ohm
    --input-impedance 2kohm` (app: ←/→ on *Measured* chooses injected). The full-scale
    voltage is the input's, whatever drives it; the mic will load the input in use, so state
    its loading here too.
@@ -4147,7 +4162,7 @@ ac2 spl bands transfer --foh "FOH SPL@21:00:00..21:02:00" \
 
    File second *t* is the replay's start + *t* on the meter's clock.
 5. An SPL meter on the replayed input with its band meter on; while the tone plays,
-   calibrate from it (Calibration page, or `ac2 cal spl --input 1 --ref 94db`).
+   calibrate from it (Calibration page, or `ac2 cal spl --channel 1 --ref 94db`).
 6. Mark the place's and background spans of that meter as the file plays (Space / Space in
    the step), or write them with `ac2 spl bands log --levels-out` and use them as recipe 3.
 
@@ -4784,5 +4799,6 @@ documents each command.
 | `ac2 selftest net --listen <addr:port> \| --connect <host:port> --server-key <key> --role send\|receive --minutes N --out <dir>` | network timing between two hosts for the clock study, no audio: block-sized messages of zeros at `--rate`/`--frames`/`--channels` (default 96000/256/1) over the data wire's transport (CURVE, byte credit). The listener prints its key and writes `<dir>/server.key`; listening and sending are independent. The receiver logs every arrival to `<dir>/arrivals.bin` and ends with the one-way spread, interval jitter, missing/reordered blocks and a suggested link offset; the sender records credit stalls and late sends. Analysis in `tools/experiments/timing/` |
 | `ac2 selftest frames --meas <name\|id> [--seconds N] [--remote HOST]` | how one measurement's live frames reach this client, read-only (no sound, no state change; only hello, subscribe, unsubscribe): subscribes to its stream (`spec`, `rta`, `tf`, `spl`) as the app does and records every frame for `--seconds` (default 30, Ctrl-C ends early). Reports the arrival interval (mean, p50, p95, p99, max, gaps over twice the median), the age at arrival (this host's wall clock − the frame's `capture_wall_ns`: it includes the two hosts' clock offset, about ±1 ms with NTP) and its drift, seq gaps, the hop (`audio_sample` step at the stream rate) beside the interval, and bytes per frame and Mbit/s. Text: a line every 5 s and a summary; `--json`: one line per frame and a closing summary object |
 | `ac2 discover`, `ac2 auth pair / show` | find network daemons, pair with one |
-| `ac2 server info`, `ac2 server network [on [--interface NAME \| --addr IP \| --all] [--port N] \| off]`, `ac2 server authorize NAME --refused FINGERPRINT \| --key KEY` | on the rig's own host: how the daemon serves clients (local endpoints, the network's setting, status and why it waits or failed, server key, authorized and lately refused keys, interfaces); the network switched on or off live, stream and local clients running on, and kept across restarts (`on` alone keeps the last interface and port; first time every interface, port 47820); a refused client authorized by the fingerprint `server info` lists, at once. Refused from a remote client, while `ac2d --listen` fixes the network, and by a daemon with no network to serve |
+| `ac2 auth add NAME KEY --role viewer\|operator`, `ac2 auth add NAME --refused FINGERPRINT --role …`, `ac2 auth role NAME viewer\|operator`, `ac2 auth remove NAME`, `ac2 auth list` | on the rig's own host or from an operator: the client keys the daemon accepts and each one's role, at once (no restart); a refused client authorized by the fingerprint `auth list` shows; a role changed or a key removed drops that client's connections now and ends a generator lease it holds |
+| `ac2 server info`, `ac2 server network [on [--interface NAME \| --addr IP \| --all] [--port N] \| off]` | on the rig's own host: how the daemon serves clients (local endpoints, the network's setting, status and why it waits or failed, server key, authorized and lately refused keys, interfaces); the network switched on or off live, stream and local clients running on, and kept across restarts (`on` alone keeps the last interface and port; first time every interface, port 47820); clients are authorized with `ac2 auth`. Refused from a remote client, while `ac2d --listen` fixes the network, and by a daemon with no network to serve |
 | `ac2 auth admit-rig NAME --key KEY --rig-id ID`, `ac2 auth peer-add NAME --rig-id ID --at HOST[:PORT] --key KEY`, `ac2 auth peer-remove NAME`, `ac2 stream open … --remote-in RIG:IN [--link-offset TIME]`, `ac2 stream link-offset TIME\|default` | remote inputs (network mode on both rigs): the rig whose input is taken admits the other rig's server key, which may then read its inputs and nothing else; the taking rig pairs with it and opens a stream with that input beside its own (`--remote-in` names the paired rig and its input, 1-based). `ac2 status` adds a *between rigs* line per remote rig (clock relation, link), the link offset and a line per remote input. and a block per transfer function across rigs (its clock gate, relock, slip, drift and late cues, delay with its basis); `link-offset` reopens the audio I/O with that offset, the remote inputs anchoring again |

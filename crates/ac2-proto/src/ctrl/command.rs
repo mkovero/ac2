@@ -2,6 +2,7 @@
 
 mod import;
 mod meta;
+mod role;
 mod run;
 
 pub use import::{CalSplElectricalArgs, TraceImportArgs};
@@ -13,12 +14,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::model::{
-    ArtnetTarget, AverageMethod, BackendKind, Ballistic, CalRef, ColourFamily, CorrelationWindow,
-    DelayPick, DelayReference, DeviceId, DmxSet, ExportFormat, FinderBand, GeneratorDesired,
-    InputSetup, MeasConfig, MicCurveId, NetBind, OscMessage, OutputSetup, OwnedTraces, Pair,
-    PaneLayout, PlanSpec, PreviewInput, RecordRequest, RecordingRef, ReplayPace, RigPeer,
-    SessionRef, SimFitRequest, SimMapRequest, SimRequest, SplLogWhich, StreamConfig, TargetCurve,
-    TraceEdit, TraceOwner, WalkKind, WalkPointSpec,
+    ArtnetTarget, AverageMethod, BackendKind, Ballistic, CalRef, ClientRole, ColourFamily,
+    CorrelationWindow, DelayPick, DelayReference, DeviceId, DmxSet, ExportFormat, FinderBand,
+    GeneratorDesired, InputSetup, MeasConfig, MicCurveId, NetBind, OscMessage, OutputSetup,
+    OwnedTraces, Pair, PaneLayout, PlanSpec, PreviewInput, RecordRequest, RecordingRef, ReplayPace,
+    RigPeer, SessionRef, SimFitRequest, SimMapRequest, SimRequest, SplLogWhich, StreamConfig,
+    TargetCurve, TraceEdit, TraceOwner, WalkKind, WalkPointSpec,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, Rev, RigId, Seconds, TraceId,
@@ -918,14 +919,18 @@ pub enum Command {
         /// Ctrl port, data on the next (not 0 or 65535); `None` keeps the stored one.
         port: Option<u16>,
     },
-    /// Authorize a client key under `name`. Applies to connections from now on, network on
-    /// or off; written to the authorized-clients file.
+    /// Authorize a client key under `name` as an operator or a viewer, network on or off;
+    /// written to the authorized-clients file. A name given again takes the new key and
+    /// role, and its old connections drop. `invalid`: role `rig` (`auth.admit_rig`), or a
+    /// name admitted as a rig.
     #[serde(rename = "auth.authorize")]
     AuthAuthorize {
         /// Name the client's requests will carry (1 … 64 characters, no spaces).
         name: String,
         /// The client's public key (Z85, 40 characters).
         key: String,
+        /// What it may do.
+        role: ClientRole,
     },
     /// Revoke the client key named `name`: its requests are refused at once,
     /// and it cannot connect again. A client cannot revoke its own key.

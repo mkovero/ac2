@@ -8,6 +8,7 @@ mod doc_parity;
 mod fixtures;
 mod fuzz;
 mod leq_presets;
+mod roles;
 mod roundtrip;
 mod spl_log_history_band_log_caps;
 mod transfer_resolution;

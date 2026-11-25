@@ -10,9 +10,11 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::ProtoError;
 use ac2_proto::model::{
-    NetChoice, NetSaved, NetSetting, NetToggle, NetUnavailable, NotSavedReason, ServerSummary,
+    ClientRole, NetChoice, NetSaved, NetSetting, NetToggle, NetUnavailable, NotSavedReason,
+    ServerSummary,
 };
-use ac2_zmq::{AuthorizedHandle, AuthorizedKeys, KeyPair, PublicKey};
+use ac2_proto::units::RigId;
+use ac2_zmq::{Admission, AuthorizedHandle, AuthorizedKeys, KeyPair, PublicKey, Role};
 
 use crate::authlog::{AuthLog, RefusedList};
 use crate::config::{Listen, Mdns, NetworkSecurity};
@@ -456,20 +458,16 @@ impl NetCtl {
         self.changed = true;
     }
 
-    /// Whether the authorization a CURVE connection was granted (`key` under `name`) is gone.
-    /// The name alone is not enough: a revoked name can later be given to a different key,
-    /// and that must not revive a connection the old key still holds open.
-    pub(crate) fn revoked(&self, name: &str, key: &PublicKey) -> bool {
-        self.authorized
-            .as_ref()
-            .is_none_or(|a| a.handle.get().get(name) != Some(key))
-    }
-
-    /// Whether `name` is admitted as a rig rather than an app.
-    pub(crate) fn is_rig(&self, name: &str) -> bool {
-        self.authorized
-            .as_ref()
-            .is_some_and(|a| a.handle.get().rig_of(name).is_some())
+    /// What a CURVE connection (`key` under `name`) may do now; `None` once its
+    /// authorization is gone. The name alone is not enough: a revoked name can later be given
+    /// to a different key, and that must not revive a connection the old key still holds
+    /// open. Read at every request, so a demotion holds from the next one on.
+    pub(crate) fn role(&self, name: &str, key: &PublicKey) -> Option<ClientRole> {
+        let a = self.authorized.as_ref()?;
+        match a.handle.get().admission(name, key) {
+            Admission::Revoked => None,
+            Admission::Listed(role) => Some(client_role(role)),
+        }
     }
 
     /// When [`Self::tick`] has work.
@@ -741,5 +739,14 @@ pub(crate) fn intended(l: &NetListen) -> (String, String) {
             format!("tcp://{host}:{}", p + 1),
         ),
         NetPort::Any => (format!("tcp://{host}:*"), format!("tcp://{host}:*")),
+    }
+}
+
+/// The wire's role of a listed key.
+pub(crate) fn client_role(r: Role) -> ClientRole {
+    match r {
+        Role::Operator => ClientRole::Operator,
+        Role::Viewer => ClientRole::Viewer,
+        Role::Rig(id) => ClientRole::Rig { rig_id: RigId(id) },
     }
 }

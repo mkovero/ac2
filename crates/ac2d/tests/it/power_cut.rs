@@ -468,7 +468,10 @@ fn damaged_network_keys_never_stop_the_start() {
     std::fs::write(&key, b"public 0123\0\0\0").unwrap();
     std::fs::write(
         &authorized,
-        format!("laptop {}\nphone zzz\ntorn-li", laptop.public.to_z85()),
+        format!(
+            "laptop {} operator\nphone zzz viewer\ntorn-li",
+            laptop.public.to_z85()
+        ),
     )
     .unwrap();
     let security = NetworkSecurity {

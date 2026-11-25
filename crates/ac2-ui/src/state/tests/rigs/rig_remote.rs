@@ -180,7 +180,7 @@ fn the_dialog_refuses_in_words() {
                 name: taken.clone(),
                 key: KEY_A.into(),
                 fingerprint: "cd34".into(),
-                rig: None,
+                role: ac2_proto::model::ClientRole::Operator,
             }],
         )),
     );

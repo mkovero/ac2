@@ -30,7 +30,7 @@ impl Daemon {
     fn start(authorized: &[(&KeyPair, &str)]) -> R<Self> {
         let mut keys = AuthorizedKeys::new();
         for (k, name) in authorized {
-            keys.insert(name, k.public)?;
+            keys.insert(name, k.public, ac2_zmq::Role::Operator)?;
         }
         let decisions = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&decisions);
@@ -297,7 +297,7 @@ fn curve_server_socket_keeps_zap_running_after_secure_context_is_dropped() -> Te
     let alice = KeyPair::generate()?;
     let mallory = KeyPair::generate()?;
     let mut keys = AuthorizedKeys::new();
-    keys.insert("alice", alice.public)?;
+    keys.insert("alice", alice.public, ac2_zmq::Role::Operator)?;
     let server_keys = KeyPair::generate()?;
     let secure = SecureContext::new(DOMAIN, keys, |_| {})?;
     let xpub = secure.curve_server_socket(SocketType::XPub, &server_keys)?;

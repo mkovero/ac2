@@ -48,7 +48,7 @@ fn libzmq_fails_open_without_zap_handler() -> Result<()> {
 fn handler_exit_is_fatal_and_fails_closed() -> Result<()> {
     let alice = KeyPair::generate()?;
     let mut keys = AuthorizedKeys::new();
-    keys.insert("alice", alice.public)
+    keys.insert("alice", alice.public, crate::Role::Operator)
         .map_err(|_| Error::InvalidArgument("insert"))?;
     let server = KeyPair::generate()?;
     let secure = SecureContext::new("ac2", keys, |_| {})?;
@@ -99,7 +99,7 @@ fn request(domain: &str, mechanism: &str, credentials: &[&[u8]]) -> Message {
 fn decisions_follow_rfc27_fields() {
     let alice = PublicKey::from_bytes([7; 32]);
     let mut keys = AuthorizedKeys::new();
-    assert!(keys.insert("alice", alice).is_ok());
+    assert!(keys.insert("alice", alice, crate::Role::Operator).is_ok());
     let h = Handler {
         domain: "ac2".into(),
         keys: Arc::new(RwLock::new(keys)),

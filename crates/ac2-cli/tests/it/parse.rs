@@ -7,6 +7,7 @@ use ac2_scene::unit_text::*;
 use clap::Parser;
 use proptest::prelude::*;
 
+mod cal;
 mod kinds;
 mod levels;
 mod sim;
@@ -233,7 +234,7 @@ fn plan_examples_parse() {
         }
     ));
 
-    let c = ok(&["cal", "spl", "--input", "3", "--ref", "94db"]);
+    let c = ok(&["cal", "spl", "--channel", "3", "--ref", "94db"]);
     let Cmd::Cal {
         cmd: CalCmd::Spl(a),
     } = c.cmd
@@ -244,7 +245,7 @@ fn plan_examples_parse() {
     assert_eq!(a.freq, Freq(Hz(1000.0)));
     assert_eq!(a.mic, None);
 
-    let c = ok(&["cal", "electrical", "--input", "2", "--volts", "15.03mv"]);
+    let c = ok(&["cal", "electrical", "--channel", "2", "--volts", "15.03mv"]);
     let Cmd::Cal {
         cmd: CalCmd::Electrical(a),
     } = c.cmd
@@ -262,7 +263,7 @@ fn plan_examples_parse() {
     let c = ok(&[
         "cal",
         "electrical",
-        "--input",
+        "--channel",
         "2",
         "--volts",
         "15.03mv",
@@ -283,13 +284,13 @@ fn plan_examples_parse() {
         ["--mic-impedance", "330ohm"],
         ["--input-impedance", "2kohm"],
     ] {
-        let mut v = vec!["cal", "electrical", "--input", "2", "--volts", "15mv"];
+        let mut v = vec!["cal", "electrical", "--channel", "2", "--volts", "15mv"];
         v.extend(one);
         assert!(parse(&v).is_err(), "{one:?}");
     }
     // Every value carries its unit: a bare voltage is refused.
-    assert!(parse(&["cal", "electrical", "--input", "2", "--volts", "0.015"]).is_err());
-    assert!(parse(&["cal", "electrical", "--input", "2"]).is_err());
+    assert!(parse(&["cal", "electrical", "--channel", "2", "--volts", "0.015"]).is_err());
+    assert!(parse(&["cal", "electrical", "--channel", "2"]).is_err());
 
     ok(&["trace", "capture", "main-l", "--name", "l-pre-eq"]);
     let c = ok(&["trace", "export", "l-pre-eq", "--csv", "out.csv"]);
@@ -421,7 +422,14 @@ fn other_commands_parse() {
     ok(&["delay", "track", "main-l", "on"]);
     ok(&["spl", "watch", "--meas", "foh"]);
     ok(&[
-        "spl", "cal", "--input", "1", "--ref", "114dbspl", "--freq", "1khz",
+        "spl",
+        "cal",
+        "--channel",
+        "1",
+        "--ref",
+        "114dbspl",
+        "--freq",
+        "1khz",
     ]);
     ok(&["timing", "--watch"]);
     ok(&["state", "dump"]);
@@ -454,157 +462,6 @@ fn other_commands_parse() {
     ok(&["auth", "pair", "rig.local", "--server-key", "x"]);
     ok(&["auth", "show"]);
     ok(&["--timeout", "300ms", "devices"]);
-}
-
-#[test]
-fn calibration_and_input_setup_parse() {
-    let c = ok(&[
-        "cal", "curve", "import", "m30.frd", "--input", "3", "--mic", "M30 #1", "--label", "90°",
-    ]);
-    let Cmd::Cal {
-        cmd: CalCmd::Curve(CalCurveCmd::Import(a)),
-    } = c.cmd
-    else {
-        panic!("not cal curve import");
-    };
-    assert_eq!(a.input, Some(Channel(2)));
-    assert_eq!(a.mic.as_deref(), Some("M30 #1"));
-    assert_eq!(a.label.as_deref(), Some("90°"));
-    assert_eq!(a.file, std::path::Path::new("m30.frd"));
-    // A mic or an input (whose mic it is) is required.
-    assert!(parse(&["cal", "curve", "import", "m30.frd"]).is_err());
-    let c = ok(&[
-        "cal",
-        "curve",
-        "rename",
-        "--mic",
-        "MM1 34804",
-        "0°",
-        "on axis",
-    ]);
-    assert!(matches!(
-        c.cmd,
-        Cmd::Cal {
-            cmd: CalCmd::Curve(CalCurveCmd::Rename { ref mic, ref label, ref new_label })
-        } if mic == "MM1 34804" && label == "0°" && new_label == "on axis"
-    ));
-    let c = ok(&["cal", "curve", "rm", "--mic", "MM1 34804", "90°"]);
-    assert!(matches!(
-        c.cmd,
-        Cmd::Cal {
-            cmd: CalCmd::Curve(CalCurveCmd::Rm { ref label, .. })
-        } if label == "90°"
-    ));
-    let c = ok(&["cal", "use", "2", "90°"]);
-    let Cmd::Cal {
-        cmd: CalCmd::Use { input, curve },
-    } = c.cmd
-    else {
-        panic!("not cal use");
-    };
-    assert_eq!(input, Channel(1));
-    assert_eq!(
-        curve.0,
-        ac2_proto::model::CurveChoice::Curve {
-            label: "90°".into()
-        }
-    );
-    let c = ok(&["cal", "use", "2", "OFF"]);
-    assert!(matches!(
-        c.cmd,
-        Cmd::Cal {
-            cmd: CalCmd::Use {
-                curve: CurveArg(ac2_proto::model::CurveChoice::Off),
-                ..
-            }
-        }
-    ));
-    let c = ok(&[
-        "cal", "rm", "--input", "3", "--mic", "M30", "--device", "hw:1",
-    ]);
-    let Cmd::Cal { cmd: CalCmd::Rm(a) } = c.cmd else {
-        panic!("not cal rm");
-    };
-    assert_eq!(a.input, Channel(2));
-    assert_eq!(a.device.as_deref(), Some("hw:1"));
-
-    let c = ok(&[
-        "stream",
-        "inputs",
-        "--mic",
-        "3=M30",
-        "--mic",
-        "4= ECM 8000 ",
-        "--mic",
-        "5=",
-        "--curve",
-        "3=off",
-        "--curve",
-        "4=90°",
-    ]);
-    let Cmd::Stream {
-        cmd: StreamCmd::Inputs(i),
-    } = c.cmd
-    else {
-        panic!("not stream inputs");
-    };
-    assert_eq!(
-        i.mics,
-        vec![
-            MicAssign {
-                input: Channel(2),
-                mic: Some("M30".into())
-            },
-            MicAssign {
-                input: Channel(3),
-                mic: Some("ECM 8000".into())
-            },
-            MicAssign {
-                input: Channel(4),
-                mic: None
-            },
-        ]
-    );
-    assert_eq!(
-        i.curves,
-        vec![
-            CurveAssign {
-                input: Channel(2),
-                curve: CurveArg(ac2_proto::model::CurveChoice::Off),
-            },
-            CurveAssign {
-                input: Channel(3),
-                curve: CurveArg(ac2_proto::model::CurveChoice::Curve {
-                    label: "90°".into()
-                }),
-            },
-        ]
-    );
-    let c = ok(&[
-        "stream",
-        "open",
-        "--backend",
-        "fake",
-        "--in",
-        "1-4",
-        "--mic",
-        "3=M30",
-        "--mic",
-        "4=ECM",
-    ]);
-    let Cmd::Stream {
-        cmd: StreamCmd::Open(o),
-    } = c.cmd
-    else {
-        panic!("not stream open");
-    };
-    assert_eq!(o.mics.len(), 2);
-    assert!(matches!(
-        ok(&["stream", "inputs"]).cmd,
-        Cmd::Stream {
-            cmd: StreamCmd::Inputs(_)
-        }
-    ));
 }
 
 #[test]
@@ -655,12 +512,12 @@ fn refusals() {
         &["delay", "find", "x", "--band", "800hz-80hz"],
         &["delay", "find", "x", "--band", "80-800"],
         &["delay", "find", "x", "--observation", "8"],
-        &["cal", "spl", "--input", "3", "--ref", "94"],
-        &["cal", "curve", "import", "--input", "3"],
+        &["cal", "spl", "--channel", "3", "--ref", "94"],
+        &["cal", "curve", "import", "--channel", "3"],
         &["cal", "use", "3"],
         &["cal", "curve", "rename", "--mic", "M30", "0°"],
         &["cal", "rm", "--mic", "M30"],
-        &["cal", "rm", "--input", "3", "--sensitivity", "--curve"],
+        &["cal", "rm", "--channel", "3", "--sensitivity", "--curve"],
         &["stream", "inputs", "--mic", "M30"],
         &["stream", "inputs", "--mic", "0=M30"],
         &["stream", "inputs", "--curve", "3="],

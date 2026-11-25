@@ -42,7 +42,7 @@ pub(crate) fn rig(
     let d = dir.join(name);
     std::fs::create_dir_all(&d)?;
     let mut authorized = AuthorizedKeys::new();
-    authorized.insert("app", app.public)?;
+    authorized.insert("app", app.public, ac2_zmq::Role::Operator)?;
     authorized.save(&d.join("authorized_clients"))?;
     let key_file = d.join("server.key");
     std::fs::write(

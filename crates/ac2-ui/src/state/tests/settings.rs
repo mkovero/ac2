@@ -525,11 +525,13 @@ fn connection_page_asks_the_daemon_authorizes_and_revokes() {
     let r = t.key("Delete");
     assert!(r.iter().any(|r| matches!(r,
         Request::ServerCall { cmd: Command::AuthRevoke { name }, .. } if name == "laptop")));
-    // A on a refused key (past the admitted rig), a name, Enter authorizes it.
-    t.key("Down");
-    t.key("Down");
+    // A on a refused key (past the viewer and the admitted rig), a name and a role, Enter
+    // authorizes it.
+    for _ in 0..3 {
+        t.key("Down");
+    }
     t.type_key("A", "a");
-    t.text("tablet");
+    t.text("tablet viewer");
     let r = t.key("Enter");
     assert!(r.iter().any(|r| matches!(r,
         Request::ServerCall { cmd: Command::AuthAuthorize { name, .. }, .. } if name == "tablet")));

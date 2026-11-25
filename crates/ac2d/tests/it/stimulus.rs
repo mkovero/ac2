@@ -291,7 +291,8 @@ fn lease_acquire_force_expiry_and_universal_stop() {
 fn curve_rig(dir: &std::path::Path) -> (FakeBackend, ac2d::Handle, CurveClient) {
     let key = KeyPair::generate().unwrap();
     let mut keys = AuthorizedKeys::new();
-    keys.insert("laptop", key.public).unwrap();
+    keys.insert("laptop", key.public, ac2_zmq::Role::Operator)
+        .unwrap();
     let authorized = dir.join("authorized_clients");
     keys.save(&authorized).unwrap();
     let security = NetworkSecurity {

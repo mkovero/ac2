@@ -4,7 +4,12 @@
 Run once per host with the old daemon stopped, before the first start of a 105 daemon:
 
     python3 tools/proto-next/convert.py --rig ~/.config/ac2/rig.json \
-        --cal ~/.config/ac2/calibrations.json --plans ~/.local/share/ac2/plans
+        --cal ~/.config/ac2/calibrations.json --plans ~/.local/share/ac2/plans \
+        --auth ~/.config/ac2/authorized_clients
+
+A 105 daemon started before that sets an old authorized-clients file aside as
+`authorized_clients.damaged-<time>`: convert that file and put it back as
+`authorized_clients`, the daemon stopped.
 
 Each file is rewritten atomically; the original is kept beside it as `<name>.pre105`.
 A file already in the new shape is left alone. Covers, per file:
@@ -19,6 +24,9 @@ A file already in the new shape is left alone. Covers, per file:
   `calibrated_at` and `imported_at` a decimal string.
 - plan files (`plans/*.json`), unversioned -> `version: 1`: a surface tagged by `type`,
   not `kind`.
+- authorized clients (text, `<name> <key>` a line) -> `<name> <key> <role>`: every app's key
+  becomes `operator` (what every key could do before roles); a rig's `rig=<id>` stays. No
+  key is printed.
 
 Deleted once every host has been converted.
 """
@@ -33,6 +41,8 @@ import tempfile
 RIG_FORMAT = "ac2-rig-settings"
 CAL_FORMAT = "ac2-calibrations"
 PLAN_VERSION = 1
+AUTH_HEADER = "# ac2 authorized clients: <name> <Z85 CURVE public key> <operator | viewer | rig=<rig id>>"
+AUTH_ROLES = ("operator", "viewer")
 
 
 def retag(obj, old):
@@ -182,6 +192,46 @@ def convert_plan(doc):
     return out
 
 
+def convert_auth(text):
+    """The authorized-clients text with a role on every key line; `None` when every line
+    has one. A line that is neither shape is an error naming its line number only: the
+    file holds keys."""
+    out = []
+    changed = False
+    for n, line in enumerate(text.splitlines(), 1):
+        t = line.strip()
+        if t.startswith("# ac2 authorized clients"):
+            changed |= t != AUTH_HEADER
+            out.append(AUTH_HEADER)
+            continue
+        if not t or t.startswith("#"):
+            out.append(line)
+            continue
+        f = t.split()
+        if len(f) == 2:
+            out.append(f"{f[0]} {f[1]} operator")
+            changed = True
+        elif len(f) == 3 and (f[2] in AUTH_ROLES or f[2].startswith("rig=")):
+            out.append(line)
+        else:
+            raise ValueError(f"line {n}: neither `<name> <key>` nor `<name> <key> <role>`")
+    return "\n".join(out) + "\n" if changed else None
+
+
+def write_beside(path, text):
+    """Writes `text` over `path` atomically, with its mode; the original kept as `.pre105`."""
+    shutil.copy2(path, path + ".pre105")
+    d = os.path.dirname(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".convert-")
+    os.chmod(tmp, os.stat(path).st_mode & 0o777)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    print(f"{path}: converted (original kept as {path}.pre105)")
+
+
 def rewrite(path, convert):
     with open(path, encoding="utf-8") as f:
         doc = json.load(f)
@@ -189,16 +239,16 @@ def rewrite(path, convert):
     if new is None:
         print(f"{path}: already converted")
         return
-    shutil.copy2(path, path + ".pre105")
-    d = os.path.dirname(os.path.abspath(path))
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=".convert-")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(new, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
-    print(f"{path}: converted (original kept as {path}.pre105)")
+    write_beside(path, json.dumps(new, indent=2, ensure_ascii=False) + "\n")
+
+
+def rewrite_auth(path, _convert):
+    with open(path, encoding="utf-8") as f:
+        new = convert_auth(f.read())
+    if new is None:
+        print(f"{path}: already converted")
+        return
+    write_beside(path, new)
 
 
 def main(argv):
@@ -208,21 +258,26 @@ def main(argv):
     ap.add_argument(
         "--plans", action="append", default=[], help="a plan directory: every *.json in it"
     )
+    ap.add_argument(
+        "--auth", action="append", default=[], help="an authorized-clients file to convert"
+    )
     args = ap.parse_args(argv)
-    jobs = [(p, convert_rig) for p in args.rig] + [(p, convert_cal) for p in args.cal]
+    jobs = [(p, rewrite, convert_rig) for p in args.rig]
+    jobs += [(p, rewrite, convert_cal) for p in args.cal]
+    jobs += [(p, rewrite_auth, None) for p in args.auth]
     for d in args.plans:
         try:
             names = sorted(n for n in os.listdir(d) if n.endswith(".json"))
         except OSError as e:
             print(f"{d}: {e}", file=sys.stderr)
             return 1
-        jobs += [(os.path.join(d, n), convert_plan) for n in names]
+        jobs += [(os.path.join(d, n), rewrite, convert_plan) for n in names]
     if not jobs:
-        ap.error("nothing to convert: give --rig, --cal or --plans PATH")
+        ap.error("nothing to convert: give --rig, --cal, --plans or --auth PATH")
     failed = False
-    for p, convert in jobs:
+    for p, run, convert in jobs:
         try:
-            rewrite(p, convert)
+            run(p, convert)
         except (OSError, ValueError) as e:
             print(f"{p}: {e}", file=sys.stderr)
             failed = True

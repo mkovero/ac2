@@ -5,6 +5,7 @@ mod artnet;
 mod auth;
 mod bands;
 mod cal;
+mod clients;
 mod daemon;
 mod delay;
 mod devsel;

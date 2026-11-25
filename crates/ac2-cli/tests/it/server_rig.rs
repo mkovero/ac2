@@ -244,13 +244,21 @@ async fn a_daemon_with_no_network_says_so() {
     let r = ac2(
         &ep,
         false,
-        &["server", "authorize", "laptop", "--refused", "1a2b"],
+        &[
+            "auth",
+            "add",
+            "laptop",
+            "--refused",
+            "1a2b",
+            "--role",
+            "viewer",
+        ],
     )
     .await;
     assert_eq!(
         r.stderr,
         "ac2: no refused key has fingerprint 1a2b: the daemon has refused no key lately; \
-         have the client try again, or give --key KEY (shown by `ac2 auth show` on the \
+         have the client try again, or give its KEY (shown by `ac2 auth show` on the \
          client)\n"
     );
     h.shutdown();

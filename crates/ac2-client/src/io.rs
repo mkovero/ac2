@@ -82,6 +82,9 @@ pub(crate) enum SyncIn {
     },
     /// The daemon dropped events for this connection: a new snapshot is due.
     Resync,
+    /// The daemon dropped this connection's data peer and asked it to rejoin: a stall, or
+    /// the key's role changed, which `welcome` tells.
+    Rejoined,
 }
 
 pub(crate) type ReplyTx = oneshot::Sender<Result<Reply, ClientError>>;
@@ -357,7 +360,7 @@ impl Worker {
             let msg = match decode_data_message(&parts) {
                 Ok(DataMessage::Flow(FlowNotice::Rejoin)) => {
                     let _ = self.sync.state();
-                    continue;
+                    SyncIn::Rejoined
                 }
                 Ok(DataMessage::Flow(FlowNotice::ResyncRequired)) => SyncIn::Resync,
                 Ok(DataMessage::Flow(FlowNotice::NetworkOff)) => {

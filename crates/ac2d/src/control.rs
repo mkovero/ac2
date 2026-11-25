@@ -71,6 +71,7 @@ mod remote;
 mod request;
 pub(crate) mod rig;
 mod rig_meas;
+mod roles;
 mod sim;
 mod standing;
 mod startup;

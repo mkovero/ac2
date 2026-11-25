@@ -125,7 +125,7 @@ def ac2_use_curve(ac2: Ac2, d: Path, curve: dict | None, active: bool) -> bool:
         return False
     pts = d / "mic_curve_ac2.txt"
     pts.write_text("".join(f"{f:.3f}\t{v:.3f}\n" for f, v in curve["points"]))
-    ac2.run("cal", "curve", "import", str(pts), "--mic", curve["mic"], "--label", curve["label"], "--input", 1)
+    ac2.run("cal", "curve", "import", str(pts), "--mic", curve["mic"], "--label", curve["label"], "--channel", 1)
     return True
 
 

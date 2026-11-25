@@ -13,7 +13,7 @@ use ac2_proto::{
 
 use crate::dedup::{Admit, Retry};
 use crate::health::StreamState;
-use crate::util::{internal, invalid, perr, refused, wall_ns};
+use crate::util::{internal, invalid, perr, wall_ns};
 
 use super::{Control, PendingFind, PendingReply, PreviewKey};
 use crate::route::{Peer, Route};
@@ -125,57 +125,15 @@ impl Control {
                 return;
             }
         };
-        if let Some((name, key)) = peer.curve()
-            && self.s.server.network.revoked(name, key)
-        {
-            // The handshake check refuses it from now on; a connection already up must
-            // not keep acting on the rig until it drops.
-            tracing::warn!(target: "ac2d::auth", "request from revoked client {name:?} refused");
-            self.send_reply(
-                route,
-                &Reply::new(
-                    id,
-                    Err(refused(format!(
-                        "the key of client {name:?} was revoked on this rig"
-                    ))),
-                ),
-            );
-            return;
-        }
-        // A rig admitted to take this rig's inputs says hello and reads the source state;
-        // it is no operator and never drives this rig.
-        if let Some((name, _)) = peer.curve()
-            && self.s.server.network.is_rig(name)
-            && !matches!(req.cmd, Command::Hello { .. } | Command::SourceState)
-        {
-            self.send_reply(
-                route,
-                &Reply::new(
-                    id,
-                    Err(refused(format!(
-                        "{name:?} is admitted as a rig: it may only take inputs"
-                    ))),
-                ),
-            );
-            return;
-        }
-        // Only a rig reads the source state: a rig whose key was admitted as an app would
-        // otherwise see its link up and its audio subscriptions refused without a word.
-        if let Some((name, _)) = peer.curve()
-            && matches!(req.cmd, Command::SourceState)
-            && !self.s.server.network.is_rig(name)
-        {
-            self.send_reply(
-                route,
-                &Reply::new(
-                    id,
-                    Err(refused(format!(
-                        "{name:?} is not admitted as a rig: admit it with auth.admit_rig"
-                    ))),
-                ),
-            );
-            return;
-        }
+        // Before dedup admission: a refused request stores nothing, and a retry of it after
+        // a promotion runs.
+        let role = match self.role_gate(&peer, &req.cmd) {
+            Ok(r) => r,
+            Err(e) => {
+                self.send_reply(route, &Reply::new(id, Err(e)));
+                return;
+            }
+        };
         let client = peer;
         // Reserved before anything executes, the asynchronous branches below included: a
         // copy of a request still running waits for its reply rather than running it again.
@@ -183,7 +141,12 @@ impl Control {
             .dedup
             .admit(&client, req.id, route, now, retry(&req.cmd))
         {
-            Admit::Execute => {}
+            Admit::Execute => {
+                if let Err(e) = self.viewer_transfer_gate(&client, role, &req.cmd) {
+                    self.answer(route, &client, req.id, Err(e), now);
+                    return;
+                }
+            }
             Admit::Attached => {
                 tracing::debug!("{} retried running request {}", client.id().0, req.id.0);
                 return;

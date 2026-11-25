@@ -1,13 +1,13 @@
-//! `server info|network|authorize`: how the daemon serves clients, its network listener
-//! switched live (`server.network`), and the client keys it admits (`auth.authorize`).
+//! `server info|network`: how the daemon serves clients and its network listener switched
+//! live (`server.network`); the client keys it admits are `ac2 auth` ([`super::clients`]).
 //! Refusals (fixed by `--listen`, asked from the network, an in-process daemon, a bad port
 //! or interface) are the daemon's own words, printed as they come.
 
-use ac2_client::{Client, ClientError, expect_body};
+use ac2_client::{Client, expect_body};
 use ac2_proto::model::{
-    AuthorizedClient, LocalServer, NetBind, NetChoice, NetReason, NetReasonKind, NetSaved,
-    NetSetting, NetSettingKind, NetSettingView, NetStatus, NetStatusView, NetToggle,
-    NetUnavailable, NotSavedReason, PeerNetStatus, RefusedKey, ServerInfo,
+    LocalServer, NetBind, NetChoice, NetReason, NetReasonKind, NetSaved, NetSetting,
+    NetSettingKind, NetSettingView, NetStatus, NetStatusView, NetToggle, NetUnavailable,
+    NotSavedReason, PeerNetStatus, ServerInfo,
 };
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
@@ -15,7 +15,7 @@ use serde_json::json;
 use super::connect;
 use crate::CliError;
 use crate::args::{Cli, NetworkCmd, ServerCmd};
-use crate::output::{Out, utc};
+use crate::output::Out;
 
 pub(crate) async fn run(cli: &Cli, cmd: &ServerCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
@@ -43,56 +43,6 @@ pub(crate) async fn run(cli: &Cli, cmd: &ServerCmd, out: &mut Out<'_>) -> Result
                 || network_text(&info),
             )?;
         }
-        ServerCmd::Authorize { name, refused, key } => {
-            let before = info(&c).await?;
-            let key = match (refused, key) {
-                (Some(fp), _) => refused_key(before.network.refused.as_deref(), fp)?,
-                (None, Some(k)) => k.trim().to_owned(),
-                (None, None) => {
-                    return Err(CliError::Usage("give --refused or --key".into()));
-                }
-            };
-            // The daemon replaces the key of a name given again (and drops its connections).
-            let replaced = before
-                .network
-                .authorized
-                .iter()
-                .find(|a| a.name == *name && a.key != key)
-                .map(|a| a.fingerprint.clone());
-            let r = c
-                .call(Command::AuthAuthorize {
-                    name: name.clone(),
-                    key: key.clone(),
-                })
-                .await?;
-            let info = expect_body!("auth.authorize", r, ReplyBody::Server(s) => s)?;
-            let entry = info
-                .network
-                .authorized
-                .iter()
-                .find(|a| a.name == *name && a.key == key)
-                .ok_or(ClientError::UnexpectedReply {
-                    op: "auth.authorize",
-                    got: "server info without the authorized name",
-                })?;
-            out.emit(
-                &json!({ "authorized": entry, "replaced_fingerprint": replaced }),
-                || {
-                    let mut s = format!(
-                        "authorized {name} (fingerprint {}): its connections are admitted from \
-                         now on",
-                        entry.fingerprint
-                    );
-                    if let Some(old) = &replaced {
-                        s.push_str(&format!(
-                            "\nreplaced its earlier key (fingerprint {old}), whose connections \
-                             are dropped"
-                        ));
-                    }
-                    s
-                },
-            )?;
-        }
     }
     Ok(())
 }
@@ -116,46 +66,6 @@ async fn network(
         })
         .await?;
     Ok(expect_body!("server.network", r, ReplyBody::Server(s) => s)?)
-}
-
-/// The key of the refused client whose fingerprint is `fp`, as the daemon lists it (`None`:
-/// it lists them only to a client on its own host).
-fn refused_key(refused: Option<&[RefusedKey]>, fp: &str) -> Result<String, CliError> {
-    let Some(refused) = refused else {
-        return Err(CliError::Usage(
-            "the daemon lists the keys it refused only on its own host: run this there, or \
-             give --key KEY"
-                .into(),
-        ));
-    };
-    let fp = fp.trim();
-    if let Some(k) = refused
-        .iter()
-        .filter(|r| {
-            r.fingerprint
-                .as_deref()
-                .is_some_and(|f| f.eq_ignore_ascii_case(fp))
-        })
-        .find_map(|r| r.key.clone())
-    {
-        return Ok(k);
-    }
-    let mut listed: Vec<&str> = Vec::new();
-    for f in refused.iter().filter_map(|r| r.fingerprint.as_deref()) {
-        if !listed.contains(&f) {
-            listed.push(f);
-        }
-    }
-    let then = "have the client try again, or give --key KEY (shown by `ac2 auth show` on the \
-                client)";
-    Err(CliError::NotFound(if listed.is_empty() {
-        format!("no refused key has fingerprint {fp}: the daemon has refused no key lately; {then}")
-    } else {
-        format!(
-            "no refused key has fingerprint {fp} (refused lately: {}); {then}",
-            listed.join(", ")
-        )
-    }))
 }
 
 fn bind_text(b: &NetBind) -> String {
@@ -304,29 +214,6 @@ fn network_text(info: &ServerInfo) -> String {
     s
 }
 
-/// `  laptop  app  <fingerprint>`, `  rig-pupu  rig 00000000000000a1  <fingerprint>`: the
-/// kind in the app's word for it, a rig's id after it.
-fn authorized_line(a: &AuthorizedClient) -> String {
-    let kind = ac2_scene::rig::key_kind(a);
-    let id = a.rig.map_or_else(String::new, |r| format!(" {:016x}", r.0));
-    format!("  {}  {kind}{id}  {}\n", a.name, a.fingerprint)
-}
-
-fn refused_line(r: &RefusedKey) -> String {
-    let when = format!(
-        "from {}, {}×, last {} UTC",
-        r.address,
-        r.count,
-        utc(r.last_at.0)
-    );
-    match &r.fingerprint {
-        Some(fp) => {
-            format!("  {fp}  {when}\n    authorize: ac2 server authorize <name> --refused {fp}\n")
-        }
-        None => format!("  (no key: not a CURVE client)  {when}\n"),
-    }
-}
-
 fn info_text(info: &ServerInfo) -> String {
     let mut s = match &info.local {
         Some(LocalServer::Local { ctrl, data }) => format!("local        {ctrl} (data {data})\n"),
@@ -337,19 +224,7 @@ fn info_text(info: &ServerInfo) -> String {
     if let Some(d) = &info.recording_dir {
         s.push_str(&format!("recordings   {d}\n"));
     }
-    s.push_str("authorized\n");
-    if info.network.authorized.is_empty() {
-        s.push_str("  none\n");
-    }
-    for a in &info.network.authorized {
-        s.push_str(&authorized_line(a));
-    }
-    s.push_str("refused lately\n");
-    match &info.network.refused {
-        None => s.push_str("  listed on the rig's own host only\n"),
-        Some(r) if r.is_empty() => s.push_str("  none\n"),
-        Some(r) => r.iter().for_each(|r| s.push_str(&refused_line(r))),
-    }
+    s.push_str(&super::clients::list_text(info));
     if !info.interfaces.is_empty() {
         s.push_str("interfaces\n");
         for i in &info.interfaces {
@@ -363,30 +238,4 @@ fn info_text(info: &ServerInfo) -> String {
         }
     }
     s
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// An authorized key reads as an app or a rig, the app's words for it.
-    #[test]
-    fn an_authorized_key_says_app_or_rig() {
-        let app = AuthorizedClient {
-            name: "laptop".into(),
-            key: String::new(),
-            fingerprint: "ab12".into(),
-            rig: None,
-        };
-        assert_eq!(authorized_line(&app), "  laptop  app  ab12\n");
-        let rig = AuthorizedClient {
-            name: "rig-pupu".into(),
-            rig: Some(ac2_proto::units::RigId(0xa1)),
-            ..app
-        };
-        assert_eq!(
-            authorized_line(&rig),
-            "  rig-pupu  rig 00000000000000a1  ab12\n"
-        );
-    }
 }

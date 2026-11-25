@@ -62,7 +62,8 @@ impl Rig {
         .unwrap();
         let client = KeyPair::generate().unwrap();
         let mut keys = AuthorizedKeys::new();
-        keys.insert("app", client.public).unwrap();
+        keys.insert("app", client.public, ac2_zmq::Role::Operator)
+            .unwrap();
         let dir = tempfile::tempdir().unwrap();
         Self {
             ctx,

@@ -124,7 +124,7 @@ fn network_on_and_off_from_the_page() -> R {
     let dir = tempfile::tempdir()?;
     let app = KeyPair::generate()?;
     let mut authorized = AuthorizedKeys::new();
-    authorized.insert("tablet", app.public)?;
+    authorized.insert("tablet", app.public, ac2_zmq::Role::Operator)?;
     let authorized_file = dir.path().join("authorized_clients");
     authorized.save(&authorized_file)?;
     let keys = ac2d::NetworkSecurity {
