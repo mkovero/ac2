@@ -86,3 +86,34 @@ fn sinc_rows_have_unit_dc_gain_and_integer_phase_is_a_unit_impulse() {
             .all(|(k, v)| k == SINC_HALF - 1 || v.abs() < 1e-6)
     );
 }
+
+/// The start-up stamp error is the stated offset at the first frame and gone a few time
+/// constants on; without it every stamp is host time.
+#[test]
+fn a_start_up_stamp_error_decays_away() {
+    let rate = 48_000_u64;
+    let cfg = FakeConfig {
+        start_stamp_error: Some(StartStampError {
+            offset_ns: 2e6,
+            decay_s: 0.5,
+        }),
+        ..FakeConfig::default()
+    };
+    let err = |f: u64| cfg.capture_ns(f) as i64 - cfg.host_ns(f) as i64;
+    assert_eq!(err(0), 2_000_000);
+    assert!((err(rate / 2) - 735_759).abs() <= 1, "{}", err(rate / 2));
+    assert_eq!(err(10 * rate), 0);
+    let exact = FakeConfig::default();
+    assert_eq!(exact.capture_ns(rate), exact.host_ns(rate));
+    assert_eq!(
+        FakeBackend::new(FakeConfig {
+            start_stamp_error: Some(StartStampError {
+                offset_ns: 1e6,
+                decay_s: 0.0,
+            }),
+            ..FakeConfig::default()
+        })
+        .err(),
+        Some(FakeConfigError::BadNumber("start_stamp_error"))
+    );
+}

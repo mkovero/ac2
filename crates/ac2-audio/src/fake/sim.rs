@@ -250,7 +250,7 @@ impl Sim {
             "output index is device time"
         );
         flags |= self.latch.take();
-        let capture_ns = self.cfg.host_ns(start);
+        let capture_ns = self.cfg.capture_ns(start);
         let callback_ns = self.cfg.host_ns(start + u64::from(frames));
         let playback_ns = callback_ns + self.cfg.host_ns(u64::from(frames));
 

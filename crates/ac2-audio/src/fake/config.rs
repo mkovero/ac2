@@ -221,6 +221,9 @@ pub struct FakeConfig {
     /// Error of the host's system clock against true time, ns; positive = ahead. Two fake
     /// rigs with different offsets are two hosts whose disciplined clocks disagree.
     pub system_offset_ns: i64,
+    /// Error of the block capture stamps over the stream's first seconds; `None`: every
+    /// stamp exact from the first block.
+    pub start_stamp_error: Option<StartStampError>,
     /// Scripted faults.
     pub faults: Vec<FakeFault>,
     /// Raw frame counter of the first block (to exercise the 32-bit wrap).
@@ -254,6 +257,7 @@ impl Default for FakeConfig {
             audio_clock_ppm: 0.0,
             host_crystal_ppm: 0.0,
             system_offset_ns: 0,
+            start_stamp_error: None,
             faults: Vec::new(),
             counter_origin: 0,
             stop_after_blocks: None,
@@ -263,6 +267,18 @@ impl Default for FakeConfig {
             endpoints: FakeEndpoints::Duplex,
         }
     }
+}
+
+/// A stamp error at the stream's start that decays away, as a device's stamps do while
+/// the filter that derives them from interrupt times (JACK's DLL, a driver's own) settles
+/// on the period: each block's capture stamp is off by `offset_ns · e^(−t / decay_s)`, `t`
+/// the block's time since the stream's first frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StartStampError {
+    /// The first block's stamp is this late, ns; negative: early.
+    pub offset_ns: f64,
+    /// Time constant of the decay, s.
+    pub decay_s: f64,
 }
 
 /// A [`FakeConfig`] that cannot be simulated.
@@ -332,6 +348,14 @@ impl FakeConfig {
         }
         if !(self.host_crystal_ppm.is_finite() && self.host_crystal_ppm.abs() < 1e5) {
             return Err(FakeConfigError::BadNumber("host_crystal_ppm"));
+        }
+        if self.start_stamp_error.is_some_and(|e| {
+            !(e.offset_ns.is_finite()
+                && e.offset_ns.abs() < 1e9
+                && e.decay_s.is_finite()
+                && e.decay_s > 0.0)
+        }) {
+            return Err(FakeConfigError::BadNumber("start_stamp_error"));
         }
         if !ok(self.drift_horizon_seconds) {
             return Err(FakeConfigError::BadNumber("drift_horizon_seconds"));
@@ -404,6 +428,17 @@ impl FakeConfig {
             return self.true_ns(frames);
         }
         (self.true_ns(frames) as f64 * (1.0 + self.host_crystal_ppm * 1e-6)) as u64
+    }
+
+    /// The capture stamp of the block whose first frame is `frames` after the stream's
+    /// start: host time, off by the start-up error while it lasts.
+    pub(super) fn capture_ns(&self, frames: u64) -> u64 {
+        let host = self.host_ns(frames);
+        let Some(e) = self.start_stamp_error else {
+            return host;
+        };
+        let t = frames as f64 / f64::from(self.sample_rate);
+        host.saturating_add_signed((e.offset_ns * (-t / e.decay_s).exp()).round() as i64)
     }
 }
 

@@ -49,7 +49,7 @@ mod tests;
 
 pub use config::{
     FakeConfig, FakeConfigError, FakeDrive, FakeEndpoints, FakeFault, FakePath, FakeReverb,
-    InputContent, Pace, signature,
+    InputContent, Pace, StartStampError, signature,
 };
 pub use device::FakeBackend;
 pub use outage::OutageKind;
