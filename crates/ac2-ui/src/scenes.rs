@@ -114,13 +114,13 @@ pub fn freshness(st: &AppState, tf: &TopicFrame) -> Freshness {
 }
 
 /// The frame's measurement is listed and not running: its last frame is its final result.
+/// Read as this app has the measurement, as the pane drawing the frame does: a stop the
+/// daemon has answered is committed before the mirror catches up with it.
 fn stopped(st: &AppState, tf: &TopicFrame) -> bool {
     let Topic::Data { meas, .. } = tf.topic else {
         return false;
     };
-    st.daemon()
-        .and_then(|s| s.measurements.iter().find(|m| m.id == meas))
-        .is_some_and(|m| !m.running)
+    st.meas(meas).is_some_and(|m| !m.running)
 }
 
 /// Banner inputs for a pane showing `shown` frames.

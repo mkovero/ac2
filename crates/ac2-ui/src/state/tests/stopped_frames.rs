@@ -116,3 +116,36 @@ fn a_stopped_transfers_frames_go_when_its_delay_moves() {
     t.conn(moved(9));
     assert_eq!(held_revs(&t), (None, None));
 }
+
+/// A stop the daemon has answered tags the kept result stopped while the mirror still says
+/// the measurement runs: the frame's freshness reads the measurement as the pane does.
+#[test]
+fn an_answered_stop_tags_the_result_before_the_mirror_says_so() {
+    let mut t = T::new();
+    let m = t.st.meas(MeasId(1)).expect("Main L").clone();
+    assert!(m.running);
+    t.conn(main_l_frames(m.config_rev.0, m.config_rev.0));
+    t.put_ir();
+    let r = t.key("S");
+    let what = calls(&r)
+        .into_iter()
+        .find_map(|(c, w)| {
+            matches!(c, Command::MeasStop { meas } if *meas == MeasId(1)).then(|| w.to_owned())
+        })
+        .expect("meas.stop");
+    let stopped = Measurement {
+        running: false,
+        rev: Rev(m.rev.0 + 1),
+        ..m
+    };
+    t.conn(ConnEvent::MeasEdited {
+        meas: MeasId(1),
+        what,
+        result: Ok(Some(Box::new(stopped))),
+    });
+    let mirrored = t.st.daemon().expect("mirror").measurements.iter();
+    assert!(mirrored.clone().any(|m| m.id == MeasId(1) && m.running));
+    let tf =
+        crate::scenes::frame(&t.st, MeasId(1), ac2_proto::topic::Stream::Tf).expect("Main L's tf");
+    assert!(crate::scenes::freshness(&t.st, tf).is_stopped());
+}
