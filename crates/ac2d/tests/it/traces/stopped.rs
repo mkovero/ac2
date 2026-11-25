@@ -274,6 +274,20 @@ fn slow_what_keeps_and_what_drops_the_kept_result() {
     r.h.shutdown();
 }
 
+/// Mean squared second difference of `v` over every three neighbouring valid columns: how
+/// rough a curve is.
+fn roughness(v: &[f32]) -> f64 {
+    let d: Vec<f64> = v
+        .windows(3)
+        .filter(|w| w.iter().all(|x| x.is_finite()))
+        .map(|w| {
+            let d = f64::from(w[0]) - 2.0 * f64::from(w[1]) + f64::from(w[2]);
+            d * d
+        })
+        .collect();
+    d.iter().sum::<f64>() / d.len() as f64
+}
+
 /// A display smoothing change of a stopped transfer: its final `tf` goes out again under the
 /// new config rev, smoothed as a running job would send it, and a capture stores the
 /// unsmoothed columns with the new smoothing as its display edit.
@@ -310,10 +324,32 @@ fn a_smoothing_change_while_stopped_relabels_the_kept_result() {
         tf.1.meta.smoothing.map(|s| s.fraction),
         Some(SmoothingFraction::Third)
     );
-    let differs = band()
-        .into_iter()
-        .any(|i| (tf.1.mag[i] - plain.mag_db[i]).abs() > 0.05);
-    assert!(differs, "the frame is drawn smoothed");
+    // The frame is the kept result smoothed: the unsmoothed columns a capture stores, put
+    // through ac2-core's smoother, to the hundredths of a dB a frame carries.
+    let smoothing = tf.1.meta.smoothing.expect("smoothing");
+    let (want, _) = core_smoothed(&plain, smoothing);
+    let mut compared = 0;
+    for (i, want) in want.iter().enumerate() {
+        if !(tf.1.mag[i].is_finite() && plain.mag_db[i].is_finite()) {
+            continue;
+        }
+        compared += 1;
+        assert!(
+            (f64::from(tf.1.mag[i]) - want).abs() < 0.006,
+            "{} Hz: drawn {}, ac2-core {want}",
+            grid_freq(i),
+            tf.1.mag[i]
+        );
+    }
+    assert!(compared > 300, "{compared} columns compared");
+    // …and not the kept result as it was: a third of an octave averages some sixteen columns,
+    // so whatever the measurement noise is, the curve is far less rough than the raw one. A
+    // ratio of roughness does not depend on how large the noise of this run happens to be.
+    let (drawn, raw) = (roughness(&tf.1.mag), roughness(&plain.mag_db));
+    assert!(
+        raw > 100.0 * drawn,
+        "drawn smoothed: roughness {drawn}, raw {raw}"
+    );
 
     let t = r.c.trace(Command::TraceCapture {
         meas: MeasId(1),

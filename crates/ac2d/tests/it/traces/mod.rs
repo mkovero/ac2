@@ -36,6 +36,60 @@ fn band() -> Vec<usize> {
         .collect()
 }
 
+/// `raw` (as captured: unsmoothed, NaN gaps) smoothed by ac2-core directly: magnitude dB and
+/// phase degrees.
+fn core_smoothed(raw: &TraceData, s: Smoothing) -> (Vec<f64>, Vec<f64>) {
+    use ac2_core::smoothing as sm;
+    let grid = ac2_core::grid::LogGrid {
+        ppo: 48,
+        k_min: -336,
+        k_max: 383,
+    };
+    let phase = raw.phase_deg.as_ref().unwrap();
+    let h: Vec<num_complex::Complex64> = raw
+        .mag_db
+        .iter()
+        .zip(phase)
+        .map(|(m, p)| {
+            num_complex::Complex64::from_polar(
+                10f64.powf(f64::from(*m) / 20.0),
+                f64::from(*p).to_radians(),
+            )
+        })
+        .collect();
+    let valid: Vec<bool> = h.iter().map(|z| z.re.is_finite()).collect();
+    let coh = vec![1.0; h.len()];
+    let fraction = match s.fraction {
+        SmoothingFraction::Third => sm::SmoothingFraction::Third,
+        SmoothingFraction::Sixth => sm::SmoothingFraction::Sixth,
+        SmoothingFraction::Twelfth => sm::SmoothingFraction::Twelfth,
+        SmoothingFraction::TwentyFourth => sm::SmoothingFraction::TwentyFourth,
+        SmoothingFraction::FortyEighth => sm::SmoothingFraction::FortyEighth,
+    };
+    let mode = match s.mode {
+        SmoothingMode::Magnitude => sm::SmoothingMode::Magnitude,
+        SmoothingMode::MagnitudePhase => sm::SmoothingMode::MagnitudePhase,
+    };
+    let out = sm::Smoother::new(grid, fraction).smooth(
+        sm::TfColumns {
+            h: &h,
+            coherence: &coh,
+            valid: &valid,
+        },
+        mode,
+    );
+    out.h
+        .iter()
+        .map(|z| (20.0 * z.norm().log10(), z.arg().to_degrees()))
+        .unzip()
+}
+
+/// Smallest difference between two angles in degrees.
+fn deg_diff(a: f64, b: f64) -> f64 {
+    let d = (a - b).rem_euclid(360.0);
+    d.min(360.0 - d)
+}
+
 fn data(c: &mut Client, id: TraceId) -> TraceData {
     c.trace_data(Command::TraceGet { trace: id })
 }
