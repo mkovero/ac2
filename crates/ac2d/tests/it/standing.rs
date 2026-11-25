@@ -79,7 +79,6 @@ fn rigs_with(rate_b: u32, start: Option<StartStampError>) -> Rigs {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: net_endpoints(&b).0.as_str().to_owned(),
-            data: net_endpoints(&b).1.as_str().to_owned(),
             key: b.server_public_key().unwrap().to_z85(),
         },
     });

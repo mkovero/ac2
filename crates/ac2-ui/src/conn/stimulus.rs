@@ -169,7 +169,7 @@ pub(super) async fn detect(
             input_device: d.device,
             output_device: d.output_device,
             output: d.output,
-            level: Some(d.level),
+            level: d.level,
         })
         .await
         .and_then(

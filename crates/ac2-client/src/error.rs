@@ -127,22 +127,6 @@ impl ClientError {
             _ => None,
         }
     }
-
-    pub(crate) fn from_proto(e: ProtoError) -> Self {
-        match (&e.code, &e.detail) {
-            (ErrorCode::VersionMismatch, Some(ac2_proto::ErrorDetail::Version { daemon, .. })) => {
-                Self::VersionMismatch {
-                    daemon: *daemon,
-                    client: ac2_proto::PROTO_VERSION,
-                }
-            }
-            (ErrorCode::VersionMismatch, _) => Self::VersionMismatch {
-                daemon: 0,
-                client: ac2_proto::PROTO_VERSION,
-            },
-            _ => Self::Daemon(e),
-        }
-    }
 }
 
 /// Wire name of an error code (`lease_held`, …).

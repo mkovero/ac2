@@ -47,12 +47,23 @@ pub struct RigPeer {
     pub rig: RigId,
     /// Its name, for display.
     pub name: String,
-    /// Its ctrl endpoint (`tcp://host:port`).
+    /// Its ctrl endpoint (`tcp://host:port`); its data endpoint follows from it
+    /// ([`Self::data_endpoint`]).
     pub ctrl: String,
-    /// Its data endpoint (`tcp://host:port`).
-    pub data: String,
     /// Its server key as the app pinned it (Z85, 40 characters); never replaced silently.
     pub key: String,
+}
+
+impl RigPeer {
+    /// Its data endpoint: a rig serves the network's data on the port after its ctrl port,
+    /// so the ctrl endpoint names both. `None` for a ctrl endpoint that is not
+    /// `tcp://host:port` with a port from 1 to 65534.
+    pub fn data_endpoint(&self) -> Option<String> {
+        let (host, port) = self.ctrl.strip_prefix("tcp://")?.rsplit_once(':')?;
+        let port = port.parse::<u16>().ok().filter(|&p| p != 0)?;
+        let data = port.checked_add(1)?;
+        (!host.is_empty()).then(|| format!("tcp://{host}:{data}"))
+    }
 }
 
 /// A host's stamp clock on its system clock (`CLOCK_REALTIME`), fitted over the last minute

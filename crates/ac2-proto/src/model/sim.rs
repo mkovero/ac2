@@ -140,18 +140,6 @@ pub struct SimState {
     pub map: Option<SimMap>,
 }
 
-impl super::State {
-    /// Takes `s` as the latest simulation of its kind: a map is [`Self::sim_map`], a run
-    /// or a fit [`Self::sim`].
-    pub fn set_sim(&mut self, s: SimState) {
-        if s.kind == SimKind::Map {
-            self.sim_map = Some(s);
-        } else {
-            self.sim = Some(s);
-        }
-    }
-}
-
 impl SimState {
     /// Still running.
     pub fn active(&self) -> bool {

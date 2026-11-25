@@ -25,8 +25,8 @@ use std::fmt::Write as _;
 use ac2_proto::GridDef;
 use ac2_proto::ImportProblem;
 use ac2_proto::model::{
-    DynamicsData, DynamicsEdge, DynamicsHarmonics, DynamicsInfo, DynamicsInput, DynamicsLevel,
-    DynamicsOvershoot, DynamicsPoint, DynamicsRow, DynamicsThump, DynamicsTime, DynamicsWindows,
+    DynamicsData, DynamicsEdges, DynamicsHarmonics, DynamicsInfo, DynamicsInput, DynamicsLevel,
+    DynamicsOvershoot, DynamicsRow, DynamicsThump, DynamicsTime, DynamicsWindows,
 };
 use ac2_proto::units::{Db, Hz, Seconds};
 use serde::{Deserialize, Serialize};
@@ -180,29 +180,33 @@ pub(super) fn write(out: &mut String, d: &DynamicsData) {
             let _ = writeln!(out, ",{}", r.drift.0);
         }
     }
-    let points: usize = d.envelopes.iter().flatten().map(Vec::len).sum();
+    let points: usize = d
+        .envelopes
+        .iter()
+        .flatten()
+        .map(|e| e.start.t.len() + e.end.t.len())
+        .sum();
     let _ = writeln!(out, "# dynamics_envelopes: {{\"rows\":{points}}}");
     out.push_str(ENVELOPE_HEADER);
     out.push('\n');
     for (i, envelopes) in d.inputs.iter().zip(&d.envelopes) {
         for (s, env) in envelopes.iter().enumerate() {
-            for p in env {
-                let _ = writeln!(
-                    out,
-                    "{},{},{},{},{},{},{},{},{}",
-                    u32::from(i.input) + 1,
-                    s + 1,
-                    match p.edge {
-                        DynamicsEdge::Start => "start",
-                        DynamicsEdge::End => "end",
-                    },
-                    num32(p.t),
-                    num32(p.gr_db),
-                    num32(p.h_db[0]),
-                    num32(p.h_db[1]),
-                    num32(p.h_db[2]),
-                    num32(p.h_db[3]),
-                );
+            for (edge, c) in [("start", &env.start), ("end", &env.end)] {
+                for (k, (&t, &gr)) in c.t.iter().zip(&c.gr_db).enumerate() {
+                    let h = |j: usize| c.h_db[j].get(k).copied().unwrap_or(f32::NAN);
+                    let _ = writeln!(
+                        out,
+                        "{},{},{edge},{},{},{},{},{},{}",
+                        u32::from(i.input) + 1,
+                        s + 1,
+                        num32(t),
+                        num32(gr),
+                        num32(h(0)),
+                        num32(h(1)),
+                        num32(h(2)),
+                        num32(h(3)),
+                    );
+                }
             }
         }
     }
@@ -370,7 +374,7 @@ pub(super) fn read(lines: &[(usize, &str)]) -> Result<DynamicsData, ImportError>
             rows: Vec::with_capacity(n_steps),
         })
         .collect();
-    let mut envelopes = vec![vec![Vec::new(); n_steps]; n_inputs];
+    let mut envelopes = vec![vec![DynamicsEdges::default(); n_steps]; n_inputs];
     let header = step_header();
     let (rows, _) = table(lines, steps_at, &header, n_steps * n_inputs)?;
     let cols: Vec<&str> = header.split(',').collect();
@@ -469,9 +473,10 @@ pub(super) fn read(lines: &[(usize, &str)]) -> Result<DynamicsData, ImportError>
             return Err(cell_err(no, "input", c[0]));
         };
         let step = index(no, "step", c[1], n_steps)?;
-        let edge = match c[2] {
-            "start" => DynamicsEdge::Start,
-            "end" => DynamicsEdge::End,
+        let step_env = &mut env[step];
+        let curve = match c[2] {
+            "start" => &mut step_env.start,
+            "end" => &mut step_env.end,
             v => return Err(cell_err(no, "edge", v)),
         };
         // Parsed as f32 directly: the export wrote each value's shortest f32 form.
@@ -489,17 +494,16 @@ pub(super) fn read(lines: &[(usize, &str)]) -> Result<DynamicsData, ImportError>
             }
             Ok(x)
         };
-        env[step].push(DynamicsPoint {
-            edge,
-            t: v32(3, true)?,
-            gr_db: v32(4, false)?,
-            h_db: [
+        curve.push(
+            v32(3, true)?,
+            v32(4, false)?,
+            [
                 v32(5, false)?,
                 v32(6, false)?,
                 v32(7, false)?,
                 v32(8, false)?,
             ],
-        });
+        );
     }
     let d = DynamicsData {
         info,

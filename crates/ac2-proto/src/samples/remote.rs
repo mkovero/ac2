@@ -31,7 +31,6 @@ pub(super) fn rig_peer() -> RigPeer {
         rig: ketunkolo(),
         name: "ketunkolo".into(),
         ctrl: "tcp://192.168.9.20:47820".into(),
-        data: "tcp://192.168.9.20:47821".into(),
         key: "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7".into(),
     }
 }

@@ -159,12 +159,11 @@ pub fn dynamics_data() -> DynamicsData {
         },
         drift: Db(-0.0625),
     };
-    let point = |edge, t: f32, gr: f32| DynamicsPoint {
-        edge,
-        t,
-        gr_db: gr,
-        h_db: [-40.5, f32::NAN, -70.0, f32::NAN],
-    };
+    let h_db = [-40.5, f32::NAN, -70.0, f32::NAN];
+    let mut edges = DynamicsEdges::default();
+    edges.start.push(-0.05, 0.0, h_db);
+    edges.start.push(0.00025, 4.5, h_db);
+    edges.end.push(0.5, 1.25, h_db);
     DynamicsData {
         info: DynamicsInfo {
             sample_rate_hz: Hz(48_000.0),
@@ -191,10 +190,6 @@ pub fn dynamics_data() -> DynamicsData {
             g0: Db(-0.25),
             rows: vec![row],
         }],
-        envelopes: vec![vec![vec![
-            point(DynamicsEdge::Start, -0.05, 0.0),
-            point(DynamicsEdge::Start, 0.00025, 4.5),
-            point(DynamicsEdge::End, 0.5, 1.25),
-        ]]],
+        envelopes: vec![vec![edges]],
     }
 }

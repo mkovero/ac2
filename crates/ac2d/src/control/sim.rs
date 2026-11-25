@@ -57,6 +57,16 @@ pub(super) struct Sims {
     next: u32,
 }
 
+/// The change `s` makes: a coverage map is `State.sim_map`, a run or a fit `State.sim`, so
+/// a map never hides the run whose results the operator reads.
+fn sim_change(s: SimState) -> Change {
+    if s.kind == SimKind::Map {
+        Change::SimMap(Some(s))
+    } else {
+        Change::Sim(s)
+    }
+}
+
 fn refused(reason: SimRefusal) -> ProtoError {
     let msg = match &reason {
         SimRefusal::Outdoor => "the plan has no ceiling: outdoor plans are not simulated".into(),
@@ -79,7 +89,13 @@ fn refused(reason: SimRefusal) -> ProtoError {
             )
         }
     };
-    perr_detail(ErrorCode::Invalid, msg, ErrorDetail::Sim { reason })
+    // A run in progress refuses another as a held lease does: the request is sound, the
+    // rig is not free for it.
+    let code = match reason {
+        SimRefusal::Busy => ErrorCode::Refused,
+        _ => ErrorCode::Invalid,
+    };
+    perr_detail(code, msg, ErrorDetail::Sim { reason })
 }
 
 fn check_settings(s: &SimSettings) -> Result<(), ProtoError> {
@@ -355,7 +371,7 @@ impl Control {
         };
         let worker = sim::spawn(id, job, mode, self.s.to_self.clone())
             .map_err(|e| internal(format!("cannot start the simulation: {e}")))?;
-        self.commit(Change::Sim(state.clone()));
+        self.commit(sim_change(state.clone()));
         self.sims.active = Some(ActiveSim {
             worker,
             state: state.clone(),
@@ -385,7 +401,7 @@ impl Control {
             status: SimStatus::Cancelled { why },
             ..a.state
         };
-        self.commit(Change::Sim(state.clone()));
+        self.commit(sim_change(state.clone()));
         Some(state)
     }
 
@@ -444,7 +460,7 @@ impl Control {
                 if a.state.status != status {
                     a.state.status = status;
                     let s = a.state.clone();
-                    self.commit(Change::Sim(s));
+                    self.commit(sim_change(s));
                 }
             }
             SimMsg::Ended(result) => {
@@ -483,7 +499,7 @@ impl Control {
                         ..a.state
                     },
                 };
-                self.commit(Change::Sim(state));
+                self.commit(sim_change(state));
             }
         }
     }

@@ -69,15 +69,10 @@ fn hello_and_version_refusal() {
     let mut req = Request::new(c.next_id(), Command::StreamStatus);
     req.v = PROTO_VERSION + 1;
     let r = c.call_req(req);
+    assert_eq!(r.v, PROTO_VERSION);
     let e = r.result.unwrap_err();
     assert_eq!(e.code, ErrorCode::VersionMismatch);
-    assert_eq!(
-        e.detail,
-        Some(ErrorDetail::Version {
-            daemon: PROTO_VERSION,
-            client: PROTO_VERSION + 1
-        })
-    );
+    assert_eq!(e.detail, None);
 
     // No version at all: refused, never assumed.
     #[derive(serde::Serialize)]
@@ -93,15 +88,10 @@ fn hello_and_version_refusal() {
     c.sock.send(&[raw]).unwrap();
     let r = c.recv(T).unwrap();
     assert_eq!(r.id.0, 77);
+    assert_eq!(r.v, PROTO_VERSION);
     let e = r.result.unwrap_err();
     assert_eq!(e.code, ErrorCode::VersionMismatch);
-    assert_eq!(
-        e.detail,
-        Some(ErrorDetail::Version {
-            daemon: PROTO_VERSION,
-            client: 0
-        })
-    );
+    assert_eq!(e.detail, None);
 
     // Malformed body at the right version: `invalid`, and the daemon keeps serving.
     #[derive(serde::Serialize)]

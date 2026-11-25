@@ -130,7 +130,7 @@ fn every_event_roundtrips() {
             DataMessage::Event(e)
         );
     }
-    assert_eq!(kinds.len(), 25);
+    assert_eq!(kinds.len(), 26);
 }
 
 /// The input-meter kinds only travel on their own topics, with one channel per column.
@@ -508,13 +508,8 @@ fn version_mismatch_is_a_typed_refusal() {
         decode_reply(&encode_reply(&refusal).expect("sample message")).expect("sample message");
     let err = back.result.expect_err("must be refused");
     assert_eq!(err.code, ErrorCode::VersionMismatch);
-    assert_eq!(
-        err.detail,
-        Some(ErrorDetail::Version {
-            daemon: PROTO_VERSION,
-            client: PROTO_VERSION + 1
-        })
-    );
+    assert_eq!(back.v, PROTO_VERSION);
+    assert_eq!(err.detail, None);
 
     // A message without `v` is refused, never defaulted.
     #[derive(serde::Serialize)]
@@ -885,7 +880,7 @@ fn the_largest_map_fits_in_an_event() {
         .collect();
     let b = encode_event(&event::Event {
         rev: Rev(1),
-        change: event::Change::Sim(s),
+        change: event::Change::SimMap(Some(s)),
     })
     .expect("sample message");
     assert!(

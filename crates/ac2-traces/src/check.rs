@@ -373,9 +373,14 @@ pub fn dynamics(d: &DynamicsData) -> Result<(), String> {
                 return Err("dynamics: a step value is not finite".into());
             }
         }
-        let points = envelopes.iter().flatten();
-        if points.into_iter().any(|p| {
-            !p.t.is_finite() || p.gr_db.is_infinite() || p.h_db.iter().any(|h| h.is_infinite())
+        let curves = || envelopes.iter().flat_map(|e| [&e.start, &e.end]);
+        if curves().any(|c| c.points().is_none()) {
+            return Err("dynamics: an envelope's arrays differ in length".into());
+        }
+        if curves().any(|c| {
+            c.t.iter().any(|t| !t.is_finite())
+                || c.gr_db.iter().any(|g| g.is_infinite())
+                || c.h_db.iter().flatten().any(|h| h.is_infinite())
         }) {
             return Err("dynamics: an envelope point is not finite".into());
         }

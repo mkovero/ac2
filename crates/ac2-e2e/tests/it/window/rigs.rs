@@ -80,7 +80,6 @@ fn pair(taker: &Rig, source: RigId, name: &str) -> R {
             rig: source,
             name: name.into(),
             ctrl: "tcp://127.0.0.1:7700".into(),
-            data: "tcp://127.0.0.1:7701".into(),
             key: ac2_zmq::KeyPair::generate()?.public.to_z85(),
         },
     })?;

@@ -235,7 +235,8 @@ struct KeyHeaderRef<'a> {
 }
 
 /// A delta's short header: a msgpack array of these fields in this order; `meta` is the
-/// kind's per-frame metadata (nil for a kind without any).
+/// kind's per-frame metadata (nil for a kind without any). It ends `meta, crc` as the
+/// keyframe header does, so both read their tail alike.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DeltaHeader<M> {
@@ -246,8 +247,8 @@ struct DeltaHeader<M> {
     audio_sample: SampleIndex,
     capture_wall_ns: WallNs,
     protection: ProtectionFlags,
-    crc: u32,
     meta: M,
+    crc: u32,
 }
 
 fn msgpack<T: Serialize>(x: &T) -> Result<Vec<u8>, EncodeError> {

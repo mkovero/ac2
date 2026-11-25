@@ -81,9 +81,10 @@ pub enum Change {
     Walk(Patch<WalkState, WalkId>),
     /// The session's copy of a plan, by name.
     WalkPlan(Patch<PlanSpec, String>),
-    /// The latest simulation of its kind (never deleted; a new one replaces it): a map
-    /// ([`crate::model::SimKind::Map`]) is `State.sim_map`, a run or a fit `State.sim`.
+    /// The latest simulation run or fit, `State.sim` (never deleted; a new one replaces it).
     Sim(SimState),
+    /// The latest coverage map ([`crate::model::SimKind::Map`]), `State.sim_map`.
+    SimMap(Option<SimState>),
     /// The absorption fit kept for later runs (`None`: dropped).
     SimFit(Option<SimFitKept>),
     /// The network listener, in short (never deleted).
@@ -265,6 +266,13 @@ pub enum WireEvent {
         /// Payload.
         payload: SimState,
     },
+    /// [`Change::SimMap`].
+    SimMap {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: Option<SimState>,
+    },
     /// [`Change::SimFit`].
     SimFit {
         /// Rev.
@@ -308,6 +316,7 @@ impl From<Event> for WireEvent {
             Change::Walk(payload) => Self::Walk { rev, payload },
             Change::WalkPlan(payload) => Self::WalkPlan { rev, payload },
             Change::Sim(payload) => Self::Sim { rev, payload },
+            Change::SimMap(payload) => Self::SimMap { rev, payload },
             Change::SimFit(payload) => Self::SimFit { rev, payload },
             Change::Server(payload) => Self::Server { rev, payload },
         }
@@ -340,6 +349,7 @@ impl From<WireEvent> for Event {
             WireEvent::Walk { rev, payload } => (rev, Change::Walk(payload)),
             WireEvent::WalkPlan { rev, payload } => (rev, Change::WalkPlan(payload)),
             WireEvent::Sim { rev, payload } => (rev, Change::Sim(payload)),
+            WireEvent::SimMap { rev, payload } => (rev, Change::SimMap(payload)),
             WireEvent::SimFit { rev, payload } => (rev, Change::SimFit(payload)),
             WireEvent::Server { rev, payload } => (rev, Change::Server(payload)),
         };
@@ -374,6 +384,7 @@ impl Change {
             Self::Walk(_) => "walk",
             Self::WalkPlan(_) => "walk_plan",
             Self::Sim(_) => "sim",
+            Self::SimMap(_) => "sim_map",
             Self::SimFit(_) => "sim_fit",
             Self::Server(_) => "server",
         }

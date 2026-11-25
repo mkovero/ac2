@@ -140,7 +140,6 @@ fn connection_paired_rigs_long_names() {
         rig: RigId(rig),
         name: name.into(),
         ctrl: "tcp://192.168.9.27:7700".into(),
-        data: "tcp://192.168.9.27:7701".into(),
         key: "k".repeat(40),
     };
     const NAME: &str = "ac2 on ac2pi-0ab1c6-front";

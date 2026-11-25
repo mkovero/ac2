@@ -47,11 +47,11 @@ daemon answered there.
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
-- `v` missing → refused as `version_mismatch` with `detail.client` 0; it is never assumed.
+- `v` missing → refused as `version_mismatch`; it is never assumed.
 - `v` ≠ own version → refused. The daemon answers with a reply at its own version whose
-  `result` is `err{code: version_mismatch, detail: {type: version, daemon, client}}`. A
-  client that receives a reply with another `v` treats it as the same refusal without
-  decoding the body.
+  `result` is `err{code: version_mismatch}` with no detail: the reply's `v` is the daemon's
+  version. A client that receives a reply with another `v` treats it as the same refusal
+  without decoding the body.
 - There is no negotiation, no range of accepted versions and no compatibility layer.
 - An envelope (`v`, `id`) that does not parse is dropped without a reply. An envelope that
   parses with a body that does not decode is answered `invalid`. A request without `id` is
@@ -140,7 +140,7 @@ mutation.
 | `stream.preview` | `backend: BackendKind`, `device: DeviceId`, `inputs: [PreviewInput]` ({`channel`, `kind: InputKind`}), `pairs: [Pair]` | `preview` | non-mutating |
 | `stream.preview_stop` | — | `ack` | non-mutating |
 | `stream.control_panel` | `backend: BackendKind`, `device: DeviceId` | `ack` | non-mutating |
-| `stream.detect_loopback` | `lease_token`, `backend`, `input_device`, `output_device`, `output: u16`, `level: Dbfs \| nil` | `loopback_detection` | L, non-mutating |
+| `stream.detect_loopback` | `lease_token`, `backend`, `input_device`, `output_device`, `output: u16`, `level: Dbfs` | `loopback_detection` | L, non-mutating |
 | `stream.open` | `config: StreamConfig` | `stream` | |
 | `stream.close` | — | `ack` | |
 | `stream.status` | — | `stream` | non-mutating |
@@ -528,8 +528,9 @@ only `audio/<channel>` and `source/levels` frames (§5.1) and the §5.8 notices 
 times), `inputs`: [`SourceInput` {`channel`, `setup`: `InputSetup` \| nil,
 `cal_status`, `calibration`: `CalEntry` \| nil, `curve`: `SourceCurve` \| nil
 {`reference`: `MicCurveRef`, `freq`: [f64], `gain_db`: [f64]}}]}}: all of the stream an
-admitted rig sees. `rig.pair` {`peer`: `RigPeer` {`rig`, `name`, `ctrl`, `data`, `key` (the
-other rig's server key, Z85)}} adds one rig this rig takes inputs from, in place of an entry
+admitted rig sees. `rig.pair` {`peer`: `RigPeer` {`rig`, `name`, `ctrl` (`tcp://host:port`, port 1 … 65534;
+its data endpoint is the next port, as a rig serves the network), `key` (the other rig's
+server key, Z85)}} adds one rig this rig takes inputs from, in place of an entry
 for the same rig; a name another paired rig holds is `invalid` (unpair that rig first: an
 entry is found by its name, and replacing it would drop that rig and its feed); `rig.unpair` {`rig_id`} removes that rig's entry
 (`not_found` when there is none). Either leaves the other entries as they are, kept in the rig
@@ -1221,7 +1222,7 @@ within `expires_in_ms` (5 s). Opening it may fail where the host allows a device
 stream (`unsupported` / `not_found` with the host's reason).
 
 **Loopback detection.** `stream.detect_loopback` needs the stimulus lease (`lease_required`
-otherwise) and an explicit `level` (`refused` when nil; there is no default level); a level
+otherwise) and an explicit `level` (required: there is no default level); a level
 above the global ceiling, or a request while the stimulus is armed or firing, is `refused`.
 It is allowed with a stream open. The daemon closes the preview, opens `input_device` with every input and `output_device`
 with `output + 1` outputs (the same id for one device),
@@ -1542,7 +1543,7 @@ one `<name>.json` per plan in its data directory (`plans/`: the plan's fields be
 engine (image sources for the early reflections, ray tracing for the late field, per
 octave band 125 Hz … 8 kHz) on a worker thread of its own. A simulation is not a
 measurement and makes no trace; its latest run or fit is `State.sim`, its latest coverage
-map `State.sim_map` (a `sim` event carries either; its `kind` says which), neither saved with
+map `State.sim_map` (a `sim` event carries the one, a `sim_map` event the other), neither saved with
 the session. One runs at a time (runs, fits and maps share the worker).
 
 - `sim.run` {`request`: `SimRequest` {`plan`, `sources` [speaker marker names], `receivers`
@@ -1562,8 +1563,8 @@ the session. One runs at a time (runs, fits and maps share the worker).
   Eyring scale, Newton steps on log T20 against log scale, fixed seed, stopping when every
   fitted band is within 3 % or after 6 passes (`budget` per pass). A band the walk gives no
   T20 keeps the table's absorption. `not_found` for an unknown walk.
-- Both reply `sim` with the started state (`status` running) and refuse `invalid` with
-  `detail` `sim` {`reason`: `SimRefusal`}: `outdoor` (no ceiling), `unknown_material`
+- Both reply `sim` with the started state (`status` running) and refuse with `detail` `sim`
+  {`reason`: `SimRefusal`}, `refused` for `busy` and `invalid` for the rest: `outdoor` (no ceiling), `unknown_material`
   {`surface`, `name`}, `plan` {`reason`} (does not validate), `no_speaker` {`name`},
   `outside` {`name`} (a source or receiver not inside the room), `empty`,
   `not_a_sweep_walk`, `no_measured_t20`, `busy` (one is running), and `invalid` for
@@ -1586,7 +1587,7 @@ the session. One runs at a time (runs, fits and maps share the worker).
   with it `cancelled` {`why`: `operator`}. A run also stops `cancelled` when its plan changes
   or is deleted (`plan_changed`; saving it unchanged does not), when the fit's walk is
   deleted (`walk_deleted`) and at `stream.close` (`stream_closed`).
-- Progress: `sim` events with `status` `running` {`stage` `image_sources` \|
+- Progress: `sim` events (`sim_map` for a map) with `status` `running` {`stage` `image_sources` \|
   `ray_tracing` \| `analysis`, `done`, `total`, `source` (index), `pass` (fit pass, 1-based; 0 for a run)}, at
   most five a second, then `done`, `cancelled` {`why`} or `failed` {`msg`}.
 - **`SimState`** {`id: SimId`, `plan`, `kind` {`type`: `run` \| `fit` {`walk`} \| `map`},
@@ -1739,8 +1740,9 @@ an A/B pair plays an identical programme. The generator's level is the highest b
   `rest` (as played), `recovered` (false: the rest reached `rest_max`)}]), `inputs`:
   [`DynamicsInput` {`input`, `name`, `delay` (the processor's envelope delay), `g0` (gain at
   the pilot re the reference), `rows`: one `DynamicsRow` per step}], `envelopes`: per input
-  (as `inputs`), one [`DynamicsPoint` {`edge` (`start` \| `end`), `t` (s from the edge),
-  `gr_db`, `h_db` (H2…H5 re the fundamental, NaN where blind)}] per step. A long run at a
+  (as `inputs`), one `DynamicsEdges` {`start`, `end`} per step, each edge a
+  `DynamicsEdgeCurve` of parallel f32 arrays of one length {`t` (s from the edge), `gr_db`,
+  `h_db` (four arrays, H2…H5 re the fundamental, NaN where blind)}, as `dynamics.envelope`. A long run at a
   high carrier holds tens of MB of envelopes, over the ctrl message limit (`too_large`):
   `dynamics.table` reads its step table, `dynamics.envelope` one step's envelopes of one
   input, `trace.export` all of it. `DynamicsRow`: `gr_end`, `gr_settled`
@@ -2155,7 +2157,7 @@ other kinds).
 exceeds the 4 MiB ctrl message limit, §3.1).
 
 `detail` (optional, tagged by `type`): `conflict` {rev}, `lease_held` {owner},
-`version` {daemon, client}, `resync` {oldest}, `import` {line, problem} (§3.2 traces),
+`resync` {oldest}, `import` {line, problem} (§3.2 traces),
 `session_version` {found, supported}, `unsaved_changes` {origin}, `session_exists` {name,
 saved_at} (§3.2 sessions), `mic_curve_file` {line, reason} and
 `cal_store` {path, reason} (§3.2 calibration), `sim` {reason} (§3.2 room simulation).
@@ -2342,9 +2344,9 @@ samples). Every later recovery reopens the configuration as it then stands.
 `state.snapshot` → `{state, rev, daemon_incarnation, stream_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `stream`, `measurement`, `trace`,
-`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `remote`, `sweep`, `dynamics`, `autosave`, `recording`, `working`, `rig`, `plan`, `walk`, `walk_plan`, `sim`, `sim_fit`, `server`. `payload` is the entity's
+`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `remote`, `sweep`, `dynamics`, `autosave`, `recording`, `working`, `rig`, `plan`, `walk`, `walk_plan`, `sim`, `sim_map`, `sim_fit`, `server`. `payload` is the entity's
 full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the whole list;
-`sim`: the `SimState`, which `State.sim` becomes, or `State.sim_map` for a map; `sim_fit`: the `SimFitKept` or nil); for keyed entities (`measurement`, `trace`,
+`sim`: the `SimState`, which `State.sim` becomes; `sim_map`: the `SimState` of a coverage map or nil, which `State.sim_map` becomes; `sim_fit`: the `SimFitKept` or nil); for keyed entities (`measurement`, `trace`,
 `calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`, `plan` and `walk_plan` (keyed by name), `walk` (keyed by
 `WalkId`)) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
@@ -2471,8 +2473,8 @@ A frame goes in one of two forms, the header's second element (`form`):
 | `audio_sample` | u64 | as §5.3 |
 | `capture_wall_ns` | u64 | as §5.3 |
 | `protection` | u32 | as §5.3 |
-| `crc` | u32 | CRC of the frame's codes (below) |
 | `meta` | […] \| nil | the per-frame metadata: `tf` [filled, settling], `bins` [blocks, eff_avg], `spl` [level, lmax, lmin, leq, lpeak, duration], `source_levels` [mark]; nil for every other kind |
+| `crc` | u32 | CRC of the frame's codes (below) |
 
 The **codes** of a frame are its arrays quantised to their `elem` encoding (below),
 concatenated in the header's array order, each code little-endian, a `bfp16` array's

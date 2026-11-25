@@ -262,7 +262,7 @@ impl CallCore {
                         let reply = reply?;
                         return match reply.result {
                             Ok(body) => Ok((body, reply.warnings)),
-                            Err(e) => Err(ClientError::from_proto(e)),
+                            Err(e) => Err(ClientError::Daemon(e)),
                         };
                     }
                     Ok(Err(_)) => return Err(ClientError::Closed),

@@ -482,11 +482,11 @@ network mode.
 | `sample_rate: Hz` / `u32` (sweep info, `ir` meta, dynamics, trace, sidecar), `BinsMeta.rate`, `AudioHeader.rate` (`audio/<channel>`), `EqRealisation::Digital.rate`, `EqShape::Biquad.rate` | `sample_rate_hz`; trace export v7, whose reader takes a v6-or-older JSON header line's `sample_rate` / `lo` / `hi` as `sample_rate_hz` / `lo_hz` / `hi_hz` (open question 1) | proto, traces, ac2d, ui, scene |
 | `AlignBand.lo/hi`, `FreqRange.lo/hi`, `BinRange.lo/hi` | `lo_hz`, `hi_hz` (`LevelRange.lo/hi`, a dB axis of the layout, and `MicCurveRef.f_lo/f_hi` stay) | proto, core conv, ui, scene |
 | `NotLockedReason::OtherRate {theirs, ours}` | `{theirs_hz, ours_hz}` | proto, ac2d, scene |
-| `sim` event setting `State.sim_map` | event kind `sim_map: Option<SimState>` | proto, ac2d, client |
-| delta header `…, crc, meta` | `…, config_rev, config_applied_at, …, meta, crc` (§6) | proto |
-| `RigPeer.data` | dropped; data endpoint is ctrl port + 1 | proto, ac2d, rig.json |
-| `trace.get` dynamics envelopes as points | parallel `f32` arrays as `dynamics.envelope` | proto, ac2d, traces, ui |
-| `ErrorDetail::Version {daemon, client}` | dropped; client decode of it dropped | proto, client |
+| `sim` event setting `State.sim_map` | event kind `sim_map: Option<SimState>` (`State::set_sim` goes) | proto, ac2d, client |
+| delta header `…, crc, meta` | `…, config_rev, config_applied_at, …, meta, crc` (§6); `pn-shapes` swaps the tail to `meta, crc`, `pn-frames` adds the stamp fields | proto, tools/protocol |
+| `RigPeer.data` | dropped; data endpoint is ctrl port + 1 (`RigPeer::data_endpoint`; `rig.pair` refuses a `ctrl` that is not `tcp://host:port` with port 1 … 65534) | proto, ac2d, ui, cli, rig.json |
+| `trace.get` dynamics envelopes as points | parallel `f32` arrays as `dynamics.envelope`: `DynamicsData.envelopes` per input, per step a `DynamicsEdges {start, end}` of `DynamicsEdgeCurve`; `DynamicsPoint` and `DynamicsEdge` go; the CSV export keeps its envelope table | proto, ac2d, traces |
+| `ErrorDetail::Version {daemon, client}` | dropped (the refusal's own `v` is the daemon's version); client decode of it dropped | proto, client |
 | `stream.detect_loopback.level: Dbfs \| nil` | `level: Dbfs` | proto, ac2d, cli, ui |
 | `sim.run` / `sim.fit` busy `invalid` | `refused` | ac2d |
 | `#[serde(default)]` on `CalEntry.loading`, `PaneLayout.levels`, `.plates` | required | proto |

@@ -107,7 +107,7 @@ pub fn events() -> Vec<Event> {
                 ..super::sim::sim_running()
             }),
         ),
-        ev(88, Change::Sim(super::sim::sim_map_state())),
+        ev(88, Change::SimMap(Some(super::sim::sim_map_state()))),
         ev(89, Change::SimFit(Some(super::sim::sim_fit_kept()))),
         ev(90, Change::SimFit(None)),
         ev(91, Change::Clocks(clocks())),

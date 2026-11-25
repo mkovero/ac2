@@ -447,6 +447,7 @@ impl Control {
             | Change::Walk(_)
             | Change::WalkPlan(_)
             | Change::Sim(_)
+            | Change::SimMap(_)
             | Change::SimFit(_)
             | Change::Server(_) => return,
         };

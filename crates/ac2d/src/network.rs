@@ -22,8 +22,8 @@ pub use ac2_proto::model::{NetBind, NetInterface, NetReason, NetStatus};
 pub enum NetPort {
     /// A fixed port (see [`check_port`]).
     Port(u16),
-    /// Each socket on a port the OS picks, on every bind: for daemons inside tests, which
-    /// run side by side. Never from the command line (clients find data on ctrl + 1).
+    /// Ctrl on a port the OS picks on every bind, data on the next one: for daemons inside
+    /// tests, which run side by side. Never from the command line.
     Any,
 }
 
@@ -298,6 +298,30 @@ pub(crate) fn bind_pair(
         audit.record(d);
     })
     .map_err(other("ZAP handler"))?;
+    let (router, data, ctrl_ep, data_ep) = match port {
+        NetPort::Port(p) => {
+            let (router, data) = sockets(&secure, keys)?;
+            let (ctrl_ep, data_ep) = (endpoint(host, Some(p)), endpoint(host, Some(p + 1)));
+            router
+                .bind(&ctrl_ep)
+                .map_err(other(format!("bind {ctrl_ep}")))?;
+            data.bind(&data_ep)
+                .map_err(other(format!("bind {data_ep}")))?;
+            (router, data, ctrl_ep, data_ep)
+        }
+        NetPort::Any => any_pair(&secure, keys, host)?,
+    };
+    Ok(Pair {
+        ctrl_ep: router.last_endpoint().unwrap_or(ctrl_ep),
+        data_ep: data.last_endpoint().unwrap_or(data_ep),
+        router,
+        data,
+        secure,
+    })
+}
+
+/// The two network sockets of `secure`, their options set, unbound.
+fn sockets(secure: &SecureContext, keys: &KeyPair) -> Result<(Socket, Socket), NetReason> {
     let router = secure
         .curve_server_socket(SocketType::Router, keys)
         .map_err(other("CURVE ROUTER"))?;
@@ -314,24 +338,43 @@ pub(crate) fn bind_pair(
         s.set_linger(Some(NET_LINGER))
             .map_err(other("network linger"))?;
     }
-    let (c, d) = match port {
-        NetPort::Port(p) => (Some(p), Some(p + 1)),
-        NetPort::Any => (None, None),
-    };
-    let ctrl_ep = endpoint(host, c);
-    let data_ep = endpoint(host, d);
-    router
-        .bind(&ctrl_ep)
-        .map_err(other(format!("bind {ctrl_ep}")))?;
-    data.bind(&data_ep)
-        .map_err(other(format!("bind {data_ep}")))?;
-    Ok(Pair {
-        ctrl_ep: router.last_endpoint().unwrap_or(ctrl_ep),
-        data_ep: data.last_endpoint().unwrap_or(data_ep),
-        router,
-        data,
-        secure,
-    })
+    Ok((router, data))
+}
+
+/// Tries at a port the OS picks for ctrl before [`NetPort::Any`] gives up.
+const ANY_TRIES: usize = 32;
+
+/// Both sockets bound for [`NetPort::Any`]: ctrl where the OS puts it, data on the next
+/// port, since a peer derives the data endpoint from the ctrl one. A next port already
+/// taken drops the pair and asks the OS again.
+fn any_pair(
+    secure: &SecureContext,
+    keys: &KeyPair,
+    host: Host,
+) -> Result<(Socket, Socket, String, String), NetReason> {
+    for _ in 0..ANY_TRIES {
+        let (router, data) = sockets(secure, keys)?;
+        let ctrl_ep = endpoint(host, None);
+        router
+            .bind(&ctrl_ep)
+            .map_err(other(format!("bind {ctrl_ep}")))?;
+        let bound = router
+            .last_endpoint()
+            .map_err(other(format!("bound {ctrl_ep}")))?;
+        let Some(next) = tcp_host_port(&bound)
+            .and_then(|(_, p)| p.parse::<u16>().ok())
+            .and_then(|p| p.checked_add(1))
+        else {
+            continue;
+        };
+        let data_ep = endpoint(host, Some(next));
+        match data.bind(&data_ep) {
+            Ok(()) => return Ok((router, data, bound, data_ep)),
+            Err(ac2_zmq::Error::AddressInUse) => {}
+            Err(e) => return Err(other(format!("bind {data_ep}"))(e)),
+        }
+    }
+    Err(NetReason::AddressInUse)
 }
 
 /// Closes a detached pair on a thread of its own: its linger lets the last events leave and

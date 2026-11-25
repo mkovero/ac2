@@ -268,7 +268,6 @@ pub(super) fn paired_with(mut s: State, rig: RigId, name: &str) -> State {
         rig,
         name: name.into(),
         ctrl: "tcp://192.168.9.27:7700".into(),
-        data: "tcp://192.168.9.27:7701".into(),
         key: "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID".into(),
     });
     s

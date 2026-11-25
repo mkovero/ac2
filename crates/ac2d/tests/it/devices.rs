@@ -304,15 +304,11 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
         output: 0,
         level,
     };
-    // Refused without the lease and without a level; nothing opened.
-    let e = c
-        .call(detect(LeaseToken(7), Some(Dbfs(-30.0))))
-        .unwrap_err();
+    // Refused without the lease and above the ceiling; nothing opened.
+    let e = c.call(detect(LeaseToken(7), Dbfs(-30.0))).unwrap_err();
     assert_eq!(e.code, ErrorCode::LeaseRequired);
     let token = c.acquire();
-    let e = c.call(detect(token, None)).unwrap_err();
-    assert_eq!(e.code, ErrorCode::Refused);
-    let e = c.call(detect(token, Some(Dbfs(-3.0)))).unwrap_err();
+    let e = c.call(detect(token, Dbfs(-3.0))).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "above the −10 dBFS ceiling");
     let e = c
         .call(Command::StreamDetectLoopback {
@@ -321,7 +317,7 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
             input_device: fake_dev(),
             output_device: fake_dev(),
             output: 5,
-            level: Some(Dbfs(-30.0)),
+            level: Dbfs(-30.0),
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
@@ -329,7 +325,7 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
         opened.lock().unwrap().iter().all(|(_, g)| !g),
         "no emitting stream yet"
     );
-    let d = c.loopback_detection(detect(token, Some(Dbfs(-30.0))));
+    let d = c.loopback_detection(detect(token, Dbfs(-30.0)));
     assert_eq!(d.loopback, Some(0), "{d:?}");
     assert_eq!(d.ranked[0].input, 0);
     assert_eq!(d.ranked[0].delay_samples.0, i64::from(LOOP_DELAY));
@@ -365,7 +361,7 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
             firing: false,
         },
     });
-    let e = c.call(detect(token, Some(Dbfs(-30.0)))).unwrap_err();
+    let e = c.call(detect(token, Dbfs(-30.0))).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
 }
 
@@ -405,7 +401,7 @@ fn a_stream_plays_on_another_device_than_it_captures_from() {
             input_device: in_id.clone(),
             output_device: in_id.clone(),
             output: 0,
-            level: Some(Dbfs(-30.0)),
+            level: Dbfs(-30.0),
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
@@ -415,7 +411,7 @@ fn a_stream_plays_on_another_device_than_it_captures_from() {
         input_device: in_id.clone(),
         output_device: out_id.clone(),
         output: 0,
-        level: Some(Dbfs(-30.0)),
+        level: Dbfs(-30.0),
     });
     assert_eq!(d.loopback, Some(0), "{d:?}");
     assert_eq!((&d.input_device, &d.output_device), (&in_id, &out_id));
@@ -590,7 +586,7 @@ fn a_retried_detection_runs_once() {
             input_device: fake_dev(),
             output_device: fake_dev(),
             output: 0,
-            level: Some(Dbfs(-30.0)),
+            level: Dbfs(-30.0),
         },
     );
     c.send(&req);

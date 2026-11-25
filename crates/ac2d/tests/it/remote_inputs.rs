@@ -238,7 +238,6 @@ fn paired() -> Paired {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: net_endpoints(&b).0.as_str().to_owned(),
-            data: net_endpoints(&b).1.as_str().to_owned(),
             key: b.server_public_key().unwrap().to_z85(),
         },
     });
@@ -434,7 +433,6 @@ fn a_rig_whose_key_changed_is_named() {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: net_endpoints(&b).0.as_str().to_owned(),
-            data: net_endpoints(&b).1.as_str().to_owned(),
             key: other.to_z85(),
         },
     });
@@ -473,7 +471,6 @@ fn slow_a_rig_admitted_as_an_app_is_told_so_until_admitted_as_a_rig() {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: net_endpoints(&b).0.as_str().to_owned(),
-            data: net_endpoints(&b).1.as_str().to_owned(),
             key: b.server_public_key().unwrap().to_z85(),
         },
     });
@@ -627,7 +624,6 @@ fn slow_a_paired_rig_is_followed_to_its_new_address() {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: gone.into(),
-            data: "tcp://127.0.0.1:10".into(),
             key: b.server_public_key().unwrap().to_z85(),
         },
     });
@@ -663,7 +659,10 @@ fn slow_a_paired_rig_is_followed_to_its_new_address() {
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    assert_eq!(r.peers[0].data, net_endpoints(&b).1.as_str());
+    assert_eq!(
+        r.peers[0].data_endpoint().as_deref(),
+        Some(net_endpoints(&b).1.as_str())
+    );
     wait_remote(&mut ca, "streaming from the new address", |r| {
         r.inputs.first().map(|i| i.audio) == Some(RemoteAudio::Streaming)
     });
@@ -768,7 +767,6 @@ fn unreachable_peer(rig: RigId, name: &str) -> RigPeer {
         rig,
         name: name.into(),
         ctrl: "tcp://127.0.0.1:9".into(),
-        data: "tcp://127.0.0.1:10".into(),
         key: KeyPair::generate().unwrap().public.to_z85(),
     }
 }

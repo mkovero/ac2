@@ -8,10 +8,7 @@
 //! comes up empty and read-only and every calibration command is refused with the reason,
 //! so an operator's calibrations are never replaced by an empty set. A store of any other
 //! format version, older or newer, is set aside (renamed, never deleted) and the daemon
-//! starts with an empty store. An optional field a
-//! version 4 file leaves out reads as its `None` meaning (an electrical calibration without
-//! a mic loading was taken unloaded, and its stored sensitivity counts none), so adding one
-//! keeps the version.
+//! starts with an empty store.
 
 use std::collections::HashMap;
 use std::io;

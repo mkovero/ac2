@@ -61,7 +61,6 @@ pub(crate) async fn peer_add(
         rig: rig_id(id)?,
         name: name.to_owned(),
         ctrl: ep.ctrl,
-        data: ep.data,
         key: key(k)?,
     };
     let c = connect(cli, false).await?;
