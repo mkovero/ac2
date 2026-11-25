@@ -148,12 +148,58 @@ pub struct LeqAlarm {
     pub position: Option<Db>,
 }
 
+/// What the wall time of a log row rests on (`docs/design/protocol-next.md` §7): an
+/// annotation, never the row's key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogClock {
+    /// The OS held the system clock synchronised.
+    Synced,
+    /// The OS said the clock was not synchronised.
+    Unsynced,
+    /// Logged unsynced, re-stamped from the boot-clock distance to the point where the
+    /// clock became synchronised in the same run.
+    Derived,
+    /// The OS states nothing about its clock (macOS, Windows, a failed `adjtimex`).
+    NotStated,
+}
+
+impl LogClock {
+    /// Whether a wall time stamped so may measure the distance across a reboot: a
+    /// desktop OS keeps its clock by network time without saying so, and a standalone
+    /// meter runs on Linux, which states it.
+    pub fn trusted(self) -> bool {
+        !matches!(self, Self::Unsynced)
+    }
+}
+
+/// How the seconds between a run's first row and the row before it are known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogGap {
+    /// Measured on the boot clock or a trusted wall clock: the index counts them.
+    Known,
+    /// Not known (a reboot with an untrusted clock, a lost high-water mark): the index
+    /// moves on by one and no window spans it.
+    Unknown,
+}
+
 /// One second of an SPL meter's log.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SplLogRow {
-    /// Wall time of the second's first sample.
+    /// The row's key: an index into the log that only rises; within a run it advances by
+    /// the seconds the audio clock counted.
+    pub second: u64,
+    /// The run (one stretch of the meter on one open stream) the row is of, rising.
+    pub run: u32,
+    /// Wall time of the second's first sample, as read (an annotation).
     pub start: WallNs,
+    /// What `start` rests on.
+    pub clock: LogClock,
+    /// On a run's first row, how the distance to the row before is known; `None` on the
+    /// others.
+    pub gap: Option<LogGap>,
     /// Time measured within the second (< 1 s next to a capture gap).
     pub measured: Seconds,
     /// LAeq over the measured time.
@@ -190,6 +236,10 @@ pub enum SplLogWhich {
 pub struct SplLogPage {
     /// SPL measurement.
     pub meas: MeasId,
+    /// When the log started: a log whose rows may differ from what a client cached (a new
+    /// log, a high-water mark lost) starts anew with a new one, and a downloader that sees
+    /// it change mid-download starts over.
+    pub started_at: WallNs,
     /// Number of the first row returned.
     pub from: u64,
     /// Rows logged so far (one past the newest row's number).
@@ -215,16 +265,16 @@ pub enum HistorySpan {
         /// Seconds wanted.
         seconds: u32,
     },
-    /// The seconds that end after `from` and at or before `to`, anywhere in the log, a
-    /// point per `step_s` seconds: buckets of `step_s` whole seconds of Unix time, each
-    /// window's highest Leq in the bucket and over when it was over in any second of it
-    /// (a limit is about the worst moment). At most [`SplHistory::MAX_POINTS`] buckets,
-    /// else refused.
+    /// The seconds whose index lies in `from ..= to`, anywhere in the log, a point per
+    /// `step_s` seconds: buckets of the whole multiples of `step_s` on the index
+    /// (`second / step_s`), each window's highest Leq in the bucket and over when it was
+    /// over in any second of it (a limit is about the worst moment). At most
+    /// [`SplHistory::MAX_POINTS`] buckets, else refused.
     Range {
-        /// Start (exclusive), wall time.
-        from: WallNs,
-        /// End (inclusive), wall time.
-        to: WallNs,
+        /// First second index (inclusive).
+        from: u64,
+        /// Last second index (inclusive).
+        to: u64,
         /// Seconds per point, ≥ 1 (1: each second as the frames carried it).
         step_s: u32,
     },
@@ -245,13 +295,19 @@ pub struct SplHistory {
     pub scale: LevelScale,
     /// Seconds per point: 1, or the `step_s` of a [`HistorySpan::Range`].
     pub step_s: u32,
-    /// Start of the oldest second the log holds; `None` for an empty log.
+    /// Index of the oldest second the log holds; `None` for an empty log.
+    pub first_second: Option<u64>,
+    /// Index of the newest second the log holds; `None` for an empty log.
+    pub last_second: Option<u64>,
+    /// Wall start of the oldest second held, as logged (an annotation of `first_second`).
     pub log_start: Option<WallNs>,
-    /// End of the newest second the log holds; `None` for an empty log.
+    /// Wall end of the newest second held, as logged (an annotation of `last_second`).
     pub log_until: Option<WallNs>,
-    /// End of each second (of each bucket, with `step_s` > 1), oldest first. A second
-    /// without a row (nothing measured) has none, as no frame was sent for it; a bucket
-    /// without any row neither.
+    /// Index of each second (of each bucket's last row, with `step_s` > 1), oldest first.
+    /// A second without a row (nothing measured) has none, as no frame was sent for it; a
+    /// bucket without any row neither.
+    pub second: Vec<u64>,
+    /// Wall end of each point's second, as logged (an annotation beside `second`).
     pub at: Vec<WallNs>,
     /// Per window (as `windows`), its Leq at each point of `at` in `scale` (the highest in
     /// the bucket); NaN when nothing was measured in the window.

@@ -284,6 +284,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::Salvage(Salvage {
             version: Some(19),
             imported: vec![trace_meta()],
+            spl_logs: vec![MeasId(7)],
             refused: vec![SalvageRefusal {
                 file: "traces/9-0a1b2c3d4e5f6071.csv".into(),
                 reason: "ac2 trace CSV version 3; this build reads version 4".into(),

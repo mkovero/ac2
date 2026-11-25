@@ -709,8 +709,8 @@ pub(super) fn band_leq_frame() -> BandLeqFrame {
                     weighting: Weighting::Z,
                     elapsed: Seconds(1800.0),
                     measured: Seconds(1790.0),
-                    period: BandPeriod::Night,
-                    period_after_horizon: BandPeriod::Night,
+                    period: Some(BandPeriod::Night),
+                    period_after_horizon: Some(BandPeriod::Night),
                 },
                 BandWindowState {
                     band: Hz(63.0),
@@ -718,8 +718,8 @@ pub(super) fn band_leq_frame() -> BandLeqFrame {
                     weighting: Weighting::Z,
                     elapsed: Seconds(1800.0),
                     measured: Seconds(1790.0),
-                    period: BandPeriod::Night,
-                    period_after_horizon: BandPeriod::Night,
+                    period: None,
+                    period_after_horizon: None,
                 },
                 BandWindowState {
                     band: Hz(1000.0),
@@ -727,8 +727,8 @@ pub(super) fn band_leq_frame() -> BandLeqFrame {
                     weighting: Weighting::A,
                     elapsed: Seconds(900.0),
                     measured: Seconds(900.0),
-                    period: BandPeriod::Night,
-                    period_after_horizon: BandPeriod::Night,
+                    period: Some(BandPeriod::Night),
+                    period_after_horizon: Some(BandPeriod::Day),
                 },
             ],
             predicted: Some(PredictedLeq {

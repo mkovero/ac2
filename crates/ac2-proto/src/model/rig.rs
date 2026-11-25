@@ -40,6 +40,9 @@ pub struct Rig {
     /// gate: the daemon computes these quantities, so it owns the choice and every client
     /// reads the same bar.
     pub levels: LevelsSettings,
+    /// The host's time zone, read from the OS at start and once a minute: the band
+    /// meter's day and night follow it, and the logs name it.
+    pub zone: super::TimeZone,
     /// Sending OSC.
     pub osc: OutputStatus,
     /// Sending Art-Net.
@@ -150,6 +153,10 @@ mod tests {
                 ..LevelsSettings::default()
             },
             damaged_files: Vec::new(),
+            zone: crate::model::TimeZone {
+                name: None,
+                utc_offset_s: -12_600,
+            },
             osc: OutputStatus {
                 sent: 3,
                 last_error: Some("unreachable".into()),

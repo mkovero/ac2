@@ -2,29 +2,48 @@
 //! SPL meter and what `ac2 spl leq export` writes for compliance records.
 //!
 //! ```text
-//! # ac2 spl log v2
+//! # ac2 spl log v3
 //! # meas: 4
 //! # name: FOH SPL
 //! # input: 2
 //! # mic: M30
-//! start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,lcpeak_1s,lafmax_1s,sensitivity_db,position_db,position_peak_db
-//! 2026-10-03T14:57:25.000Z,1790000245000000000,1,dB SPL,95.1234,98.0000,99.5000,121.2500,101.0000,120.0200,3.0000,2.0000
+//! # zone: Europe/Helsinki
+//! # started: 2026-10-03T14:50:00.000Z
+//! second,run,start_utc,start_ns,clock,gap,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,lcpeak_1s,lafmax_1s,sensitivity_db,position_db,position_peak_db
+//! 0,0,2026-10-03T14:57:25.000Z,1790000245000000000,synced,known,1,dB SPL,95.1234,98.0000,99.5000,121.2500,101.0000,120.0200,3.0000,2.0000
+//! 1,0,2026-10-03T14:57:26.000Z,1790000246000000000,synced,,1,dB SPL,95.0000,98.0000,99.5000,121.2500,101.0000,120.0200,3.0000,2.0000
 //! ```
+//!
+//! A row's key is `second`, an index into the log that only rises: within a run (one
+//! stretch of the meter on one open stream) it advances by the seconds the audio clock
+//! counted, so a wall-clock step changes nothing but the annotation `start_ns`, and a
+//! capture gap shows as missing indices. `gap` (on a run's first row only) says whether the
+//! seconds since the row before are known (`docs/design/protocol-next.md` §7).
 //!
 //! Levels are written in the unit of their row (dB SPL when a sensitivity was in force,
 //! else dBFS) with four decimals: 10⁻⁴ dB is far below anything a one-second level is read
-//! to, and keeps a day's log near 8 MB. Reading back recovers dBFS by subtracting the
+//! to, and keeps a day's log near 9 MB. Reading back recovers dBFS by subtracting the
 //! sensitivity. The levels are what was measured: a measuring-position correction in force
 //! is recorded beside them (energy, peak), never added in.
 
-use crate::model::{PositionCorrection, SplLogRow};
+use crate::model::{LogClock, LogGap, PositionCorrection, SplLogRow};
 use crate::units::{Db, Dbfs, MeasId, Seconds, WallNs};
 use thiserror::Error;
 
+mod read;
+#[cfg(test)]
+mod tests;
+
+pub use read::{LogRead, LogRow, read_log};
+
+/// The version this build writes and reads.
+pub const VERSION: u32 = 3;
 /// First line of every SPL log file.
-pub const HEADER_LINE: &str = "# ac2 spl log v2";
-const COLUMNS: &str = "start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,lcpeak_1s,lafmax_1s,\
-                       sensitivity_db,position_db,position_peak_db";
+pub const HEADER_LINE: &str = "# ac2 spl log v3";
+/// What the first line of an SPL log of any version starts with.
+pub const HEADER_PREFIX: &str = "# ac2 spl log v";
+const COLUMNS: &str = "second,run,start_utc,start_ns,clock,gap,measured_s,unit,laeq_1s,lceq_1s,\
+                       lzeq_1s,lcpeak_1s,lafmax_1s,sensitivity_db,position_db,position_peak_db";
 
 /// Highest level a row can hold, dBFS. The meter squares f32 samples, so no mean square or
 /// peak exceeds `f32::MAX²`: 20·log10(f32::MAX) ≈ 770.6 dB. A higher level is not a
@@ -78,14 +97,28 @@ pub struct SplLogInfo {
     pub input: u16,
     /// The input's mic name, if any.
     pub mic: Option<String>,
+    /// The host's time zone when the header was written: its IANA name, else `±hh:mm`
+    /// ([`crate::model::TimeZone::label`]).
+    pub zone: String,
+    /// When the log started (ms resolution, as the header holds it): the log's identity,
+    /// which a client compares to tell a log it cached from a new one.
+    pub started: WallNs,
 }
 
 /// An unreadable SPL log file.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SplLogError {
-    /// Not an ac2 SPL log of this version.
-    #[error("not an ac2 SPL log (first line must be {HEADER_LINE:?})")]
+    /// Not an ac2 log of this kind.
+    #[error("not an ac2 log of this kind (first line must be {HEADER_LINE:?} or its band log's)")]
     Header,
+    /// An ac2 log of this kind, of another version: read by nothing in this build.
+    #[error("a log of version {found}; this build reads version {reads}")]
+    Version {
+        /// The file's version.
+        found: u32,
+        /// The version this build reads.
+        reads: u32,
+    },
     /// A malformed line.
     #[error("line {line}: {msg}")]
     Line {
@@ -110,6 +143,17 @@ pub fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
 
+/// Days from 1970-01-01 of civil date `y`-`m`-`d` (the inverse of [`civil_from_days`]).
+pub fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let mp = i64::from((m + 9) % 12);
+    let doy = (153 * mp + 2) / 5 + i64::from(d) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
 /// `YYYY-MM-DDThh:mm:ss.mmmZ` of Unix nanoseconds.
 pub fn utc_iso(ns: u64) -> String {
     let secs = ns / 1_000_000_000;
@@ -124,6 +168,78 @@ pub fn utc_iso(ns: u64) -> String {
     )
 }
 
+/// Unix nanoseconds of `YYYY-MM-DDThh:mm:ss.mmmZ` (what [`utc_iso`] writes), on or after
+/// 1970; `None` for anything else.
+pub fn parse_utc_iso(s: &str) -> Option<u64> {
+    let b = s.as_bytes();
+    if b.len() != 24 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' {
+        return None;
+    }
+    if b[16] != b':' || b[19] != b'.' || b[23] != b'Z' {
+        return None;
+    }
+    let n = |r: std::ops::Range<usize>| -> Option<u32> {
+        let t = s.get(r)?;
+        if t.bytes().all(|c| c.is_ascii_digit()) {
+            t.parse().ok()
+        } else {
+            None
+        }
+    };
+    let (y, mo, d) = (n(0..4)?, n(5..7)?, n(8..10)?);
+    let (h, mi, se, ms) = (n(11..13)?, n(14..16)?, n(17..19)?, n(20..23)?);
+    if !(1..=12).contains(&mo) || d == 0 || h > 23 || mi > 59 || se > 59 {
+        return None;
+    }
+    let days = days_from_civil(i64::from(y), mo, d);
+    if civil_from_days(days) != (i64::from(y), mo, d) {
+        return None;
+    }
+    let secs = u64::try_from(days * 86_400 + i64::from(h * 3600 + mi * 60 + se)).ok()?;
+    secs.checked_mul(1_000_000_000)?
+        .checked_add(u64::from(ms) * 1_000_000)
+}
+
+/// A clock column's text.
+pub fn clock_name(c: LogClock) -> &'static str {
+    match c {
+        LogClock::Synced => "synced",
+        LogClock::Unsynced => "unsynced",
+        LogClock::Derived => "derived",
+        LogClock::NotStated => "not_stated",
+    }
+}
+
+/// The clock of a clock column's text.
+pub fn parse_clock(s: &str) -> Option<LogClock> {
+    Some(match s {
+        "synced" => LogClock::Synced,
+        "unsynced" => LogClock::Unsynced,
+        "derived" => LogClock::Derived,
+        "not_stated" => LogClock::NotStated,
+        _ => return None,
+    })
+}
+
+/// A gap column's text (empty on a row that is not its run's first).
+pub fn gap_name(g: Option<LogGap>) -> &'static str {
+    match g {
+        Some(LogGap::Known) => "known",
+        Some(LogGap::Unknown) => "unknown",
+        None => "",
+    }
+}
+
+/// The gap of a gap column's text.
+pub fn parse_gap(s: &str) -> Option<Option<LogGap>> {
+    Some(match s {
+        "known" => Some(LogGap::Known),
+        "unknown" => Some(LogGap::Unknown),
+        "" => None,
+        _ => return None,
+    })
+}
+
 fn level(v: f64) -> String {
     if v == f64::NEG_INFINITY {
         "-inf".into()
@@ -134,21 +250,29 @@ fn level(v: f64) -> String {
     }
 }
 
-/// The header lines, through the column header, for `info`.
-pub fn header(info: &SplLogInfo) -> String {
-    let mut s = String::with_capacity(160);
-    s.push_str(HEADER_LINE);
+/// The header lines of either log kind (first line `first`), through `columns`.
+pub fn header_with(first: &str, info: &SplLogInfo, columns: &str) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::with_capacity(240 + columns.len());
+    s.push_str(first);
     s.push('\n');
-    s.push_str(&format!("# meas: {}\n", info.meas.0));
-    s.push_str(&format!("# name: {}\n", info.name.replace('\n', " ")));
+    let _ = writeln!(s, "# meas: {}", info.meas.0);
+    let _ = writeln!(s, "# name: {}", info.name.replace(['\n', '\r'], " "));
     // Inputs as printed on the interface: 1-based.
-    s.push_str(&format!("# input: {}\n", u32::from(info.input) + 1));
+    let _ = writeln!(s, "# input: {}", u32::from(info.input) + 1);
     if let Some(m) = &info.mic {
-        s.push_str(&format!("# mic: {}\n", m.replace('\n', " ")));
+        let _ = writeln!(s, "# mic: {}", m.replace(['\n', '\r'], " "));
     }
-    s.push_str(COLUMNS);
+    let _ = writeln!(s, "# zone: {}", info.zone.replace(['\n', '\r'], " "));
+    let _ = writeln!(s, "# started: {}", utc_iso(info.started.0));
+    s.push_str(columns);
     s.push('\n');
     s
+}
+
+/// The header lines, through the column header, for `info`.
+pub fn header(info: &SplLogInfo) -> String {
+    header_with(HEADER_LINE, info, COLUMNS)
 }
 
 /// Appends one row's line, newline included, to `s`.
@@ -161,9 +285,13 @@ pub fn push_row(s: &mut String, r: &SplLogRow) {
     let db = |d: Option<f64>| d.map_or_else(String::new, |d| format!("{d:.4}"));
     let _ = writeln!(
         s,
-        "{},{},{},{unit},{},{},{},{},{},{},{},{}",
+        "{},{},{},{},{},{},{},{unit},{},{},{},{},{},{},{},{}",
+        r.second,
+        r.run,
         utc_iso(r.start.0),
         r.start.0,
+        clock_name(r.clock),
+        gap_name(r.gap),
         r.measured.0,
         level(r.laeq.0 + off),
         level(r.lceq.0 + off),
@@ -179,7 +307,7 @@ pub fn push_row(s: &mut String, r: &SplLogRow) {
 /// One header and one row per second.
 pub fn export_csv(info: &SplLogInfo, rows: &[SplLogRow]) -> String {
     let mut s = header(info);
-    s.reserve(rows.len() * 96);
+    s.reserve(rows.len() * 110);
     for r in rows {
         push_row(&mut s, r);
     }
@@ -195,98 +323,69 @@ fn parse_level(s: &str) -> Option<f64> {
 }
 
 /// A log read back.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SplLogRead {
-    /// Rows, oldest first.
-    pub rows: Vec<SplLogRow>,
-    /// Bytes up to the end of the last whole row: where an append carries on.
-    pub complete_len: usize,
-    /// Bytes after it (a torn row, zeros, garbage), cut off before the next append.
-    pub tail: usize,
+pub type SplLogRead = LogRead<SplLogRow>;
+
+impl LogRow for SplLogRow {
+    fn key(&self) -> (u64, u32, Option<LogGap>) {
+        (self.second, self.run, self.gap)
+    }
 }
 
-/// Reads rows back (the header lines are checked, not returned). A log grows a line at a
-/// time and a power cut keeps an unpredictable part of the last appends: a torn last row,
-/// zeros a file system extended the file with (possibly after a torn row, possibly with
-/// newlines among them), bytes that are not text. The rows before the first such line are
-/// the log; that line and everything after it are the tail, cut off
-/// before the next append ([`SplLogRead::complete_len`]). Only a log whose header lines are
-/// unreadable is an error.
+/// Reads an SPL log back ([`read_log`]: header, rows, where an append carries on).
 pub fn import_csv(bytes: &[u8]) -> Result<SplLogRead, SplLogError> {
-    let whole = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
-    let mut rows = Vec::new();
-    let mut header = false;
-    let mut seen_columns = false;
-    let mut complete_len = 0;
-    let mut off = 0;
-    for (i, raw) in bytes[..whole].split_inclusive(|&b| b == b'\n').enumerate() {
-        let line = i + 1;
-        let start = off;
-        off += raw.len();
-        let text = std::str::from_utf8(raw).map(str::trim_end);
-        if !header {
-            match text {
-                Ok(l) if l == HEADER_LINE => header = true,
-                _ => return Err(SplLogError::Header),
-            }
-            complete_len = off;
-            continue;
-        }
-        if let Ok(l) = text
-            && (l.is_empty() || l.starts_with('#'))
-        {
-            complete_len = off;
-            continue;
-        }
-        if !seen_columns {
-            if text != Ok(COLUMNS) {
-                return Err(SplLogError::Line {
-                    line,
-                    msg: "expected the column header".to_owned(),
-                });
-            }
-            seen_columns = true;
-            complete_len = off;
-            continue;
-        }
-        // What a cut leaves past the last whole row: zeros (a file system that committed the
-        // length before the data) or bytes that are not text. A whole line of text that is
-        // not a row was written so, and is an error.
-        let junk = raw.contains(&0) || text.is_err();
-        let parsed = match text {
-            Ok(l) => parse_row(l, line),
-            Err(_) => Err(SplLogError::Header),
-        };
-        match parsed {
-            Ok(row) => {
-                check_row(&row).map_err(|msg| SplLogError::Line {
-                    line,
-                    msg: msg.to_owned(),
-                })?;
-                rows.push(row);
-                complete_len = off;
-            }
-            Err(_) if junk => {
-                complete_len = start;
-                break;
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    if !header {
-        return Err(SplLogError::Header);
-    }
-    if !seen_columns {
-        return Err(SplLogError::Line {
-            line: 1,
-            msg: "no column header".into(),
-        });
-    }
-    Ok(SplLogRead {
-        rows,
-        complete_len,
-        tail: bytes.len() - complete_len,
+    read_log(bytes, HEADER_PREFIX, VERSION, COLUMNS, |l, line| {
+        let row = parse_row(l, line)?;
+        check_row(&row).map_err(|msg| SplLogError::Line {
+            line,
+            msg: msg.to_owned(),
+        })?;
+        Ok(row)
     })
+}
+
+/// The leading `second,run,start_utc,start_ns,clock,gap` fields of a row of either log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowKey {
+    /// Second index.
+    pub second: u64,
+    /// Run.
+    pub run: u32,
+    /// Wall start, ns.
+    pub start: WallNs,
+    /// What `start` rests on.
+    pub clock: LogClock,
+    /// On a run's first row.
+    pub gap: Option<LogGap>,
+}
+
+/// Parses the key fields `f[0..6]`; `f` holds at least six fields.
+pub fn parse_key(f: &[&str], line: usize) -> Result<RowKey, SplLogError> {
+    let bad = |msg: &str| SplLogError::Line {
+        line,
+        msg: msg.to_owned(),
+    };
+    Ok(RowKey {
+        second: f[0].parse().map_err(|_| bad("bad second"))?,
+        run: f[1].parse().map_err(|_| bad("bad run"))?,
+        start: WallNs(f[3].parse().map_err(|_| bad("bad start_ns"))?),
+        clock: parse_clock(f[4]).ok_or_else(|| bad("bad clock"))?,
+        gap: parse_gap(f[5]).ok_or_else(|| bad("bad gap"))?,
+    })
+}
+
+/// Writes the key fields, comma-terminated.
+pub fn push_key(s: &mut String, k: &RowKey) {
+    use std::fmt::Write as _;
+    let _ = write!(
+        s,
+        "{},{},{},{},{},{},",
+        k.second,
+        k.run,
+        utc_iso(k.start.0),
+        k.start.0,
+        clock_name(k.clock),
+        gap_name(k.gap)
+    );
 }
 
 fn parse_row(l: &str, line: usize) -> Result<SplLogRow, SplLogError> {
@@ -295,11 +394,11 @@ fn parse_row(l: &str, line: usize) -> Result<SplLogRow, SplLogError> {
         msg: msg.to_owned(),
     };
     let f: Vec<&str> = l.split(',').collect();
-    if f.len() != 12 {
-        return Err(bad("expected 12 fields"));
+    if f.len() != 16 {
+        return Err(bad("expected 16 fields"));
     }
-    let start: u64 = f[1].parse().map_err(|_| bad("bad start_ns"))?;
-    let measured: f64 = f[2].parse().map_err(|_| bad("bad measured_s"))?;
+    let key = parse_key(&f, line)?;
+    let measured: f64 = f[6].parse().map_err(|_| bad("bad measured_s"))?;
     let opt_db = |t: &str, what: &str| {
         if t.is_empty() {
             Ok(None)
@@ -309,10 +408,10 @@ fn parse_row(l: &str, line: usize) -> Result<SplLogRow, SplLogError> {
                 .map_err(|_| bad(&format!("bad {what}")))
         }
     };
-    let sensitivity = opt_db(f[9], "sensitivity_db")?;
+    let sensitivity = opt_db(f[13], "sensitivity_db")?;
     let position = match (
-        opt_db(f[10], "position_db")?,
-        opt_db(f[11], "position_peak_db")?,
+        opt_db(f[14], "position_db")?,
+        opt_db(f[15], "position_peak_db")?,
     ) {
         (None, None) => None,
         (Some(level), Some(peak)) => Some(PositionCorrection {
@@ -321,7 +420,7 @@ fn parse_row(l: &str, line: usize) -> Result<SplLogRow, SplLogError> {
         }),
         _ => return Err(bad("position_db and position_peak_db go together")),
     };
-    match (f[3], sensitivity) {
+    match (f[7], sensitivity) {
         ("dB SPL", Some(_)) | ("dBFS", None) => {}
         _ => return Err(bad("unit and sensitivity disagree")),
     }
@@ -331,205 +430,19 @@ fn parse_row(l: &str, line: usize) -> Result<SplLogRow, SplLogError> {
             .map(|v| Dbfs(v - off))
             .ok_or_else(|| bad("bad level"))
     };
-    let row = SplLogRow {
-        start: WallNs(start),
+    Ok(SplLogRow {
+        second: key.second,
+        run: key.run,
+        start: key.start,
+        clock: key.clock,
+        gap: key.gap,
         measured: Seconds(measured),
-        laeq: lv(f[4])?,
-        lceq: lv(f[5])?,
-        lzeq: lv(f[6])?,
-        lcpeak: lv(f[7])?,
-        lafmax: lv(f[8])?,
+        laeq: lv(f[8])?,
+        lceq: lv(f[9])?,
+        lzeq: lv(f[10])?,
+        lcpeak: lv(f[11])?,
+        lafmax: lv(f[12])?,
         sensitivity: sensitivity.map(Db),
         position,
-    };
-    Ok(row)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn rows() -> Vec<SplLogRow> {
-        vec![
-            SplLogRow {
-                start: WallNs(1_790_000_245_000_000_000),
-                measured: Seconds(1.0),
-                laeq: Dbfs(-24.9),
-                lceq: Dbfs(-22.0),
-                lzeq: Dbfs(-20.5),
-                lcpeak: Dbfs(1.23),
-                lafmax: Dbfs(-19.02),
-                sensitivity: Some(Db(120.02)),
-                position: Some(PositionCorrection {
-                    level: Db(3.0),
-                    peak: Db(2.0),
-                }),
-            },
-            SplLogRow {
-                start: WallNs(1_790_000_246_000_000_000),
-                measured: Seconds(0.25),
-                laeq: Dbfs(f64::NEG_INFINITY),
-                lceq: Dbfs(-90.125),
-                lzeq: Dbfs(-80.0),
-                lcpeak: Dbfs(-70.0),
-                lafmax: Dbfs(f64::NEG_INFINITY),
-                sensitivity: None,
-                position: None,
-            },
-        ]
-    }
-
-    #[test]
-    fn utc_text() {
-        assert_eq!(utc_iso(0), "1970-01-01T00:00:00.000Z");
-        // 2026-10-03 14:57:25.5 UTC.
-        assert_eq!(
-            utc_iso(1_791_039_445_500_000_000),
-            "2026-10-03T14:57:25.500Z"
-        );
-        assert_eq!(utc_iso(951_782_400_000_000_000), "2000-02-29T00:00:00.000Z");
-    }
-
-    #[test]
-    fn civil_dates() {
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-        assert_eq!(civil_from_days(-1), (1969, 12, 31));
-        assert_eq!(civil_from_days(11_016), (2000, 2, 29));
-        assert_eq!(civil_from_days(-719_468), (0, 3, 1));
-        // Every day of 1900–2100 follows the one before.
-        let mut prev = civil_from_days(-25_567);
-        assert_eq!(prev, (1900, 1, 1));
-        for days in -25_566..47_482 {
-            let (y, m, d) = civil_from_days(days);
-            let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-            let len = [
-                31,
-                if leap { 29 } else { 28 },
-                31,
-                30,
-                31,
-                30,
-                31,
-                31,
-                30,
-                31,
-                30,
-                31,
-            ];
-            let next = if prev.2 < len[(prev.1 - 1) as usize] {
-                (prev.0, prev.1, prev.2 + 1)
-            } else if prev.1 < 12 {
-                (prev.0, prev.1 + 1, 1)
-            } else {
-                (prev.0 + 1, 1, 1)
-            };
-            assert_eq!((y, m, d), next, "{days}");
-            prev = (y, m, d);
-        }
-        assert_eq!(prev, (2099, 12, 31));
-    }
-
-    #[test]
-    fn round_trip() {
-        let info = SplLogInfo {
-            meas: MeasId(4),
-            name: "FOH SPL".into(),
-            input: 1,
-            mic: Some("M30".into()),
-        };
-        let csv = export_csv(&info, &rows());
-        let lines: Vec<&str> = csv.lines().collect();
-        assert_eq!(lines[0], HEADER_LINE);
-        assert_eq!(lines[4], "# mic: M30");
-        assert_eq!(lines[5], COLUMNS);
-        assert_eq!(
-            lines[6],
-            "2026-09-21T14:17:25.000Z,1790000245000000000,1,dB SPL,95.1200,98.0200,99.5200,\
-             121.2500,101.0000,120.0200,3.0000,2.0000"
-        );
-        assert_eq!(
-            lines[7],
-            "2026-09-21T14:17:26.000Z,1790000246000000000,0.25,dBFS,-inf,-90.1250,-80.0000,\
-             -70.0000,-inf,,,"
-        );
-        let back = import_csv(csv.as_bytes()).expect("reads back").rows;
-        assert_eq!(back.len(), 2);
-        for (a, b) in back.iter().zip(rows()) {
-            assert_eq!(a.start, b.start);
-            assert_eq!(a.measured, b.measured);
-            assert_eq!(a.sensitivity, b.sensitivity);
-            assert_eq!(a.position, b.position);
-            for (x, y) in [
-                (a.laeq, b.laeq),
-                (a.lceq, b.lceq),
-                (a.lzeq, b.lzeq),
-                (a.lcpeak, b.lcpeak),
-                (a.lafmax, b.lafmax),
-            ] {
-                assert!(x.0 == y.0 || (x.0 - y.0).abs() < 1e-9, "{x:?} {y:?}");
-            }
-        }
-    }
-
-    /// A log cut short by a power cut reads up to its last whole line and says where that
-    /// ends, so an append carries on from there.
-    #[test]
-    fn an_unterminated_last_line_is_left_out() {
-        let info = SplLogInfo {
-            meas: MeasId(1),
-            name: "m".into(),
-            input: 0,
-            mic: None,
-        };
-        let csv = export_csv(&info, &rows());
-        let whole = import_csv(csv.as_bytes()).expect("whole");
-        assert_eq!((whole.rows.len(), whole.complete_len), (2, csv.len()));
-        let one = csv.len() - csv.lines().last().expect("row").len() - 1;
-        for cut in [csv.len() - 1, csv.len() - 30, one + 1] {
-            let r = import_csv(&csv.as_bytes()[..cut]).expect("cut");
-            assert_eq!((r.rows.len(), r.complete_len), (1, one), "cut at {cut}");
-        }
-        let mut zeros = csv.clone().into_bytes();
-        zeros.truncate(one + 7);
-        zeros.extend([0u8; 300]);
-        let r = import_csv(&zeros).expect("zeros");
-        assert_eq!((r.rows.len(), r.complete_len), (1, one));
-        // Zeros after a torn row, with newlines among them, several KiB: the rows before.
-        for tail in [
-            [&b"2026-10-1"[..], &[0u8; 4096], b"\n", &[0u8; 512], b"\n"].concat(),
-            [&[0u8; 8192][..], b"\n"].concat(),
-            b"\xff\xfe\x00garbage\n\x01\n".to_vec(),
-        ] {
-            let mut b = csv.clone().into_bytes();
-            b.extend(&tail);
-            let r = import_csv(&b).expect("zero tail");
-            assert_eq!((r.rows.len(), r.complete_len), (2, csv.len()));
-            assert_eq!(r.tail, tail.len());
-        }
-        // A malformed whole line is damage, not a cut.
-        let bad = format!("{csv}x,1\n");
-        assert!(import_csv(bad.as_bytes()).is_err());
-    }
-
-    #[test]
-    fn refuses_what_it_did_not_write() {
-        assert_eq!(import_csv(b"start,leq\n"), Err(SplLogError::Header));
-        assert_eq!(import_csv(HEADER_LINE.as_bytes()), Err(SplLogError::Header));
-        let bad = format!("{HEADER_LINE}\n{COLUMNS}\n1,2,3\n");
-        assert!(matches!(
-            import_csv(bad.as_bytes()),
-            Err(SplLogError::Line { line: 3, .. })
-        ));
-        let bad = format!("{HEADER_LINE}\n{COLUMNS}\nx,1,1,dBFS,1,1,1,1,1,120,,\n");
-        assert!(matches!(
-            import_csv(bad.as_bytes()),
-            Err(SplLogError::Line { line: 3, .. })
-        ));
-        // A correction is energy and peak together.
-        let bad = format!("{HEADER_LINE}\n{COLUMNS}\n1,1,1,dB SPL,1,1,1,1,1,120,3,\n");
-        assert!(matches!(
-            import_csv(bad.as_bytes()),
-            Err(SplLogError::Line { line: 3, .. })
-        ));
-    }
+    })
 }

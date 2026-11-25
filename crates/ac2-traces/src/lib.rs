@@ -14,6 +14,7 @@ pub mod check;
 pub mod columns;
 pub mod eq;
 pub mod ir_wav;
+pub mod log_mark;
 pub mod math;
 pub mod meta;
 pub mod mic;

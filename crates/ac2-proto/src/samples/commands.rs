@@ -229,8 +229,8 @@ pub fn commands() -> Vec<Command> {
         Command::SplHistoryGet {
             meas: MeasId(4),
             span: HistorySpan::Range {
-                from: WallNs(1_789_500_000_000_000_000),
-                to: WallNs(1_789_510_800_000_000_000),
+                from: 86_400,
+                to: 97_199,
                 step_s: 30,
             },
         },

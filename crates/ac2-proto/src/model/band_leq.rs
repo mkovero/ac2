@@ -223,12 +223,23 @@ pub enum BandLevelSource {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BandLogSecond {
-    /// Wall time of the second's start.
+    /// The row's key, as [`super::SplLogRow::second`].
+    pub second: u64,
+    /// Its run, as [`super::SplLogRow::run`].
+    pub run: u32,
+    /// Wall time of the second's start, as read (an annotation).
     pub start: WallNs,
+    /// What `start` rests on.
+    pub clock: super::LogClock,
+    /// On a run's first row, how the distance to the row before is known.
+    pub gap: Option<super::LogGap>,
     /// Time measured within it (0 … 1 s).
     pub measured: Seconds,
-    /// Limit set of its local start.
-    pub period: BandPeriod,
+    /// The zone's offset from UTC in force when the period was judged, s east.
+    pub utc_offset_s: i32,
+    /// Limit set of its local start; `None`: can't tell (the clock was unsynced on a host
+    /// without an RTC, so the time of day was not known).
+    pub period: Option<BandPeriod>,
     /// §13 correction in force (not included in `levels`).
     pub correction: Db,
     /// dB SPL of 0 dBFS in force, if calibrated.

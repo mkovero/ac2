@@ -85,8 +85,8 @@ bitmask!(
 
 bitmask!(
     /// State of a rolling Leq window. Its judgement ([`LeqFlags::judgement`]) is "no
-    /// limit" without `LIMIT`, "not calibrated" with `LIMIT` but without `JUDGED`, else
-    /// over, near or ok.
+    /// limit" without `LIMIT`, "can't tell" with `LIMIT` and `CANT_TELL`, "not calibrated"
+    /// with `LIMIT` but without `JUDGED`, else over, near or ok.
     LeqFlags {
         /// The window has a limit.
         LIMIT = 1 << 0;
@@ -105,6 +105,9 @@ bitmask!(
         /// Filling, with the Leq so far above the limit: at the pace so far the full window
         /// ends over it (with `NEAR`).
         ON_COURSE = 1 << 6;
+        /// A band window's day/night limit, not judged: the time of day is not known (the
+        /// clock unsynced on a host without an RTC). Never with `JUDGED`.
+        CANT_TELL = 1 << 7;
     }
 );
 
@@ -113,6 +116,8 @@ impl LeqFlags {
     pub fn judgement(self) -> LeqJudgement {
         if !self.contains(Self::LIMIT) {
             LeqJudgement::NoLimit
+        } else if self.contains(Self::CANT_TELL) {
+            LeqJudgement::CantTell
         } else if !self.contains(Self::JUDGED) {
             LeqJudgement::NotCalibrated
         } else if self.contains(Self::OVER) {

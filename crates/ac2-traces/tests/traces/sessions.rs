@@ -80,10 +80,16 @@ pub(super) fn session_sample() -> Session {
                 name: "FOH SPL".into(),
                 input: 1,
                 mic: None,
+                zone: "Europe/Helsinki".into(),
+                started: WallNs(1_789_999_000_000_000_000),
             },
             rows: (0..3)
                 .map(|k| SplLogRow {
+                    second: k,
+                    run: 0,
                     start: WallNs(1_790_000_000_000_000_000 + k * 1_000_000_000),
+                    clock: ac2_proto::model::LogClock::Synced,
+                    gap: (k == 0).then_some(ac2_proto::model::LogGap::Known),
                     measured: Seconds(1.0),
                     laeq: Dbfs(-25.5 + k as f64),
                     lceq: Dbfs(-23.25),
@@ -97,18 +103,24 @@ pub(super) fn session_sample() -> Session {
             // Quarter-dB levels: the file's 0.01 dB reads them back exactly.
             bands: (0..2)
                 .map(|k| ac2_traces::band_log::BandLogRow {
+                    second: k,
+                    run: 0,
                     start: WallNs(1_790_000_000_000_000_000 + k * 1_000_000_000),
+                    clock: ac2_proto::model::LogClock::Synced,
+                    gap: (k == 0).then_some(ac2_proto::model::LogGap::Known),
                     measured: Seconds(1.0),
+                    utc_offset_s: 7_200,
                     levels: std::array::from_fn(|i| -60.25 + i as f32 * 0.5 + k as f32),
                     correction: Db(if k == 0 { 0.0 } else { 5.0 }),
                     period: if k == 0 {
-                        ac2_proto::model::BandPeriod::Day
+                        Some(ac2_proto::model::BandPeriod::Day)
                     } else {
-                        ac2_proto::model::BandPeriod::Night
+                        None
                     },
                     sensitivity: Some(Db(120.0)),
                 })
                 .collect(),
+            mark: None,
         }],
         traces: vec![a, b],
         walks: vec![ac2_proto::samples::walk()],
@@ -260,6 +272,7 @@ fn autosave_in_place_writes_only_what_changed() {
             rows: log.rows.len() as u64,
             complete_len: whole_len as u64,
             bands: None,
+            mark_fault: Some("no high-water mark".into()),
         }]
     );
 }

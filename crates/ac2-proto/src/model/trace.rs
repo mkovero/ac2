@@ -588,6 +588,9 @@ pub struct Salvage {
     pub version: Option<u32>,
     /// Traces imported, in file order.
     pub imported: Vec<TraceMeta>,
+    /// SPL logs recovered, in file order: each a stopped SPL measurement of session
+    /// scope holding the log as its current log.
+    pub spl_logs: Vec<MeasId>,
     /// Files not imported.
     pub refused: Vec<SalvageRefusal>,
 }
