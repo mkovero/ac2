@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use ac2_proto::model::{ClientRole, State};
 use ac2_proto::units::{ClientId, RequestId};
 use ac2_proto::{
-    Command, ErrorCode, ErrorDetail, GridDef, GridId, ProtoError, ReplyBody, Request,
+    Command, ErrorCode, ErrorDetail, GridDef, GridId, ProtoError, Reply, ReplyBody, Request,
     StateSnapshot, Subscription, Warning, Welcome, encode_request,
 };
 use ac2_zmq::{Context, CurveClient, Socket, SocketType, TcpLiveness};
@@ -211,6 +211,44 @@ impl CallCore {
         cmd: Command,
         retry: Retry,
     ) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
+        let (op, id, bytes, mut rx) = self.start(cmd)?;
+        // Removes the waiter however this future ends (reply, timeout or cancellation).
+        struct Guard<'a>(&'a CallCore, u64);
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) {
+                self.0.forget(self.1);
+            }
+        }
+        let _guard = Guard(self, id);
+        self.finish(op, &bytes, &mut rx, retry).await
+    }
+
+    /// [`Self::start`], the reply to be awaited apart ([`SentCall::reply`]).
+    pub(crate) fn send(
+        self: &Arc<Self>,
+        cmd: Command,
+        retry: Retry,
+    ) -> Result<SentCall, ClientError> {
+        let (op, id, bytes, rx) = self.start(cmd)?;
+        Ok(SentCall {
+            core: self.clone(),
+            op,
+            id,
+            bytes,
+            rx,
+            retry,
+        })
+    }
+
+    fn forget(&self, id: u64) {
+        if let Ok(mut p) = self.io.pending.lock() {
+            p.remove(&id);
+        }
+    }
+
+    /// Encodes `cmd`, registers its waiter and sends it once, before anything is awaited:
+    /// what is started in order reaches the socket in that order.
+    fn start(&self, cmd: Command) -> Result<Started, ClientError> {
         let op = cmd.name();
         let req = Request::new(self.next_id(), cmd);
         let bytes = encode_request(&req).map_err(ClientError::Encode)?;
@@ -220,26 +258,34 @@ impl CallCore {
                 bytes: bytes.len(),
             });
         }
-        let (tx, mut rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let id = req.id.0;
         self.io
             .pending
             .lock()
             .map_err(|_| ClientError::Closed)?
             .insert(id, tx);
-        // Removes the waiter however this future ends (reply, timeout or cancellation).
-        struct Guard<'a>(&'a CallCore, u64);
-        impl Drop for Guard<'_> {
-            fn drop(&mut self) {
-                if let Ok(mut p) = self.0.io.pending.lock() {
-                    p.remove(&self.1);
-                }
-            }
+        if let Err(e) = self.io.send(&bytes) {
+            self.forget(id);
+            return Err(e);
         }
-        let _guard = Guard(self, id);
+        Ok((op, id, bytes, rx))
+    }
+
+    /// The reply to a request [`Self::start`] sent, resent after each timeout the retry
+    /// policy allows.
+    async fn finish(
+        &self,
+        op: &'static str,
+        bytes: &[u8],
+        rx: &mut oneshot::Receiver<Result<Reply, ClientError>>,
+        retry: Retry,
+    ) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
         let attempts = retry.retries.saturating_add(1);
-        for _ in 0..attempts {
-            self.io.send(&bytes)?;
+        for attempt in 0..attempts {
+            if attempt > 0 {
+                self.io.send(bytes)?;
+            }
             // In slices: a refused key is known within a handshake, long before the
             // attempt's timeout.
             let until = tokio::time::Instant::now() + retry.timeout;
@@ -248,7 +294,7 @@ impl CallCore {
                 if left.is_zero() {
                     break;
                 }
-                match tokio::time::timeout(left.min(REFUSAL_POLL), &mut rx).await {
+                match tokio::time::timeout(left.min(REFUSAL_POLL), &mut *rx).await {
                     Ok(Ok(reply)) => {
                         let reply = reply?;
                         return match reply.result {
@@ -276,6 +322,39 @@ impl CallCore {
         if let Ok(bytes) = encode_request(&req) {
             let _ = self.io.send(&bytes);
         }
+    }
+}
+
+type Started = (
+    &'static str,
+    u64,
+    Vec<u8>,
+    oneshot::Receiver<Result<Reply, ClientError>>,
+);
+
+/// A request sent whose reply is still to come ([`Client::send_warned`]).
+#[derive(Debug)]
+pub struct SentCall {
+    core: Arc<CallCore>,
+    op: &'static str,
+    id: u64,
+    bytes: Vec<u8>,
+    rx: oneshot::Receiver<Result<Reply, ClientError>>,
+    retry: Retry,
+}
+
+impl SentCall {
+    /// The reply, with its warnings; resent after a timeout as [`Client::call`] does.
+    pub async fn reply(mut self) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
+        let core = self.core.clone();
+        core.finish(self.op, &self.bytes, &mut self.rx, self.retry)
+            .await
+    }
+}
+
+impl Drop for SentCall {
+    fn drop(&mut self) {
+        self.core.forget(self.id);
     }
 }
 
@@ -500,6 +579,15 @@ impl Client {
         view_only_gate(self.role(), &cmd)?;
         let r = self.inner.core.retry;
         self.inner.core.call_warned(cmd, r).await
+    }
+
+    /// Sends `cmd` now, with the default retry policy; the reply is awaited apart. Calls
+    /// sent this way reach the daemon in the order they were sent, which it executes them
+    /// in, however their replies are awaited.
+    pub fn send_warned(&self, cmd: Command) -> Result<SentCall, ClientError> {
+        view_only_gate(self.role(), &cmd)?;
+        let core = &self.inner.core;
+        core.send(cmd, core.retry)
     }
 
     /// Sends `cmd` with an explicit retry policy.

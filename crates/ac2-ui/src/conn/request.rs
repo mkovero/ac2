@@ -66,9 +66,12 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
             super::meas_edit::send(client, meas, cmd, what, out);
         }
         Request::Call { cmd, what } => {
-            let (c, o) = (client.clone(), out.clone());
+            // Sent here, in the order the app made its requests; only the reply is awaited
+            // apart.
+            let sent = client.send_warned(cmd);
+            let o = out.clone();
             tokio::spawn(async move {
-                match c.call_warned(cmd).await {
+                match async { sent?.reply().await }.await {
                     Err(e) if e.code() == Some(ac2_proto::ErrorCode::Conflict) => {
                         o.send(ConnEvent::Conflict {
                             what,
