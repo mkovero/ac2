@@ -489,7 +489,7 @@ fn measurements(i: &Input<'_>) -> Section {
             let trouble = l.starts_with("link offset too small") || l.contains("slipped");
             row = row.more(Line::trouble(l.clone(), trouble));
         }
-        if let Some(d) = &m.delay {
+        if let Some(d) = st.delays.iter().find(|d| d.meas == m.id) {
             let basis = if i.verbose {
                 ac2_scene::cross_rig::delay_basis(d.applied.0, ours, &br::name_of(r, x.rig))
             } else {

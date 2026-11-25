@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    CalEntry, Clocks, DynamicsRun, Generator, InputSetup, LineCalEntry, Measurement, Mic,
-    OutputSetup, Pair, PlanSpec, RecordingRun, RemoteState, Rig, ServerSummary, SimFitKept,
-    SimState, SplLog, Stream, SweepRun, TraceMeta, WalkState, WorkingSession,
+    CalEntry, Clocks, Delay, DelayFinding, DynamicsRun, Generator, InputSetup, LineCalEntry,
+    Measurement, Mic, OutputSetup, Pair, PlanSpec, RecordingRun, RemoteState, Rig, ServerSummary,
+    SimFitKept, SimState, SplLog, Stream, SweepRun, TraceMeta, WalkState, WorkingSession,
 };
 use crate::units::{MeasId, SampleIndex, Samples, Seconds, WallNs};
 
@@ -89,6 +89,10 @@ pub struct State {
     pub stream: Stream,
     /// Measurements.
     pub measurements: Vec<Measurement>,
+    /// The transfer measurements' delays, sorted by measurement.
+    pub delays: Vec<Delay>,
+    /// The transfer measurements' last delay findings, sorted by measurement.
+    pub delay_findings: Vec<DelayFinding>,
     /// Traces.
     pub traces: Vec<TraceMeta>,
     /// Generator.
@@ -144,6 +148,25 @@ pub struct State {
     pub sim_fit: Option<SimFitKept>,
     /// The network listener, in short (details and key lists: `server.info`).
     pub server: ServerSummary,
+}
+
+impl State {
+    /// The delay of transfer measurement `meas`; `None` between its measurement's commit and
+    /// the delay's, which a reader takes as zero and not settled.
+    pub fn delay(&self, meas: MeasId) -> Option<&Delay> {
+        self.delays
+            .binary_search_by_key(&meas, |d| d.meas)
+            .ok()
+            .map(|i| &self.delays[i])
+    }
+
+    /// The last delay finding of transfer measurement `meas`, if one stands.
+    pub fn delay_finding(&self, meas: MeasId) -> Option<&DelayFinding> {
+        self.delay_findings
+            .binary_search_by_key(&meas, |f| f.meas)
+            .ok()
+            .map(|i| &self.delay_findings[i])
+    }
 }
 
 /// Autosave of the measurements and traces: the daemon writes them, in the session file

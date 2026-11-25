@@ -355,6 +355,7 @@ impl Control {
         self.s.outbox.clear(format!("bins/{}/", id.0).as_bytes());
         self.kept.unframed(id);
         self.drop_spl_log(id);
+        self.drop_delay(id);
         self.commit(Change::Measurement(Patch::Deleted(id)))
     }
 }

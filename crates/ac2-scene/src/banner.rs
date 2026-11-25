@@ -54,7 +54,7 @@
 //! a banner is up; the plots below shrink by its height ([`banner_strip`]).
 
 use ac2_proto::frame::ProtectionFlags;
-use ac2_proto::model::{MeasKind, Measurement, NoEstimateReason, TimingState};
+use ac2_proto::model::{Delay, DelayFinding, MeasKind, Measurement, NoEstimateReason, TimingState};
 
 use crate::format;
 use crate::math::MathStatus;
@@ -182,17 +182,21 @@ pub enum NoDelayEstimate {
 
 /// Whether (and why) a TF measurement has no delay the operator can rely on: none inserted
 /// yet, tracking without a current finding, or a last finding that refused.
-pub fn no_delay_estimate(m: &Measurement) -> Option<NoDelayEstimate> {
+pub fn no_delay_estimate(
+    m: &Measurement,
+    delay: Option<&Delay>,
+    finding: Option<&DelayFinding>,
+) -> Option<NoDelayEstimate> {
     if !matches!(m.config.kind, MeasKind::Transfer { .. }) {
         return None;
     }
-    let Some(d) = &m.delay else {
+    let Some(d) = delay else {
         return Some(NoDelayEstimate::NotFound);
     };
     if d.awaiting_pick {
         return Some(NoDelayEstimate::AwaitingPick);
     }
-    match &d.last_finding {
+    match finding {
         Some(f) => f
             .no_estimate()
             .map(|r| NoDelayEstimate::Refused(r.to_vec())),

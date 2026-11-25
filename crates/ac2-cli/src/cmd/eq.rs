@@ -366,7 +366,16 @@ pub(crate) async fn meas_eq(
                 }
                 None => body.sections.push(sec),
             }
-            let m2 = edit(c, m.id, EqEdit::Put { set: set.id, body }).await?;
+            let m2 = edit(
+                c,
+                m.id,
+                EqEdit::Put {
+                    set: set.id,
+                    base: set.rev,
+                    body,
+                },
+            )
+            .await?;
             emit_set(out, &m2, set.id, Some(&s))?;
         }
         MeasEqCmd::Set {
@@ -400,7 +409,16 @@ pub(crate) async fn meas_eq(
                 sec.enabled = true;
             }
             set_fields(&mut sec.shape, f.map(|x| x.0), *gain, *q, *oct)?;
-            let m2 = edit(c, m.id, EqEdit::Put { set: set.id, body }).await?;
+            let m2 = edit(
+                c,
+                m.id,
+                EqEdit::Put {
+                    set: set.id,
+                    base: set.rev,
+                    body,
+                },
+            )
+            .await?;
             emit_set(out, &m2, set.id, Some(&s))?;
         }
         MeasEqCmd::Rm { meas, index, pick } => {
@@ -415,7 +433,16 @@ pub(crate) async fn meas_eq(
                 )));
             }
             body.sections.remove(index - 1);
-            let m2 = edit(c, m.id, EqEdit::Put { set: set.id, body }).await?;
+            let m2 = edit(
+                c,
+                m.id,
+                EqEdit::Put {
+                    set: set.id,
+                    base: set.rev,
+                    body,
+                },
+            )
+            .await?;
             emit_set(out, &m2, set.id, Some(&s))?;
         }
         MeasEqCmd::Bypass { meas, off, pick } => {
@@ -423,7 +450,16 @@ pub(crate) async fn meas_eq(
             let set = pick_set(m, pick)?;
             let mut body = set.body.clone();
             body.enabled = *off;
-            let m2 = edit(c, m.id, EqEdit::Put { set: set.id, body }).await?;
+            let m2 = edit(
+                c,
+                m.id,
+                EqEdit::Put {
+                    set: set.id,
+                    base: set.rev,
+                    body,
+                },
+            )
+            .await?;
             emit_set(out, &m2, set.id, Some(&s))?;
         }
         MeasEqCmd::On {
@@ -595,7 +631,19 @@ pub(crate) async fn meas_eq(
                         name: t.body.name.clone(),
                         ..body
                     };
-                    (edit(c, m.id, EqEdit::Put { set: t.id, body }).await?, t.id)
+                    (
+                        edit(
+                            c,
+                            m.id,
+                            EqEdit::Put {
+                                set: t.id,
+                                base: t.rev,
+                                body,
+                            },
+                        )
+                        .await?,
+                        t.id,
+                    )
                 }
                 None => {
                     let before: Vec<EqSetId> = m.eq.iter().map(|x| x.id).collect();
@@ -617,11 +665,21 @@ pub(crate) async fn meas_eq(
                         .find(|x| !before.contains(&x.id))
                         .map_or(EqSetId(0), |x| x.id);
                     if !enabled && let Some(new) = m2.eq.iter().find(|x| x.id == id) {
+                        let base = new.rev;
                         let body = EqBody {
                             enabled: false,
                             ..new.body.clone()
                         };
-                        m2 = edit(c, m.id, EqEdit::Put { set: id, body }).await?;
+                        m2 = edit(
+                            c,
+                            m.id,
+                            EqEdit::Put {
+                                set: id,
+                                base,
+                                body,
+                            },
+                        )
+                        .await?;
                     }
                     (m2, id)
                 }

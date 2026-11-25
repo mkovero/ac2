@@ -17,6 +17,8 @@
         "type": "synced"
       }
     },
+    "delay_findings": [],
+    "delays": [],
     "dynamics": null,
     "generator": {
       "armed": false,

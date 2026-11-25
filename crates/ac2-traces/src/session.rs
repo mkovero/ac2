@@ -100,7 +100,7 @@ pub struct SavedDelay {
     /// Applied delay.
     pub applied: Seconds,
     /// What `delay.nudge` steps added to the arrival
-    /// ([`ac2_proto::model::DelayState::nudged`]).
+    /// ([`ac2_proto::model::Delay::nudged`]).
     pub nudged: Seconds,
     /// Tracking on.
     pub tracking: bool,

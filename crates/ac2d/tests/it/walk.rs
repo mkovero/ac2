@@ -121,6 +121,11 @@ impl Rig {
             .unwrap()
     }
 
+    /// Whether transfer measurement `id` tracks its delay now.
+    fn tracking(&mut self, id: MeasId) -> bool {
+        self.c.delay_now(id).tracking
+    }
+
     fn trace(&mut self, id: TraceId) -> TraceMeta {
         self.state()
             .traces
@@ -201,11 +206,11 @@ fn captured(w: &WalkState, i: usize) -> TraceId {
 fn moving_to_a_point_resets_each_walk_measurement_and_turns_tracking_on() {
     let mut r = rig("walk-move", manual_rig());
     r.fill();
-    assert!(!r.meas(MeasId(1)).delay.unwrap().tracking);
+    assert!(!r.tracking(MeasId(1)));
 
     let w = r.new_walk(&["P1", "P2", "P3"]);
     assert_eq!(w.step, Some(0));
-    assert!(r.meas(MeasId(1)).delay.unwrap().tracking);
+    assert!(r.tracking(MeasId(1)));
     let first = r.fill();
     assert!(first < 0.5, "walk.new restarts the averages: {first}");
 
@@ -231,11 +236,11 @@ fn captures_carry_positions_and_a_delay_step_restarts_filled() {
     r.fill();
     // A delay step mid-walk starts the stages over: a capture now is unsettled.
     let rev =
-        r.c.measurement(Command::DelaySet {
+        r.c.delay(Command::DelaySet {
             meas: MeasId(1),
             delay: Seconds(0.05),
         })
-        .config_rev
+        .rev
         .0;
     let f = filled(&r.frame(0.1, rev));
     assert!(f < 1.0, "{f}");
@@ -363,7 +368,7 @@ fn second_mic(r: &mut Rig) -> MeasId {
 }
 
 fn tracking(r: &mut Rig, meas: MeasId) -> bool {
-    r.meas(meas).delay.is_some_and(|d| d.tracking)
+    r.state().delay(meas).is_some_and(|d| d.tracking)
 }
 
 #[test]
@@ -494,7 +499,7 @@ fn what_a_walk_names_cannot_be_deleted_and_its_delete_keeps_them() {
             assert_eq!(e.code, ErrorCode::Refused, "{meas}: {e:?}");
         }
     }
-    let base = r.meas(MeasId(1)).config_rev;
+    let base = r.meas(MeasId(1)).edit_rev;
     let e =
         r.c.call(Command::MeasUpdate {
             meas: MeasId(1),
@@ -619,7 +624,7 @@ fn awaiting_pick_reaches_the_walk_pane_and_marks_the_capture_unsettled() {
     // What the walk pane reads: its walk, at P1, with the measurement waiting for a pick.
     let st = r.state();
     let m = st.measurements.iter().find(|m| m.id == MeasId(1)).unwrap();
-    assert!(m.delay.as_ref().unwrap().awaiting_pick);
+    assert!(st.delay(MeasId(1)).unwrap().awaiting_pick);
     let Some(PaneLayout::Pane { pane }) = &m.layout else {
         panic!("{:?}", m.layout);
     };
@@ -712,12 +717,12 @@ fn a_loaded_walk_restarts_its_measurements_on_their_first_run_only() {
     });
     let m = r.meas(MeasId(1));
     assert!(!m.running);
-    assert!(!m.delay.unwrap().tracking);
+    assert!(!r.tracking(MeasId(1)));
     resume_audio(&mut r);
 
     // The first run is a move: tracking on, the average starts empty.
-    let started = r.c.measurement(Command::MeasStart { meas: MeasId(1) });
-    assert!(started.delay.as_ref().unwrap().tracking, "{started:?}");
+    r.c.ok(Command::MeasStart { meas: MeasId(1) });
+    assert!(r.tracking(MeasId(1)));
     let first = r.fill();
     assert!(first < 0.5, "the first run restarts the averages: {first}");
 
@@ -728,12 +733,12 @@ fn a_loaded_walk_restarts_its_measurements_on_their_first_run_only() {
     });
     let rev = r.meas(MeasId(1)).config_rev.0;
     r.c.ok(Command::MeasStart { meas: MeasId(1) });
-    assert!(!r.meas(MeasId(1)).delay.unwrap().tracking);
+    assert!(!r.tracking(MeasId(1)));
     let again = filled(&r.frame(0.1, rev));
     assert_eq!(again, 1.0, "a second start keeps the average");
     r.c.ok(Command::MeasStop { meas: MeasId(1) });
     r.c.ok(Command::MeasStart { meas: MeasId(1) });
-    assert!(!r.meas(MeasId(1)).delay.unwrap().tracking);
+    assert!(!r.tracking(MeasId(1)));
 
     // Saved running, the load is its first run.
     r.c.ok(Command::FileSave {
@@ -750,7 +755,7 @@ fn a_loaded_walk_restarts_its_measurements_on_their_first_run_only() {
     });
     let m = r.meas(MeasId(1));
     assert!(m.running);
-    assert!(m.delay.unwrap().tracking);
+    assert!(r.tracking(MeasId(1)));
     r.shutdown();
 }
 

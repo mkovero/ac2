@@ -36,9 +36,9 @@ change of the compensation cancels: a curve that is not the reference does not m
 and when the stepped curve is the reference every other curve is redrawn against the new
 reference delay and turns with it, so the whole picture moves together and looks unchanged.
 
-So the daemon keeps the operator's steps apart: `DelayState::nudged` is what `delay.nudge`
+So the daemon keeps the operator's steps apart: `Delay::nudged` is what `delay.nudge`
 added to the arrival (`applied = arrival + nudged`), and every TF frame states it
-(`TfMeta::nudged`; `DelayState::nudged_samples` too). The view's time base of a live curve is the arrival, `applied − nudged`.
+(`TfMeta::nudged`; `Delay::nudged_samples` too). The view's time base of a live curve is the arrival, `applied − nudged`.
 Its columns carry `e^{+jω·applied}`, so the curve is drawn `e^{+jω(τ_ref + nudged)}`: a
 step Δ moves it by `e^{+jωΔ}`, exactly as a display nudge `ν = Δ` moves a trace (Ctrl+. and
 `.` both lead the phase; Ctrl+, and `,` both lag it — no key is flipped), and since the
@@ -71,7 +71,7 @@ arrival it had at capture, so after its nudge is changed no honest absolute dela
   exact applied delay including the fraction (`IrMeta::inserted_delay`).
 - **Traces** record `TfMeta::delay` = the exact applied delay in seconds; phase comparison
   (decision 8a) therefore refers overlays to the exact value.
-- **Protocol**: `DelayState::applied_samples` is a float (samples at the
+- **Protocol**: `Delay::applied_samples` is a float (samples at the
   session rate, fractions included); `delay.nudge {meas, by: Seconds}` moves the delay by a
   step (an operator action that keeps the last finding: it refines it). The daemon snaps the
   delay in samples to 10⁻⁶ sample so whole-sample values stay exactly whole (no rotation is

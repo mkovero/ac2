@@ -23,7 +23,6 @@ struct BadOp<'a> {
     v: u16,
     id: u64,
     cmd: BadCmd<'a>,
-    expect_rev: Option<u64>,
 }
 
 #[derive(serde::Serialize)]
@@ -36,7 +35,6 @@ fn all_command_names() -> BTreeSet<String> {
         v: PROTO_VERSION,
         id: 1,
         cmd: BadCmd { op: "no.such" },
-        expect_rev: None,
     })
     .expect("sample message");
     let err = decode_request(&b).expect_err("must be refused").to_string();
@@ -47,10 +45,7 @@ fn all_command_names() -> BTreeSet<String> {
 fn every_command_roundtrips_and_samples_cover_all_variants() {
     let mut seen = BTreeSet::new();
     for (i, cmd) in samples::commands().into_iter().enumerate() {
-        let mut req = Request::new(RequestId(i as u64), cmd.clone());
-        if cmd.is_mutation() {
-            req.expect_rev = Some(units::Rev(41));
-        }
+        let req = Request::new(RequestId(i as u64), cmd.clone());
         let b = encode_request(&req).expect("sample message");
         let back = decode_request(&b).expect("sample message");
         assert_eq!(back, req, "{}", cmd.name());
@@ -130,7 +125,7 @@ fn every_event_roundtrips() {
             DataMessage::Event(e)
         );
     }
-    assert_eq!(kinds.len(), 26);
+    assert_eq!(kinds.len(), 28);
 }
 
 /// The input-meter kinds only travel on their own topics, with one channel per column.
@@ -457,6 +452,23 @@ fn unknown_fields_are_refused() {
     .expect("sample message");
     assert!(matches!(decode_request(&b), Err(CtrlError::Malformed(_))));
 
+    // The store-wide rev guard is gone: a request that still names one is not a request.
+    #[derive(serde::Serialize)]
+    struct Guarded {
+        v: u16,
+        id: u64,
+        cmd: Cmd,
+        expect_rev: Option<u64>,
+    }
+    let b = rmp_serde::to_vec_named(&Guarded {
+        v: PROTO_VERSION,
+        id: 1,
+        cmd: Cmd { op: "gen.stop" },
+        expect_rev: Some(41),
+    })
+    .expect("sample message");
+    assert!(matches!(decode_request(&b), Err(CtrlError::Malformed(_))));
+
     #[derive(serde::Serialize)]
     struct Args {
         force: bool,
@@ -467,7 +479,6 @@ fn unknown_fields_are_refused() {
         v: u16,
         id: u64,
         cmd: Cmd2,
-        expect_rev: Option<u64>,
     }
     #[derive(serde::Serialize)]
     struct Cmd2 {
@@ -484,7 +495,6 @@ fn unknown_fields_are_refused() {
                 extra: 1,
             },
         },
-        expect_rev: None,
     })
     .expect("sample message");
     assert!(matches!(decode_request(&b), Err(CtrlError::Malformed(_))));

@@ -457,11 +457,25 @@ fn upsert<T, K: PartialEq>(v: &mut Vec<T>, patch: Patch<T, K>, key: impl Fn(&T) 
     }
 }
 
+/// As [`upsert`], keeping `v` sorted by key: a measurement becomes a transfer after others
+/// were made, so its delay is not always the newest key.
+fn upsert_sorted<T, K: Ord>(v: &mut Vec<T>, patch: Patch<T, K>, key: impl Fn(&T) -> K) {
+    match patch {
+        Patch::Set(x) => match v.binary_search_by_key(&key(&x), &key) {
+            Ok(i) => v[i] = x,
+            Err(i) => v.insert(i, x),
+        },
+        Patch::Deleted(k) => v.retain(|e| key(e) != k),
+    }
+}
+
 /// Applies one change to a state: assignment of the entity's full new value.
 pub fn apply_change(s: &mut State, c: Change) {
     match c {
         Change::Stream(x) => s.stream = x,
         Change::Measurement(p) => upsert(&mut s.measurements, p, |m| m.id),
+        Change::Delay(p) => upsert_sorted(&mut s.delays, p, |d| d.meas),
+        Change::DelayFinding(p) => upsert_sorted(&mut s.delay_findings, p, |f| f.meas),
         Change::Trace(p) => upsert(&mut s.traces, p, |t| t.id),
         Change::Generator(g) => s.generator = g,
         Change::Calibration(p) => upsert(&mut s.calibrations, p, |c| c.key.clone()),

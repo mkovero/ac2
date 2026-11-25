@@ -641,9 +641,9 @@ fn a_session_with_values_out_of_range_refuses_to_load() {
         session: named("near"),
         discard: true,
     });
-    let m = c.state().measurements;
-    assert_eq!(m.len(), 1);
-    let d = m[0].delay.as_ref().expect("transfer delay");
+    let st = c.state();
+    assert_eq!(st.measurements.len(), 1);
+    let d = st.delay(st.measurements[0].id).expect("transfer delay");
     assert_eq!((d.applied, d.nudged), (Seconds(-10.0), Seconds(0.5)));
 
     c.ok(Command::FileLoad {

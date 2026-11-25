@@ -6,7 +6,7 @@ use ac2_proto::model::{
     DynamicsConfig, InputSetup, MeasConfig, MeasKind, MeasScope, Measurement, SpecAveraging,
     SpecResolution, SpectrumConfig, SweepConfig,
 };
-use ac2_proto::units::{MeasId, Rev, Seconds};
+use ac2_proto::units::{EqSetId, MeasId, Rev, Seconds};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError};
 
 use crate::conv;
@@ -91,24 +91,26 @@ pub(super) fn upsert_inputs(current: &[InputSetup], rows: Vec<InputSetup>) -> Ve
     out
 }
 
-pub(super) fn mutation_conflict(rev: Rev) -> ProtoError {
-    perr_detail(
-        ErrorCode::Conflict,
-        format!("state has moved on to rev {}", rev.0),
-        ErrorDetail::Conflict { rev },
-    )
-}
-
-/// A `meas.update` made on a config that has changed since: the client re-reads it rather
+/// A `meas.update` made on a measurement committed since: the client re-reads it rather
 /// than overwrite the other edit.
-pub(super) fn stale_meas(meas: MeasId, rev: Rev) -> ProtoError {
+pub(super) fn stale_meas(meas: MeasId, edit_rev: Rev) -> ProtoError {
     perr_detail(
         ErrorCode::Conflict,
         format!(
-            "measurement {} changed since (now at rev {}); re-read it",
-            meas.0, rev.0
+            "measurement {} was changed since this edit was made (now at rev {}); re-read it",
+            meas.0, edit_rev.0
         ),
-        ErrorDetail::Conflict { rev },
+        ErrorDetail::StaleMeas { meas, edit_rev },
+    )
+}
+
+/// A `meas.eq` `put` made on a set edited since: the client re-reads it rather than
+/// overwrite the other edit.
+pub(super) fn eq_conflict(name: &str, set: EqSetId, rev: u32) -> ProtoError {
+    perr_detail(
+        ErrorCode::Conflict,
+        format!("{name} was edited since this edit was made (now at rev {rev}); re-read it"),
+        ErrorDetail::EqConflict { set, rev },
     )
 }
 

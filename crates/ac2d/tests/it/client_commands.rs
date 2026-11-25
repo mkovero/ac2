@@ -68,10 +68,7 @@ async fn delay_find_outcome_and_insert() {
         .unwrap_err();
     assert_eq!(e.code(), Some(ErrorCode::Refused), "{e}");
     mirror_until(&c, Poll::new(T, 20), "finding mirrored", |s| {
-        s.measurements
-            .iter()
-            .find(|x| x.id == m.id)
-            .and_then(|x| x.delay.as_ref()?.last_finding.as_ref())
+        s.delay_finding(m.id)
             .filter(|f| f.outcome == want)
             .map(drop)
     })
@@ -284,7 +281,7 @@ async fn band_transfer_from_typed_levels() {
     };
     c.call(Command::MeasUpdate {
         meas: m.id,
-        base: m.config_rev,
+        base: m.edit_rev,
         config: with_bands,
     })
     .await

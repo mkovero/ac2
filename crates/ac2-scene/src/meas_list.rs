@@ -7,8 +7,8 @@
 use std::collections::BTreeSet;
 
 use ac2_proto::model::{
-    CueState, MeasKind, Measurement, Resolution, Rig, SpecAveraging, SpecResolution, SweepRun,
-    TraceMeta, TraceOwner, TraceSource, TransferResolution,
+    CueState, Delay, MeasKind, Measurement, Resolution, Rig, SpecAveraging, SpecResolution,
+    SweepRun, TraceMeta, TraceOwner, TraceSource, TransferResolution,
 };
 use ac2_proto::units::{MeasId, TraceId};
 
@@ -60,6 +60,8 @@ pub fn state_word(m: &Measurement) -> &'static str {
 #[derive(Clone, Debug)]
 pub struct MeasItem<'a> {
     pub meas: &'a Measurement,
+    /// A transfer measurement's delay.
+    pub delay: Option<&'a Delay>,
     /// A math trace's expression by its operands' names ([`crate::math::expression`]).
     pub expression: Option<String>,
     /// Display offset, dB (this app's).
@@ -112,7 +114,7 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
     if let Some(c) = &item.cue {
         text.push_str(&format!(" · {c}"));
     }
-    if let Some(d) = &m.delay {
+    if let Some(d) = item.delay {
         // One delay and how far it is from the measured arrival, as the legend and the
         // delay toasts say it. Distance stays in the transfer legend's reference line.
         text.push_str(&format!(
@@ -120,7 +122,7 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
             format::meas_delay(d.applied.0, d.nudged.0)
         ));
     }
-    if let Some(d) = &m.delay {
+    if let Some(d) = item.delay {
         if d.tracking && d.awaiting_pick {
             text.push_str(" · tracking paused");
         } else if d.tracking {

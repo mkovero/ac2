@@ -492,9 +492,9 @@ fn delay_toasts_name_the_step_the_delay_and_its_offset_from_the_arrival() {
     t.type_key("D", "d");
     assert_eq!(call_text(&t.key("Enter")), "Main L: delay 12.50 ms");
     // 0.05 ms (2.4 samples) of delay steps on the arrival.
-    let mut s = daemon_state();
-    for m in &mut s.measurements {
-        if let Some(d) = &mut m.delay {
+    let mut s = with_delays(daemon_state());
+    for d in &mut s.delays {
+        {
             d.applied = Seconds(602.4 / 48_000.0);
             d.applied_samples = 602.4;
             d.nudged = Seconds(2.4 / 48_000.0);

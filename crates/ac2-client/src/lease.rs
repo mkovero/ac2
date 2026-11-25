@@ -107,11 +107,7 @@ async fn refresh_loop(
             return;
         }
         match client
-            .call_with(
-                Command::GenRefresh { lease_token: token },
-                None,
-                REFRESH_RETRY,
-            )
+            .call_with(Command::GenRefresh { lease_token: token }, REFRESH_RETRY)
             .await
         {
             Ok(_) => {}

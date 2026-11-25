@@ -118,7 +118,7 @@ async fn delay_find_bands_ambiguity_and_refusal() -> R {
         "{d}"
     );
     assert!(
-        (delay(&d["inserted"]["delay"]["applied"]) - delay(&ranked[1]["delay"])).abs() < 1e-9,
+        (delay(&d["inserted"]["applied"]) - delay(&ranked[1]["delay"])).abs() < 1e-9,
         "{d}"
     );
     let r = ac2(&f, &["delay", "find", "sub", "--observation", "2s"]).await?;
@@ -234,8 +234,8 @@ async fn session_meas_delay_trace_flow() -> R {
                 "scope": "session"
             },
             "config_rev": 3,
+            "edit_rev": 3,
             "running": false,
-            "delay": null,
             "eq": [],
             "grid_id": null,
             "colour": null,
@@ -247,6 +247,10 @@ async fn session_meas_delay_trace_flow() -> R {
     let m = ok_json(&f, &["meas", "layout", "clear", "foh", "--json"]).await?;
     assert_eq!(m["layout"], serde_json::Value::Null);
     assert_eq!(m["config_rev"], 3);
+    assert!(
+        m["edit_rev"].as_u64() > Some(3),
+        "every commit moves edit_rev: {m}"
+    );
 
     let tf = ok_json(
         &f,
@@ -307,16 +311,16 @@ async fn session_meas_delay_trace_flow() -> R {
     );
     let d = ok_json(&f, &["delay", "insert", "main-l", "--json"]).await?;
     assert!(
-        (delay(&d["delay"]["applied"]) - delay(&outcome["first"]["delay"])).abs() < 1e-9,
+        (delay(&d["applied"]) - delay(&outcome["first"]["delay"])).abs() < 1e-9,
         "{d}"
     );
-    let n = delay(&d["delay"]["applied_samples"]);
+    let n = delay(&d["applied_samples"]);
     assert!((n - f64::from(ACOUSTIC)).abs() < 0.5, "{d}");
 
     let d = ok_json(&f, &["delay", "set", "main-l", "480samples", "--json"]).await?;
-    assert_eq!(d["delay"]["applied"], 0.01);
+    assert_eq!(d["applied"], 0.01);
     let d = ok_json(&f, &["delay", "nudge", "main-l", "-0.25samples", "--json"]).await?;
-    let n = d["delay"]["applied_samples"].as_f64().unwrap_or(f64::NAN);
+    let n = d["applied_samples"].as_f64().unwrap_or(f64::NAN);
     assert!((n - 479.75).abs() < 1e-9, "{n}");
     // One delay and its offset from the inserted arrival (5 ms), as the app says it.
     let r = ac2(&f, &["meas", "list"]).await?;
@@ -333,7 +337,7 @@ async fn session_meas_delay_trace_flow() -> R {
         r.stdout
     );
     let d = ok_json(&f, &["delay", "track", "2", "on", "--json"]).await?;
-    assert_eq!(d["delay"]["tracking"], true);
+    assert_eq!(d["tracking"], true);
     // Delay commands refuse non-transfer measurements.
     let r = ac2(&f, &["delay", "find", "foh", "--json"]).await?;
     assert_eq!(r.code, 1);

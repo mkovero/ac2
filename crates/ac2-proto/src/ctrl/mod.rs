@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::PROTO_VERSION;
-use crate::units::{RequestId, Rev};
+use crate::units::RequestId;
 
 /// Largest ctrl message accepted, bytes (trace import / export bodies included).
 pub const MAX_CTRL_BYTES: usize = 4 << 20;
@@ -33,12 +33,11 @@ pub const MAX_CTRL_BYTES: usize = 4 << 20;
 pub struct Request {
     /// Protocol version.
     pub v: u16,
-    /// Request id; retries reuse it and get the stored reply.
+    /// Request id; a retry reuses it: an acting command's retry gets the stored reply, a
+    /// read's runs again ([`Command::is_read`]).
     pub id: RequestId,
     /// Command.
     pub cmd: Command,
-    /// Mutation precondition: refused with `conflict` if state has moved past this rev.
-    pub expect_rev: Option<Rev>,
 }
 
 impl Request {
@@ -48,7 +47,6 @@ impl Request {
             v: PROTO_VERSION,
             id,
             cmd,
-            expect_rev: None,
         }
     }
 }

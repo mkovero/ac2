@@ -4354,6 +4354,13 @@ Rig monitor target whose Apply another client's edit beat comes back with your e
 line "changed elsewhere: Apply again overwrites with your edits"; Apply (Enter) again sends
 them on the newer settings.
 
+A change of a measurement's settings (smoothing, resolution, weighting, an EQ set) waits
+for the app's earlier changes of that measurement and is made on what they left; a colour,
+offset or layout change goes at once, the last one sent winning. When another client (or
+the rig itself) changes the settings in between, the settings change is not applied: a note says it changed elsewhere and the view shows it as it now is; any of your
+changes to it still waiting are dropped too, and the note counts them ("Main L: 2 later edits
+not sent — it changed elsewhere, shown as it is now"). Make them again on what you now see.
+
 #### Art-Net cues
 
 A cue state can also hold DMX levels in one Art-Net universe that ac2 owns: a lamp, an LED

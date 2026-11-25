@@ -337,7 +337,7 @@ impl Control {
             .measurements
             .iter()
             .map(|m| {
-                let mode = match &m.delay {
+                let mode = match self.delay_of(m.id) {
                     Some(d) if d.awaiting_pick => DelayMode::AwaitingPick,
                     Some(d) if d.tracking => DelayMode::Tracking,
                     _ => DelayMode::Fixed,
@@ -430,14 +430,12 @@ impl Control {
                 }
             }
             CrossEvent::RelockAmbiguous(r) => {
-                let f = conv::delay_finding(r, fs, WallNs(wall_ns()));
-                if let Ok(mut m) = self.meas(meas).cloned()
-                    && let Some(d) = &mut m.delay
-                {
+                let f = conv::delay_finding(meas, r, fs, WallNs(wall_ns()));
+                if let Some(mut d) = self.delay_of(meas).cloned() {
                     // The job paused tracking: the operator picks, as after a find (1c).
                     d.awaiting_pick = matches!(f.outcome, DelayOutcome::Ambiguous { .. });
-                    d.last_finding = Some(f);
-                    self.commit(Change::Measurement(Patch::Set(m)));
+                    self.commit(Change::Delay(Patch::Set(d)));
+                    self.commit_finding(f);
                 }
             }
             _ => {}

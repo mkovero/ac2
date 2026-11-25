@@ -168,7 +168,7 @@ impl AppState {
                     })
             })
             .flatten();
-        Ready::of(filled, m.delay.as_ref().is_some_and(|d| d.awaiting_pick))
+        Ready::of(filled, self.delay(m.id).is_some_and(|d| d.awaiting_pick))
     }
 
     /// How many of `traces` a walk captured before ready.

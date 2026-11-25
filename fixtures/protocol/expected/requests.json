@@ -7,8 +7,7 @@
    "args": {
     "client": "ac2-cli 0.0.0"
    }
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -50,8 +49,7 @@
      "link_offset": 0.02
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -83,16 +81,14 @@
      "firing": false
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
   "id": 9,
   "cmd": {
    "op": "gen.stop"
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -129,8 +125,7 @@
      }
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -144,8 +139,7 @@
     },
     "observation": 8.0
    }
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -159,8 +153,7 @@
      "index": 1
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -185,8 +178,7 @@
      "type": "imported"
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -202,8 +194,7 @@
     },
     "channel": 1
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -216,8 +207,7 @@
     "from": 120,
     "max": 3600
    }
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -231,8 +221,7 @@
     "meas": 7,
     "name": "1083 sweep"
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -305,8 +294,7 @@
      }
     ]
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -320,8 +308,7 @@
      "channel": 4
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -353,16 +340,14 @@
      }
     ]
    }
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
   "id": 42,
   "cmd": {
    "op": "stream.preview_stop"
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -379,8 +364,7 @@
     "output": 0,
     "level": -30.0
    }
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -394,8 +378,7 @@
      "label": "0\u00b0"
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -408,8 +391,7 @@
      "label": "0\u00b0"
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -419,8 +401,7 @@
    "args": {
     "meas": 4
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -441,8 +422,7 @@
     "uncertainty": null,
     "replace_acoustic": false
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -458,8 +438,7 @@
      "step_s": 30
     }
    }
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -470,8 +449,7 @@
     "meas": 1,
     "by": -5.208333333333333e-06
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -489,16 +467,14 @@
      "max_bytes": null
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
   "id": 53,
   "cmd": {
    "op": "rec.list"
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -512,8 +488,7 @@
     },
     "pace": "fast"
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -524,8 +499,7 @@
     "ceiling": -40.0,
     "confirm_raise": true
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -544,16 +518,14 @@
      }
     ]
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
   "id": 57,
   "cmd": {
    "op": "server.info"
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -563,8 +535,7 @@
    "args": {
     "name": "laptop"
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -576,8 +547,7 @@
     "rig_id": 1886744693,
     "name": "pupu"
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -592,16 +562,14 @@
      "key": "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7"
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
   "id": 62,
   "cmd": {
    "op": "source.state"
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -652,8 +620,7 @@
     "background": null,
     "place": "flat 4 bedroom"
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -666,8 +633,7 @@
     "until": 1789500030000000000,
     "step": 10
    }
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -681,8 +647,7 @@
      "index": 2
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -692,8 +657,7 @@
    "args": {
     "discard": false
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -707,8 +671,7 @@
      "$bin": "1f8b0800"
     }
    }
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -719,8 +682,7 @@
     "transfer": 4,
     "saved_as": "/run/media/foh/STICK/friday show.ac2session"
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -731,8 +693,7 @@
     "backend": "asio",
     "device": "Fireface USB"
    }
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -743,8 +704,7 @@
     "base": 38,
     "addr": "[fe80::1]:9000"
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -763,8 +723,7 @@
      "append_level": true
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -775,8 +734,7 @@
     "base": 38,
     "on": true
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -790,8 +748,7 @@
      "universe": 18
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -810,8 +767,7 @@
      }
     ]
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -822,8 +778,7 @@
     "base": 38,
     "seconds": 2.5
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -834,8 +789,7 @@
     "channel": 4,
     "volts": 1.2277
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -850,8 +804,7 @@
     "correlation_gate": null,
     "loudness_target": -16.0
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -864,16 +817,14 @@
      1
     ]
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
   "id": 90,
   "cmd": {
    "op": "plan.list"
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -883,8 +834,7 @@
    "args": {
     "name": "Club"
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -918,8 +868,7 @@
      }
     ]
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -930,8 +879,7 @@
     "walk": 1,
     "step": 1
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -941,8 +889,7 @@
    "args": {
     "walk": 1
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -953,8 +900,7 @@
     "walk": 1,
     "point": 1
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -968,8 +914,7 @@
      3
     ]
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -980,8 +925,7 @@
     "walk": 1,
     "point": 0
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -1015,8 +959,7 @@
      }
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -1035,8 +978,7 @@
      }
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -1055,16 +997,14 @@
      "image_order": 2
     }
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
   "id": 103,
   "cmd": {
    "op": "sim.cancel"
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -1079,8 +1019,7 @@
     },
     "port": 47830
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -1095,8 +1034,7 @@
     "name": null,
     "rests_from": 14
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -1106,8 +1044,7 @@
    "args": {
     "trace": 14
    }
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -1119,8 +1056,7 @@
     "input": 4,
     "step": 0
    }
-  },
-  "expect_rev": null
+  }
  },
  {
   "v": 105,
@@ -1130,8 +1066,7 @@
    "args": {
     "rig_id": 1801811061
    }
-  },
-  "expect_rev": 41
+  }
  },
  {
   "v": 105,
@@ -1141,7 +1076,6 @@
    "args": {
     "rig_id": 1886744693
    }
-  },
-  "expect_rev": 41
+  }
  }
 ]

@@ -225,8 +225,7 @@ fn math_traces_from_an_empty_daemon() -> R {
         what: "delay".into(),
     });
     d.until("the delay set", |s| {
-        s.meas(second)
-            .and_then(|m| m.delay.as_ref())
+        s.delay(second)
             .is_some_and(|x| (x.applied.0 - 12.3e-6).abs() < 1e-12)
     })?;
     assert!(

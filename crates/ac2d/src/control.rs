@@ -20,8 +20,8 @@ use ac2_core::sweep::{SweepAnalysis, SweepError, SweepSpec};
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
-    CalState, DelayState, GenAction, GeneratorSettings, LoopbackDetection, MeasKind, Measurement,
-    MicState, SweepConfig, SweepFailure, SweepRun, SweepStatus, TimingStatus, TraceKind, TraceMeta,
+    CalState, GenAction, GeneratorSettings, LoopbackDetection, MeasKind, Measurement, MicState,
+    SweepConfig, SweepFailure, SweepRun, SweepStatus, TimingStatus, TraceKind, TraceMeta,
     TraceSource,
 };
 use ac2_proto::units::{
@@ -43,13 +43,13 @@ use crate::state::Store;
 use crate::stimulus::{LeaseGate, LeasedSource, SweepTrain};
 use crate::stream::{Limits, Runtime};
 use crate::sweep::Recording;
-use crate::util::invalid;
 
 mod artnet;
 mod autosave;
 mod cal;
 mod clocks;
 mod cross_rig;
+mod delays;
 mod dynamics;
 mod eq;
 mod execute;
@@ -92,7 +92,7 @@ pub(crate) use remote::check_peers;
 pub(crate) use validate::validate_meas;
 use validate::{
     MAX_CAL_UNSETTLED_DB, MAX_DELAY_S, check_delay, check_find, delay_samples, gen_err,
-    lease_required, mutation_conflict, not_found, static_grid, upsert_inputs,
+    lease_required, not_found, static_grid, upsert_inputs,
 };
 pub(crate) use walk_sweep::walk_room;
 
@@ -812,18 +812,24 @@ impl Control {
     fn commit(&mut self, change: Change) -> Rev {
         let saved = matches!(
             change,
-            Change::Measurement(_) | Change::Trace(_) | Change::Walk(_) | Change::WalkPlan(_)
+            Change::Measurement(_)
+                | Change::Delay(_)
+                | Change::Trace(_)
+                | Change::Walk(_)
+                | Change::WalkPlan(_)
         );
         let generator = matches!(change, Change::Generator(_));
         let levels = matches!(
             change,
             Change::Rig(_) | Change::Inputs(_) | Change::LineCalibration(_)
         );
-        self.note_for_recording(&change);
         self.rig_meas_committing(&change);
         self.runs_committing(&change);
         let sim_stops = self.sim_stopped_by(&change);
         let ev = self.store.commit(change, Instant::now());
+        // After the commit: the timeline keeps the measurement as committed, `edit_rev`
+        // included.
+        self.note_for_recording(&ev.change);
         if levels {
             self.sync_levels_policy();
         }
@@ -871,17 +877,23 @@ impl Control {
             .ok_or_else(|| not_found(id))
     }
 
-    /// Commits `m` as its measurement's new state and answers with it.
+    /// Commits `m` as its measurement's new state and answers with it as stored: the commit
+    /// gave it its `edit_rev`, which the caller's next edit names as its base.
     fn reply_meas(&mut self, m: Measurement) -> ReplyBody {
-        self.commit(Change::Measurement(Patch::Set(m.clone())));
-        ReplyBody::Measurement(m)
+        ReplyBody::Measurement(self.commit_meas_read(m))
     }
 
-    fn transfer_delay(&self, id: MeasId) -> Result<&DelayState, ProtoError> {
-        self.meas(id)?
-            .delay
-            .as_ref()
-            .ok_or_else(|| invalid(format!("measurement {} is not a transfer function", id.0)))
+    /// Commits `m` and reads it back as stored, `edit_rev` included.
+    fn commit_meas_read(&mut self, m: Measurement) -> Measurement {
+        let id = m.id;
+        self.commit(Change::Measurement(Patch::Set(m)));
+        self.store
+            .state()
+            .measurements
+            .iter()
+            .find(|m| m.id == id)
+            .cloned()
+            .expect("a measurement just committed is in the state")
     }
 
     fn register_grid(&mut self, g: GridDef) -> GridId {

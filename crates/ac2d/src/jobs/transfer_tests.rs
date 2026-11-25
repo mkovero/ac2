@@ -89,14 +89,15 @@ fn stage_bins_take_the_mic_curve_off_per_bin() {
         },
         FS,
         (0, 1),
-        &DelayState {
+        &Delay {
+            meas: MeasId(3),
+            rev: Rev(1),
             applied: Seconds(0.0),
             applied_samples: 0.0,
             nudged: Seconds(0.0),
             nudged_samples: 0.0,
             tracking: false,
             awaiting_pick: false,
-            last_finding: None,
         },
         tx,
         Some(&curve),

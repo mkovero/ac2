@@ -90,12 +90,16 @@ impl RigMeas {
 }
 
 /// A measurement as a session file keeps it.
-pub(super) fn saved_of(m: &Measurement, next_run: u32) -> SavedMeasurement {
+pub(super) fn saved_of(
+    m: &Measurement,
+    delay: Option<&ac2_proto::model::Delay>,
+    next_run: u32,
+) -> SavedMeasurement {
     SavedMeasurement {
         id: m.id,
         config: m.config.clone(),
         running: m.running,
-        delay: m.delay.as_ref().map(|d| ac2_traces::session::SavedDelay {
+        delay: delay.map(|d| ac2_traces::session::SavedDelay {
             applied: d.applied,
             nudged: d.nudged,
             tracking: d.tracking,
@@ -425,7 +429,7 @@ impl Control {
                 running: sm.running && sm.config.kind.is_job(),
                 config: sm.config,
                 config_rev: Rev(0),
-                delay: None,
+                edit_rev: Rev(0),
                 grid_id,
                 colour: sm.colour,
                 layout: sm.layout,

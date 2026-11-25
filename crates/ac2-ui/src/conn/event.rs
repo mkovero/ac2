@@ -33,6 +33,13 @@ pub enum ConnEvent {
         what: String,
         result: Result<(), String>,
     },
+    /// An edit of measurement `meas` (a [`Request::Call`] of a command
+    /// [`meas_edit_target`] names) finished, with the measurement as committed.
+    MeasEdited {
+        meas: MeasId,
+        what: String,
+        result: Edited,
+    },
     /// A command was refused as made on a configuration (or the rig settings) another
     /// client changed first: the daemon's `conflict`.
     Conflict {

@@ -17,7 +17,7 @@ fn hint_texts(t: &T) -> Vec<String> {
 #[test]
 fn a_picked_inputs_row_leaves_the_pane_its_keys() {
     let mut t = T::new();
-    t.key("Alt+2");
+    t.key_acked("Alt+2");
     let pane = t.st.layout.focus;
     t.st.apply(Msg::InputPick(0), &t.keys);
     assert_eq!(t.st.rig.input_pick, Some(0));
@@ -25,13 +25,13 @@ fn a_picked_inputs_row_leaves_the_pane_its_keys() {
     assert_eq!(t.st.overlay_scope(), Some(Scope::Inputs));
     // G steps the spectrum pane's view; the row stays picked.
     let before = t.st.pane_modes(pane).spectrum;
-    t.key("G");
+    t.key_acked("G");
     assert_ne!(t.st.pane_modes(pane).spectrum, before);
-    t.key("Shift+G");
+    t.key_acked("Shift+G");
     assert_eq!(t.st.pane_modes(pane).spectrum, before);
     assert_eq!(t.st.rig.input_pick, Some(0));
     // S is the pane's start/stop, K its smoothing.
-    let r = t.key("S");
+    let r = t.key_acked("S");
     assert!(
         matches!(
             calls(&r).first(),
@@ -40,7 +40,7 @@ fn a_picked_inputs_row_leaves_the_pane_its_keys() {
         "{r:?}"
     );
     assert!(matches!(
-        calls(&t.key("K")).first(),
+        calls(&t.key_acked("K")).first(),
         Some((
             Command::MeasUpdate {
                 meas: MeasId(2),
@@ -50,7 +50,7 @@ fn a_picked_inputs_row_leaves_the_pane_its_keys() {
         ))
     ));
     // R is the row's: its meters reset, the spectrum's averaging does not.
-    let r = t.key("R");
+    let r = t.key_acked("R");
     assert!(
         matches!(
             calls(&r).as_slice(),
@@ -58,7 +58,7 @@ fn a_picked_inputs_row_leaves_the_pane_its_keys() {
         ),
         "{r:?}"
     );
-    let r = t.key("Shift+R");
+    let r = t.key_acked("Shift+R");
     assert!(
         matches!(
             calls(&r).as_slice(),
@@ -79,7 +79,7 @@ fn a_picked_inputs_row_leaves_the_pane_its_keys() {
     // The row let go: R is the pane's reset again.
     t.st.apply(Msg::InputPick(0), &t.keys);
     assert_eq!(t.st.overlay_scope(), None);
-    let r = t.key("R");
+    let r = t.key_acked("R");
     assert!(
         matches!(
             calls(&r).first(),

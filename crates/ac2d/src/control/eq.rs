@@ -284,8 +284,15 @@ impl Control {
                     self.eq_predict(client, &m, id, Operand::Meas { meas }, true)?;
                 }
             }
-            EqEdit::Put { set, body } => {
-                Self::eq_set(&m, set)?;
+            EqEdit::Put { set, base, body } => {
+                let current = Self::eq_set(&m, set)?;
+                if current.rev != base {
+                    return Err(super::validate::eq_conflict(
+                        &current.body.name,
+                        set,
+                        current.rev,
+                    ));
+                }
                 self.eq_check(&body, &eq_grid(&m.config.kind))?;
                 let s = m.eq.iter_mut().find(|s| s.id == set).expect("checked");
                 s.body = body;

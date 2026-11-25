@@ -114,21 +114,24 @@ impl Control {
         let Some(fs) = self.stream.as_ref().map(|r| f64::from(r.sample_rate)) else {
             return;
         };
+        // The delays in samples follow the new rate first, so the jobs start with them:
+        // a delay that moved takes this commit's rev, and its frames the newer stamp.
+        let delays: Vec<_> = self.store.state().delays.clone();
+        for mut d in delays {
+            let samples = delay_samples(d.applied.0, fs);
+            let nudged = delay_samples(d.nudged.0, fs);
+            if samples != d.applied_samples || nudged != d.nudged_samples {
+                d.applied_samples = samples;
+                d.applied = Seconds(samples / fs);
+                d.nudged_samples = nudged;
+                d.nudged = Seconds(nudged / fs);
+                d.rev = Rev(self.store.rev().0 + 1);
+                self.commit(Change::Delay(Patch::Set(d)));
+            }
+        }
         let ms: Vec<Measurement> = self.store.state().measurements.clone();
         for mut m in ms {
             let mut changed = false;
-            if let Some(d) = &mut m.delay {
-                let samples = delay_samples(d.applied.0, fs);
-                let nudged = delay_samples(d.nudged.0, fs);
-                if samples != d.applied_samples || nudged != d.nudged_samples {
-                    d.applied_samples = samples;
-                    d.applied = Seconds(samples / fs);
-                    d.nudged_samples = nudged;
-                    d.nudged = Seconds(nudged / fs);
-                    m.config_rev = Rev(self.store.rev().0 + 1);
-                    changed = true;
-                }
-            }
             if m.running {
                 match self.start_job(&m) {
                     Ok(Some(g)) => {

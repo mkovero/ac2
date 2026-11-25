@@ -385,6 +385,9 @@ pub enum EqEdit {
     Put {
         /// The set.
         set: EqSetId,
+        /// The set's `rev` the body was made on: refused with `conflict` (`eq_conflict`)
+        /// when the set has been edited since.
+        base: u32,
         /// What it holds now.
         body: EqBody,
     },

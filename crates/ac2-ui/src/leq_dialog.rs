@@ -280,10 +280,11 @@ pub struct LeqDialog {
     pub peak_cues: [CueEdit; 2],
     /// The predicted window's cue.
     pub predicted_cue: CueEdit,
-    /// The meter's configuration rev the dialog was opened on: Enter names it, so an edit
-    /// made meanwhile by another client is refused rather than overwritten.
+    /// The meter's `edit_rev` the dialog was made on: Enter names it, so a configuration
+    /// changed meanwhile by another client is refused rather than overwritten.
     pub base_rev: Rev,
     base: SplConfig,
+    base_scope: ac2_proto::model::MeasScope,
 }
 
 impl LeqDialog {
@@ -345,8 +346,9 @@ impl LeqDialog {
                     .and_then(|b| b.predicted.as_ref())
                     .and_then(|p| p.cue.as_deref()),
             ),
-            base_rev: m.config_rev,
+            base_rev: m.edit_rev,
             base: config.clone(),
+            base_scope: m.config.scope,
         };
         d.cues_shown |= d.any_cue_set();
         Some(d)
@@ -726,9 +728,22 @@ impl LeqDialog {
         if let MeasKind::Spl { config } = &m.config.kind {
             self.base = config.clone();
         }
-        self.base_rev = m.config_rev;
+        self.base_rev = m.edit_rev;
+        self.base_scope = m.config.scope;
         self.name = m.config.name.clone();
         self.notice = Some(ac2_scene::osc::CHANGED_ELSEWHERE.to_owned());
+    }
+
+    /// The meter committed again with what Enter writes unchanged (its panes, colour or
+    /// offset, a start, a job restart): the dialog takes that commit's `edit_rev`, as Enter
+    /// then overwrites nothing the dialog has not seen.
+    pub fn follow(&mut self, m: &Measurement) {
+        let same = m.config.name == self.name
+            && m.config.scope == self.base_scope
+            && matches!(&m.config.kind, MeasKind::Spl { config } if *config == self.base);
+        if m.id == self.meas && m.edit_rev > self.base_rev && same {
+            self.base_rev = m.edit_rev;
+        }
     }
 
     /// The `meas.update` Enter sends: on the rev the dialog was opened on, with the scope

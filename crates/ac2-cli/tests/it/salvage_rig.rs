@@ -97,6 +97,12 @@ async fn meas(c: &Client, name: &str) -> Measurement {
         .unwrap_or_else(|| panic!("no measurement {name}"))
 }
 
+/// The delay of the transfer measurement `m`.
+async fn delay(c: &Client, m: &Measurement) -> ac2_proto::model::Delay {
+    let s = c.snapshot().await.unwrap().state;
+    s.delay(m.id).cloned().expect("delay")
+}
+
 /// What every version's fixture holds, restored the same.
 async fn check_common(r: &Rig, report: &Value) {
     for name in ["FOH SPL", "TF 1", "Spectrum 1", "TF 1 vs S1", "TF 1 S1"] {
@@ -192,7 +198,7 @@ async fn format_22_comes_back_with_colours_and_running_state() {
     check_common(&r, &report).await;
     let tf = meas(&r.c, "TF 1").await;
     assert_eq!(tf.colour, Some(ColourFamily::Hue { index: 2 }));
-    let d = tf.delay.expect("delay");
+    let d = delay(&r.c, &tf).await;
     assert!((d.applied.0 - 0.0025).abs() < 1e-9, "{d:?}");
     // Running when saved and its input captured: started.
     assert!(meas(&r.c, "FOH SPL").await.running);
@@ -232,7 +238,7 @@ async fn format_20_keeps_the_delay_and_tracking_and_names_the_arrival_it_cannot(
     check_common(&r, &report).await;
     let tf = meas(&r.c, "TF 1").await;
     assert_eq!(tf.colour, None, "format 20 had no colour choice");
-    let d = tf.delay.expect("delay");
+    let d = delay(&r.c, &tf).await;
     assert!((d.applied.0 - 0.0031).abs() < 1e-9, "{d:?}");
     assert!(d.tracking);
     assert!(

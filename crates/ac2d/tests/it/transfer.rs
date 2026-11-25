@@ -298,18 +298,17 @@ fn transfer_magnitude_delay_timing_and_ir() {
     }
     // The finder's estimate goes in exactly, fraction included.
     let (rev, inserted) = {
-        let m = c.measurement(Command::DelayInsert {
+        let d = c.delay(Command::DelayInsert {
             meas: MeasId(1),
             pick: ac2_proto::model::DelayPick::FirstArrival,
         });
-        let d = m.delay.unwrap();
         assert!(
             (d.applied_samples - f64::from(ACOUSTIC_DELAY)).abs() < 0.5,
             "{}",
             d.applied_samples
         );
         assert!((d.applied.0 * f64::from(FS) - d.applied_samples).abs() < 1e-6);
-        (m.config_rev.0, d.applied_samples)
+        (d.rev.0, d.applied_samples)
     };
     for _ in 0..4 {
         run_tf(&mut d, &sub, 0.5, rev);
@@ -348,7 +347,7 @@ fn transfer_magnitude_delay_timing_and_ir() {
         meas: MeasId(1),
         by: Seconds(by / f64::from(FS)),
     }) {
-        ReplyBody::Measurement(m) => (m.config_rev.0, m.delay.unwrap().applied_samples),
+        ReplyBody::Delay(d) => (d.rev.0, d.applied_samples),
         other => panic!("{other:?}"),
     };
     let (rev, applied) = nudge(&mut c, 1.0);
@@ -399,11 +398,11 @@ fn transfer_magnitude_delay_timing_and_ir() {
     // Tracking follows the arrival and keeps the operator's steps from it: two agreeing
     // windows at the inserted arrival leave a delay stepped 3 samples later where it is.
     let (rev, _) = nudge(&mut c, 3.0);
-    let tracked = c.measurement(Command::DelayTrack {
+    let tracked = c.delay(Command::DelayTrack {
         meas: MeasId(1),
         enabled: true,
     });
-    assert!(tracked.delay.unwrap().tracking);
+    assert!(tracked.tracking);
     run_tf(&mut d, &sub, 1.0, rev);
     let st = snapshot_delay(&mut c);
     assert_eq!(
@@ -420,7 +419,7 @@ fn transfer_magnitude_delay_timing_and_ir() {
         meas: MeasId(1),
         delay: Seconds(samples / f64::from(FS)),
     }) {
-        ReplyBody::Measurement(m) => (m.config_rev.0, m.delay.unwrap()),
+        ReplyBody::Delay(d) => (d.rev.0, d),
         other => panic!("{other:?}"),
     };
     let (rev, st) = typed(&mut c, inserted + 5.0);
@@ -528,8 +527,8 @@ pub(crate) fn two_arrival_rig() -> ac2_audio::FakeBackend {
     .unwrap()
 }
 
-fn snapshot_delay(c: &mut Client) -> ac2_proto::model::DelayState {
-    c.state().measurements[0].delay.clone().unwrap()
+fn snapshot_delay(c: &mut Client) -> ac2_proto::model::Delay {
+    c.delay_now(MeasId(1))
 }
 
 #[test]
@@ -547,13 +546,10 @@ fn an_ambiguous_finding_awaits_a_pick() {
         config: transfer("main"),
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
-    let st = c
-        .measurement(Command::DelayTrack {
-            meas: MeasId(1),
-            enabled: true,
-        })
-        .delay
-        .unwrap();
+    let st = c.delay(Command::DelayTrack {
+        meas: MeasId(1),
+        enabled: true,
+    });
     assert!(st.tracking && !st.awaiting_pick);
     let tok = c.acquire();
     c.ok(Command::GenSet {
@@ -600,28 +596,22 @@ fn an_ambiguous_finding_awaits_a_pick() {
 
     // The operator picks a candidate: resolved, tracking resumes; the finding stays (the
     // other ranked picks remain insertable).
-    let st = c
-        .measurement(Command::DelayInsert {
-            meas: MeasId(1),
-            pick: DelayPick::Ranked { index: 0 },
-        })
-        .delay
-        .unwrap();
+    let st = c.delay(Command::DelayInsert {
+        meas: MeasId(1),
+        pick: DelayPick::Ranked { index: 0 },
+    });
     assert!(!st.awaiting_pick);
-    assert!(st.last_finding.is_some());
+    assert!(c.state().delay_finding(MeasId(1)).is_some());
 
     // A new ambiguous finding pauses again; a typed value resolves it too.
     c.ok(find(FinderBand::Full, None));
     assert!(snapshot_delay(&mut c).awaiting_pick);
-    let st = c
-        .measurement(Command::DelaySet {
-            meas: MeasId(1),
-            delay: Seconds(early),
-        })
-        .delay
-        .unwrap();
+    let st = c.delay(Command::DelaySet {
+        meas: MeasId(1),
+        delay: Seconds(early),
+    });
     assert!(!st.awaiting_pick);
-    assert!(st.last_finding.is_none());
+    assert!(c.state().delay_finding(MeasId(1)).is_none());
 
     c.ok(Command::GenStop);
     let stop = std::thread::spawn(move || h.shutdown());
@@ -691,12 +681,10 @@ fn tracking_applies_a_fractional_arrival() {
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
     assert!(
-        c.measurement(Command::DelayTrack {
+        c.delay(Command::DelayTrack {
             meas: MeasId(1),
             enabled: true,
         })
-        .delay
-        .unwrap()
         .tracking
     );
     let tok = c.acquire();
@@ -792,21 +780,16 @@ fn tenth_millisecond_steps_at_96_khz_return_exactly() {
     c.ok(Command::MeasCreate {
         config: transfer("main"),
     });
-    let start = c
-        .measurement(Command::DelaySet {
-            meas: MeasId(1),
-            delay: Seconds(1201.0 / f64::from(fs)),
-        })
-        .delay
-        .unwrap();
+    let start = c.delay(Command::DelaySet {
+        meas: MeasId(1),
+        delay: Seconds(1201.0 / f64::from(fs)),
+    });
     let arrival = start.applied_samples - start.nudged_samples;
     let step = |c: &mut Client, by: f64| {
-        c.measurement(Command::DelayNudge {
+        c.delay(Command::DelayNudge {
             meas: MeasId(1),
             by: Seconds(by),
         })
-        .delay
-        .unwrap()
     };
     let mut st = start.clone();
     for _ in 0..10 {
@@ -930,11 +913,11 @@ fn filled_rises_after_a_reset_and_a_delay_step_restarts_it() {
     assert!(after_reset[0] < 0.5, "{after_reset:?}");
 
     let rev = c
-        .measurement(Command::DelaySet {
+        .delay(Command::DelaySet {
             meas: MeasId(1),
             delay: Seconds(0.05),
         })
-        .config_rev
+        .rev
         .0;
     let after_step = fill_up(&mut d, &mut c, rev);
     assert!(after_step[0] < 1.0, "{after_step:?}");
@@ -986,7 +969,7 @@ fn a_find_across_a_generator_stop_says_so() {
     assert_eq!(refused(&f), vec![NoEstimateReason::GeneratorStopped]);
     assert!(f.candidates.is_empty());
     // The refusal is the reply's alone: the job never ran, so the state keeps no finding.
-    assert!(snapshot_delay(&mut c).last_finding.is_none());
+    assert!(c.state().delay_finding(MeasId(1)).is_none());
 
     let stop = std::thread::spawn(move || h.shutdown());
     while !stop.is_finished() {

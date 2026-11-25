@@ -1,8 +1,8 @@
-//! Delay finder: picks, bands, arrivals, outcomes, findings and a transfer measurement's delay state.
+//! Delay finder: picks, bands, arrivals, outcomes, findings and a transfer measurement's delay.
 
 use serde::{Deserialize, Serialize};
 
-use crate::units::{Db, Degrees, Hz, Samples, Seconds, WallNs};
+use crate::units::{Db, Degrees, Hz, MeasId, Rev, Samples, Seconds, WallNs};
 
 /// Which delay-finder result to insert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,6 +181,8 @@ pub const MAX_FINDING_CANDIDATES: usize = 16;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DelayFinding {
+    /// The transfer measurement it was found on (the key of the `delay_finding` entity).
+    pub meas: MeasId,
     /// Outcome.
     pub outcome: DelayOutcome,
     /// Evidence.
@@ -223,10 +225,18 @@ impl DelayFinding {
     }
 }
 
-/// Delay state of a transfer measurement.
+/// Delay of a transfer measurement: an entity of its own, keyed by the measurement, so a
+/// tracking step commits this small value and not the measurement with its EQ sets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct DelayState {
+pub struct Delay {
+    /// The transfer measurement (key).
+    pub meas: MeasId,
+    /// Rev of the commit that last moved `applied` or `nudged`; for a delay created with its
+    /// measurement, that measurement's `config_rev`. A frame's `config_rev` stamp is the
+    /// newer of this and the measurement's `config_rev`, so a client tells from one
+    /// comparison whether a frame was computed under this delay.
+    pub rev: Rev,
     /// Delay applied to the reference before the estimator.
     pub applied: Seconds,
     /// Applied delay in samples at the stream rate (exact value used by DSP, fractions
@@ -246,6 +256,21 @@ pub struct DelayState {
     /// The last finding is ambiguous and the operator has not picked yet (decision 1c):
     /// tracking is paused until `delay.insert`, `delay.set` or a new `delay.find`.
     pub awaiting_pick: bool,
-    /// Last finder result.
-    pub last_finding: Option<DelayFinding>,
+}
+
+impl Delay {
+    /// The delay a transfer measurement starts with: none applied, nothing nudged, not
+    /// tracking, under `rev`.
+    pub fn zero(meas: MeasId, rev: Rev) -> Self {
+        Self {
+            meas,
+            rev,
+            applied: Seconds(0.0),
+            applied_samples: 0.0,
+            nudged: Seconds(0.0),
+            nudged_samples: 0.0,
+            tracking: false,
+            awaiting_pick: false,
+        }
+    }
 }

@@ -30,9 +30,8 @@ impl AppState {
             }
             C::TypeDelay => {
                 if let Some(m) = self.need_tf() {
-                    let text = m
-                        .delay
-                        .as_ref()
+                    let text = self
+                        .delay(m.id)
                         .map(|d| format::delay_entry_ms(d.applied.0))
                         .unwrap_or_default();
                     self.prompt(PromptKind::Delay(m.id), text);
@@ -49,7 +48,7 @@ impl AppState {
             }
             C::TrackDelay => {
                 if let Some(m) = self.need_tf() {
-                    let enabled = !m.delay.as_ref().is_some_and(|d| d.tracking);
+                    let enabled = !self.delay(m.id).is_some_and(|d| d.tracking);
                     let what = if enabled { "on" } else { "off" };
                     self.call(
                         out,

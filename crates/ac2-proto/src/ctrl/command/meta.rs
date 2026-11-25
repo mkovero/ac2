@@ -1,4 +1,4 @@
-//! A command's wire name, mutation flag and lease token.
+//! A command's wire name, whether it only reads, and its lease token.
 
 use super::Command;
 
@@ -121,41 +121,123 @@ impl Command {
         }
     }
 
-    /// Whether the command commits a state change (and so honours `expect_rev`).
-    pub fn is_mutation(&self) -> bool {
-        !matches!(
-            self,
+    /// Whether the command only reads: its reply is not kept, and a retry of its request id
+    /// runs it again. Every other command acts (commits a change, or touches devices,
+    /// files or the generator), so its reply is kept and a retry is answered from it,
+    /// never run twice. Exhaustive, so a new command is classified where it is added.
+    pub fn is_read(&self) -> bool {
+        match self {
             Self::Hello { .. }
-                | Self::StreamDevices
-                | Self::StreamPreview { .. }
-                | Self::StreamPreviewStop
-                | Self::StreamControlPanel { .. }
-                | Self::StreamDetectLoopback { .. }
-                | Self::StreamStatus
-                | Self::TraceList
-                | Self::TraceGet { .. }
-                | Self::DynamicsTable { .. }
-                | Self::DynamicsEnvelope(_)
-                | Self::TraceExport { .. }
-                | Self::CalList
-                | Self::StateSnapshot
-                | Self::StateSince { .. }
-                | Self::GridGet { .. }
-                | Self::DelayFind { .. }
-                | Self::FileUploadBegin { .. }
-                | Self::FileUploadChunk { .. }
-                | Self::FileImport { .. }
-                | Self::FileDownloadBegin { .. }
-                | Self::FileDownloadChunk { .. }
-                | Self::SplLogGet { .. }
-                | Self::SplHistoryGet { .. }
-                | Self::SplBandLogGet { .. }
-                | Self::FileList
-                | Self::RecList
-                | Self::ServerInfo
-                | Self::SourceState
-                | Self::PlanList
-        )
+            | Self::StreamStatus
+            | Self::TraceList
+            | Self::TraceGet { .. }
+            | Self::CalList
+            | Self::SplLogGet { .. }
+            | Self::SplBandLogGet { .. }
+            | Self::SplHistoryGet { .. }
+            | Self::DynamicsTable { .. }
+            | Self::DynamicsEnvelope(_)
+            | Self::StateSnapshot
+            | Self::StateSince { .. }
+            | Self::GridGet { .. }
+            | Self::FileList
+            | Self::FileDownloadChunk { .. }
+            | Self::RecList
+            | Self::ServerInfo
+            | Self::SourceState
+            | Self::PlanList => true,
+            Self::StreamDevices
+            | Self::StreamPreview { .. }
+            | Self::StreamPreviewStop
+            | Self::StreamControlPanel { .. }
+            | Self::StreamDetectLoopback { .. }
+            | Self::StreamOpen { .. }
+            | Self::StreamClose
+            | Self::StreamInputs { .. }
+            | Self::StreamOutputs { .. }
+            | Self::GenAcquire { .. }
+            | Self::GenSet { .. }
+            | Self::GenRefresh { .. }
+            | Self::GenRelease { .. }
+            | Self::GenStop
+            | Self::GenCeiling { .. }
+            | Self::OscTarget { .. }
+            | Self::OscTest { .. }
+            | Self::ArtnetTarget { .. }
+            | Self::ArtnetFade { .. }
+            | Self::ArtnetTest { .. }
+            | Self::RigMonitorAtStart { .. }
+            | Self::LevelsSet { .. }
+            | Self::LevelsReset { .. }
+            | Self::MeasCreate { .. }
+            | Self::MeasUpdate { .. }
+            | Self::MeasColour { .. }
+            | Self::MeasOffset { .. }
+            | Self::MeasLayout { .. }
+            | Self::MeasDelete { .. }
+            | Self::MeasEq { .. }
+            | Self::MeasStart { .. }
+            | Self::MeasStop { .. }
+            | Self::MeasReset { .. }
+            | Self::DelayFind { .. }
+            | Self::DelayInsert { .. }
+            | Self::DelaySet { .. }
+            | Self::DelayNudge { .. }
+            | Self::DelayTrack { .. }
+            | Self::TraceCapture { .. }
+            | Self::TraceUpdate { .. }
+            | Self::TraceDelete { .. }
+            | Self::TraceAverage { .. }
+            | Self::TraceImport(..)
+            | Self::TraceTarget { .. }
+            | Self::TraceMicCurve { .. }
+            | Self::TraceExport { .. }
+            | Self::CalSpl { .. }
+            | Self::CalSplElectrical(..)
+            | Self::CalCurveImport { .. }
+            | Self::CalCurveRename { .. }
+            | Self::CalCurveDelete { .. }
+            | Self::CalLine { .. }
+            | Self::CalDelete { .. }
+            | Self::SplLogNew { .. }
+            | Self::SplBandTransfer { .. }
+            | Self::SweepRun(_)
+            | Self::DynamicsRun(_)
+            | Self::FileSave { .. }
+            | Self::FileLoad { .. }
+            | Self::FileNew { .. }
+            | Self::FileRecover
+            | Self::FileSalvage { .. }
+            | Self::FileUploadBegin { .. }
+            | Self::FileUploadChunk { .. }
+            | Self::FileImport { .. }
+            | Self::FileDownloadBegin { .. }
+            | Self::FileDownloadEnd { .. }
+            | Self::RecStart { .. }
+            | Self::RecStop
+            | Self::StreamReplay { .. }
+            | Self::ServerNetwork { .. }
+            | Self::AuthAuthorize { .. }
+            | Self::AuthRevoke { .. }
+            | Self::AuthAdmitRig { .. }
+            | Self::AuthRevokeRig { .. }
+            | Self::RigPair { .. }
+            | Self::RigUnpair { .. }
+            | Self::PlanSave { .. }
+            | Self::PlanDelete { .. }
+            | Self::WalkNew { .. }
+            | Self::WalkUpdate { .. }
+            | Self::WalkGoto { .. }
+            | Self::WalkCapture { .. }
+            | Self::WalkSkip { .. }
+            | Self::WalkRedo { .. }
+            | Self::WalkSwap { .. }
+            | Self::WalkDelete { .. }
+            | Self::SimRun { .. }
+            | Self::SimFit { .. }
+            | Self::SimMap { .. }
+            | Self::SimCancel => false,
+        }
     }
 
     /// The lease token, for commands that require the stimulus lease.

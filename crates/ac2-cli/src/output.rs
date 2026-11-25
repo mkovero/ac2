@@ -185,8 +185,8 @@ pub fn owner_text(o: ac2_proto::model::TraceOwner) -> String {
     }
 }
 
-/// Measurements table.
-pub fn measurements(ms_: &[Measurement]) -> String {
+/// Measurements table, with the transfer measurements' delays.
+pub fn measurements(ms_: &[Measurement], delays: &[ac2_proto::model::Delay]) -> String {
     let mut t = table(&["id", "name", "kind", "running", "delay", "layout", "rev"]);
     for m in ms_ {
         t.add_row(vec![
@@ -194,7 +194,7 @@ pub fn measurements(ms_: &[Measurement]) -> String {
             m.config.name.clone(),
             meas_kind(&m.config.kind),
             yes(m.running),
-            m.delay.as_ref().map_or_else(
+            delays.iter().find(|d| d.meas == m.id).map_or_else(
                 || format::NO_VALUE.to_owned(),
                 |d| format::delay_and_offset(d.applied.0, d.nudged.0),
             ),
@@ -208,8 +208,8 @@ pub fn measurements(ms_: &[Measurement]) -> String {
     t.to_string()
 }
 
-/// One measurement, as a line.
-pub fn measurement(m: &Measurement) -> String {
+/// One measurement, as a line, with its delay when it is a transfer measurement.
+pub fn measurement(m: &Measurement, delay: Option<&ac2_proto::model::Delay>) -> String {
     let mut s = format!(
         "{} {}  {}  {}",
         m.id,
@@ -217,7 +217,7 @@ pub fn measurement(m: &Measurement) -> String {
         meas_kind(&m.config.kind),
         if m.running { "running" } else { "stopped" }
     );
-    if let Some(d) = &m.delay {
+    if let Some(d) = delay {
         // One delay and its offset from the measured arrival, as the app's row says it.
         s.push_str(&format!(
             "  {} · {} samples{}",

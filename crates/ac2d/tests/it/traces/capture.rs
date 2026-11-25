@@ -45,11 +45,11 @@ fn capture_average_math_export_import() {
     // Aligned capture into slot 2.
     let delay = f64::from(ACOUSTIC_DELAY) / f64::from(FS);
     let rev = c
-        .measurement(Command::DelaySet {
+        .delay(Command::DelaySet {
             meas: MeasId(1),
             delay: Seconds(delay),
         })
-        .config_rev
+        .rev
         .0;
     settle(&mut r.d, c, &r.sub, r.tok, rev);
     let aligned = c.trace(Command::TraceCapture {
@@ -323,11 +323,11 @@ fn transfer_capture_keeps_its_ir() {
 
     // Aligned: the arrival moves to time zero with the inserted delay.
     let rev = c
-        .measurement(Command::DelaySet {
+        .delay(Command::DelaySet {
             meas: MeasId(1),
             delay: Seconds(path_s),
         })
-        .config_rev
+        .rev
         .0;
     settle(&mut r.d, c, &r.sub, r.tok, rev);
     let aligned = c.trace(Command::TraceCapture {

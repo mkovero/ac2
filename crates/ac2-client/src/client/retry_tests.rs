@@ -1,4 +1,5 @@
 use super::*;
+use ac2_proto::units::Rev;
 use ac2_proto::{Reply, Request, decode_request, encode_reply};
 
 /// A [`CallCore`] whose ctrl DEALER is connected to a ROUTER handed back, and a context
@@ -100,7 +101,7 @@ async fn a_retry_resends_the_same_id_and_takes_the_reply() {
         router.send(&[peer, encode_reply(&reply).unwrap()]).unwrap();
         got.into_iter().map(|(_, r)| r).collect::<Vec<_>>()
     });
-    let r = core.call(Command::StreamStatus, None, retry).await.unwrap();
+    let r = core.call(Command::StreamStatus, retry).await.unwrap();
     assert_eq!(r, ReplyBody::Ack { rev: Rev(3) });
     let got = daemon.join().unwrap();
     assert_eq!(got.len(), 2, "{got:?}");
@@ -115,10 +116,7 @@ async fn a_silent_daemon_times_out_after_every_retry() {
         retries: 2,
     };
     let (core, router, _ctx) = core(retry);
-    let e = core
-        .call(Command::StreamStatus, None, retry)
-        .await
-        .unwrap_err();
+    let e = core.call(Command::StreamStatus, retry).await.unwrap_err();
     assert!(
         matches!(
             e,

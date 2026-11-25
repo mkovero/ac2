@@ -324,6 +324,13 @@ pub fn conflict_toast(what: &str) -> String {
     format!("{what}: changed elsewhere — reloaded")
 }
 
+/// The warning when a measurement changed elsewhere while edits of it waited to be sent:
+/// they were made on what the operator saw before, so none is sent.
+pub fn edits_dropped(name: &str, n: usize) -> String {
+    let edits = if n == 1 { "edit" } else { "edits" };
+    format!("{name}: {n} later {edits} not sent — it changed elsewhere, shown as it is now")
+}
+
 /// The toast when the refused edit stays on its page, rebased on the newer settings.
 pub fn conflict_kept_toast(what: &str) -> String {
     format!("{what}: changed elsewhere — not applied, your edits kept")

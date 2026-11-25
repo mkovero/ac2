@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model::SessionOrigin;
-use crate::units::{ClientId, Rev, WallNs};
+use crate::units::{ClientId, EqSetId, MeasId, Rev, WallNs};
 
 /// Error codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -14,7 +14,8 @@ pub enum ErrorCode {
     Invalid,
     /// Entity missing.
     NotFound,
-    /// `expect_rev` stale.
+    /// Made on a state that has changed since: a stale `base` (`meas.update`, `meas.eq`
+    /// `put`, the `rig.rev` commands), or unsaved changes (`file.new`, `file.load`).
     Conflict,
     /// Command needs the stimulus lease.
     LeaseRequired,
@@ -40,10 +41,24 @@ pub enum ErrorCode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ErrorDetail {
-    /// `conflict`: the current rev.
+    /// `conflict` from a command guarded by the rig's `rev`: the current one.
     Conflict {
         /// Current rev.
         rev: Rev,
+    },
+    /// `conflict` from `meas.update`: its `base` is not the measurement's `edit_rev`.
+    StaleMeas {
+        /// The measurement.
+        meas: MeasId,
+        /// Its current `edit_rev`.
+        edit_rev: Rev,
+    },
+    /// `conflict` from `meas.eq` `put`: its `base` is not the set's `rev`.
+    EqConflict {
+        /// The set.
+        set: EqSetId,
+        /// Its current rev.
+        rev: u32,
     },
     /// `lease_held`: who holds it.
     LeaseHeld {

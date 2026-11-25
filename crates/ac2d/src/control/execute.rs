@@ -4,9 +4,7 @@
 use std::time::Instant;
 
 use ac2_proto::event::{Change, Patch};
-use ac2_proto::model::{
-    ColourFamily, DelayState, GenAction, MeasConfig, MeasKind, Measurement, SweepFailure,
-};
+use ac2_proto::model::{ColourFamily, GenAction, MeasConfig, MeasKind, Measurement, SweepFailure};
 use ac2_proto::units::{Db, MeasId, Rev, Seconds};
 use ac2_proto::{
     CalSplElectricalArgs, Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, TraceImportArgs,
@@ -229,8 +227,8 @@ impl Control {
 
             Command::DelayFind { .. } => Err(internal("delay.find is answered asynchronously")),
             Command::DelayInsert { meas, pick } => {
-                let d = self.transfer_delay(meas)?;
-                let Some(f) = &d.last_finding else {
+                self.transfer_delay(meas)?;
+                let Some(f) = self.store.state().delay_finding(meas) else {
                     return Err(invalid(
                         "no delay finding to insert; run delay.find or use delay.set",
                     ));
@@ -259,15 +257,14 @@ impl Control {
                 self.set_delay(meas, delay, DelaySource::Nudge)
             }
             Command::DelayTrack { meas, enabled } => {
-                self.transfer_delay(meas)?;
-                let mut m = self.meas(meas)?.clone();
-                if let Some(d) = &mut m.delay {
-                    d.tracking = enabled;
-                }
+                // Tracking on or off moves neither `applied` nor `nudged`: the delay's rev
+                // stays, and so does the stamp of the frames computed under it.
+                let mut d = self.transfer_delay(meas)?.clone();
+                d.tracking = enabled;
                 if let Some(j) = self.jobs.get(&meas) {
                     j.send(JobCmd::Track { enabled });
                 }
-                Ok(self.reply_meas(m))
+                Ok(self.reply_delay(d))
             }
 
             Command::TraceList => Ok(ReplyBody::Traces(self.store.state().traces.clone())),
@@ -455,33 +452,24 @@ impl Control {
         let grid = self.grid_of(None, &config.kind)?;
         let id = self.ids.meas();
         let grid_id = grid.map(|g| self.register_grid(g));
-        let delay = matches!(config.kind, MeasKind::Transfer { .. }).then(|| DelayState {
-            applied: Seconds(0.0),
-            applied_samples: 0.0,
-            nudged: Seconds(0.0),
-            nudged_samples: 0.0,
-            tracking: false,
-            awaiting_pick: false,
-            last_finding: None,
-        });
         let m = Measurement {
             id,
             config,
             config_rev: Rev(self.store.rev().0 + 1),
+            edit_rev: Rev(self.store.rev().0 + 1),
             running: false,
-            delay,
             grid_id,
             colour: None,
             layout: None,
             offset: Db(0.0),
             eq: Vec::new(),
         };
-        self.commit(Change::Measurement(Patch::Set(m.clone())));
+        let m = self.commit_meas_with_delay(m, None)?;
         self.ensure_spl_log(&m, None);
-        Ok(m)
+        Ok(self.meas(m.id)?.clone())
     }
 
-    /// `meas.update`: the measurement with `config`, if `base` is its config rev.
+    /// `meas.update`: the measurement with `config`, if `base` is its `edit_rev`.
     pub(super) fn meas_update(
         &mut self,
         meas: MeasId,
@@ -492,8 +480,8 @@ impl Control {
         validate_meas(&config)?;
         self.spl_needs_mic(&config)?;
         let mut m = self.meas(meas)?.clone();
-        if base != m.config_rev {
-            return Err(stale_meas(meas, m.config_rev));
+        if base != m.edit_rev {
+            return Err(stale_meas(meas, m.edit_rev));
         }
         self.check_dynamics_idle(meas)?;
         self.check_meas_owner(Some(meas), &config.kind)?;
@@ -520,9 +508,9 @@ impl Control {
                     rev: m.config_rev,
                 });
             }
-            self.commit(Change::Measurement(Patch::Set(m.clone())));
+            let m = self.commit_meas_read(m);
             self.ensure_spl_log(&m, old_leq.as_ref());
-            return Ok(ReplyBody::Measurement(m));
+            return Ok(ReplyBody::Measurement(self.meas(meas)?.clone()));
         }
         if display_only(&m.config.kind, &config.kind) {
             // Only how clients draw it changes: the job, its averages and the
@@ -551,39 +539,29 @@ impl Control {
         // A running job starts over with the new configuration: a stopped one's kept
         // result no longer describes it.
         self.drop_kept(meas);
-        let was_transfer = matches!(m.config.kind, MeasKind::Transfer { .. });
-        let is_transfer = matches!(config.kind, MeasKind::Transfer { .. });
         m.config = config;
-        m.config_rev = Rev(self.store.rev().0 + 1);
-        if !is_transfer {
-            m.delay = None;
-        } else if !was_transfer {
-            m.delay = Some(DelayState {
-                applied: Seconds(0.0),
-                applied_samples: 0.0,
-                nudged: Seconds(0.0),
-                nudged_samples: 0.0,
-                tracking: false,
-                awaiting_pick: false,
-                last_finding: None,
-            });
-        }
         m.grid_id = grid.map(|g| self.register_grid(g));
         // The log and the entity follow the new configuration before the job
-        // starts, so a restarted meter reports against its new windows; the
-        // measurement's own commit comes after, under the rev it names.
+        // starts, so a restarted meter reports against its new windows. A kind
+        // change from a transfer drops its finding and delay first; the
+        // measurement's own commit comes next, under the rev it names (one more
+        // for each of those deletes), and a delay made with it after.
         self.ensure_spl_log(&m, old_leq.as_ref());
-        m.config_rev = Rev(self.store.rev().0 + 1);
+        let drops = match (self.delay_of(meas).is_some(), &m.config.kind) {
+            (true, MeasKind::Transfer { .. }) | (false, _) => 0,
+            (true, _) => 1 + u64::from(self.store.state().delay_finding(meas).is_some()),
+        };
+        m.config_rev = Rev(self.store.rev().0 + 1 + drops);
         if m.running && self.stream.is_some() {
             self.stop_job(meas);
             if let Some(g) = self.start_job(&m)? {
                 m.grid_id = Some(self.register_grid(g));
             }
         }
-        self.commit(Change::Measurement(Patch::Set(m.clone())));
+        self.commit_meas_with_delay(m, None)?;
         // Its grid may have changed: the sets' curves follow it.
         self.eq_refresh(meas);
-        Ok(ReplyBody::Measurement(m))
+        Ok(ReplyBody::Measurement(self.meas(meas)?.clone()))
     }
 
     /// `meas.start`: its job runs while a stream is open.

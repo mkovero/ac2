@@ -159,5 +159,9 @@ pub fn events() -> Vec<Event> {
             103,
             Change::Measurement(Patch::Set(super::dynamics::dynamics_measurement())),
         ),
+        ev(104, Change::Delay(Patch::Set(delay()))),
+        ev(105, Change::Delay(Patch::Deleted(MeasId(3)))),
+        ev(106, Change::DelayFinding(Patch::Set(finding()))),
+        ev(107, Change::DelayFinding(Patch::Deleted(MeasId(3)))),
     ]
 }

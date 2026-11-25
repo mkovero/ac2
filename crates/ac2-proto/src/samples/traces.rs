@@ -32,6 +32,7 @@ pub(super) fn confidence() -> DelayConfidence {
 /// An ambiguous finding (two near-equal arrivals).
 pub(super) fn finding() -> DelayFinding {
     DelayFinding {
+        meas: MeasId(1),
         outcome: DelayOutcome::Ambiguous {
             reasons: vec![
                 AmbiguityReason::BorderlineLevel,
@@ -53,6 +54,7 @@ pub(super) fn finding() -> DelayFinding {
 
 pub(super) fn accepted_finding() -> DelayFinding {
     DelayFinding {
+        meas: MeasId(1),
         outcome: DelayOutcome::Accepted {
             first: arrival(600.0, -6.0),
             strongest: arrival(628.5, 0.0),
@@ -67,6 +69,7 @@ pub(super) fn accepted_finding() -> DelayFinding {
 
 pub(super) fn refused_finding() -> DelayFinding {
     DelayFinding {
+        meas: MeasId(1),
         outcome: DelayOutcome::NoEstimate {
             reasons: vec![
                 NoEstimateReason::LowPsr,

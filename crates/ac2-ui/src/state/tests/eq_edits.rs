@@ -44,10 +44,14 @@ fn puts(r: &[Request]) -> Vec<EqBody> {
         .collect()
 }
 
+/// The connection's answer to a `put` of Main L's set.
 fn answered(t: &mut T, result: Result<(), String>) -> Vec<Request> {
-    t.conn(ConnEvent::Reply {
+    t.conn(ConnEvent::MeasEdited {
+        meas: MeasId(1),
         what: "EQ edit".into(),
-        result,
+        result: result
+            .map(|()| None)
+            .map_err(crate::conn::MeasRefusal::Failed),
     })
 }
 

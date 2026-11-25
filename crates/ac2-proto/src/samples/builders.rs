@@ -341,8 +341,8 @@ pub fn sweep_measurement() -> Measurement {
             },
         },
         config_rev: Rev(66),
+        edit_rev: Rev(66),
         running: false,
-        delay: None,
         grid_id: None,
         colour: Some(ColourFamily::Neutral),
         layout: None,
@@ -382,8 +382,8 @@ pub fn math_measurement() -> Measurement {
             },
         },
         config_rev: Rev(62),
+        edit_rev: Rev(62),
         running: true,
-        delay: None,
         grid_id: Some(log_grid().id()),
         colour: None,
         layout: None,
@@ -469,21 +469,27 @@ pub(super) fn measurement() -> Measurement {
         id: MeasId(1),
         config: meas_config(),
         config_rev: Rev(40),
+        edit_rev: Rev(43),
         running: true,
-        delay: Some(DelayState {
-            applied: Seconds(0.0125),
-            applied_samples: 600.25,
-            nudged: Seconds(0.25 / 48_000.0),
-            nudged_samples: 0.25,
-            tracking: true,
-            awaiting_pick: false,
-            last_finding: Some(finding()),
-        }),
         grid_id: Some(log_grid().id()),
         colour: Some(ColourFamily::Hue { index: 5 }),
         layout: Some(pane_layout()),
         offset: Db(0.0),
         eq: Vec::new(),
+    }
+}
+
+/// The delay of [`measurement`].
+pub(super) fn delay() -> Delay {
+    Delay {
+        meas: MeasId(1),
+        rev: Rev(42),
+        applied: Seconds(0.0125),
+        applied_samples: 600.25,
+        nudged: Seconds(0.25 / 48_000.0),
+        nudged_samples: 0.25,
+        tracking: true,
+        awaiting_pick: false,
     }
 }
 
@@ -509,8 +515,8 @@ pub(super) fn spectrum_measurement() -> Measurement {
             },
         },
         config_rev: Rev(41),
+        edit_rev: Rev(41),
         running: true,
-        delay: None,
         grid_id: None,
         colour: None,
         layout: None,

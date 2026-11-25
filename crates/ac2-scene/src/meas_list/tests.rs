@@ -24,8 +24,8 @@ pub(crate) fn tf(id: u32, name: &str) -> Measurement {
             },
         },
         config_rev: Rev(1),
+        edit_rev: Rev(1),
         running: true,
-        delay: None,
         grid_id: None,
         colour: None,
         layout: None,
@@ -37,6 +37,7 @@ pub(crate) fn tf(id: u32, name: &str) -> Measurement {
 fn item(m: &Measurement) -> MeasItem<'_> {
     MeasItem {
         meas: m,
+        delay: None,
         expression: None,
         offset_db: 0.0,
         inverted: false,
@@ -50,7 +51,6 @@ fn item(m: &Measurement) -> MeasItem<'_> {
 #[test]
 fn rows_say_a_measurement_has_its_own_panes() {
     let mut m = tf(2, "TF 2");
-    m.delay = None;
     m.layout = Some(ac2_proto::samples::pane_layout());
     assert_eq!(
         meas_row(&item(&m), None, true).text,
@@ -68,35 +68,42 @@ fn rows_say_a_measurement_has_its_own_panes() {
 
 #[test]
 fn rows_say_one_delay_and_its_offset_from_the_arrival() {
-    let state = |applied: f64, nudged: f64| DelayState {
+    let state = |applied: f64, nudged: f64| Delay {
+        meas: MeasId(2),
+        rev: Rev(1),
         applied: Seconds(applied / 48_000.0),
         applied_samples: applied,
         nudged: Seconds(nudged / 48_000.0),
         nudged_samples: nudged,
         tracking: false,
         awaiting_pick: false,
-        last_finding: None,
     };
-    let mut m = tf(2, "TF 2");
-    m.delay = Some(state(600.0, 0.0));
-    let r = meas_row(&item(&m), None, true);
+    let m = tf(2, "TF 2");
+    let row = |d: Delay| {
+        meas_row(
+            &MeasItem {
+                delay: Some(&d),
+                ..item(&m)
+            },
+            None,
+            true,
+        )
+    };
+    let r = row(state(600.0, 0.0));
     assert_eq!(r.text, "TF  TF 2\n     running · delay 12.50 ms");
     // 0.1 ms later than the arrival.
-    m.delay = Some(state(604.8, 4.8));
-    let r = meas_row(&item(&m), None, true);
+    let r = row(state(604.8, 4.8));
     assert_eq!(
         r.text,
         "TF  TF 2\n     running · delay 12.60 ms (+0.10 ms from arrival)"
     );
     // One sample earlier.
-    m.delay = Some(state(599.0, -1.0));
-    let r = meas_row(&item(&m), None, true);
+    let r = row(state(599.0, -1.0));
     assert_eq!(
         r.text,
         "TF  TF 2\n     running · delay 12.479 ms (−0.021 ms from arrival)"
     );
-    let mut plain = tf(3, "TF 3");
-    plain.delay = None;
+    let plain = tf(3, "TF 3");
     assert_eq!(
         meas_row(&item(&plain), None, true).text,
         "TF  TF 3\n     running"

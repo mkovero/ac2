@@ -71,6 +71,7 @@ fn sidecar(name: &str) -> Sidecar {
         started_by: ClientId("alice".into()),
         initial: Initial {
             measurements: st.measurements.clone(),
+            delays: st.delays.clone(),
             generator: st.generator.clone(),
             inputs: st.inputs.clone(),
             calibrations: st.calibrations.clone(),

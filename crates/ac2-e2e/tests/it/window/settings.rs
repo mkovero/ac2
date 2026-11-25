@@ -28,7 +28,7 @@ fn leq_page_holds_its_scroll_while_the_rig_meters() -> R {
     config.scope = MeasScope::Rig;
     rig.call(Command::MeasUpdate {
         meas: FOH_SPL,
-        base: m.config_rev,
+        base: m.edit_rev,
         config,
     })?;
     let mut h = harness(options(&rig));

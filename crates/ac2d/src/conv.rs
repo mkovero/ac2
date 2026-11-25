@@ -400,11 +400,13 @@ pub(crate) fn finder_band(b: pm::FinderBand) -> FindBand {
 /// The finding `delay.find` answers when the generator stopped within the audio it would
 /// read: no estimate, no evidence, no candidates.
 pub(crate) fn generator_stopped(
+    meas: ac2_proto::units::MeasId,
     band: core::delay::Band,
     observation_s: f64,
     at: WallNs,
 ) -> pm::DelayFinding {
     pm::DelayFinding {
+        meas,
         outcome: pm::DelayOutcome::NoEstimate {
             reasons: vec![pm::NoEstimateReason::GeneratorStopped],
         },
@@ -478,9 +480,10 @@ fn ambiguity_reason(r: core::delay::AmbiguityReason) -> pm::AmbiguityReason {
     }
 }
 
-/// Wire form of a finder result at sample rate `fs`. Values the finder did not reach before
-/// refusing are NaN in the core record and nil on the wire.
+/// Wire form of a finder result on transfer measurement `meas` at sample rate `fs`. Values
+/// the finder did not reach before refusing are NaN in the core record and nil on the wire.
 pub(crate) fn delay_finding(
+    meas: ac2_proto::units::MeasId,
     r: &core::delay::FinderResult,
     fs: f64,
     found_at: WallNs,
@@ -508,6 +511,7 @@ pub(crate) fn delay_finding(
     };
     let c = &r.confidence;
     pm::DelayFinding {
+        meas,
         outcome,
         confidence: pm::DelayConfidence {
             psr_db: finite(c.psr_db).map(Db),

@@ -409,7 +409,8 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an in-proces
 - Command groups: `stream`, `gen` (lease, full-state `set`, stop, ceiling), `meas` (math
   traces and sweeps are measurement kinds), `delay`, `trace`, `cal`, `spl`, `sweep`, `rec`,
   `state`, `grid`, `file`, `server`. `docs/protocol.md` is the normative list.
-- Mutations take an optional `expect_rev` precondition; stale → `conflict` error.
+- A whole-value write takes the `base` it was made on (a measurement's `edit_rev`, an EQ
+  set's `rev`, `rig.rev`); stale → `conflict` error. Field edits are last write wins.
   The daemon commits state changes serially.
 - **State sync:** client subscribes to `evt` first, buffers, then requests a snapshot
   (`rev = R`), applies buffered events with rev > R. Daemon keeps a bounded replay buffer;
@@ -458,7 +459,7 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an in-proces
   owner's lease simply expires; on reconnect it starts disarmed and must re-acquire.
 - The CLI holds a lease only while a foreground command runs (§7).
 - Non-stimulus mutations are open to every authorized client, ordered by serial commit,
-  optionally guarded with `expect_rev`.
+  whole-value writes guarded by their `base`.
 
 ---
 

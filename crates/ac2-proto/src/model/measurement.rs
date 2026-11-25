@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AverageMethod, BandFraction, DelayState, DynamicsConfig, PeakMode, PeakWeighting, Smoothing,
+    AverageMethod, BandFraction, DynamicsConfig, PeakMode, PeakWeighting, Smoothing,
     SmoothingFraction, SpecAveraging, SpecLevel, SpecResolution, SpectrumDisplay, SweepConfig,
     TfAveraging, TimeWeighting, TransferResolution, Weighting, Window,
 };
@@ -739,12 +739,14 @@ pub struct Measurement {
     pub id: MeasId,
     /// Configuration.
     pub config: MeasConfig,
-    /// Rev at which the config was committed; frames with `config_rev` ≥ this show it.
+    /// Rev of the last commit that changed what its job computes from its configuration;
+    /// frames whose `config_rev` stamp is ≥ this show it.
     pub config_rev: Rev,
+    /// Rev of the last commit of this measurement, whatever changed: the token an edit
+    /// names as its `base`, refused when another commit came between.
+    pub edit_rev: Rev,
     /// Job running.
     pub running: bool,
-    /// Delay (transfer measurements only).
-    pub delay: Option<DelayState>,
     /// Grid of the measurement's main stream.
     pub grid_id: Option<GridId>,
     /// Colour family the operator chose (`meas.colour`); `None`: the one its id gives.

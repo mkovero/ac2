@@ -22,6 +22,7 @@ mod discovery;
 mod drift;
 mod driver_stall;
 mod dynamics;
+mod edit_token;
 mod eq;
 mod file_jobs;
 mod harmonics;

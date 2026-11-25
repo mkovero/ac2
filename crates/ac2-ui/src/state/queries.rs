@@ -21,8 +21,12 @@ impl AppState {
         self.rig.meas(id)
     }
 
-    /// `meas.update` of `meas` to `config`, made on the configuration the mirror holds (the
-    /// daemon refuses it with `conflict` when another client changed it since). The
+    pub fn delay(&self, id: MeasId) -> Option<&ac2_proto::model::Delay> {
+        self.rig.delay(id)
+    }
+
+    /// `meas.update` of `meas` to `config`, made on the measurement as the mirror holds it
+    /// (the daemon refuses it with `conflict` when another commit moved it since). The
     /// measurement stays the session's or the rig's, as it is.
     pub fn meas_update(&self, meas: MeasId, mut config: ac2_proto::model::MeasConfig) -> Command {
         let m = self.meas(meas);
@@ -30,7 +34,7 @@ impl AppState {
             config.scope = m.config.scope;
         }
         // No such measurement: the daemon answers `not_found` before it looks at the base.
-        let base = m.map_or(ac2_proto::units::Rev(0), |m| m.config_rev);
+        let base = m.map_or(ac2_proto::units::Rev(0), |m| m.edit_rev);
         Command::MeasUpdate { meas, base, config }
     }
 
@@ -457,6 +461,7 @@ impl AppState {
                 };
                 ac2_scene::meas_list::MeasItem {
                     meas: m,
+                    delay: self.delay(m.id),
                     expression,
                     offset_db: m.offset.0,
                     inverted: e.inverted,

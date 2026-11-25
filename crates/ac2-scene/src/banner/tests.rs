@@ -200,11 +200,12 @@ fn check_routing_ranks_right_after_no_reference() {
 #[test]
 fn no_delay_estimate_says_why() {
     use ac2_proto::model::{
-        DelayBand, DelayConfidence, DelayFinding, DelayOutcome, DelayState, MeasConfig, Resolution,
+        Delay, DelayBand, DelayConfidence, DelayFinding, DelayOutcome, MeasConfig, Resolution,
         TfAveraging, TransferConfig,
     };
     use ac2_proto::units::{MeasId, Rev, Seconds, WallNs};
     let refused = DelayFinding {
+        meas: MeasId(1),
         outcome: DelayOutcome::NoEstimate {
             reasons: vec![NoEstimateReason::LowPsr, NoEstimateReason::LowBandSnr],
         },
@@ -222,7 +223,7 @@ fn no_delay_estimate_says_why() {
         candidates: vec![],
         found_at: WallNs(0),
     };
-    let mut m = Measurement {
+    let m = Measurement {
         id: MeasId(1),
         config: MeasConfig {
             scope: ac2_proto::model::MeasScope::Session,
@@ -241,23 +242,21 @@ fn no_delay_estimate_says_why() {
             },
         },
         config_rev: Rev(1),
+        edit_rev: Rev(1),
         running: true,
-        delay: Some(DelayState {
-            applied: Seconds(0.0),
-            applied_samples: 0.0,
-            nudged: Seconds(0.0),
-            nudged_samples: 0.0,
-            tracking: false,
-            awaiting_pick: false,
-            last_finding: Some(refused),
-        }),
         grid_id: None,
         colour: None,
         layout: None,
         offset: ac2_proto::units::Db(0.0),
         eq: Vec::new(),
     };
-    let why = no_delay_estimate(&m);
+    let mut d = Delay::zero(m.id, Rev(1));
+    assert_eq!(
+        no_delay_estimate(&m, None, None),
+        Some(NoDelayEstimate::NotFound),
+        "no delay yet"
+    );
+    let why = no_delay_estimate(&m, Some(&d), Some(&refused));
     assert_eq!(
         why,
         Some(NoDelayEstimate::Refused(vec![
@@ -275,19 +274,15 @@ fn no_delay_estimate_says_why() {
         Some("finder: no clear peak, too noisy in band")
     );
     // No finding and not tracking: the operator's delay stands.
-    if let Some(d) = &mut m.delay {
-        d.last_finding = None;
-    }
-    assert_eq!(no_delay_estimate(&m), None);
-    if let Some(d) = &mut m.delay {
-        d.tracking = true;
-    }
-    assert_eq!(no_delay_estimate(&m), Some(NoDelayEstimate::NotFound));
+    assert_eq!(no_delay_estimate(&m, Some(&d), None), None);
+    d.tracking = true;
+    assert_eq!(
+        no_delay_estimate(&m, Some(&d), None),
+        Some(NoDelayEstimate::NotFound)
+    );
     // An ambiguous finding nobody picked from: tracking is paused, and says so.
-    if let Some(d) = &mut m.delay {
-        d.awaiting_pick = true;
-    }
-    let why = no_delay_estimate(&m);
+    d.awaiting_pick = true;
+    let why = no_delay_estimate(&m, Some(&d), None);
     assert_eq!(why, Some(NoDelayEstimate::AwaitingPick));
     let b = banners(&Status {
         no_delay_estimate: why,

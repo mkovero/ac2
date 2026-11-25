@@ -51,11 +51,7 @@ fn kind_name(k: FrameKind) -> String {
 }
 
 fn request(i: usize, cmd: Command) -> Request {
-    let mut r = Request::new(RequestId(i as u64), cmd);
-    if r.cmd.is_mutation() {
-        r.expect_rev = Some(units::Rev(41));
-    }
-    r
+    Request::new(RequestId(i as u64), cmd)
 }
 
 #[derive(serde::Serialize)]

@@ -5,9 +5,9 @@
 
 use super::harness::{Cli, DEADLINE, Driver, NAME, R};
 use ac2_client::{ClientConfig, Endpoints};
-use ac2_proto::Command;
 use ac2_proto::model::{MeasConfig, MeasKind, OwnedTraces};
 use ac2_proto::units::MeasId;
+use ac2_proto::{Command, ErrorDetail, ReplyBody};
 use ac2_ui::forms::FormKind;
 use ac2_ui::prefs::{PanePrefs, PanesPrefs, UiPrefs};
 use ac2_ui::sim::{demo_measurement, demo_stream};
@@ -155,6 +155,44 @@ fn desk_edits_tf(desk: &mut Driver, kiosk: &mut Driver) -> R {
     })
 }
 
+/// The new meter renamed `FOH SPL`, made on the measurement as the daemon holds it: the
+/// desk app's own edits of the meter it just made (start, panes) may land in between, and
+/// a write on an older `edit_rev` is refused, so a refusal is read again and retried.
+fn rename_spl(cli: &Cli, id: MeasId) -> R {
+    loop {
+        let ReplyBody::Snapshot(s) = cli.call(Command::StateSnapshot)? else {
+            return Err("a snapshot".into());
+        };
+        let m = s
+            .state
+            .measurements
+            .iter()
+            .find(|m| m.id == id)
+            .ok_or("the SPL meter")?;
+        let renamed = cli.call(Command::MeasUpdate {
+            meas: id,
+            base: m.edit_rev,
+            config: MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
+                name: SPL.into(),
+                kind: m.config.kind.clone(),
+            },
+        });
+        match renamed {
+            Err(e)
+                if e.downcast_ref::<ac2_client::ClientError>()
+                    .is_some_and(|e| {
+                        matches!(e, ac2_client::ClientError::Daemon(p)
+                        if matches!(p.detail, Some(ErrorDetail::StaleMeas { .. })))
+                    }) =>
+            {
+                continue;
+            }
+            r => return r.map(drop),
+        }
+    }
+}
+
 /// `FOH SPL` (first) and `TF 1` with three panes of its own (from the desk app), and the
 /// kiosk showing `FOH SPL`.
 fn rig(ep: &Endpoints, cli: &Cli) -> R<(Driver, Driver)> {
@@ -177,16 +215,8 @@ fn rig(ep: &Endpoints, cli: &Cli) -> R<(Driver, Driver)> {
             .iter()
             .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
     })?;
-    let spl = desk.st.measurements()[0].clone();
-    cli.call(Command::MeasUpdate {
-        meas: spl.id,
-        base: spl.config_rev,
-        config: MeasConfig {
-            scope: ac2_proto::model::MeasScope::Session,
-            name: SPL.into(),
-            kind: spl.config.kind.clone(),
-        },
-    })?;
+    let spl = desk.st.measurements()[0].id;
+    rename_spl(cli, spl)?;
     let mut tf = demo_measurement();
     tf.name = TF.into();
     cli.call(Command::MeasCreate { config: tf })?;
@@ -194,7 +224,7 @@ fn rig(ep: &Endpoints, cli: &Cli) -> R<(Driver, Driver)> {
         meas_named(s, SPL).is_some() && meas_named(s, TF).is_some()
     })?;
     let tf = meas_named(&desk.st, TF).ok_or("TF 1")?;
-    assert!(spl.id < tf, "FOH SPL first");
+    assert!(spl < tf, "FOH SPL first");
     // Selected and dropped on the focused pane: the panes split there are its own.
     desk.send(Msg::SelectMeas(tf));
     let f = desk.st.layout.focus;
