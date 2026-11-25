@@ -10,7 +10,7 @@ use crate::units::Hz;
 /// Stable grid identifier: FNV-1a 64 of the grid's canonical bytes ([`GridDef::canonical_bytes`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct GridId(pub u64);
+pub struct GridId(#[serde(with = "crate::units::dec_u64")] pub u64);
 
 impl fmt::Display for GridId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

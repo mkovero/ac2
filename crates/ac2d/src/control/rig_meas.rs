@@ -90,7 +90,7 @@ impl RigMeas {
 }
 
 /// A measurement as a session file keeps it.
-pub(super) fn saved_of(m: &Measurement) -> SavedMeasurement {
+pub(super) fn saved_of(m: &Measurement, next_run: u32) -> SavedMeasurement {
     SavedMeasurement {
         id: m.id,
         config: m.config.clone(),
@@ -104,6 +104,7 @@ pub(super) fn saved_of(m: &Measurement) -> SavedMeasurement {
         layout: m.layout.clone(),
         offset: m.offset,
         eq: m.eq.clone(),
+        next_run,
     }
 }
 

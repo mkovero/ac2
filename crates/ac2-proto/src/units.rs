@@ -2,7 +2,9 @@
 //!
 //! Every physical quantity on the wire is a newtype so that a field's unit is part of its
 //! type. All of them serialize transparently (a msgpack float or integer), so the wire stays
-//! plain for non-Rust clients.
+//! plain for non-Rust clients. The 64-bit identifiers and times that use the whole range
+//! ([`WallNs`], [`RigId`], [`crate::grid::GridId`]) are decimal strings in a human-readable
+//! format ([`dec_u64`]).
 
 use std::fmt;
 
@@ -86,7 +88,67 @@ pub struct Samples(pub i64);
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
 )]
 #[serde(transparent)]
-pub struct WallNs(pub u64);
+pub struct WallNs(#[serde(with = "dec_u64")] pub u64);
+
+/// A `u64` that may use all 64 bits, as a decimal string in a human-readable format (the
+/// JSON files) and an integer in msgpack (the wire). A JSON reader whose numbers are
+/// doubles keeps 53 bits: a rig id, a grid id or a time in nanoseconds would come back as
+/// another value, silently, and be written back so.
+pub mod dec_u64 {
+    use std::fmt;
+
+    use serde::de::{self, Visitor};
+    use serde::{Deserializer, Serializer};
+
+    /// Writes `v`: a string when human-readable, else an integer.
+    pub fn serialize<S: Serializer>(v: &u64, s: S) -> Result<S::Ok, S::Error> {
+        if s.is_human_readable() {
+            s.collect_str(v)
+        } else {
+            s.serialize_u64(*v)
+        }
+    }
+
+    /// Reads a decimal string (digits only, no sign, no leading zero) when
+    /// human-readable, else an integer. An integer is also taken when human-readable: serde
+    /// hands a msgpack value inside an internally tagged enum over through its buffered
+    /// content, which reports itself human-readable whatever the format was.
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+        if d.is_human_readable() {
+            d.deserialize_any(Dec)
+        } else {
+            d.deserialize_u64(Dec)
+        }
+    }
+
+    struct Dec;
+
+    impl Visitor<'_> for Dec {
+        type Value = u64;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("a u64 as a decimal string")
+        }
+
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<u64, E> {
+            Ok(v)
+        }
+
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<u64, E> {
+            u64::try_from(v).map_err(|_| E::invalid_value(de::Unexpected::Signed(v), &self))
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<u64, E> {
+            let digits = !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit());
+            let canonical = v == "0" || !v.starts_with('0');
+            digits
+                .then_some(())
+                .filter(|()| canonical)
+                .and_then(|()| v.parse().ok())
+                .ok_or_else(|| E::invalid_value(de::Unexpected::Str(v), &self))
+        }
+    }
+}
 
 /// Index in the stream's sample clock; origin = stream open.
 #[derive(
@@ -125,7 +187,7 @@ id_type!(
 /// hex digits, the form of its file (`<config>/rig-id`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct RigId(pub u64);
+pub struct RigId(#[serde(with = "dec_u64")] pub u64);
 
 impl fmt::Display for RigId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -251,5 +313,52 @@ impl<'de> Deserialize<'de> for Blob {
             }
         }
         d.deserialize_byte_buf(V)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use crate::model::layout::RigRef;
+
+    #[test]
+    fn a_full_u64_is_a_string_in_json_and_an_integer_in_msgpack() {
+        let id = RigId(u64::MAX - 1);
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "\"18446744073709551614\"");
+        assert_eq!(serde_json::from_str::<RigId>(&json).unwrap(), id);
+        let mp = rmp_serde::to_vec_named(&id).unwrap();
+        assert_eq!(mp[0], 0xcf, "a msgpack uint64");
+        assert_eq!(rmp_serde::from_slice::<RigId>(&mp).unwrap(), id);
+        // Inside an internally tagged enum, msgpack comes back through serde's buffered
+        // content, which reports itself human-readable.
+        let r = RigRef::Rig {
+            id,
+            name: "b".into(),
+        };
+        let mp = rmp_serde::to_vec_named(&r).unwrap();
+        assert_eq!(rmp_serde::from_slice::<RigRef>(&mp).unwrap(), r);
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["id"], "18446744073709551614");
+        assert_eq!(serde_json::from_value::<RigRef>(json).unwrap(), r);
+    }
+
+    #[test]
+    fn only_plain_decimal_digits_read() {
+        assert_eq!(serde_json::from_str::<WallNs>("\"0\"").unwrap(), WallNs(0));
+        for bad in [
+            "\"\"",
+            "\"+1\"",
+            "\"-1\"",
+            "\"01\"",
+            "\"1.0\"",
+            "\"1e3\"",
+            "\" 1\"",
+            "\"18446744073709551616\"",
+            "-1",
+        ] {
+            assert!(serde_json::from_str::<WallNs>(bad).is_err(), "{bad}");
+        }
     }
 }

@@ -12,9 +12,11 @@ A file already in the new shape is left alone. Covers, per file:
 - rig.json (rig settings) 11 -> 12: `monitor_session` -> `monitor_stream`; a band
   transfer's bands tagged by `type`, not `status`; a paired rig without `data` (its data
   endpoint is the port after `ctrl`); a pane layout's `levels` and `plates` written out
-  where missing (none set, every plate at its default place and size).
+  where missing (none set, every plate at its default place and size); every rig id (a
+  paired rig's `rig`, a remote input's `rig`, a pane's pinned rig `id`) a decimal string.
 - calibration store 4 -> 5: an input's `InputKind` tagged by `type`, not `kind`; an
-  electrical calibration's `loading` written out (`null`, unloaded) where missing.
+  electrical calibration's `loading` written out (`null`, unloaded) where missing; every
+  `calibrated_at` and `imported_at` a decimal string.
 - plan files (`plans/*.json`), unversioned -> `version: 1`: a surface tagged by `type`,
   not `kind`.
 
@@ -70,6 +72,40 @@ def layout_fields(node):
             layout_fields(v)
 
 
+def dec(v):
+    """A u64 as the files now hold it: its decimal string (a JSON number read by Python is
+    exact, so nothing is lost here)."""
+    return str(v) if isinstance(v, int) and not isinstance(v, bool) else v
+
+
+def rig_ids(node):
+    """Every rig id under `node` as a decimal string: a pinned rig of a pane
+    (`{"type": "rig", "id": ...}`) and the `rig` of a paired rig or a remote input."""
+    if isinstance(node, dict):
+        if node.get("type") == "rig" and "id" in node:
+            node["id"] = dec(node["id"])
+        if "rig" in node:
+            node["rig"] = dec(node["rig"])
+        for v in node.values():
+            rig_ids(v)
+    elif isinstance(node, list):
+        for v in node:
+            rig_ids(v)
+
+
+def wall_times(node, keys):
+    """Every value under `node` keyed by one of `keys` as a decimal string."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in keys:
+                node[k] = dec(v)
+            else:
+                wall_times(v, keys)
+    elif isinstance(node, list):
+        for v in node:
+            wall_times(v, keys)
+
+
 def electrical_loading(node):
     """Every electrical calibration under `node` with its `loading`, `null` where missing."""
     if isinstance(node, dict):
@@ -100,6 +136,9 @@ def convert_rig(doc):
         {k: v for k, v in p.items() if k != "data"} if isinstance(p, dict) else p
         for p in out.get("peers", [])
     ]
+    rig_ids(out.get("peers"))
+    rig_ids(out.get("meters"))
+    rig_ids(out.get("monitor_stream"))
     out["version"] = 12
     return out
 
@@ -119,6 +158,7 @@ def convert_cal(doc):
         for i in doc.get("inputs", [])
     ]
     electrical_loading(out.get("sensitivities"))
+    wall_times(out, {"calibrated_at", "imported_at"})
     out["version"] = 5
     return out
 

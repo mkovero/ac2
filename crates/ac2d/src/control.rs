@@ -504,6 +504,8 @@ pub(crate) struct Control {
     sims: sim::Sims,
     /// The links to the paired rigs and what they report.
     remote: remote::RemoteCtl,
+    /// Each measurement's next run number (none held: 1).
+    next_run: HashMap<MeasId, u32>,
 }
 
 /// The stimulus output: who may drive it, its gate, level and source, and the ceiling.
@@ -819,6 +821,7 @@ impl Control {
         );
         self.note_for_recording(&change);
         self.rig_meas_committing(&change);
+        self.runs_committing(&change);
         let sim_stops = self.sim_stopped_by(&change);
         let ev = self.store.commit(change, Instant::now());
         if levels {

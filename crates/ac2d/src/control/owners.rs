@@ -98,25 +98,35 @@ impl Control {
         (traces, maths)
     }
 
-    /// The number of sweep measurement `meas`'s next run: one more than the highest of its
-    /// stored runs, wherever they are filed now.
+    /// The number of measurement `meas`'s next sweep or dynamics run: past every run it
+    /// has made (a stored run raises it, a deleted one never lowers it) and the number a
+    /// loaded session had reached.
     pub(super) fn next_run_number(&self, meas: MeasId) -> u32 {
-        self.store
-            .state()
-            .traces
-            .iter()
-            .filter_map(|t| match &t.source {
-                TraceSource::Sweep {
-                    meas: m, number, ..
+        self.next_run.get(&meas).copied().unwrap_or(1)
+    }
+
+    /// `meas`'s next run is numbered `n` or higher.
+    pub(super) fn raise_next_run(&mut self, meas: MeasId, n: u32) {
+        let e = self.next_run.entry(meas).or_insert(1);
+        *e = (*e).max(n);
+    }
+
+    /// Called with every change before it is committed: a stored run moves its
+    /// measurement's run counter past it; a deleted measurement's counter goes with it.
+    pub(super) fn runs_committing(&mut self, change: &Change) {
+        match change {
+            Change::Trace(Patch::Set(t)) => {
+                if let TraceSource::Sweep { meas, number, .. }
+                | TraceSource::Dynamics { meas, number, .. } = &t.source
+                {
+                    self.raise_next_run(*meas, number.saturating_add(1));
                 }
-                | TraceSource::Dynamics {
-                    meas: m, number, ..
-                } if *m == meas => Some(*number),
-                _ => None,
-            })
-            .max()
-            .unwrap_or(0)
-            + 1
+            }
+            Change::Measurement(Patch::Deleted(id)) => {
+                self.next_run.remove(id);
+            }
+            _ => {}
+        }
     }
 
     /// `meas.delete`: the measurement goes; what it owns is kept under the imported group or

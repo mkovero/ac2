@@ -98,7 +98,10 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
         let mom = &l["momentary"];
         assert!(mom == "-inf" || mom.is_f64(), "{l}");
         assert!(l["duration"].as_f64().expect("seconds") > 0.0, "{l}");
-        assert!(l["since"].as_u64().expect("daemon wall ns") > 0, "{l}");
+        // A time in ns is a decimal string in JSON: a reader with double-precision numbers
+        // keeps it.
+        let since: u64 = l["since"].as_str().expect("daemon wall ns").parse()?;
+        assert!(since > 0, "{l}");
     }
     let pairs = v["pairs"].as_array().expect("array");
     assert_eq!(pairs.len(), 1);

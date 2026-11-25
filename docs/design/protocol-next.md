@@ -491,8 +491,8 @@ network mode.
 | `sim.run` / `sim.fit` busy `invalid` | `refused` | ac2d |
 | `#[serde(default)]` on `CalEntry.loading`, `PaneLayout.levels`, `.plates` | required | proto |
 | `ppm`, `max` declared `dbfs` under loudness ballistics | `dbtp` (§6) | ac2d jobs/meters |
-| `WallNs`, `RigId`, `GridId` in JSON files | decimal strings when `is_human_readable()`, integers in msgpack | proto units |
-| run `number` = highest stored + 1 | per-measurement `next_run: u32` in the session file, never lowered | ac2d, traces |
+| `WallNs`, `RigId`, `GridId` in JSON files | decimal strings when `is_human_readable()`, integers in msgpack (`units::dec_u64`); the JSON reader also takes an integer, because serde hands a msgpack value inside an internally tagged enum over through its buffered content, which reports itself human-readable; sample indices and frame counts stay numbers (2^53 samples are centuries of audio) | proto units |
+| run `number` = highest stored + 1 | per-measurement `next_run: u32` in the session file, never lowered: ac2d keeps it per measurement (not on the wire), every stored run raises it past its number, a deleted run does not lower it; a load takes the file's value, raised past any run the file stores | ac2d, traces |
 | loopback burst: no state | a `generator` event as it starts, `firing` true for its length, `last_action.action = loopback_burst` (new `GenAction::LoopbackBurst`); `firing` false after | proto, ac2d, ui |
 | a stream reopen silently ends a recording | the reply of the command that caused it carries warning `recording_ended {recording: RecordingRef}` (`file.load`, `file.new`, `stream.open`, `stream.close`) | proto, ac2d, cli, ui |
 | `DmxSet {channel, value}` | `+ snap: bool` (jump, no fade) | proto, ac2d artnet, ui |
@@ -556,7 +556,11 @@ until the last has landed.
 3. `pn-shapes`: the §9 rows that change a shape but not frames or files: `sim_map`, dynamics
    envelopes as arrays, `RigPeer`, the `Version` detail, required `level`, busy `refused`,
    required `serde` fields.
-4. `pn-files`: string integers in JSON files and `next_run`.
+4. `pn-files`: string integers in JSON files and `next_run`. Every file it touches was
+   already bumped by an earlier step (session 50, rig.json 12, sidecar 4, calibration store
+   5, trace export v7) and changes shape under that number; the converter writes rig ids
+   and calibration times as strings. CLI `--json` output and the recorded daemon fixtures
+   follow, being JSON.
 5. `pn-edit`: §1, §2 (`edit_rev`, delay entity, `expect_rev` gone, `eq put` base); bins
    frames take the `tf` stamp already, so they follow without a change of their own.
 6. `pn-roles`: §3 (needs the `auth.*` names of 2). The data socket's rig gate already
@@ -586,11 +590,11 @@ Every serde writer of the workspace was walked; stored formats that change shape
 | raw capture sidecar | 3 → 4 | stream names, `sample_rate_hz`, string integers, measurement without `delay` and `TimelineChange::Delay` (§1) | old captures not replayed; keep the WAV |
 | SPL log | v2 → v3 | §7 | none (inside sessions) |
 | band log | v1 → v2 | §7 | none (inside sessions) |
-| calibration store | 4 → 5 | `InputKind` tag, string `calibrated_at`, required `loading` | converter (adds `loading` where missing) |
+| calibration store | 4 → 5 | `InputKind` tag, string `calibrated_at` and `imported_at`, required `loading` | converter (adds `loading` where missing, writes the times as strings) |
 | rig settings (`rig.json`) | 11 → 12 | `RigPeer`, `DmxSet.snap`, stream config names, tag keys, unit suffixes, required layout fields, string integers | converter |
 | authorized clients | grammar | role on every line (§3) | converter adds `operator` |
 | plan files (`plans/*.json`) | unversioned → `version: 1` | `Surface` tag `type` | converter |
-| trace export | v6 → v7 | sweep info, `ir` header and dynamics info carry `sample_rate_hz`, `lo_hz` / `hi_hz`, `type` tags | none (open question 1) |
+| trace export | v6 → v7 | sweep info, `ir` header and dynamics info carry `sample_rate_hz`, `lo_hz` / `hi_hz`, `type` tags; a `mic_curve` header's `imported_at` a string | none (open question 1) |
 | network settings | 2, unchanged | no affected type | — |
 | `ui.toml` | unchanged | its own file types; rig ids already hex strings | — |
 

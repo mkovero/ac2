@@ -55,7 +55,11 @@ async fn trace_commands_json() -> R {
     let actual = a.clone();
     for path in ["/grid_id", "/created_at", "/source/at_sample"] {
         let v = a.pointer_mut(path).ok_or(path)?;
-        assert!(v.as_u64().is_some_and(|n| n > 0), "{path}: {actual}");
+        // 64-bit ids and times are decimal strings in JSON; sample indices are numbers.
+        let n = v
+            .as_u64()
+            .or_else(|| v.as_str().and_then(|s| s.parse().ok()));
+        assert!(n.is_some_and(|n: u64| n > 0), "{path}: {actual}");
         *v = Value::Null;
     }
     assert_eq!(

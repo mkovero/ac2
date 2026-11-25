@@ -75,7 +75,8 @@ fn pin_times(mut v: Value, now: i128) -> Value {
             Value::Object(m) => {
                 for (k, x) in m.iter_mut() {
                     let instant = k.ends_with("_at") || k == "since" || k == "at";
-                    match x.as_u64() {
+                    // A `WallNs` is a decimal string in JSON.
+                    match x.as_str().and_then(|s| s.parse::<u64>().ok()) {
                         // Zero is "never" (a fresh rig's unset instants), not 1970.
                         Some(t) if instant && t > 0 => {
                             *x = Value::String(format!("now-{}", now - i128::from(t)));

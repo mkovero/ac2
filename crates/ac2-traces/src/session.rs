@@ -88,6 +88,9 @@ pub struct SavedMeasurement {
     pub offset: Db,
     /// EQ what-if sets (their filter curves are recomputed on load).
     pub eq: Vec<ac2_proto::model::EqSet>,
+    /// The number its next sweep or dynamics run takes: past every run it has made, those
+    /// whose traces were deleted since included, so a number never names two runs.
+    pub next_run: u32,
 }
 
 /// Delay of a saved transfer measurement.

@@ -344,17 +344,25 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     assert_eq!(t2.edit.owner, TraceOwner::Meas { meas });
     assert!(matches!(t2.source, TraceSource::Sweep { number: 2, .. }));
 
-    // Deleted with its runs kept: they move to the imported group.
+    // A deleted run keeps its number: the next run is not numbered 2 again.
+    c.ok(Command::TraceDelete { trace: second });
+    arm(&mut c, token);
+    let run2 = start(&mut c, token, meas);
+    assert_eq!(run2.name, "Run 3");
+    c.ok(Command::GenStop);
+    run_until(&mut d, &mut c, &sub, &ka, token, |r| {
+        r.id == run2.id && !r.active()
+    });
+
+    // Deleted with its run kept: it moves to the imported group.
     c.ok(Command::MeasDelete {
         meas,
         traces: OwnedTraces::Keep,
     });
     let st = c.state();
     assert!(st.measurements.iter().all(|m| m.id != meas));
-    for id in [trace, second] {
-        let t = st.traces.iter().find(|t| t.id == id).unwrap();
-        assert_eq!(t.edit.owner, TraceOwner::Imported, "{}", t.edit.name);
-    }
+    let t = st.traces.iter().find(|t| t.id == trace).unwrap();
+    assert_eq!(t.edit.owner, TraceOwner::Imported, "{}", t.edit.name);
 }
 
 #[test]
@@ -755,4 +763,40 @@ fn a_sweep_through_a_corrected_mic_applies_its_curve() {
             assert!((a - f64::from(bare.mag_db[i])).abs() < 1e-3);
         }
     }
+}
+
+/// A run is numbered by its measurement's run counter, which the session keeps beside it: a
+/// loaded session's counter numbers the next run even with none of its runs stored.
+#[test]
+fn the_run_counter_travels_with_the_session() {
+    let (_h, _b, mut c, _sub, _ka, _d, _token) = setup();
+    let meas = create(&mut c, "sweep", request(LEVEL));
+    let dir = tempfile::tempdir().unwrap();
+    let session = ac2_proto::model::SessionRef::Path {
+        path: dir.path().join("s").to_string_lossy().into_owned(),
+    };
+    c.ok(Command::FileSave {
+        session: session.clone(),
+        overwrite: true,
+    });
+    let manifest = dir.path().join("s/session.json");
+    let mut doc: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+    assert_eq!(doc["measurements"][0]["next_run"], 1);
+    assert!(
+        doc["saved_at"].is_string(),
+        "a time in ns is a decimal string"
+    );
+    doc["measurements"][0]["next_run"] = 7.into();
+    std::fs::write(&manifest, serde_json::to_vec(&doc).unwrap()).unwrap();
+    c.ok(Command::FileLoad {
+        session,
+        discard: true,
+    });
+    // A load leaves the stimulus without an owner.
+    let token = c.acquire();
+    arm(&mut c, token);
+    let r = start(&mut c, token, meas);
+    assert_eq!(r.name, "Run 7");
+    c.ok(Command::GenStop);
 }

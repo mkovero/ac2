@@ -366,6 +366,7 @@ fn the_leq_log_exports_as_csv_in_a_new_folder() -> R {
                 layout: None,
                 offset: ac2_proto::units::Db(0.0),
                 eq: Vec::new(),
+                next_run: 1,
             }],
             spl_logs: vec![SavedSplLog {
                 info: info.clone(),
