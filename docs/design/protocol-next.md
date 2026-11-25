@@ -202,8 +202,8 @@ rig's) is not read line by line: the daemon sets it aside whole (`.damaged-<time
 damaged file), starts with no client authorized and reports a damaged file whose reason
 names `tools/proto-next/convert.py --auth <the set-aside file>`; there is no version marker,
 the role field is the marker. The one-shot deploy converter (`--auth`) adds `operator` to
-the two-field lines, keeps `rig=` lines and the file's mode, keeps the original as `.pre105`,
-and prints no key.
+the two-field lines, keeps `rig=` lines, writes the file and the `.pre105` original it keeps
+with mode 600, and prints no key.
 
 `auth.authorize` (today `server.authorize`) takes `role: ClientRole`, typed and required;
 `auth.admit_rig` stays the only way to `rig`, and `auth.authorize` refuses `rig`
@@ -273,6 +273,43 @@ app's connect dialog) offers a viewer line.
 OS user is the boundary. `server.network` and the `SessionRef.path` forms stay reserved to
 them, as today. `auth.*` is not: a network operator may authorize, demote and revoke clients
 and admit or revoke rigs, as it may today; a viewer and a rig may send none of it.
+
+**Limits on a key.** The threat is a holder of a valid viewer or rig key, or of a key
+demoted or revoked, on the network. Settled:
+
+- *Logs.* `hello`'s `client` is cut to 64 characters at decode, control and bidi characters
+  `?` (`ac2_proto::printable`); a decode error quoted in a log line is cut the same way to
+  160. Trace and import file names that reach state go through it too; names are checked by
+  `check_name` (one line, no control characters). The revoked-key, wrong-version and
+  undecodable-message warnings come once per key and reason from a set of 256 that is never
+  cleared (past it, one line says so and the rest go to debug). Audit lines (target
+  `ac2d::audit`) go to `ac2d-audit.log` beside the log file, 4 MiB and one `.1`, appended
+  across restarts and written under journald too: no client can push them out.
+- *Transfers.* A viewer key holds one transfer, a download still being packed counted;
+  viewers together hold at most half of the 4. Every transfer ends at 15 min whatever its
+  use (64 MiB at about 600 kbit/s), beside the 2 min idle drop.
+- *File slot.* An operator's file command cuts a viewer's download under way (the viewer is
+  refused and told to ask again) instead of being refused; a viewer key starts a download
+  at most once per 5 s (`refused`, with the seconds left).
+- *Subscriptions.* 4096 per data peer (the app holds hundreds); past it the peer is dropped
+  and logged once, and must rejoin.
+- *`file.list`.* One reading at a time; later requests attach to its answer.
+- *Role changes.* A demotion or revoke cancels the key's file jobs: a job re-checks its
+  requester's role when it ends, and its result is discarded (staging removed, nothing
+  committed). A loopback-detection burst of the key is cut with the fade, as its lease is.
+  A `delay.find` is not re-checked: its finding pauses the finder for a pick, and viewers
+  read findings anyway.
+- *Self lock-out.* `auth.authorize` that changes the caller's own name's key or role is
+  refused, as revoking it is; `auth.admit_rig` onto an app's name is `invalid`.
+- *What a network client reads.* Host paths become base names in every reply and event to a
+  network client (session origin, `file.list`, recordings, replay, damaged files, the
+  calibration store error); the local pair reads them whole. A viewer's `server.info` lists
+  its own entry only and says `recordings: kept` instead of the directory.
+- *`gen.stop`* with nothing armed, firing or running is an `ack` with no commit, event,
+  `last_action` or audit line.
+- *The authorized-clients file* is refused (no network client admitted, a `damaged_files`
+  entry saying why, the file left as it is) unless it is a regular file owned by the
+  daemon's user that its group and others cannot write.
 
 ### 4. Oversize snapshots and events
 
