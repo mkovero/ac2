@@ -31,6 +31,7 @@
             "type": "measuring"
           }
         },
+        "rtc": true,
         "stamp_map": null,
         "system": {
           "maxerror_us": 1000,
@@ -301,7 +302,11 @@
           "sent": 0
         },
         "osc_target": null,
-        "rev": 0
+        "rev": 0,
+        "zone": {
+          "name": "Europe/Helsinki",
+          "utc_offset_s": 7200
+        }
       },
       "server": {
         "ctrl": null,
@@ -319,11 +324,11 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-11892527"
+              "since": "now-13609650"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-11892527"
+              "since": "now-13609650"
             }
           },
           "started_at": null,
@@ -331,31 +336,31 @@
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-11892527",
+              "since": "now-13609650",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-11892527",
+              "since": "now-13609650",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-11892527",
+              "since": "now-13609650",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-11892527",
+              "since": "now-13609650",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-11892527",
+              "since": "now-13609650",
               "weighting": "a"
             }
           ]
@@ -396,7 +401,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-53875810",
+          "opened_at": "now-56623699",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -425,7 +430,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-5620481"
+        "saved_at": "now-5968685"
       }
     },
     "traces": []

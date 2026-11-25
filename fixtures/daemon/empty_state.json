@@ -11,6 +11,7 @@
     "calibrations": [],
     "clocks": {
       "capture": null,
+      "rtc": true,
       "stamp_map": null,
       "system": {
         "maxerror_us": 1000,
@@ -69,7 +70,11 @@
         "sent": 0
       },
       "osc_target": null,
-      "rev": 0
+      "rev": 0,
+      "zone": {
+        "name": "Europe/Helsinki",
+        "utc_offset_s": 7200
+      }
     },
     "server": {
       "ctrl": null,

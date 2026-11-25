@@ -39,6 +39,8 @@ fn doc<T: Serialize>(value: &T) -> R<Value> {
 /// the same:
 /// - the system clock, whatever the operating system states (Linux: synced or not, with the
 ///   kernel's error bound; macOS and Windows: nothing);
+/// - whether the host has a battery-backed clock, and the host's time zone with the offset
+///   in force;
 /// - a local client's tag, the routing id libzmq gave its connection, which starts from the
 ///   C library's random generator and so differs by platform.
 fn pin_host(mut v: Value) -> Value {
@@ -60,6 +62,12 @@ fn pin_host(mut v: Value) -> Value {
     }
     if let Some(e) = v.pointer_mut("/clocks/system") {
         *e = serde_json::json!({"type": "synced", "maxerror_us": 1000});
+    }
+    if let Some(e) = v.pointer_mut("/clocks/rtc") {
+        *e = Value::Bool(true);
+    }
+    if let Some(e) = v.pointer_mut("/rig/zone") {
+        *e = serde_json::json!({"name": "Europe/Helsinki", "utc_offset_s": 7200});
     }
     walk(&mut v);
     v
