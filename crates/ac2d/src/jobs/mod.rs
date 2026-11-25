@@ -251,7 +251,9 @@ pub(crate) enum JobMsg {
     CaptureBins(SyncSender<Option<bins::OperandBins>>),
     /// Form the current result with its impulse response for `trace.capture`.
     CaptureTrace(SyncSender<Option<Captured>>),
-    Stop,
+    /// Send the final frames and end; with a channel, also answer there with the result a
+    /// `trace.capture` would take at that moment.
+    Stop(Option<SyncSender<Option<Captured>>>),
 }
 
 /// One analysis.
@@ -325,7 +327,7 @@ pub(crate) struct Live {
 }
 
 /// A job's result as `trace.capture` stores it.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Captured {
     /// The curve result.
     pub(crate) frame: Frame,
@@ -376,8 +378,17 @@ impl JobHandle {
         })
     }
 
-    fn stop_inner(&mut self) {
-        let _ = self.tx.send(JobMsg::Stop);
+    /// Stops the job and returns the result a `trace.capture` would have taken as it
+    /// stopped, formed after its final frames from the same state, so a capture of the
+    /// stopped measurement stores what its views show. `None` when it had none yet.
+    pub(crate) fn stop_keeping(mut self) -> Option<Captured> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.stop_inner(Some(tx));
+        rx.try_recv().ok().flatten()
+    }
+
+    fn stop_inner(&mut self, keep: Option<SyncSender<Option<Captured>>>) {
+        let _ = self.tx.send(JobMsg::Stop(keep));
         self.wake();
         if let Some(t) = self.thread.take() {
             let _ = t.join();
@@ -387,7 +398,9 @@ impl JobHandle {
 
 impl Drop for JobHandle {
     fn drop(&mut self) {
-        self.stop_inner();
+        if self.thread.is_some() {
+            self.stop_inner(None);
+        }
     }
 }
 
@@ -580,15 +593,14 @@ fn run(
                     false
                 }
                 JobMsg::CaptureTrace(reply) => {
-                    let c = a.capture().map(|(s, d)| Captured {
-                        frame: em.frame(s, 0, d),
-                        ir: a.capture_ir(),
-                    });
-                    let _ = reply.send(c);
+                    let _ = reply.send(captured(a, em));
                     false
                 }
-                JobMsg::Stop => {
+                JobMsg::Stop(keep) => {
                     a.final_frames(em);
+                    if let Some(reply) = keep {
+                        let _ = reply.send(captured(a, em));
+                    }
                     return;
                 }
             };
@@ -651,6 +663,14 @@ const PARK_MAX: Duration = Duration::from_secs(1);
 /// Sleeps until `n` frames are queued. Parked rather than blocked in a receive, the thread
 /// is not woken by each hand-off (a send wakes only a waiting receiver): the fan-out unparks
 /// it once enough has arrived, and `JobHandle` for anything else.
+/// The analysis's current result with its impulse response, as `trace.capture` stores it.
+fn captured(a: &mut dyn Analysis, em: &Emitter) -> Option<Captured> {
+    a.capture().map(|(s, d)| Captured {
+        frame: em.frame(s, 0, d),
+        ir: a.capture_ir(),
+    })
+}
+
 fn park_until_queued(queue: &Queue, n: u64) {
     // Announced before the queue is looked at, and the fan-out adds to the queue before it
     // reads this, so one of the two always sees the other: a hand-off is never missed.

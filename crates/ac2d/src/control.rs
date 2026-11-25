@@ -57,6 +57,7 @@ mod file_jobs;
 mod files;
 mod generator;
 mod ids;
+mod kept;
 mod leq;
 mod levels;
 mod load_check;
@@ -445,6 +446,8 @@ pub(crate) struct Control {
     /// would otherwise end with every reopen.
     spare_links: Vec<ac2_audio::SpareLink>,
     jobs: BTreeMap<MeasId, JobHandle>,
+    /// What each stopped measurement's job left for `trace.capture`.
+    kept: kept::Kept,
     /// How spatial averages reach their running members.
     probes: Arc<Probes>,
     timing_job: Option<JobHandle>,

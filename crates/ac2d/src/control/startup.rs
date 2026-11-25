@@ -11,7 +11,7 @@ use ac2_proto::units::Dbfs;
 
 use super::{
     Control, Keepalive, Output, Pending, RigState, Setup, SplLogs, artnet, clocks, file_jobs, ids,
-    osc, remote, rig_meas, sim, traces, transfer, walks, working,
+    kept, osc, remote, rig_meas, sim, traces, transfer, walks, working,
 };
 use crate::autosave::Autosaver;
 use crate::calstore::{self, CalStore};
@@ -109,6 +109,7 @@ impl Control {
             audio_recovery: None,
             spare_links: Vec::new(),
             jobs: BTreeMap::new(),
+            kept: kept::Kept::default(),
             probes: Arc::new(Probes::default()),
             timing_job: None,
             preview: None,

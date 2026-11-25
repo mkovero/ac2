@@ -293,16 +293,18 @@ impl Control {
                 m.config.name
             )));
         }
-        let super::Captured { frame, ir } = self
-            .jobs
-            .get(&meas)
-            .and_then(super::JobHandle::capture)
-            .ok_or_else(|| {
+        let captured = match self.jobs.get(&meas) {
+            Some(j) => j
+                .capture()
+                .ok_or_else(|| invalid(format!("{}: no result to capture yet", m.config.name)))?,
+            None => self.kept.get(meas).cloned().ok_or_else(|| {
                 invalid(format!(
-                    "{}: no result to capture yet (the measurement must be running)",
+                    "{}: no result to capture (it has not measured with its current settings)",
                     m.config.name
                 ))
-            })?;
+            })?,
+        };
+        let super::Captured { frame, ir } = captured;
         if frame.stamp.session_epoch != self.epoch() {
             return Err(invalid(
                 "the newest result is from an earlier session epoch",

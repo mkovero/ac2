@@ -1356,8 +1356,13 @@ display edits and are never applied to the stored data.
   `t0` re the trace's `delay`), every sample (one FFT length of the full-rate stage: 4096 points, ±42.7 ms at 48 kHz). It is nil
   when the measurement has no IR yet (no block accepted with a reference); traces made by
   `trace.average`, math traces, imports of other formats and targets have none.
-  It needs a result in the current session epoch (`invalid` otherwise: not running, no
-  frame yet, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
+  A stopped measurement keeps the result its job had as it stopped (formed after its
+  final frames, from the same state, with its IR) and a capture stores that, stamped as
+  its final frames; it goes when the measurement starts again, is reset, gets a new
+  delay or a configuration that would have restarted a running job's averages (a display
+  smoothing change of a transfer keeps it, with the new smoothing), is deleted, or the
+  session closes. It needs a result in the current session epoch (`invalid` otherwise:
+  none yet while running, none kept while stopped, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
   `target`, `spectrum` {`scale`, `level`: `SpecLevel`}, `rta` {`scale`}), `source.captured` {`meas`, `meas_name`,
   `epoch`, `at_sample`}, `edit.owner` the measurement, `delay` (the delay the DSP used),
   `depth` (transfer),

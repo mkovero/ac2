@@ -197,7 +197,7 @@ impl Control {
             Command::MeasStop { meas } => {
                 let mut m = self.meas(meas)?.clone();
                 not_a_sweep(&m)?;
-                self.stop_job(meas);
+                self.stop_job_keeping(meas);
                 m.running = false;
                 Ok(self.reply_meas(m))
             }
@@ -209,6 +209,7 @@ impl Control {
                         "a math trace holds no averages of its own; reset its operands",
                     ));
                 }
+                self.kept.forget(meas);
                 if let Some(j) = self.jobs.get(&meas) {
                     j.send(JobCmd::Reset);
                 }
@@ -525,6 +526,7 @@ impl Control {
             // frame carries the new setting under the new rev.
             m.config = config;
             m.config_rev = Rev(self.store.rev().0 + 1);
+            self.kept.smoothing(meas, &change, m.config_rev);
             if let Some(j) = self.jobs.get(&meas) {
                 j.send(JobCmd::Smoothing {
                     change,
@@ -533,6 +535,9 @@ impl Control {
             }
             return Ok(self.reply_meas(m));
         }
+        // A running job starts over with the new configuration: a stopped one's kept
+        // result no longer describes it.
+        self.kept.forget(meas);
         let was_transfer = matches!(m.config.kind, MeasKind::Transfer { .. });
         let is_transfer = matches!(config.kind, MeasKind::Transfer { .. });
         m.config = config;

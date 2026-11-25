@@ -77,6 +77,7 @@ impl Control {
 
     /// Starts the job of `m` on the open session; returns its grid when it has one.
     pub(super) fn start_job(&mut self, m: &Measurement) -> Result<Option<GridDef>, ProtoError> {
+        self.kept.forget(m.id);
         if self.session.is_none() || !m.config.kind.is_job() {
             return Ok(None);
         }
@@ -229,7 +230,17 @@ impl Control {
         Ok(grid)
     }
 
+    /// Stops measurement `id`'s job; the result it had goes with it.
     pub(super) fn stop_job(&mut self, id: MeasId) {
+        self.end_job(id, false);
+    }
+
+    /// Stops measurement `id`'s job (`meas.stop`), keeping its result for `trace.capture`.
+    pub(super) fn stop_job_keeping(&mut self, id: MeasId) {
+        self.end_job(id, true);
+    }
+
+    fn end_job(&mut self, id: MeasId, keep: bool) {
         let orphaned: Vec<u64> = self
             .pending
             .finds
@@ -245,11 +256,16 @@ impl Control {
         }
         self.probes.set(id, None);
         self.cross_stop(id);
+        self.kept.forget(id);
         if let Some(h) = self.jobs.remove(&id) {
             if let Some(rt) = &self.session {
                 rt.fanout.detach(h.fanout_id);
             }
-            drop(h);
+            if keep {
+                self.kept.keep(id, h.stop_keeping());
+            } else {
+                drop(h);
+            }
         }
     }
 
@@ -258,6 +274,7 @@ impl Control {
         for id in ids {
             self.stop_job(id);
         }
+        self.kept.clear();
         if let Some(h) = self.timing_job.take() {
             if let Some(rt) = &self.session {
                 rt.fanout.detach(h.fanout_id);
@@ -385,6 +402,9 @@ impl Control {
             self.cross_resolved(meas);
         }
         m.config_rev = rev;
+        // A running transfer's averages start over at a new delay: a stopped one's kept
+        // result no longer describes it.
+        self.kept.forget(meas);
         if let Some(j) = self.jobs.get(&meas) {
             j.send(JobCmd::SetDelay {
                 samples,

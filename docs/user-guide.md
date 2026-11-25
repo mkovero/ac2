@@ -2804,6 +2804,10 @@ unsmoothed.
 - **Ctrl+1 … Ctrl+9** capture the focused pane's measurement into slot 1–9 (replacing
   what was there): its own, or the selected live curve when the pane draws it (one
   compared into it, a math trace of its group). **1 … 9** show and hide a slot.
+- A stopped measurement captures the result it had as it stopped (its curve and, for a
+  transfer, its IR: what its views still show), until it starts again, is reset, gets a new
+  delay or a change that restarts its averages. With nothing measured since then the toast
+  says *TF 1: no result to capture (it has not measured with its current settings)*.
 - The tree lists every trace under its owner: name, kind (*capture*, *sweep run*,
   *imported*, *average*, *A ÷ B*, *target* …), slot, *hidden*, colour dot. Within a
   measurement slotted traces come first by slot, then the rest oldest first. A click selects
