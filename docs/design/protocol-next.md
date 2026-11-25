@@ -442,7 +442,8 @@ header size; `frame/decode.rs`) becomes `array_size(d.elem, d.len)`.
 
 **Levels (`stream_levels`, `preview_levels`, `source_levels`).** Per input (`len` = inputs):
 `ppm`, `max`, `true_peak`, `overs`, `peak`, `rms`, `clip` as today; `ppm` and `max` are
-declared `dbtp` under `momentary` / `short_term` and `dbfs` under a peak detector. Per pair
+declared `dbtp` under `true_peak`, `momentary` and `short_term` and `dbfs` under the other
+detectors (the true-peak detector's reading is a true peak: `Ballistic::unit` says dBTP). Per pair
 (`len` = `pairs.len()`): `pair_corr` (`f32`, unit `correlation`, NaN while a side is under the
 gate), `pair_quiet` (`u32`, the raw `Elem::U32`, unit `side`: 0 none, 1 left, 2 right;
 `Elem::U8` is the coherence coding and is not used). Per loudness source (`len` = sources):
@@ -450,17 +451,41 @@ gate), `pair_quiet` (`u32`, the raw `Elem::U32`, unit `side`: 0 none, 1 left, 2 
 (`f32`, `lufs`, NaN for none), `lra` (`f32`, `lu`, NaN for none), `tp_max` (`f32`, `dbtp`),
 `loud_s` (`f32`, `seconds`, metered time since the reset). New units: `correlation`, `side`,
 `lufs`, `lu`. `meta` keeps only what changes on a configuration change: `channels`,
-`ballistic`, `pairs: Vec<Pair>` (left, right) and `sources: Vec<LoudnessSource>`, each source
-with its `since: WallNs` (it moves on a reset, which may go as a keyframe). The header no
+`ballistic`, `pairs: Vec<MeterPair>` (left, right; `model::Pair` also names the pair, which
+the meter path does not know; `preview_levels` keeps its declared `Vec<Pair>`) and
+`sources: Vec<LoudnessSourceMeta>` {`source`, `since: WallNs`} (`since` moves on a reset,
+which goes as a keyframe). The header no
 longer grows per source by more than a pair of channel numbers. `source_levels` carries the
 same arrays; its meta keeps `sample_rate_hz` and the timing `mark` beside the fields above.
+
+Decided in `pn-frames`:
+- The levels' level and loudness arrays (`peak`, `rms`, `ppm`, `true_peak`, `max`,
+  `lufs_m`, `lufs_s`, `lufs_m_max`, `lufs_s_max`, `lufs_i`, `lra`, `tp_max`) are `i16`
+  hundredths, not `f32`: the rig requirement of 120–150 B per `source_levels` delta (8
+  inputs, 3 pairs, 5 sources) is tighter than this section, and `f32` arrays go intra in a
+  delta (≈ 350 B measured). In `i16` a delta carries small differences: 166 B
+  (`source_levels`, its `mark` included) and 149 B (`stream_levels`). A bar or readout shows
+  0.1 dB; the 0.005 dB step is below it. `pair_corr` and `loud_s` stay `f32` (not dB; a
+  metered time passes 327 s), `pair_quiet` `u32`.
+- `MAX_ARRAYS` is 20 (was 12): a levels frame has 17 arrays.
+- A decoded levels frame keeps `meta` as on the wire (identities) and the readings beside
+  it, index-aligned: `pair_levels: Vec<PairLevels {correlation, quiet}>` per `meta.pairs`,
+  `loudness: Vec<SourceLoudness>` (no `source`, no `since`) per `meta.sources`.
+- Keyframe interval: the existing 500 ms per peer and topic covers the levels topics too
+  (the rig asks ≤ 2 s); `source_levels` keeps its own 15/s cadence.
+- The client marks a topic `broken` (and STALE) from a refused delta until a keyframe
+  applies, so the frame before a loss is never shown as live.
+- Publishing cost: a frame's payload is deflated by one compressor per thread, reset per
+  frame. A fresh one per frame (its tables are a few hundred kB) cost a levels delta ≈ 40 µs,
+  most of its encode; with the kept one a levels frame (quantise, delta, fallback
+  keyframe) costs ≈ 8 µs against ≈ 12 µs before the change (release build, desktop core).
 
 **Delta meta.** `PerFrame` covers every kind whose metadata moves every frame; a delta's
 `meta` slot carries:
 
 | kind | per-frame part |
 |---|---|
-| `tf` | `filled`, `settling` (today), `delay`, `nudged`, `math.align: Option<AlignState>` |
+| `tf` | `filled`, `settling` (today), `delay`, `nudged`, `math.align: Option<AlignState>` (nil on a frame of no `math`) |
 | `bins` | `blocks`, `eff_avg` (today), `delay`, `nudged` |
 | `spl` | as today |
 | `spec` | `ages: Vec<Option<Seconds>>` (one per band of `bands`), `harmonics` |
@@ -759,9 +784,9 @@ until the last has landed.
    returns exactly `seconds` now and 14 400 fits the cap.
 9. `pn-spool`: §5; then an all-OS CI run for the free-space query per OS.
 10. `pn-frames`: §6 with the `dbtp` tagging and the delta header,
-    `crates/ac2d/tests/wire_size.rs` rerun. `PerFrame` (`frame/wire.rs`) already carries
+    `crates/ac2d/tests/wire_size.rs` rerun. `PerFrame` (now `frame/per_frame.rs`) carries
     `bins` and `source_levels` and its match is exhaustive; this step adds `delay` /
-    `nudged` to `bins` and gives `source_levels` the levels arrays.
+    `nudged` to `bins` and gives `source_levels` the levels arrays (done).
 11. `pn-logs`: §7; then an all-OS CI run for the boot clock, boot id, RTC, zone and
     `adjtimex` code per OS.
 12. `pn-misc`: `DmxSet.snap`, the `artnet.test` merge, the `cal.line` range, the loopback

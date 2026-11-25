@@ -2630,8 +2630,10 @@ A frame goes in one of two forms, the header's second element (`form`):
   needs nothing before it.
 - **Delta** (`form` 1): a short header and the payload against the topic's frame of `seq`
   `base`, the frame the receiver applied last. It inherits from that frame everything the
-  short header does not carry: kind, incarnation, epoch, `config_rev`, `config_applied_at`,
-  `grid_id`, `n`, the arrays and the metadata but for the kind's per-frame fields.
+  short header does not carry: kind, incarnation, epoch, `grid_id`, `n`, the arrays and
+  the metadata but for the kind's per-frame fields. It carries its own `config_rev` and
+  `config_applied_at`: a delay step moves them (§5.3) and continues the chain, its new
+  `delay` / `nudged` in the per-frame metadata.
 
 | delta field | type | meaning |
 |---|---|---|
@@ -2642,8 +2644,27 @@ A frame goes in one of two forms, the header's second element (`form`):
 | `audio_sample` | u64 | as §5.3 |
 | `capture_wall_ns` | u64 | as §5.3 |
 | `protection` | u32 | as §5.3 |
-| `meta` | […] \| nil | the per-frame metadata: `tf` [filled, settling], `bins` [blocks, eff_avg], `spl` [level, lmax, lmin, leq, lpeak, duration], `source_levels` [mark]; nil for every other kind |
+| `config_rev` | u64 | as §5.3 |
+| `config_applied_at` | u64 | as §5.3 |
+| `meta` | […] \| nil | the per-frame metadata (below); nil for every other kind |
 | `crc` | u32 | CRC of the frame's codes (below) |
+
+The per-frame metadata, an array of these fields in this order; the rest of the kind's
+metadata (§5.4) is the base's, and a frame whose rest differs goes as a keyframe:
+
+| kind | per-frame fields |
+|---|---|
+| `tf` | `filled`, `settling`, `delay`, `nudged`, `align` (the `math.align` of §5.4; nil on a frame of no `math` or no alignment) |
+| `bins` | `blocks`, `eff_avg`, `delay`, `nudged` |
+| `spl` | `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration` |
+| `spec` | `ages` (one `age` per band of `bands`, in its order; empty without `bands`), `harmonics` |
+| `stream_gonio`, `preview_gonio` | `gains` (each pair's `gain_dbfs`, in `pairs` order) |
+| `source_levels` | `mark` |
+
+Every other kind's metadata moves only with its configuration (the levels kinds carry their
+readings as arrays, §5.4); `leq` and `band_leq` always go as keyframes. A delta whose
+`ages` or `gains` count differs from the base's bands or pairs, or whose `align` is set on
+a base of no `math`, is refused as malformed.
 
 The **codes** of a frame are its arrays quantised to their `elem` encoding (below),
 concatenated in the header's array order, each code little-endian, a `bfp16` array's
@@ -2669,18 +2690,24 @@ of the topic it handed over for that connection. A connection that credit holds 
 (§5.8) receives a delta over the longer distance, from the frame it has to the newest;
 connections in step share one encode. A frame goes to a connection as a keyframe when it
 has no base of the topic yet (its subscription), on its `keyframe` request, after a send
-to it that could not complete, at least every 500 ms, when a static field differs from
-the base's (another `n`, grid, array set, epoch, config or metadata), and when the delta
-would not be smaller than the last keyframe of the topic it was sent. One connection's
-keyframes never go to another.
+to it that could not complete, at least every 500 ms (the **keyframe interval**: every
+topic, the levels topics `stream/levels`, `preview/levels` and `source/levels` included,
+so a late subscriber or one that lost a frame holds a usable frame again within it), when
+a static field differs from the base's (another `n`, grid, array set, array length, epoch
+or static metadata), and when the delta would not be smaller than the last keyframe of
+the topic it was sent. One connection's keyframes never go to another.
 
 A receiver applies each topic's frames in the order they arrive. A keyframe replaces the
 frame held. A delta applies only on the frame of `seq` `base` of its topic and only if the
 codes it makes match `crc`; any other delta is refused, never drawn, and the frame held
-stays (it reads as STALE once no new frame comes, §5.1). A receiver that held a frame of
-the topic and refuses a delta asks for a keyframe of it (`keyframe`, §5.8), at most once
-per 250 ms; one that holds none yet waits for the keyframe without asking. A delta never repairs a gap: its keyframe does, within 500 ms or a
-round trip after asking.
+stays. A lost frame is always noticed: the next delta names a `base` the receiver does not
+hold. From that refusal until a keyframe applies the topic reads as STALE (`ac2-client`:
+`TopicFrame::broken` and `stale`): the frame held is the last one received whole, not the
+newest sent, and is never shown as live. A receiver that held a frame of the topic and
+refuses a delta asks for a keyframe of it (`keyframe`, §5.8), at most once per 250 ms; one
+that holds none yet waits for the keyframe without asking. A delta never repairs a gap: a
+keyframe does, a round trip after asking and at most the keyframe interval (500 ms) after
+the loss in any case.
 
 Columns are in grid order. Invalid values are NaN; where the reason matters a `validity`
 bitmask array says why.
@@ -2699,10 +2726,14 @@ Element encodings (`elem`), all little-endian:
 | `bfp16` | 2 (+ 1 per array) | block floating point: the array's bytes start with one signed exponent byte `e`, then one `i16` mantissa per element, `round(x × 2^−e)` rounding halves up, clamped to ±32 766, with the `i16` codes of NaN and ±∞. `e` is the smallest integer in [−128, 113] for which every finite \|x\| × 2^−e ≤ 32 765 (from `frexp(peak) = (m, k)`: `k − 14` if `m × 2^15 > 32 765`, else `k − 15`), 0 when no element is finite and non-zero; an exponent above 113 refuses the frame. Decoded as mantissa × 2^e rounded to f32 |
 
 Which arrays use which encoding is fixed by name: `mag`, `phase`, `level` (rta, spec),
-`ir_etc` and the `align_*` arrays are `i16`; `range_lo` and `range_hi` are `i16_mag_offset`;
-`coh` is `u16`; `range_coh` is `u8`; `ir_linear` is `bfp16`; bitmasks and
-counts (`overs`) are `u32`; `gonio_x` and `gonio_y` are `i8`;
-everything else (meters, Leq and band Leq windows) is `f32`. Precision: `i16` is within
+`ir_etc` and the `align_*` arrays are `i16`; so are the programme meters' levels and
+loudness (`peak`, `rms`, `ppm`, `true_peak`, `max`, `lufs_m`, `lufs_s`, `lufs_m_max`,
+`lufs_s_max`, `lufs_i`, `lra`, `tp_max`), which a bar or readout shows to 0.1 dB and which
+go in a delta as small differences from the frame before; `range_lo` and `range_hi` are
+`i16_mag_offset`; `coh` is `u16`; `range_coh` is `u8`; `ir_linear` is `bfp16`; bitmasks,
+counts (`overs`) and sides (`pair_quiet`) are `u32`; `gonio_x` and `gonio_y` are `i8`;
+everything else (`pair_corr`, `loud_s`, Leq and band Leq windows) is `f32`. A meter's
+level below −327.66 dB reads −327.66 (digital silence is −∞, which has its code). Precision: `i16` is within
 0.005 dB or 0.005° of the value computed, `u16` within 5·10⁻⁵ of γ² — below the readouts
 (0.1 dB, 1°, 0.01) and, for a group delay fitted to the phase over 1/12 octave of
 1/48-octave columns, below 13 µs at 20 Hz and 3 µs at 100 Hz, far below the measurement's
@@ -2746,15 +2777,17 @@ layout as code.
 | `capture_wall_ns` | u64 | daemon wall clock of the newest sample (Unix ns); frame age = now + offset − this |
 | `grid_id` | u64 \| nil | column grid (`tf`, `rta`, `spec`); nil otherwise |
 | `protection` | u32 | protection bitmask (§5.5) |
-| `n` | u32 | elements per array, ≤ 65536 |
-| `arrays` | [[`name`, `unit`, `elem`]] | one descriptor per array, in payload order |
+| `n` | u32 | columns, ≤ 65536: the element count of the column arrays |
+| `arrays` | [[`name`, `unit`, `elem`, `len`]] | one descriptor per array, in payload order; `len` is its element count: `n` for a column array, the metadata's pair count for a per-pair array, its source count for a per-source array (§5.4) |
 | `meta` | {kind: […]} | per-kind metadata (§5.4), fields in the order listed there |
 | `crc` | u32 | CRC-32 of the frame's codes (§5.2) |
 
 `elem` is `f32`, `u32`, `i16`, `i16_mag_offset`, `u16`, `u8`, `i8` or `bfp16` (§5.2), fixed per array name. `unit` is one of `db`, `dbfs`, `dbtp` (dB true peak), `db_spl`, `dbfs_per_hz`, `db_spl_per_hz` (a spectrum density), `deg`, `coherence`
 (γ², 0…1), `full_scale` (linear, full scale = 1), `seconds`, `bitmask` (always
 `u32`), `count` (an event count, always `u32`), `gonio_unit` (a goniometer coordinate,
-always `i8`).
+always `i8`), `correlation` (a pair's correlation coefficient, −1 … 1), `side` (a pair's
+side: 0 none, 1 left, 2 right; always `u32`), `lufs` (BS.1770 loudness re full scale),
+`lu` (a loudness difference: a range).
 
 In frame age, `offset` is the daemon's clock minus the client's: the maximum, over a 10 s
 window, of a `ka`'s `daemon_wall_ns` minus the local wall time it was received at (the
@@ -2775,25 +2808,26 @@ newest frame's age is over that, or when the daemon stopped responding.
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
 | `band_leq` | one column per band window, in configuration order: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
-| `stream_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask, `ppm`: dbfs (the `ballistic`'s reading; the true peak where VU is chosen but not offered on the input, and under `momentary` / `short_term`), `true_peak`: dbtp, `max`: dbfs (highest `ppm` of the chosen ballistic since `levels.reset`), `overs`: count (since `levels.reset`) | `channels` (device input per column; length n), `ballistic` (`Ballistic`), `pair_levels` ([`PairLevels`] {`left`, `right`, `correlation`: f32 \| nil (−1 … 1 over the rig's window), `quiet`: `left` \| `right` \| nil (the side below the gate; then `correlation` is nil)}: every declared pair whose both inputs are captured), `loudness` ([`SourceLoudness`], below) |
-| `preview_levels` | as `stream_levels` | `backend`, `device`, `channels` (device input per column; length n), `inputs` ([PreviewInput] as `stream.preview` declared them), `pairs` ([Pair]), `ballistic`, `pair_levels` ([`PairLevels`], one per declared pair), `loudness` ([`SourceLoudness`]; a preview's sources never carry into the stream) |
-| `source_levels` | as `stream_levels`, over the rig's own captured inputs (no remote input) | `channels`, `ballistic`, `pair_levels`, `loudness` as `stream_levels`; `sample_rate_hz` (the stream's nominal rate); `mark` (`LevelsMark` \| nil {`sample` (stream sample index of the newest block's first frame), `system_ns` (its capture time on the rig's system clock, ns since the Unix epoch), `breaks` (continuity breaks of the capture so far)}; nil while the rig stamps no capture times or its stamp clock is not yet mapped onto system time) |
+| `stream_levels` | per input (`len` n): `peak`: dbfs, `rms`: dbfs, `clip`: bitmask, `ppm` (the `ballistic`'s reading; the true peak where VU is chosen but not offered on the input), `true_peak`: dbtp, `max` (highest `ppm` of the chosen ballistic since `levels.reset`), `overs`: count (since `levels.reset`); `ppm` and `max` are dbtp under `true_peak`, `momentary` and `short_term` (each input then reads its true peak) and dbfs under the other ballistics. Per pair (`len` = `pairs`, in its order): `pair_corr`: correlation (f32, −1 … 1 over the rig's window; NaN while a side is under the gate or with no reading yet), `pair_quiet`: side (the side below the gate, 0 none). Per loudness source (`len` = `sources`, in its order): `lufs_m`, `lufs_s`: lufs (momentary, short-term), `lufs_m_max`, `lufs_s_max`: lufs (their maxima since the reset), `lufs_i`: lufs (integrated; NaN for none), `lra`: lu (range; NaN for none), `tp_max`: dbtp (the source's channels' highest true peak since the reset), `loud_s`: seconds (metered time since the reset); below | `channels` (device input per column; length n), `ballistic` (`Ballistic`), `pairs` ([`MeterPair`] {`left`, `right`}: every declared pair whose both inputs are captured), `sources` ([`LoudnessSourceMeta`] {`source`, `since`}, below) |
+| `preview_levels` | as `stream_levels` | `backend`, `device`, `channels` (device input per column; length n), `inputs` ([PreviewInput] as `stream.preview` declared them), `pairs` ([Pair], as declared: the per-pair arrays follow them), `ballistic`, `sources` (as `stream_levels`; a preview's sources never carry into the stream) |
+| `source_levels` | as `stream_levels`, over the rig's own captured inputs (no remote input) | `channels`, `ballistic`, `pairs`, `sources` as `stream_levels`; `sample_rate_hz` (the stream's nominal rate); `mark` (`LevelsMark` \| nil {`sample` (stream sample index of the newest block's first frame), `system_ns` (its capture time on the rig's system clock, ns since the Unix epoch), `breaks` (continuity breaks of the capture so far)}; nil while the rig stamps no capture times or its stamp clock is not yet mapped onto system time). Per frame: `mark`. Sent at its own cadence (15 frames/s), not the meters' |
 | `stream_gonio` | `gonio_x`, `gonio_y`: gonio_unit — every pair's 256 points in turn (n = 256 × pairs), `x = (r − l)/√2`, `y = (l + r)/√2` divided by the pair's auto gain (a mono signal is a vertical line, a left-only one leans left), one pair drawn from a random position in each of 256 bins of the frame's samples | `pairs` ([`GonioPairMeta`] {`left`, `right`, `gain_dbfs`: the auto gain, dBFS of the pair magnitude `√(l² + r²)`}) |
 | `preview_gonio` | as `stream_gonio`, for the previewed device's declared pairs | as `stream_gonio` |
 | `timing` | none | `status` (TimingStatus), `window` {capture_start, offset, psr, loopback, stimulus} |
 | `ka` | none | `rev`, `daemon_wall_ns`, `timing` (TimingState), `generator` {owner, owner_local, armed, firing}, `health` (`DaemonHealth`, below) |
 
-`SourceLoudness` (BS.1770-5 / EBU Tech 3341 and 3342; docs/design/programme-meter.md §6.1):
-`source` (`LoudnessSource`: {`type`: `pair`, `left`, `right`} or {`type`: `input`,
-`channel`}; zero-based device inputs), `momentary` and `short_term` (LUFS, f64: the last
-400 ms and 3 s; −∞ on silence and until a window lies wholly after the source's start or a
-capture discontinuity), `integrated` (LUFS \| nil: gated, since the reset; nil until a
-block passes the −70 LUFS gate), `range` (LU \| nil: the loudness range; nil until a
-short-term value passes its gate; settling while `duration` < 60 s), `max_momentary`,
-`max_short_term` (LUFS: −∞ until the first window after the reset), `max_true_peak`
-(dBTP, the source's channels; −∞ until the first metered block), `duration` (s of metered
-samples since the reset, gaps excluded: what settling reads, independent of the wall
-clock), `since` (WallNs: the daemon clock at the reset, for display only). Sources: every
+A loudness source's readings (BS.1770-5 / EBU Tech 3341 and 3342;
+docs/design/programme-meter.md §6.1), its column in the per-source arrays: `lufs_m` and
+`lufs_s` (the last 400 ms and 3 s; −∞ on silence and until a window lies wholly after the
+source's start or a capture discontinuity), `lufs_i` (gated, since the reset; NaN until a
+block passes the −70 LUFS gate), `lra` (the loudness range; NaN until a short-term value
+passes its gate; settling while `loud_s` < 60 s), `lufs_m_max`, `lufs_s_max` (−∞ until the
+first window after the reset), `tp_max` (the source's channels; −∞ until the first metered
+block), `loud_s` (s of metered samples since the reset, gaps excluded: what settling reads,
+independent of the wall clock). `LoudnessSourceMeta`: `source` (`LoudnessSource`:
+{`type`: `pair`, `left`, `right`} or {`type`: `input`, `channel`}; zero-based device
+inputs) and `since` (WallNs: the daemon clock at the reset, for display only; a reset moves
+it, so that frame goes as a keyframe). Sources: every
 declared pair with both inputs captured and line or digital (stereo, weights 1, 1), then
 every captured line or digital input in no pair (weight 1, ascending by channel); none for
 a mic input, nor for a pair input whose partner is not captured, nor at a sample rate
@@ -2877,9 +2911,10 @@ not `JUDGED`, else `over`, `near` or `ok`.
 ### 5.6 Bounds (checked before decoding)
 
 In order: 2 parts; total ≤ 2 MiB; topic valid; `v` and `form` (read on their own); the
-header parsed from at most its first 8192 bytes (≤ 8192 bytes); then for a keyframe: `n` ≤ 65536, ≤ 12 arrays, payload bytes after the header exactly when arrays
-are listed, the payload inflating to exactly n × Σ element sizes plus one byte per `bfp16`
-array (inflation stops there: a
+header parsed from at most its first 8192 bytes (≤ 8192 bytes); then for a keyframe: `n` ≤ 65536, ≤ 20 arrays, every `len` ≤ 65536 and equal to
+the count its array belongs to (`n`, the metadata's pairs or its sources, §5.3), payload
+bytes after the header exactly when arrays are listed, the payload inflating to exactly
+Σ `len` × element size plus one byte per `bfp16` array (inflation stops there: a
 payload that would inflate further is refused, so it cannot be a decompression bomb),
 `kind` = the topic's kind (§5.1) = `meta` key, then the per-kind array schema (each array's `elem` as fixed by
 its name), `crc`, undefined `u16` codes, `bfp16` exponents and bitmask bits. A delta's
@@ -2902,6 +2937,17 @@ than most real curves); bytes include topic, header and payload, not the transpo
 | `band_leq` (11 windows), `leq` (5) | 988 B, 467 B | ≈ 832 B, 379 B | |
 | `ir`, 4 096 points (`ir_linear`, `ir_etc`) | 32 896 B | ≈ 13 050 B | ≈ 10 400 B |
 | `spl` (no arrays) | 138 B | ≈ 141 B | ≈ 85 B |
+| `stream_levels`, 4 inputs, no pairs | | ≈ 477 B | ≈ 87 B |
+| `stream_levels`, 8 inputs, 3 pairs, 5 loudness sources | 853 B | ≈ 687 B | ≈ 149 B |
+| `source_levels`, as above, with its `mark` | 871 B | ≈ 706 B | ≈ 166 B |
+| `stream_gonio`, 3 pairs | 1 565 B | ≈ 1 573 B | ≈ 1 468 B |
+
+The "as f32 arrays" column of the meter rows is what each frame cost when every one went as
+a keyframe with its readings in the metadata. With the 500 ms keyframe interval (§5.2)
+`stream_levels` of 8 inputs is ≈ 185 B per frame on average (≈ 5.6 kB/s at 30 frames/s,
+was 25.6 kB/s), `source_levels` ≈ 234 B (≈ 3.5 kB/s at its 15 frames/s, was 13.1 kB/s);
+`stream_gonio` (noise: points barely repeat) ≈ 44 kB/s. A rig link carrying another rig's
+`source_levels` thus needs ≈ 28 kbit/s per rig.
 
 A `bins` stage frame (§5.4) holds at most 0.45 × 4 096 = 1 843 bins, whatever the rate or
 LF window (every stage's window is 4 096 points of its own rate), in three 2-byte arrays:
@@ -2914,8 +2960,9 @@ re-sent every 0.25 s of audio while nothing changes. About 7 % of a `tf` stream'
 as keyframes. A session of three transfer functions
 and their average, three default spectra and a 4 096-point one, a 1/3-octave RTA, two SPL
 meters with band meters and the input meters is ≈ 2.2 Mbit/s at 30 fps and ≈ 2.4 Mbit/s at
-60 fps (3.7 with keyframes only); a pane in its IR view adds `ir` at ≈ 30 frames/s,
-≈ 4.6 Mbit/s in all at 30 fps and ≈ 4.8 at 60 fps. Encoding and decoding a 720-column `tf`
+60 fps (3.7 with keyframes only; the input meters of four inputs ≈ 27 kbit/s of it); a pane
+in its IR view adds `ir` at ≈ 30 frames/s, ≈ 4.7 Mbit/s in all at 30 fps and ≈ 4.8 at
+60 fps. Encoding and decoding a 720-column `tf`
 frame take ≈ 88 and 25 µs on a desktop core.
 
 ### 5.8 Flow control
