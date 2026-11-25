@@ -437,8 +437,9 @@ with a lower bound caps the level there and stores the capped level, so raising 
 again later does not bring the older, higher level back. A start that reads no stored level
 takes the bound: the first start, a settings file of another format version (set aside),
 and a damaged file with no readable previous copy. A damaged file whose previous copy reads
-takes that copy's level, never above the bound. Either way the start writes the file again
-with the level in force (an unreadable file that cannot be moved aside is never written:
+takes that copy's level, never above the bound; the previous copy never holds a level higher
+than the one in force (a lowered level is written to both), so a torn file never brings a
+higher level back. Either way the start writes the file again with the level in force (an unreadable file that cannot be moved aside is never written:
 the daemon says so at start). CLI: `ac2 gen ceiling`,
 `ac2 gen ceiling -40dbfs`, `ac2 gen ceiling -30dbfs --yes`.
 
@@ -2715,7 +2716,8 @@ time axis, t = 0 at the leading curve's inserted delay, whatever their sample ra
 captured at another inserted delay is drawn that much earlier or later, so a capture at
 12.50 ms and the live IR at 13.00 ms peak 0.5 ms apart, and its row says by how much
 (`Δt −0.50 ms`). In the log and ETC displays every curve is in dB re the leading curve's
-peak, so their levels compare. The cursor and the time origin follow the **selected** trace
+peak, so their levels compare; a curve louder than the leading one raises the top of the
+range to fit it (and the linear display's automatic amplitude fits every curve). The cursor and the time origin follow the **selected** trace
 when it has an IR, labelled as its legend row:
 `t = 0 at inserted delay 12.50 ms · 4.29 m @ 20 °C · pre-EQ`; else the live IR (or the first
 trace's, with no live IR). The IR travels with the trace in sessions, autosave and ac2 CSV

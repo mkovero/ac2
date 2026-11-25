@@ -39,7 +39,7 @@ fn legend(s: &AppState) -> Vec<String> {
 /// Slot `n` (1…9) holds a trace and its data is fetched. The mirror lists a capture before
 /// the app's own fetch of its columns returns, so a slot alone says nothing of the data.
 fn slot_with_data(s: &AppState, n: usize) -> bool {
-    s.slots()[n - 1].is_some_and(|t| s.rig.traces.contains_key(&t.id))
+    crate::common::slots(s)[n - 1].is_some_and(|t| s.rig.traces.contains_key(&t.id))
 }
 
 /// Z, the chooser's first row (a target curve from a file), the house curve's path typed:
@@ -109,11 +109,11 @@ fn stored_traces_and_a_target_moved_and_compared() -> R {
 
     d.key("2");
     d.until("slot 2 hidden", |s| {
-        s.slots()[1].is_some_and(|t| !t.edit.visible)
+        crate::common::slots(s)[1].is_some_and(|t| !t.edit.visible)
     })?;
     d.key("2");
     d.until("slot 2 shown, every trace visible", |s| {
-        s.slots()[1].is_some_and(|t| t.edit.visible)
+        crate::common::slots(s)[1].is_some_and(|t| t.edit.visible)
             && s.rig.traces.values().all(|(t, _)| t.meta.edit.visible)
     })?;
 
@@ -175,9 +175,11 @@ fn a_capture_re_smoothed_by_the_daemon() -> R {
     d.tf_frames(MAIN_L, 336)?;
     d.key("Ctrl+1");
     d.until("slot 1 with its data", |s| {
-        s.slots()[0].is_some() && s.rig.traces.len() == 1
+        crate::common::slots(s)[0].is_some() && s.rig.traces.len() == 1
     })?;
-    let id = d.st.slots()[0].map(|t| t.id).ok_or("slot 1")?;
+    let id = crate::common::slots(&d.st)[0]
+        .map(|t| t.id)
+        .ok_or("slot 1")?;
     d.send(Msg::SelectTrace(id));
     assert_eq!(d.st.rig.selected_trace, Some(id));
     let live_before = d.st.meas(MAIN_L).map(|m| m.config.kind.clone());

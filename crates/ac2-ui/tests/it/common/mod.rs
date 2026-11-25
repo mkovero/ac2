@@ -195,3 +195,16 @@ pub fn draw_in(
     let picks: Vec<Pick> = with.iter().map(|w| Pick::here(*w)).collect();
     st.layout.view_mut(p).expect("the pane").with = With::of(&picks);
 }
+
+/// A trace in each slot 1…9 (index 0 = slot 1), of any source curve: the last in the
+/// daemon's list when several curves' captures hold the same number. For tests of a rig
+/// with one capture per slot; the keys act on the stored traces by source.
+pub fn slots(s: &ac2_ui::state::AppState) -> [Option<&ac2_proto::model::TraceMeta>; 9] {
+    let mut out = [None; 9];
+    for t in s.daemon().map(|d| d.traces.as_slice()).unwrap_or_default() {
+        if let Some(n) = t.edit.slot.filter(|n| (1..=9).contains(n)) {
+            out[usize::from(n - 1)] = Some(t);
+        }
+    }
+    out
+}

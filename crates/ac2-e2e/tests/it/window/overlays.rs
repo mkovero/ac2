@@ -294,7 +294,9 @@ fn key_hints() -> R {
     step_until(&mut h, "live frames", live);
     // A capture of the transfer measurement.
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
-    step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
+    step_until(&mut h, "slot 1", |a| {
+        crate::common::slots(&a.state)[0].is_some()
+    });
     // The sweep pane focused (Alt+5), then the SPL meter.
     h.key_press_modifiers(Modifiers::ALT, Key::Num5);
     h.key_press_modifiers(Modifiers::ALT, Key::Num4);

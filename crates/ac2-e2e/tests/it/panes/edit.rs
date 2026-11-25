@@ -24,12 +24,12 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
 
     // Two captures, their data fetched.
     d.key("Ctrl+1");
-    d.until("slot 1", |s| s.slots()[0].is_some())?;
+    d.until("slot 1", |s| crate::common::slots(s)[0].is_some())?;
     d.key("Ctrl+2");
     d.until("both captures with their data", |s| {
-        s.slots()[1].is_some() && s.rig.traces.len() == 2
+        crate::common::slots(s)[1].is_some() && s.rig.traces.len() == 2
     })?;
-    let id = |s: &AppState, slot: usize| s.slots()[slot].map(|t| t.id);
+    let id = |s: &AppState, slot: usize| crate::common::slots(s)[slot].map(|t| t.id);
     let (a, b) = (id(&d.st, 0).ok_or("slot 1")?, id(&d.st, 1).ok_or("slot 2")?);
     let theme = Theme::dark();
     let size = ac2_scene::primitives::Viewport::new(1200.0, 600.0);
@@ -485,9 +485,13 @@ fn retype(d: &mut Driver, text: &str) {
 fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     let (daemon, mut d) = measuring_kept()?;
     d.key("Ctrl+1");
-    d.until("slot 1", |s| s.slots()[0].is_some())?;
-    let a = d.st.slots()[0].map(|t| t.id).ok_or("slot 1")?;
-    let name = d.st.slots()[0].map(|t| t.edit.name.clone()).ok_or("name")?;
+    d.until("slot 1", |s| crate::common::slots(s)[0].is_some())?;
+    let a = crate::common::slots(&d.st)[0]
+        .map(|t| t.id)
+        .ok_or("slot 1")?;
+    let name = crate::common::slots(&d.st)[0]
+        .map(|t| t.edit.name.clone())
+        .ok_or("name")?;
     let dir = tempfile::tempdir()?;
     let export = |d: &mut Driver| {
         d.key("Ctrl+K");
@@ -572,8 +576,10 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     // A math trace of an unslotted stored trace: Shift+M starts with the selected trace
     // as A, by name.
     d.key("Ctrl+2");
-    d.until("slot 2", |s| s.slots()[1].is_some())?;
-    let b = d.st.slots()[1].map(|t| t.id).ok_or("slot 2")?;
+    d.until("slot 2", |s| crate::common::slots(s)[1].is_some())?;
+    let b = crate::common::slots(&d.st)[1]
+        .map(|t| t.id)
+        .ok_or("slot 2")?;
     d.send(Msg::SelectTrace(b));
     d.key("Ctrl+K");
     d.send(Msg::Text("move trace to slot".into()));

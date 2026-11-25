@@ -77,7 +77,7 @@ impl DataSnapshot {
 }
 
 /// One measurement of a [`Request::Capture`]: `meas` stored as `name` (its name in the
-/// toast is `label`), deleting `replace` first.
+/// toast is `label`), then deleting `replace` if the new capture displaced it from the slot.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CaptureItem {
     pub meas: MeasId,
@@ -801,6 +801,17 @@ async fn wait_retry(
                 }
                 Some(Ctl::Req(Request::BandTransfer { .. })) => {
                     out.send(ConnEvent::BandTransfer(Err("not connected".into())));
+                }
+                // Answered per curve, as a capture the daemon refused: the slot's toast and
+                // its capture in flight end the usual way.
+                Some(Ctl::Req(Request::Capture { slot, items })) => {
+                    out.send(ConnEvent::Captured {
+                        slot,
+                        results: items
+                            .into_iter()
+                            .map(|i| (i.label, Err("not connected".into())))
+                            .collect(),
+                    });
                 }
                 Some(Ctl::Req(Request::PreviewStop)) => {}
                 Some(Ctl::Req(Request::Act { failed, .. })) => out.send(ConnEvent::Reply {

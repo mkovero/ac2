@@ -62,11 +62,15 @@ fn traces_list() -> R {
     let mut h = harness(options(&rig));
     step_until(&mut h, "live frames", live);
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
-    step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
+    step_until(&mut h, "slot 1", |a| {
+        crate::common::slots(&a.state)[0].is_some()
+    });
     tab_to(&mut h, DELAY_TOWER);
     drop_on_kind(&mut h, PaneKind::Transfer, DELAY_TOWER);
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
-    step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
+    step_until(&mut h, "slot 2", |a| {
+        crate::common::slots(&a.state)[1].is_some()
+    });
     // Z, then the chooser's first row: a target curve from a file.
     h.key_press(Key::Z);
     step_until(&mut h, "target chooser", |a| {
@@ -87,7 +91,7 @@ fn traces_list() -> R {
     // selects it.
     h.get_by_label("Hide Delay tower S2").click();
     step_until(&mut h, "slot 2 hidden", |a| {
-        a.state.slots()[1].is_some_and(|t| !t.edit.visible)
+        crate::common::slots(&a.state)[1].is_some_and(|t| !t.edit.visible)
     });
     h.get_by_label("house_curve\ntarget").click();
     step_until(&mut h, "target selected", |a| {

@@ -322,6 +322,26 @@ mod tests {
         }
     }
 
+    /// An operand choice names whose slot a capture holds, and whose EQ set a set is.
+    #[test]
+    fn operand_labels_name_the_source_curve() {
+        let cap = meta(1, "S1", Some(1), TraceKind::Transfer, captured());
+        let names = |m: MeasId| (m == MeasId(1)).then_some("Main L");
+        assert_eq!(
+            crate::math::stored_operand_label(&cap, names),
+            "S1 (stored, Main L S1)"
+        );
+        let imported = TraceSource::Imported {
+            file_name: "x.txt".into(),
+            format: ImportFormat::AnalyzerText,
+            notes: Vec::new(),
+            ir_file: None,
+        };
+        let imp = meta(2, "REW", Some(2), TraceKind::Transfer, imported);
+        assert!(crate::math::stored_operand_label(&imp, names).ends_with("(stored, S2)"));
+        assert_eq!(crate::math::live_operand_label("Main L"), "Main L (live)");
+    }
+
     fn swept() -> TraceSource {
         TraceSource::Sweep {
             meas: MeasId(3),

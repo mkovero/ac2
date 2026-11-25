@@ -263,10 +263,13 @@ impl RigState {
         forgot
     }
 
-    /// Drops the frames of each stopped measurement whose newest result is of an older
-    /// configuration than the measurement's own (it was reset, given a new delay or new
-    /// settings while stopped): the daemon no longer keeps that result, a capture refuses
-    /// it, so the views show the measurement as stopped with nothing measured.
+    /// Drops each frame of a stopped measurement that is of an older configuration than
+    /// the measurement's own (it was reset, given a new delay or new settings while
+    /// stopped): the daemon no longer keeps that result, a capture refuses it, so the views
+    /// show the measurement as stopped with nothing measured. Judged frame by frame against
+    /// the mirror alone, so the order frames and the mirror arrive in never matters: a
+    /// frame the mirror does not yet call outdated stays until it does, and a result the
+    /// daemon re-sent at the new configuration stays whatever came before it.
     pub(super) fn drop_outdated_frames(&mut self) {
         let Some(state) = self.mirror.as_ref().and_then(|m| m.state.as_deref()) else {
             return;
@@ -274,33 +277,22 @@ impl RigState {
         let Some(d) = &self.data else {
             return;
         };
-        let meas_of = |t: &Topic| match t {
-            Topic::Data { meas, .. } | Topic::Bins { meas, .. } => Some(*meas),
+        let stopped_rev = |t: &Topic| match t {
+            Topic::Data { meas, .. } | Topic::Bins { meas, .. } => state
+                .measurements
+                .iter()
+                .find(|m| m.id == *meas && !m.running)
+                .map(|m| m.config_rev),
             _ => None,
         };
-        let outdated: Vec<MeasId> = state
-            .measurements
-            .iter()
-            .filter(|m| !m.running)
-            .filter(|m| {
-                let newest = d
-                    .latest
-                    .frames
-                    .values()
-                    .filter(|f| matches!(f.topic, Topic::Data { meas, .. } if meas == m.id))
-                    .map(|f| f.frame.stamp.config_rev)
-                    .max();
-                newest.is_some_and(|r| r < m.config_rev)
-            })
-            .map(|m| m.id)
-            .collect();
-        if outdated.is_empty() {
+        let outdated = |f: &ac2_client::TopicFrame| {
+            stopped_rev(&f.topic).is_some_and(|r| f.frame.stamp.config_rev < r)
+        };
+        if !d.latest.frames.values().any(outdated) {
             return;
         }
         let mut nd = (**d).clone();
-        nd.latest
-            .frames
-            .retain(|_, f| !meas_of(&f.topic).is_some_and(|m| outdated.contains(&m)));
+        nd.latest.frames.retain(|_, f| !outdated(f));
         self.data = Some(Arc::new(nd));
     }
 

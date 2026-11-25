@@ -95,7 +95,10 @@ fn slots_capture_and_replace() {
     t.key("Alt+1");
     // A trace deleted daemon-side frees its slot.
     t.conn(mirror(daemon_state()));
-    assert!(t.st.slots()[2].is_none());
+    assert!(
+        t.st.daemon()
+            .is_some_and(|d| d.traces.iter().all(|x| x.edit.slot != Some(3)))
+    );
 }
 
 /// Ctrl+N stores every live curve the focused pane draws, running or stopped, each into its
@@ -153,6 +156,34 @@ fn ctrl_digit_captures_every_live_curve_of_the_pane() {
     // Answered: the key captures again, and TF 2's capture still in slot 1 is the one the
     // next capture of TF 2 replaces.
     assert_eq!(captures(&t.key("Ctrl+1"))[1].2, Some(TraceId(9)));
+}
+
+/// A capture in flight never outlives its connection: the link lost, or the daemon
+/// reached again, Ctrl+N captures again; asked while not connected, it is answered per
+/// curve like a refusal.
+#[test]
+fn a_capture_in_flight_ends_with_its_connection() {
+    let mut t = T::new();
+    assert_eq!(captures(&t.key("Ctrl+2")).len(), 1);
+    t.conn(ConnEvent::Failed {
+        down: ac2_scene::chrome::RigDown::Unreachable,
+        target: "local daemon".into(),
+        error: "lost".into(),
+        retry_in: std::time::Duration::from_secs(1),
+    });
+    t.connect(daemon_state());
+    assert_eq!(captures(&t.key("Ctrl+2")).len(), 1);
+    t.connect(daemon_state());
+    assert_eq!(captures(&t.key("Ctrl+2")).len(), 1);
+    t.conn(ConnEvent::Captured {
+        slot: 2,
+        results: vec![("Main L".into(), Err("not connected".into()))],
+    });
+    assert_eq!(
+        t.last_toast(),
+        "slot 2: nothing captured · Main L: not connected"
+    );
+    assert_eq!(captures(&t.key("Ctrl+2")).len(), 1);
 }
 
 #[test]

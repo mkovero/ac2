@@ -599,12 +599,16 @@ fn slow_the_measurement_tree_from_an_empty_daemon() -> R {
 
     // Two captures, filed under the measurement they came from.
     d.key("Ctrl+1");
-    d.until("slot 1", |s| s.slots()[0].is_some())?;
+    d.until("slot 1", |s| crate::common::slots(s)[0].is_some())?;
     d.key("Ctrl+2");
-    d.until("slot 2", |s| s.slots()[1].is_some())?;
+    d.until("slot 2", |s| crate::common::slots(s)[1].is_some())?;
     let (a, b) = (
-        d.st.slots()[0].map(|t| t.id).ok_or("slot 1")?,
-        d.st.slots()[1].map(|t| t.id).ok_or("slot 2")?,
+        crate::common::slots(&d.st)[0]
+            .map(|t| t.id)
+            .ok_or("slot 1")?,
+        crate::common::slots(&d.st)[1]
+            .map(|t| t.id)
+            .ok_or("slot 2")?,
     );
     for id in [a, b] {
         assert_eq!(d.st.trace_meta(id)?.edit.owner, under_tf);

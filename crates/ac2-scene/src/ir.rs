@@ -367,6 +367,25 @@ fn draw(
                 let o = auto_amplitude(f);
                 Range::new(r.lo.min(o.lo), r.hi.max(o.hi))
             }),
+        // In dB re the lead's peak, a louder curve over it would run off the top: the top
+        // rises to fit it, by whole steps of the headroom the default range keeps.
+        (IrMode::Log | IrMode::Etc, _) => {
+            let r = y_range(frame, mode, axes);
+            let re = peak_ref(frame, mode);
+            let loudest = finite_max(
+                extra
+                    .lines
+                    .iter()
+                    .filter_map(|(f, ..)| ir_values_re(f, mode, re))
+                    .flatten(),
+            );
+            let step = IrAxes::DEFAULT_LEVEL_DB.hi;
+            if loudest.is_finite() && loudest + step > r.hi {
+                Range::new(r.lo, ((loudest + step) / step).ceil() * step)
+            } else {
+                r
+            }
+        }
         _ => y_range(frame, mode, axes),
     };
     let title = title(mode).to_string();

@@ -10,8 +10,36 @@
 use ac2_proto::frame::{MathState, OperandStatus, ProtectionFlags};
 use ac2_proto::model::{
     AlignOutcome, AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, NamedOperand, Operand,
-    PhaseBasis,
+    PhaseBasis, TraceMeta, TraceSource,
 };
+use ac2_proto::units::MeasId;
+
+/// A live curve as an operand choice: `Main (live)`.
+pub fn live_operand_label(name: &str) -> String {
+    format!("{name} (live)")
+}
+
+/// A stored trace as an operand choice. Every source curve has its own slot N, so a
+/// capture's label says whose slot it holds (`S1 (stored, Main S1)`); an EQ set names the
+/// measurement it belongs to (`meas_name`: a listed measurement's name).
+pub fn stored_operand_label<'a>(
+    t: &TraceMeta,
+    meas_name: impl Fn(MeasId) -> Option<&'a str>,
+) -> String {
+    let name = &t.edit.name;
+    match (&t.source, t.edit.slot) {
+        (TraceSource::Eq { meas, .. }, _) => match meas_name(*meas) {
+            Some(m) => format!("{name} (EQ set of {m})"),
+            None => format!("{name} (EQ set)"),
+        },
+        (
+            TraceSource::Captured { meas_name, .. } | TraceSource::Math { meas_name, .. },
+            Some(s),
+        ) => format!("{name} (stored, {meas_name} S{s})"),
+        (_, Some(s)) => format!("{name} (stored, S{s})"),
+        (_, None) => format!("{name} (stored)"),
+    }
+}
 
 /// `÷`, `×`, `+`, `−`.
 pub fn op_symbol(op: MathOp) -> &'static str {

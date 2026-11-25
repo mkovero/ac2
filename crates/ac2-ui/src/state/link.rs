@@ -807,6 +807,8 @@ impl RigState {
             self.name.clone_from(name);
         }
         self.conn = conn;
+        // Nor is a capture of the last one answered any more.
+        self.capturing = 0;
         // A new connection holds no lease.
         self.stimulus.phase = StimPhase::Idle;
         // Nor is a stop of this app's on its way to take transfers with it or be announced.
@@ -839,6 +841,7 @@ impl RigState {
         self.pending.stack = None;
         self.mirror = None;
         self.data = None;
+        self.capturing = 0;
         self.stimulus.phase = StimPhase::Idle;
         // Nor is a stop of this app's on its way to take transfers with it or be announced.
         self.stimulus.stop_transfers = false;

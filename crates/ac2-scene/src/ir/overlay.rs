@@ -150,9 +150,13 @@ mod tests {
     }
 
     fn scene(curves: &[IrCurve<'_>], cursor_ms: Option<f64>) -> Option<IrScene> {
+        scene_in(curves, cursor_ms, IrMode::Linear)
+    }
+
+    fn scene_in(curves: &[IrCurve<'_>], cursor_ms: Option<f64>, mode: IrMode) -> Option<IrScene> {
         let view = ViewState {
             ir: IrView {
-                mode: IrMode::Linear,
+                mode,
                 ..IrView::default()
             },
             ..ViewState::default()
@@ -253,6 +257,25 @@ mod tests {
         let v = ir_values_re(&kept, IrMode::Log, peak_ref(&live, IrMode::Log)).expect("values");
         let top = v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         assert!((top + 6.02).abs() < 0.01, "{top}");
+    }
+
+    /// A curve louder than the lead is never clipped: in dB the top rises to fit it (by
+    /// whole steps of the default headroom), and the automatic amplitude fits it too.
+    #[test]
+    fn a_louder_curve_raises_the_top() {
+        let live = frame_at(48_000.0, 0.25, 0.013);
+        let loud = frame_at(96_000.0, 0.5, 0.0125);
+        let l = curve(TraceKey::Live(MeasId(1)), "TF 1", Some(&live), RED);
+        let s1 = curve(TraceKey::Stored(TraceId(4)), "TF 1 S1", Some(&loud), BLUE);
+        let s = scene(&[l.clone(), s1.clone()], None).expect("drawn");
+        assert!(
+            s.y_axis.mapping.range.hi >= 0.55,
+            "{:?}",
+            s.y_axis.mapping.range
+        );
+        let s = scene_in(&[l, s1], None, IrMode::Log).expect("drawn");
+        // +6.02 dB and the 3 dB over it, up to the next 3 dB step.
+        assert_eq!(s.y_axis.mapping.range.hi, 12.0);
     }
 
     /// The cursor reads the selected curve; time zero and the tag are that curve's.

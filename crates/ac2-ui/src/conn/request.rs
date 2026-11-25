@@ -529,9 +529,18 @@ pub(super) async fn capture(
         })
         .await?;
     let t = expect_body!("trace.capture", r, ReplyBody::Trace(t) => t)?;
-    // Only once the new trace is stored: a refused capture keeps the slot's old one. The
-    // old trace may already be gone; the capture stands either way.
-    if let Some(old) = replace {
+    // Only once the new trace is stored (a refused capture keeps the slot's old one), and
+    // only if the new one displaced it: the daemon's state, read after the capture on the
+    // same channel, shows it without the slot and still the same curve's. One moved or
+    // re-slotted meanwhile by anyone is someone's choice, and stays. The capture stands
+    // either way.
+    if let Some(old) = replace
+        && let Ok(r) = c.call(Command::TraceList).await
+        && let Ok(all) = expect_body!("trace.list", r, ReplyBody::Traces(l) => l)
+        && all
+            .iter()
+            .any(|o| o.id == old && o.edit.slot.is_none() && o.slot_holder() == t.slot_holder())
+    {
         let _ = c.call(Command::TraceDelete { trace: old }).await;
     }
     Ok(t)

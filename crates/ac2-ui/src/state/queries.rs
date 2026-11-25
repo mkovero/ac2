@@ -502,23 +502,6 @@ impl AppState {
             .collect()
     }
 
-    /// A trace in each slot 1…9 (index 0 = slot 1), of any source curve: the last in the
-    /// daemon's list when several curves' captures hold the same number. For tests of a rig
-    /// with one capture per slot; the keys act on [`Self::stored_traces`] by source.
-    pub fn slots(&self) -> [Option<&TraceMeta>; 9] {
-        let mut out = [None; 9];
-        for t in self
-            .daemon()
-            .map(|s| s.traces.as_slice())
-            .unwrap_or_default()
-        {
-            if let Some(n) = t.edit.slot.filter(|n| (1..=9).contains(n)) {
-                out[usize::from(n - 1)] = Some(t);
-            }
-        }
-        out
-    }
-
     /// Shown stored traces of transfer pane `pane`'s group, slotted first (by slot), then
     /// by order.
     pub(super) fn shown_transfer_traces(&self, pane: PaneId) -> Vec<&TraceMeta> {

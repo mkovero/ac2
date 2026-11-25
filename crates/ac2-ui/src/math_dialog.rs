@@ -73,7 +73,7 @@ impl Candidate {
             Some(Candidate {
                 operand: Operand::Meas { meas: m.id },
                 name: m.config.name.clone(),
-                label: format!("{} (live)", m.config.name),
+                label: ac2_scene::math::live_operand_label(&m.config.name),
                 domain,
             })
         });
@@ -89,20 +89,11 @@ impl Candidate {
                     _ => Operand::Trace { trace: t.id },
                 },
                 name: t.edit.name.clone(),
-                label: match (&t.source, t.edit.slot) {
-                    (TraceSource::Eq { meas, .. }, _) => match ms.iter().find(|m| m.id == *meas) {
-                        Some(m) => format!("{} (EQ set of {})", t.edit.name, m.config.name),
-                        None => format!("{} (EQ set)", t.edit.name),
-                    },
-                    // Every source curve has its own slot N: the label says whose.
-                    (
-                        TraceSource::Captured { meas_name, .. }
-                        | TraceSource::Math { meas_name, .. },
-                        Some(s),
-                    ) => format!("{} (stored, {meas_name} S{s})", t.edit.name),
-                    (_, Some(s)) => format!("{} (stored, S{s})", t.edit.name),
-                    (_, None) => format!("{} (stored)", t.edit.name),
-                },
+                label: ac2_scene::math::stored_operand_label(t, |m| {
+                    ms.iter()
+                        .find(|x| x.id == m)
+                        .map(|x| x.config.name.as_str())
+                }),
                 domain: match t.kind {
                     TraceKind::Transfer | TraceKind::Sweep | TraceKind::Target => {
                         MathDomain::Transfer
