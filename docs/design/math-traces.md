@@ -151,7 +151,7 @@ clock is the fan-out's); its result does not change.
 ## App
 
 **Shift+M** (palette *New math trace…*) opens the dialog: **A** (every live measurement
-and stored trace, by name, `(live)` / `(stored, S2)`), **Operator** (by A's kind: ÷ × + − and
+and stored trace, by name, `(live)` / `(stored, Main L S2)`), **Operator** (by A's kind: ÷ × + − and
 average for transfer functions; − + and average for levels), **B** (the curves of A's kind),
 or, for the average, one row per curve of A's kind (all in to start with; ←/→ leaves one out),
 **Method**, **Phase reference** (the operand whose delay a sum, difference or average is

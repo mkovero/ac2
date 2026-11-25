@@ -1,5 +1,5 @@
 {
-  "proto_version": 104,
+  "proto_version": 105,
   "value": {
     "grids": [
       {
@@ -382,7 +382,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-115553540",
+          "opened_at": "now-98496114",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -401,11 +401,11 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-29645790"
+              "since": "now-28096453"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-29645790"
+              "since": "now-28096453"
             }
           },
           "started_at": null,
@@ -413,31 +413,31 @@
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-29645790",
+              "since": "now-28096453",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-29645790",
+              "since": "now-28096453",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-29645790",
+              "since": "now-28096453",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-29645790",
+              "since": "now-28096453",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-29645790",
+              "since": "now-28096453",
               "weighting": "a"
             }
           ]
@@ -463,7 +463,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-11461453"
+        "saved_at": "now-8470829"
       }
     },
     "traces": []

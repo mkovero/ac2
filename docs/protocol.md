@@ -43,7 +43,7 @@ daemon answered there.
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 104`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 105`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1360,8 +1360,15 @@ display edits and are never applied to the stored data.
   final frames, from the same state, with its IR) and a capture stores that, stamped as
   its final frames; it goes when the measurement starts again, is reset, gets a new
   delay or a configuration that would have restarted a running job's averages (a display
-  smoothing change of a transfer keeps it, with the new smoothing), is deleted, or the
-  session closes. It needs a result in the current session epoch (`invalid` otherwise:
+  smoothing change of a transfer keeps it, with the new smoothing, and its final `tf`
+  frame is sent again under the new `config_rev`, display-smoothed as a running job sends
+  it; a spectrum's smoothing change drops it), is deleted, or the session closes. A
+  second `meas.stop` keeps it. When a stopped measurement's kept result goes, its frames
+  (`d/<meas>/…`, `bins/<meas>/…`) are cleared from the daemon's latest slots, and a reset
+  of a stopped measurement gives it a new `config_rev`: a client drops the frames it holds
+  of a stopped measurement whose newest frame is of an older `config_rev`. A capture of a
+  kept result is described as at the stop: `created_at` is the stop's time, and `cal`,
+  `mic`, `eq_in` and a math capture's operand names are those of the stop. It needs a result in the current session epoch (`invalid` otherwise:
   none yet while running, none kept while stopped, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
   `target`, `spectrum` {`scale`, `level`: `SpecLevel`}, `rta` {`scale`}), `source.captured` {`meas`, `meas_name`,
   `epoch`, `at_sample`}, `edit.owner` the measurement, `delay` (the delay the DSP used),
@@ -1378,10 +1385,15 @@ display edits and are never applied to the stored data.
   `name`}] — the operands that went into the captured result, named as at capture —,
   `phase`: `PhaseBasis`}, `delay` its stated delay, `depth` and `mic` nil,
   `uncalibrated`; `refused` when the expression lacks its operands at that moment.
-- **Slots.** `TraceEdit.slot` (1…9 or nil), per owner (`edit.owner`): each owner's
-  slot holds at most one trace, so two measurements each have a slot 1. Capturing or
-  updating into a slot clears it on the trace of the same owner that held it (a `trace`
-  event for that one too); moving a trace to another owner takes the slot there.
+- **Slots.** `TraceEdit.slot` (1…9 or nil), per slot holder: a capture's (`source`
+  `captured` or `math`) is the live curve it was taken of (`source.meas`, a measurement or
+  a math trace), a trace in the imported group's is that group, any other trace's is its
+  `edit.owner`. Each holder's slot N holds at most one trace, so a measurement and a math
+  trace made on it each have a slot 1. Capturing or updating into a slot clears it on the
+  trace of the same holder that held it (a `trace` event for that one too). Traces filed
+  into the imported group (`meas.delete` keeping its traces) keep their slot only where no
+  trace of the group holds it already; a session file read with two traces of one holder
+  in a slot keeps it on the first (file order) and clears it on the others.
 - **Last write wins.** `trace.update` replaces the whole `TraceEdit` and carries no
   `base` (`expect_rev` is the only guard): of two clients' edits, the later one stands whole.
 - **Lock.** `trace.update` on a locked trace may change only `visible`, `order`, `slot`,

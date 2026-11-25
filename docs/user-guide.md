@@ -431,11 +431,15 @@ names the max: `Stimulus level (dBFS, max −40.0)`). Above that, **Stop transfe
 stimulus** (**←/→**, on by default) is the rule of [Stopping the stimulus stops its
 transfers](#stopping-the-stimulus-stops-its-transfers).
 
-The daemon keeps the level across restarts and never raises it by itself: its first start
-stores the bound as the level, a restart with a higher `--max-level` keeps the stored level
-(only a typed raise goes above it), and a restart with a lower bound caps the level there
-and stores the capped level, so raising the bound again later does not bring the older,
-higher level back. CLI: `ac2 gen ceiling`,
+The daemon keeps the level in its rig settings file across restarts: a restart with a
+higher `--max-level` keeps the stored level (only a typed raise goes above it), and a restart
+with a lower bound caps the level there and stores the capped level, so raising the bound
+again later does not bring the older, higher level back. A start that reads no stored level
+takes the bound: the first start, a settings file of another format version (set aside),
+and a damaged file with no readable previous copy. A damaged file whose previous copy reads
+takes that copy's level, never above the bound. Either way the start writes the file again
+with the level in force (an unreadable file that cannot be moved aside is never written:
+the daemon says so at start). CLI: `ac2 gen ceiling`,
 `ac2 gen ceiling -40dbfs`, `ac2 gen ceiling -30dbfs --yes`.
 
 #### Connection
@@ -2229,7 +2233,7 @@ is drawn where its kind is drawn. The daemon computes it, so it follows live ope
 every client (and `ac2 meas list`) sees it.
 
 **Shift+M** (palette *New math…*): **A** (←/→ through every live measurement and
-stored trace, `(live)` or `(stored, S2)`), the **operator**, **B** (curves of A's kind). The
+stored trace, `(live)` or `(stored, Main L S2)`: a capture names the curve whose slot it holds), the **operator**, **B** (curves of A's kind). The
 name follows the expression (`Main L ÷ Sub`) until you type one. **Enter** creates and
 starts it. *Edit measurement…* on a selected math trace reopens the dialog.
 
@@ -2706,9 +2710,13 @@ at the trace's inserted delay), unless there was none (no reference). The IR vie
 IR of every stored trace the magnitude view draws (its lead's group, and those ticked in with
 **C**) over the live IR, each in the trace's colour, with a legend of the same rows in the
 same order as the magnitude view's. A trace without an IR (an average, a math capture, a
-text import, an EQ curve) keeps its row, dimmed and tagged `no IR`. Each curve's t = 0 is its
-own inserted delay, whatever its sample rate, so their arrivals line up. The cursor and the
-time origin follow the **selected** trace when it has an IR, labelled as its legend row:
+text import, an EQ curve) keeps its row, dimmed and tagged `no IR`. All curves share one
+time axis, t = 0 at the leading curve's inserted delay, whatever their sample rates: a curve
+captured at another inserted delay is drawn that much earlier or later, so a capture at
+12.50 ms and the live IR at 13.00 ms peak 0.5 ms apart, and its row says by how much
+(`Δt −0.50 ms`). In the log and ETC displays every curve is in dB re the leading curve's
+peak, so their levels compare. The cursor and the time origin follow the **selected** trace
+when it has an IR, labelled as its legend row:
 `t = 0 at inserted delay 12.50 ms · 4.29 m @ 20 °C · pre-EQ`; else the live IR (or the first
 trace's, with no live IR). The IR travels with the trace in sessions, autosave and ac2 CSV
 exports.
@@ -2809,16 +2817,23 @@ unsmoothed.
 - **Ctrl+1 … Ctrl+9** capture every live curve the focused pane draws into slot 1–9, in
   whichever view it shows: its own measurement, a math trace of its group and those
   compared into it, running or stopped (a transfer's capture keeps its IR). A curve hidden
-  with **A** is not drawn, so not captured. Slots are per measurement: each one's capture
-  goes into its own slot of that number, named `{name} S{N}`, replacing its trace there
-  (a locked one only gives up the slot). One toast says what was stored and what was not:
-  `slot 1: TF 1, TF 2 captured · TF 3: no result yet`. **1 … 9** show and hide the
+  with **A** is not drawn, so not captured. Slots are per curve: each curve's capture
+  (a measurement's, a math trace's, an EQ prediction's) goes into its own slot of that
+  number, named `{name} S{N}`; once it is stored it replaces that curve's earlier capture
+  there (a locked one only gives up the slot), and a refused capture leaves it. One toast
+  says what was stored and what was not, the daemon's reason in its words:
+  `slot 1: TF 1, TF 2 captured · TF 3: no result to capture yet`. Pressed again before
+  the daemon answered, it says `slot 1: still capturing`. **1 … 9** show and hide the
   focused pane's traces in that slot (all of them hide when any is shown); with none of
-  the pane's there, every trace in the slot.
+  the pane's there, `slot 1: nothing of this pane` (other panes' traces are left as they
+  are; the imported group's are shown and hidden from the tree).
 - A stopped measurement captures the result it had as it stopped (its curve and, for a
   transfer, its IR: what its views still show), until it starts again, is reset, gets a new
-  delay or a change that restarts its averages. With nothing measured since then the toast
-  says *TF 1: no result to capture (it has not measured with its current settings)*.
+  delay or a change that restarts its averages; then its curve goes from the views too, and
+  it shows as stopped with nothing measured. The capture is dated at the stop and keeps the
+  calibration, mic and EQ marks of the stop. With nothing measured since then the toast
+  says `slot 1: nothing captured · TF 1: no result to capture (it has not measured with
+  its current settings)`.
 - The tree lists every trace under its owner: name, kind (*capture*, *sweep run*,
   *imported*, *average*, *A ÷ B*, *target* …), slot, *hidden*, colour dot. Within a
   measurement slotted traces come first by slot, then the rest oldest first. A click selects
@@ -2830,7 +2845,7 @@ unsmoothed.
 - **End** (palette *Select live*) goes back to the live measurement. **Esc** only stops the
   stimulus: the stop reflex never changes the selection.
 - **A** shows or hides the selected trace.
-- Palette *Move trace to slot…* puts it in its measurement's slot 1–9 (`none` frees its slot).
+- Palette *Move trace to slot…* puts it in the slot 1–9 of the curve it was captured from (an import's: the imported group's) (`none` frees its slot).
 
 ### Trace keys
 
