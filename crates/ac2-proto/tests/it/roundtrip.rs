@@ -435,7 +435,6 @@ fn unknown_fields_are_refused() {
         v: u16,
         id: u64,
         cmd: Cmd,
-        expect_rev: Option<u64>,
         surprise: bool,
     }
     #[derive(serde::Serialize)]
@@ -446,13 +445,13 @@ fn unknown_fields_are_refused() {
         v: PROTO_VERSION,
         id: 1,
         cmd: Cmd { op: "gen.stop" },
-        expect_rev: None,
         surprise: true,
     })
     .expect("sample message");
     assert!(matches!(decode_request(&b), Err(CtrlError::Malformed(_))));
 
-    // The store-wide rev guard is gone: a request that still names one is not a request.
+    // Edits are guarded per entity (`base`): a request naming a store-wide rev to expect is
+    // not a request, whatever that rev.
     #[derive(serde::Serialize)]
     struct Guarded {
         v: u16,
