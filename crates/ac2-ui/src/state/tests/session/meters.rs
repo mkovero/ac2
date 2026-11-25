@@ -317,8 +317,7 @@ fn record_toggles_and_the_indicator_names_the_inputs() {
     let l = t.st.recording_label().expect("indicator");
     assert_eq!(l.text, "REC 0:05 · 1.9 MB");
     assert!(
-        l.detail
-            .starts_with("Recording Input 1, Input 2 to /r/rec-x.wav"),
+        l.detail == "/r/rec-x.wav\nInput 1, Input 2 · stops after 1 h 00 min",
         "{}",
         l.detail
     );

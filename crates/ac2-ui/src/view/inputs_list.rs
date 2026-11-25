@@ -43,11 +43,7 @@ pub(super) fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) -> Option<Msg> {
             .map(|s| s.rig.levels.ballistic)
             .unwrap_or_default(),
     );
-    let mut tip = format!(
-        "Click picks a row · {} resets its max, overs and loudness · drag a row onto a pane \
-         to meter it there (a pair on its goniometer)",
-        key(CommandId::LevelsReset),
-    );
+    let mut tip = "Click picks a row · drag one onto a pane".to_owned();
     if rig.is_loudness() {
         tip = format!("{tip} · {INPUTS_LOUDNESS_TIP}");
     }

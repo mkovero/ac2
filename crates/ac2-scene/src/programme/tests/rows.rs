@@ -44,10 +44,7 @@ fn the_header_follows_the_rig_ballistic() {
     ] {
         assert_eq!(inputs_header(b, "R"), want, "{b:?}");
     }
-    assert_eq!(
-        INPUTS_LOUDNESS_TIP,
-        "loudness is metered per programme in the Programme pane"
-    );
+    assert_eq!(INPUTS_LOUDNESS_TIP, "loudness in the Programme pane");
 }
 
 /// A digital pair under a loudness ballistic: a bar line per side, then a max line per

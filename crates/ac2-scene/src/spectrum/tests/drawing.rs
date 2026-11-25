@@ -520,7 +520,10 @@ fn multires_spectrum_marks_where_its_windows_change() {
     );
     assert_eq!(s.unresolved.len(), 1);
     assert!(s.unit.starts_with("dBFS (tone, multi-res)"), "{}", s.unit);
-    assert!(s.unit_help.as_deref().is_some_and(|h| h.contains("21 ms")));
+    assert_eq!(
+        s.unit_help.as_deref(),
+        Some("Tone level: a sine reads its RMS, noise tilts up")
+    );
     let cur = s.cursor.expect("cursor");
     assert!(cur.freq.ends_with(" · 171 + 85 ms windows"), "{}", cur.freq);
     let labels: Vec<&str> = s

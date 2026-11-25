@@ -14,8 +14,6 @@ pub(super) struct RowTips {
     pub(super) meas: String,
     /// The edit button's, with the key that edits the selected row.
     pub(super) edit: String,
-    /// The key that shows / hides the selected curve.
-    pub(super) eye: String,
     pub(super) select: String,
 }
 
@@ -138,10 +136,7 @@ pub(super) fn tree_row(
                     ui.painter()
                         .circle_stroke(centre, 8.0, egui::Stroke::new(1.0, ch.border));
                 }
-                let tip = format!(
-                    "{what} this curve · {} shows / hides the selected one",
-                    tips.eye
-                );
+                let tip = format!("{what} this curve");
                 if eye.on_hover_text(tip).clicked() {
                     click = Some(on_rig(match row.key {
                         TreeKey::Trace(id) => Msg::ToggleShown(id),
@@ -196,9 +191,15 @@ pub(super) fn tree_row(
                     .stroke(egui::Stroke::new(1.0, ch.focus)),
                 Mark::None => egui::Button::selectable(false, job),
             };
+            // A heading that stands for no measurement has no row keys to offer.
             let tip = match row.key {
                 TreeKey::Trace(_) => format!("{}\n{}", row.describe, tips.select),
-                _ => format!("{}\n{}", row.describe, tips.meas),
+                TreeKey::Meas(_) | TreeKey::Live(_) | TreeKey::Math(_) => {
+                    format!("{}\n{}", row.describe, tips.meas)
+                }
+                TreeKey::Imported | TreeKey::Rig | TreeKey::Session | TreeKey::RigName(_) => {
+                    row.describe.clone()
+                }
             };
             let draggable = !row.key.is_heading();
             let sense = if draggable {

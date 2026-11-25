@@ -9,7 +9,7 @@ use super::*;
 const PUPU: RigId = RigId(1);
 const KETUNKOLO: RigId = RigId(2);
 const NOW: u64 = 1_790_000_000_000_000_000;
-const LEVELS: &str = "measured from the rigs' level frames, no audio streamed";
+const LEVELS: &str = "from the rigs' level frames";
 
 /// pupu's own clocks: a sample clock measured against a synced system clock, so a pair
 /// judged on system clocks alone would agree with a rig at the same figure.
@@ -115,18 +115,12 @@ fn levels_that_agree_tag_both_rigs_and_say_what_backs_it() {
     assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE")]);
     assert_eq!(
         tip(&d, 1),
-        format!(
-            "clocks agree with pupu: {LEVELS}, within 2 ppm (ketunkolo runs +0.12 ppm against \
-             pupu over 60 s · marks for 5 min 12 s); a lock is not proven below 2 ppm"
-        )
+        "clocks agree with pupu within 2 ppm (+0.12 ppm over 60 s)"
     );
     // Each row reads its own rig against the other.
     assert_eq!(
         tip(&d, 0),
-        format!(
-            "clocks agree with ketunkolo: {LEVELS}, within 2 ppm (pupu runs −0.12 ppm against \
-             ketunkolo over 60 s · marks for 5 min 12 s); a lock is not proven below 2 ppm"
-        )
+        "clocks agree with ketunkolo within 2 ppm (−0.12 ppm over 60 s)"
     );
 }
 
@@ -291,8 +285,7 @@ fn a_streams_verdict_stays_the_tag_and_levels_that_differ_add_a_line() {
     assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE")]);
     assert_eq!(
         tip(&d, 1),
-        "clocks agree with pupu: measured between the rigs, within 2 ppm (+0.1 ppm over the \
-         last 60 s); a lock is not proven below 2 ppm"
+        "clocks agree with pupu within 2 ppm (+0.1 ppm over 60 s)"
     );
 
     let d = judge(&standing(PeerRelation::Measuring, Some(0.4)), &agree);
@@ -300,9 +293,8 @@ fn a_streams_verdict_stays_the_tag_and_levels_that_differ_add_a_line() {
     assert_eq!(
         tip(&d, 1),
         format!(
-            "clocks agree with pupu: measured between the rigs, within 2 ppm (+0.1 ppm over \
-             the last 60 s); a lock is not proven below 2 ppm\nmeasuring clocks… · ketunkolo \
-             runs +0.40 ppm against pupu over 60 s · marks for 5 min 12 s · {LEVELS}"
+            "clocks agree with pupu within 2 ppm (+0.1 ppm over 60 s)\nmeasuring clocks… (+0.40 \
+             ppm over 60 s) · {LEVELS}"
         )
     );
 
@@ -321,7 +313,7 @@ fn a_streams_verdict_stays_the_tag_and_levels_that_differ_add_a_line() {
         tip(&d, 1),
         format!(
             "can't tell: no audio between pupu and ketunkolo\nCLOCKS NOT LOCKED: ketunkolo runs \
-             +3.1 ppm against pupu over 60 s · marks for 5 min 12 s · {LEVELS}"
+             +3.1 ppm against pupu over 60 s · {LEVELS}"
         )
     );
 }
@@ -348,12 +340,12 @@ fn the_other_daemons_entry_reads_from_each_rig() {
     assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE")]);
     // The wire figure is pupu against ketunkolo, as ketunkolo's daemon reports it.
     assert!(
-        tip(&d, 0).contains("(pupu runs +0.12 ppm against ketunkolo over 60 s"),
+        tip(&d, 0).ends_with("(+0.12 ppm over 60 s)"),
         "{}",
         tip(&d, 0)
     );
     assert!(
-        tip(&d, 1).contains("(ketunkolo runs −0.12 ppm against pupu over 60 s"),
+        tip(&d, 1).ends_with("(−0.12 ppm over 60 s)"),
         "{}",
         tip(&d, 1)
     );
@@ -380,8 +372,7 @@ fn two_daemons_that_disagree_tag_by_the_difference() {
         tip(&d, 1),
         format!(
             "ketunkolo runs −3.1 ppm against pupu over 60 s · marks for 5 min 12 s · \
-             {LEVELS}\nclocks agree · ketunkolo runs +0.12 ppm against pupu over 60 s · marks \
-             for 5 min 12 s · {LEVELS}"
+             {LEVELS}\nclocks agree (+0.12 ppm over 60 s) · {LEVELS}"
         )
     );
 
@@ -400,7 +391,7 @@ fn two_daemons_that_disagree_tag_by_the_difference() {
         "{}",
         tip(&d, 1)
     );
-    assert!(tip(&d, 1).contains("\nclocks agree · "), "{}", tip(&d, 1));
+    assert!(tip(&d, 1).contains("\nclocks agree ("), "{}", tip(&d, 1));
 }
 
 /// A daemon whose clock the app does not know: the marks' age is left out, not guessed.
@@ -431,10 +422,7 @@ fn an_unknown_daemon_clock_leaves_the_marks_age_out() {
     ]);
     assert_eq!(
         tip(&d, 1),
-        format!(
-            "clocks agree with pupu: {LEVELS}, within 2 ppm (ketunkolo runs +0.12 ppm against \
-             pupu over 60 s); a lock is not proven below 2 ppm"
-        )
+        "clocks agree with pupu within 2 ppm (+0.12 ppm over 60 s)"
     );
 }
 

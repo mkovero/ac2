@@ -103,13 +103,11 @@ fn the_operators_rigs_two_agree_and_the_meter_has_its_own_rate() {
     assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE"), Some("FREE")]);
     assert_eq!(
         tip(&d, 0),
-        "rates agree with ketunkolo within 2 ppm (by each rig's system clock); two free \
-         clocks can meet that by chance"
+        "rates agree with ketunkolo within 2 ppm by system clocks"
     );
     assert_eq!(
         tip(&d, 1),
-        "rates agree with pupu within 2 ppm (by each rig's system clock); two free clocks \
-         can meet that by chance"
+        "rates agree with pupu within 2 ppm by system clocks"
     );
     assert_eq!(tip(&d, 2), "48 kHz here; pupu and ketunkolo at 96 kHz");
     assert_eq!(
@@ -185,13 +183,11 @@ fn a_daemons_agreement_reads_agree_with_its_figure() {
     assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE")]);
     assert_eq!(
         tip(&d, 0),
-        "clocks agree with ketunkolo: measured between the rigs, within 2 ppm (+0.3 ppm over \
-         the last 60 s); a lock is not proven below 2 ppm"
+        "clocks agree with ketunkolo within 2 ppm (+0.3 ppm over 60 s)"
     );
     assert_eq!(
         tip(&d, 1),
-        "clocks agree with pupu: measured between the rigs, within 2 ppm (−0.3 ppm over the \
-         last 60 s); a lock is not proven below 2 ppm"
+        "clocks agree with pupu within 2 ppm (−0.3 ppm over 60 s)"
     );
     assert_eq!(
         d.rigs[1].domain,
@@ -218,14 +214,8 @@ fn a_daemons_difference_outweighs_figures_that_agree() {
     );
     let d = clock_domains(&pair_with(&a, &a, &sees));
     assert_eq!(tags(&d), [Some("FREE"), Some("FREE")]);
-    assert_eq!(
-        tip(&d, 0),
-        "pupu runs −5.6 ppm against ketunkolo over 40 s, measured between the rigs"
-    );
-    assert_eq!(
-        tip(&d, 1),
-        "ketunkolo runs +5.6 ppm against pupu over 40 s, measured between the rigs"
-    );
+    assert_eq!(tip(&d, 0), "pupu runs −5.6 ppm against ketunkolo over 40 s");
+    assert_eq!(tip(&d, 1), "ketunkolo runs +5.6 ppm against pupu over 40 s");
     assert_eq!(
         d.same_domain(1, 0),
         SameDomain::No {
@@ -296,7 +286,7 @@ fn figures_that_differ_by_each_system_clock_are_own_clocks() {
     assert_eq!(tags(&d), [Some("FREE"), Some("FREE")]);
     assert_eq!(
         tip(&d, 1),
-        "usb mic runs +6.0 ppm against pupu (by each rig's system clock)"
+        "usb mic runs +6.0 ppm against pupu by system clocks"
     );
 }
 
@@ -354,8 +344,8 @@ fn a_chain_of_agreements_holding_a_difference_is_no_group() {
         rig("c", 48_000, &c),
     ]);
     assert_eq!(tags(&d), [Some("UNKNOWN"); 3]);
-    let why = "the rates agree in a chain within 2 ppm, but a runs −3.0 ppm against c (by \
-               each rig's system clock)";
+    let why = "the rates agree in a chain within 2 ppm, but a runs −3.0 ppm against c by \
+               system clocks";
     for i in 0..3 {
         assert_eq!(tip(&d, i), format!("can't tell: {why}"));
     }
@@ -375,8 +365,8 @@ fn a_broken_chain_keeps_the_group_the_daemon_measured() {
     assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE"), Some("UNKNOWN")]);
     assert_eq!(
         tip(&d, 2),
-        "can't tell: the rates agree in a chain within 2 ppm, but pupu runs −3.0 ppm against c (by each \
-         rig's system clock)"
+        "can't tell: the rates agree in a chain within 2 ppm, but pupu runs −3.0 ppm against c by \
+         system clocks"
     );
     assert!(matches!(d.same_domain(1, 2), SameDomain::CantTell { .. }));
 }
@@ -390,8 +380,7 @@ fn a_rig_joined_only_by_its_system_clock_weakens_the_groups_tag() {
     assert_eq!(tags(&d), [Some("AGREE"); 3]);
     assert_eq!(
         tip(&d, 0),
-        "rates agree with ketunkolo and c within 2 ppm (by each rig's system clock, or \
-         measured between the rigs); two free clocks can meet that by chance"
+        "rates agree with ketunkolo and c within 2 ppm by system clocks"
     );
 }
 
@@ -435,11 +424,7 @@ fn two_groups_are_lettered_in_list_order() {
             Some("AGREE B")
         ]
     );
-    assert_eq!(
-        tip(&d, 1),
-        "clocks agree with ketunkolo: measured between the rigs, within 2 ppm; a lock is not \
-         proven below 2 ppm"
-    );
+    assert_eq!(tip(&d, 1), "clocks agree with ketunkolo within 2 ppm");
     let basis = |i: usize| match d.rigs[i].domain {
         Domain::Group { basis, .. } => Some(basis),
         _ => None,

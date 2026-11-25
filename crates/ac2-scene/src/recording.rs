@@ -121,17 +121,16 @@ pub fn recording_label(r: &RecordingRun, input_name: impl Fn(u16) -> String) -> 
         dropouts(r.discontinuities),
         remote_gaps(r.remote_gaps.spans)
     );
-    let mut gaps = String::new();
+    // The hover: the file, what goes in, then what was lost.
+    let mut detail = vec![r.path.clone()];
+    let mut lost_parts = Vec::new();
     if r.discontinuities > 0 {
-        gaps.push_str(" The audio is not continuous where the sidecar lists dropouts.");
+        lost_parts.push("dropouts listed in the sidecar".to_owned());
     }
     if r.remote_gaps.spans > 0 {
-        gaps.push_str(&format!(
-            " {} of remote input audio never arrived from its rig: the file holds zeros \
-             there, and the sidecar marks them so a replay reads them as lost, not silence.",
-            gap_time(r)
-        ));
+        lost_parts.push(format!("{} of remote audio lost", gap_time(r)));
     }
+    let gaps = (!lost_parts.is_empty()).then(|| lost_parts.join(" · "));
     let lossy = r.discontinuities > 0 || r.remote_gaps.spans > 0;
     match &r.status {
         RecordingStatus::Recording => {
@@ -150,78 +149,69 @@ pub fn recording_label(r: &RecordingRun, input_name: impl Fn(u16) -> String) -> 
                 } else {
                     RecordingTone::Recording
                 },
-                detail: format!(
-                    "Recording {inputs} to {}; it stops by itself after {bound}.{gaps}",
-                    r.path
-                ),
+                detail: {
+                    detail.push(format!("{inputs} · stops after {bound}"));
+                    detail.extend(gaps);
+                    detail.join("\n")
+                },
             }
         }
         RecordingStatus::Ended { reason } => {
             let saved = format!("recorded {} · {t} · {size}{lost}", r.name);
-            let (text, tone, why) = match reason {
-                RecordingEnd::Stopped => (saved, RecordingTone::Quiet, "stopped"),
-                RecordingEnd::DurationLimit => (
-                    format!("{saved} (time limit)"),
-                    RecordingTone::Quiet,
-                    "the time limit was reached",
-                ),
-                RecordingEnd::SizeLimit => (
-                    format!("{saved} (size limit)"),
-                    RecordingTone::Quiet,
-                    "the size limit was reached",
-                ),
+            // The label says why it ended; the hover adds only what the label cannot.
+            let (text, tone, more) = match reason {
+                RecordingEnd::Stopped => (saved, RecordingTone::Quiet, None),
+                RecordingEnd::DurationLimit => {
+                    (format!("{saved} (time limit)"), RecordingTone::Quiet, None)
+                }
+                RecordingEnd::SizeLimit => {
+                    (format!("{saved} (size limit)"), RecordingTone::Quiet, None)
+                }
                 RecordingEnd::SessionClosed => (
                     format!("{saved} (audio I/O closed)"),
                     RecordingTone::Quiet,
-                    "the audio I/O closed",
+                    None,
                 ),
                 RecordingEnd::SessionReopened => (
                     format!("{saved} (audio I/O reopened)"),
                     RecordingTone::Warning,
-                    "the audio I/O reopened (device or configuration change)",
+                    Some("the device or its settings changed".to_owned()),
                 ),
                 RecordingEnd::AudioStopped => (
                     format!("{saved} (audio stopped)"),
                     RecordingTone::Warning,
-                    "the audio stopped (the device stopped delivering or its host ended the stream)",
+                    Some("the device stopped delivering".to_owned()),
                 ),
                 RecordingEnd::DaemonShutdown => (
                     format!("{saved} (daemon stopped)"),
                     RecordingTone::Quiet,
-                    "the daemon shut down",
+                    None,
                 ),
                 RecordingEnd::WriteFailed { msg } => (
                     format!("recording failed: {}", shorten(msg, MAX_REASON_CHARS)),
                     RecordingTone::Warning,
-                    "writing failed",
+                    Some(msg.clone()),
                 ),
                 RecordingEnd::Interrupted => (
                     format!("recording interrupted: {} · {t}", r.name),
                     RecordingTone::Warning,
-                    "the daemon stopped without finishing it; it was finished from what had \
-                     reached the disk",
+                    Some("kept what reached the disk".to_owned()),
                 ),
             };
-            let msg = match reason {
-                RecordingEnd::WriteFailed { msg } => format!(" ({msg})"),
-                _ => String::new(),
-            };
+            detail.push(inputs);
+            detail.extend(more);
+            detail.extend(gaps);
             RecordingLabel {
                 text,
                 tone: if lossy { RecordingTone::Warning } else { tone },
-                detail: format!(
-                    "{inputs}: {t} of audio in {}, ended because {why}{msg}.{gaps}",
-                    r.path
-                ),
+                detail: detail.join("\n"),
             }
         }
     }
 }
 
 /// What the replay label says on hover.
-pub const REPLAY_DETAIL: &str = "The session plays a recording, not a device: the \
-                                 measurements analyse the recorded inputs, and nothing can \
-                                 be played.";
+pub const REPLAY_DETAIL: &str = "Plays a recording, not a device: no output";
 
 /// `REPLAY take 1 · 0:12 / 1:23` for a replay session, `REPLAY take 1 · ended` once its
 /// last frame went by, `REPLAY take 1 · 1:23` when the position is not known (`played`
@@ -290,8 +280,10 @@ mod tests {
         let l = recording_label(&run(RecordingStatus::Recording, 48_000 * 83, 0), name);
         assert_eq!(l.text, "REC 1:23 · 31.9 MB");
         assert_eq!(l.tone, RecordingTone::Recording);
-        assert!(l.detail.contains("Loop return, Room mic"), "{}", l.detail);
-        assert!(l.detail.contains("10 min 00 s"), "{}", l.detail);
+        assert_eq!(
+            l.detail,
+            "/r/take 1.wav\nLoop return, Room mic · stops after 10 min 00 s"
+        );
         let l = recording_label(&run(RecordingStatus::Recording, 48_000, 2), name);
         assert_eq!(l.text, "REC 0:01 · 384 kB · 2 dropouts");
         assert_eq!(l.tone, RecordingTone::Warning);
@@ -308,12 +300,10 @@ mod tests {
         assert_eq!(l.text, "REC 0:01 · 384 kB · 3 remote gaps");
         assert_eq!(l.tone, RecordingTone::Warning);
         assert!(
-            l.detail
-                .contains("12 ms of remote input audio never arrived"),
+            l.detail.ends_with("\n12 ms of remote audio lost"),
             "{}",
             l.detail
         );
-        assert!(l.detail.contains("lost, not silence"), "{}", l.detail);
         r.discontinuities = 1;
         r.status = RecordingStatus::Ended {
             reason: RecordingEnd::Stopped,

@@ -469,7 +469,7 @@ impl ClockDomains {
                     format::fixed(*over, 0)
                 );
                 match levels {
-                    None => format!("{head}, measured between the rigs"),
+                    None => head,
                     Some(d) => with_levels(head, d),
                 }
             }
@@ -484,7 +484,7 @@ impl ClockDomains {
                 }
             }
             Pair::Differ(Differ::BySystemClocks { ppm }) => format!(
-                "{an} runs {} ppm against {bn} (by each rig's system clock)",
+                "{an} runs {} ppm against {bn} by system clocks",
                 format::signed(*ppm, 1)
             ),
             _ => format!("{an} and {bn} are not shown to differ"),
@@ -502,75 +502,26 @@ impl ClockDomains {
         let tol = format::fixed(AGREE_PPM, 0);
         match basis {
             Basis::BetweenRigs => {
-                // One other rig: the figure the verdict rests on reads beside it.
+                // One other rig: the figure the verdict rests on, this rig against it.
                 let figure = match (others.as_slice(), &self.pairs[i][others[0]]) {
-                    (
-                        [j],
-                        Pair::Agree {
-                            figure,
-                            levels: Some(rest),
-                            ..
-                        },
-                    ) if figure.is_some() || !rest.is_empty() => {
-                        let mut parts: Vec<String> = figure
-                            .map(|(ppm, span)| {
-                                standing::figure_text(&self.names[i], &self.names[*j], ppm, span)
-                            })
-                            .into_iter()
-                            .collect();
-                        parts.extend(rest.iter().cloned());
-                        format!(" ({})", parts.join(" · "))
-                    }
                     (
                         [_],
                         Pair::Agree {
                             figure: Some((ppm, span)),
-                            levels: None,
+                            levels,
                             ..
                         },
                     ) => format!(
-                        " ({} ppm over the last {} s)",
-                        format::signed(*ppm, 1),
+                        " ({} ppm over {} s)",
+                        format::signed(*ppm, if levels.is_some() { 2 } else { 1 }),
                         format::fixed(*span, 0)
                     ),
                     _ => String::new(),
                 };
-                let from_levels = |j: &usize| {
-                    matches!(
-                        self.pairs[i][*j],
-                        Pair::Agree {
-                            levels: Some(_),
-                            ..
-                        }
-                    )
-                };
-                let how = if others.iter().all(from_levels) {
-                    FROM_LEVELS
-                } else if others.iter().any(from_levels) {
-                    "measured between the rigs, from streams or level frames"
-                } else {
-                    "measured between the rigs"
-                };
-                format!(
-                    "clocks agree with {names}: {how}, within {tol} ppm{figure}; a lock is \
-                     not proven below {tol} ppm"
-                )
+                format!("clocks agree with {names} within {tol} ppm{figure}")
             }
             Basis::SystemClocks => {
-                let mixed = members.iter().any(|&a| {
-                    members
-                        .iter()
-                        .any(|&b| matches!(self.pairs[a][b], Pair::Agree { direct: true, .. }))
-                });
-                let by = if mixed {
-                    "by each rig's system clock, or measured between the rigs"
-                } else {
-                    "by each rig's system clock"
-                };
-                format!(
-                    "rates agree with {names} within {tol} ppm ({by}); two free clocks can \
-                     meet that by chance"
-                )
+                format!("rates agree with {names} within {tol} ppm by system clocks")
             }
         }
     }
@@ -654,7 +605,7 @@ fn pair(rigs: &[RigClockFacts<'_>], i: usize, j: usize) -> (Pair, Vec<Beside>) {
             let p = if std::ptr::eq(by, a) { p } else { p.mirrored() };
             let beside = Beside {
                 tag: tag_of(&s.clock.relation),
-                line: standing::evidence_line_at(l.remote, s, l.now, by.name),
+                line: standing::evidence_line_at(l.remote, s, by.name),
             };
             Some((p, beside))
         })

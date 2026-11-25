@@ -258,7 +258,7 @@ fn pair_with_rig_pairs_both_ways_in_one_act() {
     assert_eq!(row.text, "pupu · not paired · 1 of 4 halves in place");
     assert!(row.mend() && row.unreached.is_none());
     assert!(
-        row.tip.contains("  this rig lists pupu as paired"),
+        row.tip.starts_with("pupu → here: paired, not admitted\n"),
         "{}",
         row.tip
     );
@@ -296,8 +296,7 @@ fn enter_on_a_half_paired_row_sends_the_missing_halves_only() {
         "pupu · it takes this rig's inputs · not the other way"
     );
     assert!(
-        row.tip
-            .ends_with("Enter pairs the missing halves · Delete twice unpairs"),
+        row.tip.ends_with("\nEnter pairs the missing halves"),
         "{}",
         row.tip
     );
@@ -431,15 +430,13 @@ fn a_rig_not_held_is_unpaired_on_this_side_only() {
     assert_eq!(row.unreached, Some(words::Unseen::NotHeld));
     assert!(!row.mend());
     assert!(
-        row.tip.contains(
-            "  this rig lists ketunkolo as paired (can't check its key: the app does not hold \
-             ketunkolo"
-        ),
+        row.tip
+            .starts_with("ketunkolo → here: paired (key unchecked), can't tell\n"),
         "{}",
         row.tip
     );
     assert!(
-        !row.tip.contains("can't tell whether this rig"),
+        row.tip.contains("\ncan't tell: ketunkolo not connected\n"),
         "{}",
         row.tip
     );
@@ -488,9 +485,7 @@ fn a_rig_held_but_lost_is_not_read_and_unpaired_on_this_side_only() {
     );
     assert_eq!(row.unreached, Some(words::Unseen::NotConnected));
     assert!(
-        row.tip.contains(
-            "can't tell whether pupu has admitted this rig (the app is not connected to pupu now)"
-        ),
+        row.tip.contains("\ncan't tell: pupu unreachable\n"),
         "{}",
         row.tip
     );
@@ -560,7 +555,7 @@ fn this_rigs_unseen_admission_is_said_as_this_rigs() {
     );
     assert!(
         row.tip
-            .contains("can't tell whether this rig has admitted pupu (this rig's network is off)"),
+            .contains("\ncan't tell: this rig's network is off\n"),
         "{}",
         row.tip
     );
@@ -606,7 +601,7 @@ fn the_other_rigs_unseen_admission_is_said_and_not_promised() {
     assert_eq!(
         ask,
         "Delete again unpairs pupu as far as the app sees. Can't tell whether pupu admits \
-         this rig (pupu did not answer the app): an admission not seen stays"
+         this rig (pupu did not answer): an admission not seen stays"
     );
     let r = key(&mut t, "Delete");
     assert_eq!(unlists(&r, RIG).len(), 1, "{r:?}");
@@ -616,7 +611,7 @@ fn the_other_rigs_unseen_admission_is_said_and_not_promised() {
     assert_eq!(
         conn_page(&t).notice.as_deref(),
         Some(
-            "Can't tell whether pupu admits this rig (pupu did not answer the app): if it \
+            "Can't tell whether pupu admits this rig (pupu did not answer): if it \
              does, that stays; revoke it there under Authorized clients once seen"
         )
     );

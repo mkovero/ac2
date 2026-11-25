@@ -64,30 +64,23 @@ pub fn autosave_label(
             Some(t) => AutosaveLabel {
                 text: format!("autosaved {}", when(t)),
                 tone: AutosaveTone::Quiet,
-                detail: "Measurements and traces are autosaved by the daemon and restored \
-                         when it restarts."
-                    .to_owned(),
+                detail: "Restored when the daemon restarts".to_owned(),
             },
             None => AutosaveLabel {
                 text: "autosave on".to_owned(),
                 tone: AutosaveTone::Quiet,
-                detail: "Measurements and traces will be autosaved by the daemon as soon as \
-                         there are any."
-                    .to_owned(),
+                detail: "Nothing to save yet".to_owned(),
             },
         },
         AutosaveState::Pending => AutosaveLabel {
             text: "saving…".to_owned(),
             tone: AutosaveTone::Busy,
-            detail: format!("Autosave: a change is being written ({last})."),
+            detail: last.clone(),
         },
         AutosaveState::Failed { reason } => AutosaveLabel {
             text: format!("autosave failed: {}", shorten(reason, MAX_REASON_CHARS)),
             tone: AutosaveTone::Warning,
-            detail: format!(
-                "Autosave failed: {reason}. It is retried; {last}. `ac2 session save <name>` \
-                 saves elsewhere."
-            ),
+            detail: format!("Autosave failed: {reason}. Retrying."),
         },
     })
 }
@@ -322,8 +315,7 @@ mod tests {
             f.text.chars().count(),
             "autosave failed: ".len() + MAX_REASON_CHARS
         );
-        assert!(f.detail.contains(reason));
-        assert!(f.detail.contains("nothing written yet"));
+        assert_eq!(f.detail, format!("Autosave failed: {reason}. Retrying."));
         let short = autosave_label(
             &at(
                 AutosaveState::Failed {

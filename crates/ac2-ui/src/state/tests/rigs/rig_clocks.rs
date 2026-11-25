@@ -145,16 +145,14 @@ fn the_lists_headings_say_which_rigs_share_a_clock() {
     assert_eq!(h[0].0, "test rig / 48 kHz AGREE");
     assert_eq!(h[1].0, "pupu / 48 kHz AGREE");
     assert!(
-        h[0].1.ends_with(
-            "\nclock AGREE: rates agree with pupu within 2 ppm (by each rig's system clock); \
-             two free clocks can meet that by chance"
-        ),
+        h[0].1
+            .ends_with("\nAGREE: rates agree with pupu within 2 ppm by system clocks"),
         "{}",
         h[0].1
     );
     assert!(
         h[1].1
-            .contains("\nclock AGREE: rates agree with test rig within 2 ppm"),
+            .contains("\nAGREE: rates agree with test rig within 2 ppm"),
         "{}",
         h[1].1
     );
@@ -164,7 +162,7 @@ fn the_lists_headings_say_which_rigs_share_a_clock() {
     let h = headings(&t);
     assert_eq!(h[0].0, "test rig / 48 kHz FREE");
     assert_eq!(h[1].0, "pupu / 48 kHz FREE");
-    assert!(h[1].1.contains("\nclock FREE: "), "{}", h[1].1);
+    assert!(h[1].1.contains("\nFREE: "), "{}", h[1].1);
 
     // Pupu's clock not measured yet: neither rig can be placed, and says why.
     pupu_clocks(&mut t, Clocks::default());
@@ -173,7 +171,7 @@ fn the_lists_headings_say_which_rigs_share_a_clock() {
     assert_eq!(h[1].0, "pupu / 48 kHz UNKNOWN");
     assert!(
         h[0].1
-            .ends_with("\nclock UNKNOWN: can't tell: pupu reports no sample clock"),
+            .ends_with("\nUNKNOWN: can't tell: pupu reports no sample clock"),
         "{}",
         h[0].1
     );

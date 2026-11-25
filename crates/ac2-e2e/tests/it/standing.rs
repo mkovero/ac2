@@ -96,7 +96,7 @@ fn a_paired_rig_with_no_input_is_measured_from_its_levels() -> R {
             return false;
         };
         line == format!("{rate} TIMING")
-            && tip.contains("\nclock TIMING: can't tell: measuring clocks…")
+            && tip.contains("\nTIMING: can't tell: measuring clocks…")
             && tip.ends_with(FROM_LEVELS)
     })?;
     // The rig shown is compared with it too.
@@ -124,9 +124,7 @@ fn slow_a_paired_rig_agrees_from_its_levels() -> R {
     d.until_within(Duration::from_secs(150), "ketunkolo tagged AGREE", agreed)?;
     let (_, tip) = kettu_heading(&d.st).ok_or("ketunkolo's heading")?;
     assert!(
-        tip.contains(&format!(
-            "\nclock AGREE: clocks agree with pupu: {FROM_LEVELS}"
-        )),
+        tip.contains("\nAGREE: clocks agree with pupu within 2 ppm ("),
         "{tip}"
     );
     pupu.shutdown();

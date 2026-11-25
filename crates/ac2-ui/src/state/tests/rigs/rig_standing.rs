@@ -67,7 +67,7 @@ fn a_paired_rig_with_no_input_is_tagged_from_its_levels() {
     assert_eq!(h[1].0, "pupu / 48 kHz TIMING");
     assert!(
         h[1].1.ends_with(&format!(
-            "\nclock TIMING: can't tell: measuring clocks… · {FROM_LEVELS}"
+            "\nTIMING: can't tell: measuring clocks… · {FROM_LEVELS}"
         )),
         "{}",
         h[1].1
@@ -87,10 +87,8 @@ fn a_paired_rig_with_no_input_is_tagged_from_its_levels() {
     let h = headings(&t);
     assert_eq!(h[1].0, "pupu / 48 kHz AGREE");
     assert!(
-        h[1].1.ends_with(&format!(
-            "\nclock AGREE: clocks agree with test rig: {FROM_LEVELS}, within 2 ppm (pupu runs \
-             +0.12 ppm against test rig over 60 s); a lock is not proven below 2 ppm"
-        )),
+        h[1].1
+            .ends_with("\nAGREE: clocks agree with test rig within 2 ppm (+0.12 ppm over 60 s)"),
         "{}",
         h[1].1
     );
@@ -141,7 +139,7 @@ fn a_paired_rigs_session_and_link_read_from_its_levels() {
     );
     // The sentence is the tooltip's.
     assert!(
-        h[1].1.starts_with("pupu: another rig, unreachable; "),
+        h[1].1.starts_with("Paired rig: unreachable\n"),
         "{}",
         h[1].1
     );
@@ -217,8 +215,7 @@ fn levels_outweigh_system_clocks_and_a_stream_outweighs_levels() {
     assert_eq!(h[1].0, "pupu / 48 kHz AGREE");
     assert!(
         h[1].1.ends_with(&format!(
-            "\nclock AGREE: clocks agree with test rig: measured between the rigs, within 2 \
-             ppm (+0.1 ppm over the last 60 s); a lock is not proven below 2 ppm\n\
+            "\nAGREE: clocks agree with test rig within 2 ppm (+0.1 ppm over 60 s)\n\
              CLOCKS NOT LOCKED: pupu runs +3.1 ppm against test rig over 60 s · {FROM_LEVELS}"
         )),
         "{}",
@@ -240,7 +237,7 @@ fn the_paired_rigs_row_says_the_clocks_from_levels_in_its_hover() {
     assert!(!row.text.contains("clocks"), "{}", row.text);
     assert!(
         row.tip.contains(&format!(
-            "\nclocks agree · pupu runs +0.12 ppm against this rig over 60 s · {FROM_LEVELS}\n"
+            "\nclocks agree (+0.12 ppm over 60 s) · {FROM_LEVELS}"
         )),
         "{}",
         row.tip
@@ -248,23 +245,22 @@ fn the_paired_rigs_row_says_the_clocks_from_levels_in_its_hover() {
 }
 
 /// The marks' age reads on the reporting daemon's own clock, and not at all while the app
-/// does not know that clock.
+/// does not know that clock. An agreeing tag's hover says the figure alone; the age backs a
+/// verdict that the clocks are not locked.
 #[test]
 fn marks_age_on_the_reporting_daemons_clock() {
     let since = super::super::sessions_impl::wall_now().0 - 312_400_000_000;
-    let mut s = up(PeerRelation::Agree, Some(0.12));
+    let free = PeerRelation::NotLocked {
+        reason: NotLockedReason::CrossRate {
+            ppm: 3.12,
+            over: Seconds(60.0),
+        },
+    };
+    let mut s = up(free, Some(3.12));
     s.marks_since = Some(ac2_proto::units::WallNs(since));
     let t = pupu_not_held(Some(s.clone()));
     let h = headings(&t);
-    assert!(
-        h[1].1
-            .contains("(test rig runs −0.12 ppm against pupu over 60 s · marks for 5 min 12 s)")
-            || h[1].1.contains(
-                "(pupu runs +0.12 ppm against test rig over 60 s · marks for 5 min 12 s)"
-            ),
-        "{}",
-        h[1].1
-    );
+    assert!(h[1].1.contains(" · marks for 5 min 12 s · "), "{}", h[1].1);
 
     // The same state, the link to the daemon not yet holding an offset.
     let mut t = T::new();
@@ -277,7 +273,7 @@ fn marks_age_on_the_reporting_daemons_clock() {
     v.clock_offset_ns = None;
     t.conn(ConnEvent::Mirror(std::sync::Arc::new(v)));
     let h = headings(&t);
-    assert_eq!(h[1].0, "pupu / 48 kHz AGREE");
+    assert_eq!(h[1].0, "pupu / 48 kHz FREE");
     assert!(!h[1].1.contains("marks for"), "{}", h[1].1);
 }
 

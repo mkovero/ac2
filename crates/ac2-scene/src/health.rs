@@ -216,11 +216,12 @@ pub fn health_line(i: &HealthInputs) -> Option<HealthLine> {
 
     if let Some(d) = daemon {
         let mut lines = Vec::new();
+        let mut since_open = None;
         if let Some(c) = d.cpu {
             // The bar says where the daemon runs before this meter, so its CPU needs no
             // place word; host names go to the detail, one can be as long as the bar.
             parts.push(percent_part("CPU".to_owned(), c, c >= CPU_WARN));
-            lines.push(format!("CPU {} (every process on every core)", percent(c)));
+            lines.push(format!("CPU {}", percent(c)));
         }
         if let Some(cpu) = local_cpu {
             parts.push(percent_part("app CPU".to_owned(), cpu, cpu >= CPU_WARN));
@@ -248,40 +249,28 @@ pub fn health_line(i: &HealthInputs) -> Option<HealthLine> {
                 (None, None) => None,
             };
             if let Some(s) = span(a.load, a.peak) {
-                lines.push(format!("DSP {s} over the last second"));
+                lines.push(format!("DSP {s}"));
             }
+            let mut opened = Vec::new();
             if let Some(s) = span(a.session_load, a.session_peak) {
-                lines.push(format!("DSP {s} since the audio I/O opened"));
+                opened.push(format!("DSP {s}"));
             }
-            lines.push(format!(
-                "{} since the audio I/O opened",
-                xruns_text(a.xruns)
-            ));
-            lines.push(
-                "DSP: time in ac2d's own audio callback against the buffer period, not the \
-                 whole audio graph's load"
-                    .into(),
-            );
+            opened.push(xruns_text(a.xruns));
+            since_open = Some(format!("  since audio opened: {}", opened.join(" · ")));
         }
-        if !lines.is_empty() {
-            let from = if remote {
-                match i.daemon_addr {
-                    Some(a) if a != d.host => format!("remote = {} ({a})", d.host),
-                    _ => format!("remote = {}", d.host),
-                }
-            } else {
-                format!("{} (this computer)", d.host)
+        if !lines.is_empty() || since_open.is_some() {
+            let from = match i.daemon_addr {
+                Some(a) if remote && a != d.host => format!("{} ({a})", d.host),
+                _ => d.host.clone(),
             };
-            detail.push(format!("{from}:\n  {}", lines.join("\n  ")));
+            detail.push(format!("{from}: {}", lines.join(" · ")));
+            detail.extend(since_open);
         }
     }
 
     let mut here = Vec::new();
     if let Some(cpu) = local_cpu {
-        here.push(format!(
-            "CPU {} (every process on every core)",
-            percent(cpu)
-        ));
+        here.push(format!("CPU {}", percent(cpu)));
     }
     // Only while the daemon answers: a rate without a link is a zero that says nothing.
     if let Some(r) = i.received_per_s.filter(|_| daemon.is_some()) {
@@ -295,7 +284,7 @@ pub fn health_line(i: &HealthInputs) -> Option<HealthLine> {
             unit_slot: RateUnit::ALL.iter().map(|u| u.label().into()).collect(),
             warn: false,
         });
-        here.push(format!("{} received from the daemon", bit_rate(r)));
+        here.push(format!("{} in", bit_rate(r)));
     }
     if let Some(f) = i.frames.filter(|f| f.streaming) {
         let warn = f.fps < f.wanted_fps * FPS_WARN_SHARE;
@@ -308,19 +297,15 @@ pub fn health_line(i: &HealthInputs) -> Option<HealthLine> {
             warn,
         });
         here.push(format!(
-            "{} frames a second drawn, {} asked for; longest gap between frames {}",
+            "{} fps, {} asked · gap {}",
             format::fixed(f.fps, 0),
             format::fixed(f.wanted_fps, 0),
             format::ms(f.longest_gap_s, 0)
         ));
     }
     if !here.is_empty() {
-        let name = if remote {
-            format!("local = {}", i.local_host)
-        } else {
-            "this window".to_owned()
-        };
-        detail.push(format!("{name}:\n  {}", here.join("\n  ")));
+        let name = if remote { i.local_host } else { "this window" };
+        detail.push(format!("{name}: {}", here.join(" · ")));
     }
     (!parts.is_empty()).then(|| HealthLine {
         parts,
@@ -390,22 +375,12 @@ mod tests {
             "CPU 23 % · app CPU 41 % · DSP 14 % · 0 xruns · 14 Mbit/s · 60 fps"
         );
         assert!(l.parts.iter().all(|p| !p.warn));
-        assert!(
-            l.detail.starts_with("remote = pupu (192.168.9.27):\n"),
-            "{}",
-            l.detail
+        assert_eq!(
+            l.detail,
+            "pupu (192.168.9.27): CPU 23 % · DSP 14 % mean, 28 % peak\n  \
+             since audio opened: DSP 12 % mean, 48 % peak · 0 xruns\n\
+             ketunkolo: CPU 41 % · 14 Mbit/s in · 60 fps, 30 asked · gap 34 ms"
         );
-        for want in [
-            "DSP 14 % mean, 28 % peak over the last second",
-            "DSP 12 % mean, 48 % peak since the audio I/O opened",
-            "0 xruns since the audio I/O opened",
-            "not the whole audio graph",
-            "local = ketunkolo:\n  CPU 41 %",
-            "14 Mbit/s received from the daemon",
-            "longest gap between frames 34 ms",
-        ] {
-            assert!(l.detail.contains(want), "{want:?} in {}", l.detail);
-        }
     }
 
     #[test]

@@ -101,6 +101,9 @@ pub mod unresolved;
 pub mod view;
 pub mod walk;
 
+#[cfg(test)]
+mod hover_tests;
+
 pub use primitives::*;
 pub use theme::Theme;
 pub use view::ViewState;

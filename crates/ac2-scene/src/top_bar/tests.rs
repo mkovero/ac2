@@ -107,10 +107,7 @@ fn a_remote_rig_in_good_health() {
     let place = &b.line[0];
     assert_eq!(
         place.hover.as_deref(),
-        Some(
-            "ac2d 0.9.1 (build 85507b49) · pupu (192.168.9.27:7700) · click: Settings › \
-             Connection"
-        )
+        Some("ac2d 0.9.1 (build 85507b49) · pupu (192.168.9.27:7700)")
     );
     assert_eq!(place.click, Some(Click::Connection));
     assert!(!b.text().contains("ac2d") && !b.text().contains("192.168"));

@@ -145,7 +145,8 @@ After the rate and tag a paired rig's second line says what else the rig shown r
 the pairing, in the words of *Between rigs*: *paired · streaming*, *connecting*,
 *unreachable*, *cm4 has not admitted this rig*, a clock warning in capitals; plain
 *paired* (nothing taken from it right now) is not repeated there, a rig listed is paired.
-The tooltip says the whole pairing and what a click on the heading does. A paired rig this
+The tooltip says *Paired rig* (or what is wanting, *Paired rig: unreachable*) and the clock
+tag's evidence; a click on the heading folds or unfolds the rig's rows. A paired rig this
 app is not connected to is its heading alone, *paired · this app is not connected to it*:
 the app connects to no rig by itself, so *Connect a rig…* adds it and its measurements
 appear.
@@ -206,8 +207,9 @@ measurement) averages only while the two rigs' clocks *agree*. While they are me
 waits (*Measuring clocks…: averaging waits*); when they are *not locked* or the daemon
 *can't tell*, averaging stops and the result from before the failure stands, magnitude as
 it was, phase faint under *clocks not locked* / *clocks: can't tell* (nothing is shown if
-no result was kept from before it), with why and what to do: *TF 3 stopped: pupu and
-ketunkolo are not on one clock (+5.6 ppm). Lock both interfaces to one reference.* When
+no result was kept from before it), with why and what to do: *TF 3 stopped: clocks +5.6
+ppm apart · lock both to one reference* (the two rigs' interfaces run on different clocks;
+locking both to one reference, word clock or the like, is the fix). When
 the clocks agree again the averages restart; with delay tracking on, the finder tracks the
 delay again from the held one and says it for a minute (*clocks were not locked for 3 min
 10 s · delay tracked again: 13.41 ms (was 12.38 ms)*), or asks for a pick if two arrivals
@@ -235,9 +237,10 @@ is never only a colour):
 - **The rig's heading in the measurement list:** its second line carries the rig's clock
   tag after its rate (`96 kHz AGREE`), and the heading's tooltip says what the tag rests on.
   `AGREE`: its sample clock reads within 2 ppm of the other rigs' named in the tooltip,
-  either *measured between the rigs* (with the figure: *+0.3 ppm over the last 60 s* from a
-  stream, *ketunkolo runs +0.12 ppm against pupu over 60 s* from levels) or
-  *by each rig's system clock*, where two free clocks can meet by chance; with more than
+  either measured between the rigs (*clocks agree with ketunkolo within 2 ppm (+0.3 ppm
+  over 60 s)*) or *by system clocks* (*rates agree with pupu within 2 ppm by system clocks*):
+  each rig's rate against its own system clock, where two free clocks can meet that by
+  chance, so it is weaker evidence than a measurement between the rigs; with more than
   one such group the tags carry a letter (`AGREE A`, `AGREE B`). `FREE`: shown to differ
   from every other rig listed. `TIMING`: a daemon is still measuring the clocks and a
   verdict is on its way. `UNKNOWN`: *can't tell*, and what is missing. No tag says
@@ -256,8 +259,8 @@ is never only a colour):
   agreement after two minutes running below 1.8 ppm) and how long the marks have come, or why it
   can't tell (*no timing in ketunkolo's levels*, *figure not steady*, *ketunkolo's
   interface against its system clock not steady*, *ketunkolo's timing keeps breaking off
-  before a minute is in*, *no link to ketunkolo*). A tooltip resting on the levels says *measured from the rigs' level frames,
-  no audio streamed*. Where a remote input from the rig is in use, its stream's verdict is
+  before a minute is in*, *no link to ketunkolo*). A tooltip resting on the levels ends
+  *from the rigs' level frames*: no audio is streamed for that verdict. Where a remote input from the rig is in use, its stream's verdict is
   the tag, as it is what a cross-rig measurement rests on; if the levels would tag the rig
   otherwise, the tooltip adds their line. A paired rig this app does not read takes its
   rate from its levels too (*48 kHz TIMING · paired · not connected*, *no session* when its
@@ -529,7 +532,8 @@ measures and what its OS says, nothing more:
   bound on the clock's error, which grows between updates of the time service: a loose
   upper bound, not the clock's actual offset, and no claim about PTP or NTP.
 
-`ac2 status` prints the same as `sample clock` and `system clock` lines under *AUDIO*.
+`ac2 status` prints them short on one line under *AUDIO* (*+1 ppm vs system clock · system
+clock synced ±2.5 ms*); `-v` prints these words as `sample clock` and `system clock` lines.
 
 - **A** on a refused key, then a name, authorizes it; the client connects on its next retry.
 - *Authorize a client by its key…* takes a name and the key `ac2 auth show` prints.
@@ -556,8 +560,8 @@ stand as the daemons show them, in a few words:
 - *ketunkolo · listed and admitted by this rig · can't tell its side* (or *listed by this
   rig*, *admitted by this rig*) when this rig's own entries are there but the key they pin
   cannot be checked against the one that rig serves under now: an entry under a stale key
-  is refused, so it is not counted in place until that rig is seen (hovering says *can't
-  check its key*; a count says *1 unchecked*);
+  is refused, so it is not counted in place until that rig is seen (hovering says *paired
+  (key unchecked)*; a count says *1 unchecked*);
 - plain *can't tell* (no *its side*) when this rig's own state is wanting: its network is
   off (it lists no admitted rigs then), it has not answered, or the app is not connected
   to it.
@@ -567,8 +571,13 @@ short with *…*; the state after it always shows whole.
 
 Only what a daemon shows is said; hovering names whose state is wanting and why.
 
-Hovering a row says each of the four halves, and what **Enter** and **Delete** do there:
-**Enter** is offered only when a half is seen missing and the app is connected to both
+Hovering a row says each direction on its own line, the rig's listing then the admission:
+*pupu → here: paired, not admitted* is pupu's side (pupu lists this rig, this rig has not
+admitted pupu), *here → pupu: paired, admitted* this rig's (it lists pupu and pupu admitted
+it: this rig may take pupu's inputs). A half it can't tell adds *can't tell: pupu
+unreachable* (or *not connected*, *did not answer*, *this rig's network is off*); the last
+line is the key that acts there, *Enter pairs the missing halves* or *Delete twice
+unpairs*. **Enter** is offered only when a half is seen missing and the app is connected to both
 rigs. Once paired, the other rig is listed in the
 measurement tree beside the rig shown.
 
@@ -721,8 +730,9 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   30 on a software renderer, since the app paces its own frames rather than wait for the
   display, which keeps it responsive with the screen off or unplugged. CPU past 85 %, DSP past
   70 %, a frame rate under a third of the data's and an xrun in the last 5 s show in the
-  warning colour; the hover names the hosts (`remote = pupu (192.168.9.27)`,
-  `local = ketunkolo`) and gives the means and peaks since the session opened. Each number keeps a
+  warning colour; the hover gives a line per host (`pupu (192.168.9.27): CPU 23 % · DSP 14 %
+  mean, 28 % peak`, with the means and peaks since audio opened under it, and the app's
+  host or *this window* with its own CPU, data rate, frame rate and longest gap). Each number keeps a
   fixed width, so the words after it stay put as its digits change. A figure not known yet
   is left out, never shown as zero.
 - When the line is wider than the room between the rig drop-down and the bar's right end,
@@ -1030,7 +1040,7 @@ accident:
   | a sweep or dynamics run playing | `FIRING sweep −30.0 dBFS → out 1 · Esc stops (and discards it)` |
   | stopping | `STOPPING…` (also while the daemon still says it plays, until its next state arrives) |
   | another client's | `FIRING white −30.0 dBFS → out 2 · held by alice` (what the daemon plays; Space and Enter arm and fire nothing, Space says who holds it) |
-  | under this app's name, not armed by this run of the app | `ARMED pink −24.0 dBFS → out 1, 2 · Space disarms`, playing `FIRING pink −24.0 dBFS → out 1, 2 · Space stops` (Enter cannot fire it: this connection holds no lease; it says `armed elsewhere under this name: Space disarms` or `playing elsewhere under this name: Space stops`) |
+  | under this app's name, not armed by this run of the app | `ARMED pink −24.0 dBFS → out 1, 2 · Space disarms`, playing `FIRING pink −24.0 dBFS → out 1, 2 · Space stops` (Enter cannot fire it: this connection holds no lease; its hover says `armed elsewhere under this name` or `playing elsewhere under this name`) |
 
   followed by **■ Stop stimulus: Shift+Esc** while armed or playing. Off, the hover says
   what Space would arm. With several rigs it names the rig shown (`pupu: STIM OFF · Space
@@ -4906,19 +4916,18 @@ measurement, stopped audio, a failed autosave, a damaged file) starts with `!`, 
 within 100 columns:
 
 ```
-pupu   ac2d 0.1.0 (build 0.1.0+202486c60e44)
+pupu   ac2d 0.1.0+202486c6
 
 AUDIO     open · jack · 96 kHz · 256 samples
   in      1–8 · ac2 on ac2pi-0ab1c6 in 1
-          Wait for remote inputs (link offset): default (15 ms)
+          link offset 15 ms
   out     6
   clock   one clock · drift +1.3 ppm over 2.0 s
-          sample clock +1 ppm against the system clock (last minute)
-          system clock synced, OS bound ±2.5 ms
+          +1 ppm vs system clock · system clock synced ±2.5 ms
 
 RIGS
 ! ac2 on ac2pi-0ab1c6   CLOCKS NOT LOCKED +7.8 ppm                link up, 3.2 Mbit/s
-!                       in 1 streaming · 1 late frames in the last hour · 0 slips
+!                       in 1 streaming · 1 late in last hour · 0 slips
   ac2 on ketunkolo      measuring clocks… · −0.69 ppm over 60 s   levels only · link up
 
 MEASUREMENTS
@@ -4938,8 +4947,15 @@ INPUTS
 AUTOSAVE   saving…
 ```
 
+The header's build is the version and the commit (`ac2d 0.1.0+202486c6`); `-v` prints the
+daemon's whole string. *1 late in last hour* counts a remote input's frames that came
+after the link offset in the last hour (marked `!`, as the app colours it); *+1 ppm vs
+system clock* is the interface's rate against the system clock over the last minute, and
+*synced ±2.5 ms* the OS's stated bound on that clock.
+
 `-v` adds the identifiers (rig id, client id, incarnation, session epoch, rev) and the long
-words, one fact group a line, wider than 100 columns where a sentence needs it: why the
+words, the rigs' and measurements' facts one a line (the rig under whose row a line sits is
+said as *it*), wider than 100 columns where a sentence needs it: why the
 clocks are not locked and what to do, each rig's link window and arrival margin, the
 levels' reading with its marks and verdict count, the delay's basis naming both rigs, and
 each calibration's whole chain (how it was taken, the data sheet, the loading). `--json`

@@ -202,6 +202,16 @@ fn audio_line(root: &RigRoot<'_>) -> String {
     }
 }
 
+/// A paired rig's pairing as its hover's first line: `Paired · streaming · clocks agree`,
+/// `Paired rig: connecting`.
+fn paired_words(pairing: &str) -> String {
+    match pairing.strip_prefix(PAIRED) {
+        Some("") => "Paired rig".to_owned(),
+        Some(rest) => format!("Paired{rest}"),
+        None => format!("Paired rig: {pairing}"),
+    }
+}
+
 /// Rig `root`'s heading, with its fold arrow: its name, and under it its rate and clock tag
 /// and what else the list cannot show of it.
 pub fn rig_heading(root: &RigRoot<'_>) -> TreeRow {
@@ -217,8 +227,8 @@ pub fn rig_heading(root: &RigRoot<'_>) -> TreeRow {
         parts.join(" · ")
     };
     let whose = match root.pairing {
-        None => "the rig shown".to_owned(),
-        Some(p) => format!("another rig, {}", p.text()),
+        None => "The rig shown".to_owned(),
+        Some(p) => paired_words(p.text()),
     };
     let (mut details, describe) = if root.folded {
         // The counts read as the Sessions dialog says a session's.
@@ -231,21 +241,14 @@ pub fn rig_heading(root: &RigRoot<'_>) -> TreeRow {
                 lead(&[]),
                 audio.clone(),
             ],
-            format!("{name}: {whose}, folded: {all} under it"),
+            format!("{whose} · folded: {all}"),
         )
     } else {
-        let does = match root.pairing {
-            Some(_) => "a click shows it, its rows drag onto panes as they are",
-            None => "new measurements and the keys go to it",
-        };
-        (
-            vec![lead(&[]), audio.clone()],
-            format!("{name}: {whose}; {does}"),
-        )
+        (vec![lead(&[]), audio.clone()], whose)
     };
     details.dedup();
     let describe = match root.clock {
-        Some(c) => format!("{describe}\nclock {}: {}", c.tag, c.tip),
+        Some(c) => format!("{describe}\n{}: {}", c.tag, c.tip),
         None => describe,
     };
     let mut row = heading_row(TreeKey::RigName(root.rig), name, details, describe);
@@ -301,24 +304,17 @@ pub fn rig_away_heading(
                 line(&["this app is not connected to it"]),
                 line(&["not connected"]),
             ],
-            format!(
-                "this app is not connected to it, so its measurements are not listed: \
-                 {} in the rig drop-down adds it",
-                crate::chrome::RIG_CONNECT
-            ),
+            "Not connected: add it from the rig drop-down".to_owned(),
         ),
         Away::Unreachable => (
             vec![line(&[crate::chrome::RIG_UNREACHABLE])],
-            format!(
-                "{} from this app, so its measurements are not listed",
-                crate::chrome::RIG_UNREACHABLE
-            ),
+            "Its measurements show once it is reachable".to_owned(),
         ),
     };
     details.extend(lead.clone());
-    let mut describe = format!("{name}: another rig, {pairing}; {why}");
+    let mut describe = format!("{}\n{why}", paired_words(pairing));
     if let Some(c) = heard.and_then(|h| h.clock) {
-        describe.push_str(&format!("\nclock {}: {}", c.tag, c.tip));
+        describe.push_str(&format!("\n{}: {}", c.tag, c.tip));
     }
     heading_row(TreeKey::RigName(rig), name, details, describe)
 }
@@ -418,7 +414,7 @@ mod tests {
         );
         assert_eq!(
             pupu.describe,
-            "pupu: another rig, paired, folded: 4 measurements · 5 traces under it"
+            "Paired rig · folded: 4 measurements · 5 traces"
         );
         assert!(pupu.key.is_heading(), "a root is no curve: not dragged");
     }
@@ -441,7 +437,7 @@ mod tests {
         );
         assert_eq!(
             rig_heading(&one).describe,
-            "pupu: the rig shown, folded: 1 measurement · 1 trace under it"
+            "The rig shown · folded: 1 measurement · 1 trace"
         );
     }
 
@@ -526,8 +522,7 @@ mod tests {
         let tagged = head(RigAudio::Rate(48_000), Some("AGREE")).describe;
         assert_eq!(
             tagged,
-            "pupu: the rig shown; new measurements and the keys go to it\n\
-             clock AGREE: with cm4, by the rate between the two rigs"
+            "The rig shown\nAGREE: with cm4, by the rate between the two rigs"
         );
         assert!(
             !head(RigAudio::Rate(48_000), None)
@@ -605,9 +600,7 @@ mod tests {
         assert_eq!(h.details, ["48 kHz FREE"]);
         assert_eq!(
             h.describe,
-            "cm4: another rig, cm4 runs 48 kHz, this rig 96 kHz; a click shows it, its rows \
-             drag onto panes as they are\n\
-             clock FREE: no clock in common with ketunkolo"
+            "Paired rig: cm4 runs 48 kHz, this rig 96 kHz\nFREE: no clock in common with ketunkolo"
         );
     }
 
@@ -665,15 +658,13 @@ mod tests {
         );
         assert_eq!(
             h.describe,
-            "cm4: another rig, connecting; this app is not connected to it, so its \
-             measurements are not listed: Connect a rig… in the rig drop-down adds it"
+            "Paired rig: connecting\nNot connected: add it from the rig drop-down"
         );
         let h = rig_away_heading(RigId(2), "cm4", &Pairing::Plain, Away::Unreachable, None);
         assert_eq!(h.details, ["paired · unreachable · retrying"]);
         assert_eq!(
             h.describe,
-            "cm4: another rig, paired; unreachable · retrying from this app, so its \
-             measurements are not listed"
+            "Paired rig\nIts measurements show once it is reachable"
         );
     }
 
@@ -683,8 +674,7 @@ mod tests {
     fn a_paired_rig_not_read_says_its_rate_and_tag_from_its_levels() {
         let timing = ClockTag {
             tag: "TIMING",
-            tip: "can't tell: measuring clocks… · measured from the rigs' level frames, no \
-                  audio streamed",
+            tip: "can't tell: measuring clocks… · from the rigs' level frames",
         };
         let heard = Heard {
             audio: RigAudio::Rate(96_000),
@@ -705,10 +695,10 @@ mod tests {
                 "96 kHz TIMING",
             ]
         );
-        assert!(h.describe.ends_with(
-            "\nclock TIMING: can't tell: measuring clocks… · measured from the rigs' level \
-             frames, no audio streamed"
-        ));
+        assert!(
+            h.describe
+                .ends_with("\nTIMING: can't tell: measuring clocks… · from the rigs' level frames")
+        );
         let idle = Heard {
             audio: RigAudio::NoSession,
             clock: None,

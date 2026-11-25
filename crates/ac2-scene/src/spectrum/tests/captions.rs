@@ -293,7 +293,10 @@ fn tone_unit_names_the_bin_and_fits_narrow_panes() {
     let wide = scene(std::slice::from_ref(&t), 900.0);
     assert_eq!(wide.unit, "dB SPL per 1.46 Hz bin (tone, 1/3 oct smoothed)");
     let help = wide.unit_help.as_deref().expect("help");
-    assert!(help.contains("1.46 Hz") && help.contains("RTA"), "{help}");
+    assert_eq!(
+        help,
+        "Level per bin (1.46 Hz): a sine reads its RMS, noise reads low"
+    );
     let mut seen = Vec::new();
     for w in [900.0, 480.0, 440.0, 400.0, 330.0, 260.0, 200.0, 120.0] {
         let s = scene(std::slice::from_ref(&t), w);
@@ -416,10 +419,7 @@ fn density_unit_is_per_hertz_on_any_resolution() {
     let s = scene(&[ta.clone(), tb.clone()]);
     assert_eq!(s.unit, "dBFS/Hz (density)");
     let help = s.unit_help.as_deref().expect("help");
-    assert!(
-        help.contains("per hertz") && help.contains("3.4 dB"),
-        "{help}"
-    );
+    assert_eq!(help, "Power per hertz: noise reads true, a sine reads low");
     let mut tone = tb;
     tone.quantity = Quantity::Tone;
     assert_eq!(scene(&[ta, tone]).unit, "mixed units");

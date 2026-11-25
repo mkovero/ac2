@@ -213,7 +213,7 @@ pub fn bar(i: &BarInputs<'_>) -> Bar {
         Some(s) => format!("{s} · {}", i.target),
         None => i.target.to_owned(),
     };
-    let about = format!("{whole} · click: Settings › Connection");
+    let about = whole;
     // Link trouble takes the daemon's segment over: nothing it would say after is current.
     let trouble = match i.link {
         BarLink::Connecting => {

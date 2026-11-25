@@ -31,19 +31,13 @@ pub fn stop_label(stop: &str) -> String {
 
 /// The stop's hover with one rig.
 pub fn stop_tip(stop: &str) -> String {
-    format!(
-        "{stop} stops and disarms the stimulus (the generator, a sweep or a dynamics run) from \
-         anywhere, also with a window open; with no window open Esc does too, and Space or \
-         Enter while it plays"
-    )
+    format!("{stop} stops every stimulus")
 }
 
-/// The key hints' hover, for the Help, Palette and key-hints keys.
-pub fn keys_tip(help: &str, palette: &str, key_hints: &str) -> String {
-    format!(
-        "{help} shows every key · {palette} finds every command by name · {key_hints} hides or \
-         shows the panes' key hints"
-    )
+/// The key hints' hover: the bar already names the Help and Palette keys, so the hover
+/// adds the one it does not.
+pub fn keys_tip(key_hints: &str) -> String {
+    format!("{key_hints} shows or hides the panes' key hints")
 }
 
 /// The rigs drop-down's row for adding a rig.
@@ -125,8 +119,7 @@ pub fn rig_closed(rig: &str) -> String {
 }
 
 /// The rigs drop-down's tip.
-pub const RIG_MENU_TIP: &str = "The rig shown, of every rig this app holds: switch to another, connect a rig, or \
-     close this one. The measurement list shows this rig and the rigs paired with it";
+pub const RIG_MENU_TIP: &str = "Switch, connect or close a rig";
 
 #[cfg(test)]
 mod tests {
@@ -153,11 +146,7 @@ mod tests {
     fn keys_and_small_parts() {
         assert_eq!(keys_hint("F1", "P"), "F1 keys · P commands");
         assert_eq!(stop_label("Shift+Esc"), "■ Stop stimulus: Shift+Esc");
-        assert_eq!(
-            keys_tip("F1", "P", "K"),
-            "F1 shows every key · P finds every command by name · K hides or shows the panes' \
-             key hints"
-        );
+        assert_eq!(keys_tip("K"), "K shows or hides the panes' key hints");
         assert_eq!(
             stopped_hover("Audio stopped", "xrun"),
             "Audio stopped · xrun"

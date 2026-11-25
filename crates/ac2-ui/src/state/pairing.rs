@@ -221,7 +221,6 @@ impl AppState {
         if !on_page || self.others.visiting.is_some() {
             return;
         }
-        let now = Self::rig_now(&self.rig, super::sessions_impl::wall_now());
         let rows: Vec<PairedRow> = self
             .paired_with_shown()
             .into_iter()
@@ -235,7 +234,7 @@ impl AppState {
                     .filter(|_| connected(&self.rig))
                     .and_then(|st| {
                         let s = st.remote.standing.iter().find(|s| s.rig == rig)?;
-                        Some(ac2_scene::standing::evidence_line(&st.remote, s, now))
+                        Some(ac2_scene::standing::evidence_line(&st.remote, s))
                     });
                 PairedRow {
                     rig,

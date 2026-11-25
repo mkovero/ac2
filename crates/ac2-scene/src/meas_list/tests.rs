@@ -906,6 +906,6 @@ fn measurement_rows_are_edited_and_say_how() {
     }
     assert_eq!(edit_tip(Some("F2")), "Edit measurement… (F2)");
     assert_eq!(edit_tip(None), "Edit measurement…");
-    assert_eq!(edit_hint(Some("F2")), "F2 edits it");
-    assert_eq!(edit_hint(None), "the pencil button edits it");
+    assert_eq!(edit_hint(Some("F2")), "F2 edits");
+    assert_eq!(edit_hint(None), "the pencil edits");
 }

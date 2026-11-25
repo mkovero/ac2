@@ -423,10 +423,7 @@ pub fn level_prefix(played: Option<&Signal>) -> String {
 
 /// The tip of the top bar's level: where what plays is set.
 pub fn level_tip(level_key: &str) -> String {
-    format!(
-        "{level_key} types the level; the signal (pink or white noise, or a sine) is set in \
-         Settings › Audio I/O"
-    )
+    format!("{level_key} sets the level · signal in Settings › Audio I/O")
 }
 
 /// A signal by name, a sine with its frequency to the hundredth of a hertz as the
@@ -500,10 +497,7 @@ pub fn elsewhere_chip(e: &Elsewhere) -> String {
 
 /// The stop's tip with more than one rig: it stops them all.
 pub fn stop_every_rig_tip(stop: &str) -> String {
-    format!(
-        "{stop} stops and disarms every rig's stimulus from anywhere, also with a window open; \
-         with no window open Esc stops the rig shown"
-    )
+    format!("{stop} stops every rig's stimulus")
 }
 
 #[cfg(test)]
@@ -550,8 +544,7 @@ mod tests {
         assert_eq!(level_prefix(Some(&on_bin)), "sine 999.76 Hz ");
         assert_eq!(
             level_tip("L"),
-            "L types the level; the signal (pink or white noise, or a sine) is set in Settings › \
-             Audio I/O"
+            "L sets the level · signal in Settings › Audio I/O"
         );
     }
 

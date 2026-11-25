@@ -124,7 +124,7 @@ pub struct TraceRow {
     /// The line under the name, longest first: the list shows the first that fits its
     /// width. Every variant starts with the kind; the shortest is the kind alone.
     pub details: Vec<String>,
-    /// Everything about the row in one sentence (the tooltip, and what a screen reader says).
+    /// Its whole detail, for the tooltip: the list shows the longest that fits.
     pub describe: String,
     /// A redone or skipped walk point's capture: listed dimmed, out of the walk's average.
     pub superseded: bool,
@@ -202,12 +202,7 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
             }
             details.push(kind.to_owned());
             details.dedup();
-            let describe = format!(
-                "{}: {}, {}",
-                t.edit.name,
-                parts(true),
-                if t.edit.visible { "shown" } else { "hidden" }
-            );
+            let describe = parts(true);
             TraceRow {
                 id: t.id,
                 name: t.edit.name.clone(),
@@ -514,10 +509,7 @@ mod tests {
             ]
         );
         assert!(!rows[0].shown);
-        assert_eq!(
-            rows[0].describe,
-            "Main L S3: capture · slot 3 · hidden · 1/6 oct, hidden"
-        );
+        assert_eq!(rows[0].describe, "capture · slot 3 · hidden · 1/6 oct");
         assert_eq!(rows[1].details, ["target"]);
         assert_eq!(
             rows[2].details,
@@ -528,10 +520,7 @@ mod tests {
             ]
         );
         assert_eq!(rows[3].details, ["sweep run · 1 s −20.0 dBFS", "sweep run"]);
-        assert_eq!(
-            rows[3].describe,
-            "Sweep 2: sweep run · 1 s −20.0 dBFS, shown"
-        );
+        assert_eq!(rows[3].describe, "sweep run · 1 s −20.0 dBFS");
         assert_eq!(rows[3].color, Color::from_rgba8([10, 20, 30, 255]));
     }
 

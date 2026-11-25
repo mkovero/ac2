@@ -209,8 +209,8 @@ pub(super) fn unit_toggle(
         .keymap
         .key_hint(CommandId::DistortionUnit, Scope::Distortion)
     {
-        Some(k) => format!("Distortion in dB re fundamental or percent of it · {k}"),
-        None => "Distortion in dB re fundamental or percent of it".to_string(),
+        Some(k) => format!("dB or % of the fundamental · {k}"),
+        None => "dB or % of the fundamental".to_string(),
     };
     let font = egui::FontId::proportional(12.0);
     let pad = 7.0;

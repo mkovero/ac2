@@ -500,8 +500,5 @@ fn the_hover_hint_names_the_plate() {
         kind: PlateKind::Harmonics,
         grip: false,
     });
-    assert_eq!(
-        hint,
-        "drag: move the harmonics · its corner: text size · double-click: back to its place and size"
-    );
+    assert_eq!(hint, "Drag moves the harmonics · double-click resets");
 }

@@ -117,11 +117,7 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     ))
     .color(ch.dim)
     .into();
-    let keys_tip = ac2_scene::chrome::keys_tip(
-        &key_hint(app, CommandId::Help),
-        &key_hint(app, CommandId::Palette),
-        &key_hint(app, CommandId::KeyHints),
-    );
+    let keys_tip = ac2_scene::chrome::keys_tip(&key_hint(app, CommandId::KeyHints));
     let stop_text =
         |s: &str, c: Color32| -> egui::WidgetText { RichText::new(s).strong().color(c).into() };
     // What the fixed ends take; the key hints give their room to a line that would
@@ -354,10 +350,7 @@ fn progress(app: &mut App, ui: &mut egui::Ui, ch: &Chrome, p: &ac2_scene::progre
             .min_size(egui::vec2(96.0, 22.0));
             if ui
                 .add(b)
-                .on_hover_text(format!(
-                    "Fades the output out, disarms and discards this run · {stop_key} from \
-                     anywhere (Esc too while no window is open)"
-                ))
+                .on_hover_text("Fades out, disarms and discards this run")
                 .clicked()
             {
                 stop = true;

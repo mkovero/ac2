@@ -81,10 +81,7 @@ fn not_locked_stops_holds_and_says_what_to_do() {
     assert_eq!(faint_phase(&x), Some("clocks not locked"));
     assert_eq!(
         banner("TF 3", &x, &r, "pupu").as_deref(),
-        Some(
-            "TF 3 stopped: pupu and ketunkolo are not on one clock (+5.6 ppm). Lock both \
-         interfaces to one reference."
-        )
+        Some("TF 3 stopped: clocks +5.6 ppm apart · lock both to one reference")
     );
     assert_eq!(list_cue(&x).as_deref(), Some("clocks"));
 
@@ -96,8 +93,7 @@ fn not_locked_stops_holds_and_says_what_to_do() {
         assert_eq!(
             banner("TF 3", &x, &r, "pupu"),
             Some(format!(
-                "TF 3 stopped: {name}'s interface runs +5.6 ppm against its host. Lock it to \
-                 the reference its host is disciplined from."
+                "TF 3 stopped: {name}'s interface runs +5.6 ppm off"
             ))
         );
     }
@@ -131,10 +127,7 @@ fn cant_tell_is_refused_with_its_reason() {
     );
     assert_eq!(
         banner("TF 3", &x, &r, "pupu").as_deref(),
-        Some(
-            "TF 3 stopped: can't tell whether pupu and ketunkolo share a clock: ketunkolo's \
-         system clock is not synced."
-        )
+        Some("TF 3 stopped: can't tell the clocks: ketunkolo's system clock is not synced")
     );
     assert_eq!(faint_phase(&x), Some("clocks: can't tell"));
     assert_eq!(list_cue(&x).as_deref(), Some("clocks"));
@@ -235,11 +228,7 @@ fn a_held_result_stays_faint_while_the_clocks_are_measured_again() {
     let b = pane_banners("TF 3", &x, &r, "pupu", "X");
     assert_eq!(
         b[0].detail.as_deref(),
-        Some(
-            "less than a minute of audio from ketunkolo since the stream started: the clocks \
-             between the rigs are not known yet. The result from before stands; its phase is \
-             faint."
-        )
+        Some("under a minute of audio from ketunkolo yet")
     );
     let x = tf(
         RemoteSide::Measurement,
@@ -428,10 +417,7 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
     assert_eq!(b[0].text, "Clocks not locked: averaging stopped");
     assert_eq!(
         b[0].detail.as_deref(),
-        Some(
-            "TF 3 stopped: pupu and ketunkolo are not on one clock (+5.6 ppm). Lock both \
-             interfaces to one reference. The result from before stands; its phase is faint."
-        )
+        Some("TF 3 stopped: clocks +5.6 ppm apart · lock both to one reference")
     );
     assert!(b[0].warn);
     let x = tf(
@@ -445,10 +431,7 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
         pane_banners("TF 3", &x, &r, "pupu", "X")[0]
             .detail
             .as_deref(),
-        Some(
-            "TF 3 stopped: pupu and ketunkolo are not on one clock (+5.6 ppm). Lock both \
-             interfaces to one reference. No result was kept from before."
-        )
+        Some("TF 3 stopped: clocks +5.6 ppm apart · lock both to one reference")
     );
     let x = tf(RemoteSide::Measurement, STOPPED_HELD);
     assert_eq!(caption(&x, &r), None, "the banner says it");
@@ -466,10 +449,7 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
     assert_eq!(b[0].text, "Measuring clocks…: averaging waits");
     assert_eq!(
         b[0].detail.as_deref(),
-        Some(
-            "less than a minute of audio from ketunkolo since the stream started: the clocks \
-             between the rigs are not known yet. No result was kept from before."
-        )
+        Some("under a minute of audio from ketunkolo yet")
     );
     assert!(!b[0].warn);
 
@@ -501,16 +481,10 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
             ),
         ]
     );
-    assert_eq!(
-        b[0].detail.as_deref(),
-        Some("X runs the delay finder; the phase is faint until the delay is found again")
-    );
+    assert_eq!(b[0].detail, None, "the banner says the key");
     assert_eq!(
         b[2].detail.as_deref(),
-        Some(
-            "audio from ketunkolo keeps arriving after it is needed: Settings › Connection › \
-             Wait for remote inputs"
-        )
+        Some("audio from ketunkolo arrives late · Settings › Connection")
     );
 }
 

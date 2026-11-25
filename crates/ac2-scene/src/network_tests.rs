@@ -16,14 +16,11 @@ fn the_switch_says_its_state_and_its_tip_what_it_means() {
     );
     assert_eq!(
         network_tip(false),
-        "while off, this rig still pairs with, authorizes and reads other rigs; only \
-         connections to it are off. Turned on, apps and rigs whose keys this rig authorized can \
-         connect to it"
+        "Off: nothing can connect to this rig. Its own links stay."
     );
     assert_eq!(
         network_tip(true),
-        "turning it off cuts every app and rig connected to this rig over the network; this \
-         rig's own links to other rigs stay"
+        "On: authorized apps and rigs can connect to this rig"
     );
 }
 
@@ -38,27 +35,19 @@ fn a_switch_the_page_cannot_use_says_why() {
         fixed_row(None),
         "Network: on, set by --listen (systemd) · change it in the service's command line"
     );
-    assert_eq!(
-        FIXED_TIP,
-        "ac2d's command line is the setting for as long as it runs: this page only reads it"
-    );
+    assert_eq!(FIXED_TIP, "Set by ac2d's command line: read only here");
     assert_eq!(
         EMBEDDED_ROW,
         "Network: none · this daemon runs inside its program"
     );
-    assert_eq!(
-        EMBEDDED_TIP,
-        "it serves its own program only: no other program can connect, so it has no network to \
-         turn on"
-    );
+    assert_eq!(EMBEDDED_TIP, "Serves its own program only");
     assert_eq!(
         no_key_store_row(NetSettingKind::Off),
         "Network: off · cannot be turned on: no config directory for a server key"
     );
     assert_eq!(
         NO_KEY_STORE_TIP,
-        "this ac2d runs without a config directory, so it has nowhere to keep the server key the \
-         network needs: its network cannot be turned on"
+        "Start ac2d with a config directory to turn it on"
     );
     assert_eq!(
         peer_row(NetSettingKind::Fixed),
@@ -68,11 +57,7 @@ fn a_switch_the_page_cannot_use_says_why() {
         peer_row(NetSettingKind::Off),
         "Network: off · change it on the rig's own computer"
     );
-    assert_eq!(
-        PEER_TIP,
-        "only an app on the rig's own computer may turn its network on or off: from here it \
-         could cut this app off"
-    );
+    assert_eq!(PEER_TIP, "Read only from another computer");
 }
 
 #[test]
@@ -136,21 +121,19 @@ fn interfaces_read_as_the_daemon_lists_them() {
     );
     assert_eq!(
         choice_tip(ChoiceFrom::InForce),
-        "where the network is on now; another picked here moves it"
+        "In use now: picking another moves it"
     );
     assert_eq!(
         choice_tip(ChoiceFrom::Picked),
-        "picked here: used when the network is turned on, or moved"
+        "Picked: used when the network goes on or moves"
     );
     assert_eq!(
         choice_tip(ChoiceFrom::Kept),
-        "kept from when the network was last on: turning it on uses it unless another is picked \
-         here"
+        "Kept from when the network was last on"
     );
     assert_eq!(
         choice_tip(ChoiceFrom::Default),
-        "the daemon's default, as its network has not been on yet: turning it on uses it unless \
-         another is picked here"
+        "Default: the network has not been on yet"
     );
 }
 

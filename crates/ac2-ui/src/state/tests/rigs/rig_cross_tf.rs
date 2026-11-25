@@ -136,7 +136,7 @@ fn agreeing_clocks_are_said_quietly() {
     );
     assert!(
         head.describe
-            .contains("\nclock AGREE: clocks agree with test rig: measured between the rigs"),
+            .ends_with("\nAGREE: clocks agree with test rig within 2 ppm"),
         "{}",
         head.describe
     );
@@ -176,13 +176,9 @@ fn clocks_not_locked_stop_it_and_say_so_everywhere() {
         pupu_pairing(&t),
         "48 kHz FREE · CLOCKS NOT LOCKED +5.6 ppm · paired · streaming"
     );
-    let ours = t.st.rig_name(t.st.active());
     assert_eq!(
         pane_details(&t),
-        vec![format!(
-            "Main L stopped: {ours} and pupu are not on one clock (+5.6 ppm). Lock both \
-             interfaces to one reference. The result from before stands; its phase is faint."
-        )]
+        vec!["Main L stopped: clocks +5.6 ppm apart · lock both to one reference"]
     );
     assert_eq!(
         pane_banners(&t),

@@ -178,48 +178,25 @@ pub fn level_unit_forms(scale: LevelScale, q: Quantity, bin: BinWidth) -> Vec<St
 /// the help.
 pub fn narrow_unit_help(q: Quantity, bin: BinWidth) -> String {
     if q.is_density() {
-        density_unit_help(bin)
+        density_unit_help()
     } else {
         tone_unit_help(bin)
     }
 }
 
-/// What a density axis means.
-pub fn density_unit_help(bin: BinWidth) -> String {
-    let source = if bin == BinWidth::MultiRes {
-        "from windows of 0.68 s at the lowest frequencies to 21 ms at the highest"
-    } else {
-        "per hertz"
-    };
-    format!(
-        "Power spectral density {source}: the power each hertz holds, so noise and music \
-         read the same on a fixed or a multi-resolution spectrum, at any FFT length (white \
-         noise flat, pink falling 3 dB per octave). A sine reads below its level by \
-         10·log10 of the bin's noise bandwidth in hertz (Hann, 1.46 Hz bins: 3.4 dB). Use \
-         tone level to read a sine, an RTA for band levels in dB SPL."
-    )
+/// What a density axis means. The user guide's "What the spectrum's level means" says why.
+pub fn density_unit_help() -> String {
+    "Power per hertz: noise reads true, a sine reads low".to_owned()
 }
 
 /// What the level axis of a narrowband spectrum means, for its tooltip and the help.
 pub fn tone_unit_help(bin: BinWidth) -> String {
-    if bin == BinWidth::MultiRes {
-        return "Tone level from windows of 0.68 s at the lowest frequencies to 21 ms at the \
-                highest: a sine reads its RMS level at any frequency. Each column's \
-                bandwidth grows with its frequency, so broadband sound reads as in a \
-                constant fraction of an octave (pink noise flat, white rising 3 dB per \
-                octave) between the window changes the dashed lines mark. Use an RTA for \
-                band levels in dB SPL."
-            .to_string();
-    }
     let per = match bin {
-        BinWidth::Hz(b) => format!("per FFT bin ({} wide)", format::freq_readout(b)),
-        BinWidth::Mixed | BinWidth::Unknown | BinWidth::MultiRes => "per FFT bin".to_string(),
+        BinWidth::MultiRes => return "Tone level: a sine reads its RMS, noise tilts up".into(),
+        BinWidth::Hz(b) => format!("Level per bin ({})", format::freq_readout(b)),
+        BinWidth::Mixed | BinWidth::Unknown => "Level per bin".to_owned(),
     };
-    format!(
-        "Level {per}: a sine reads its RMS level. Broadband sound reads lower than its band \
-         or total level, and lower with finer bins (3 dB per doubling of the FFT length). \
-         Use an RTA for band levels in dB SPL."
-    )
+    format!("{per}: a sine reads its RMS, noise reads low")
 }
 
 /// `1/3 oct`.

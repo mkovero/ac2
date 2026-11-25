@@ -525,13 +525,10 @@ pub(crate) fn grip(layer: &mut Layer, rect: Rect, hot: bool, clip: Rect, theme: 
 /// The tooltip while the pointer is on a plate: what a drag there does, and the
 /// double-click.
 pub fn hint(h: PlateHover) -> String {
-    let name = h.kind.name();
     if h.grip {
-        format!("drag: text size of the {name} · double-click: back to its place and size")
+        "Drag sizes the text · double-click resets".to_owned()
     } else {
-        format!(
-            "drag: move the {name} · its corner: text size · double-click: back to its place and size"
-        )
+        format!("Drag moves the {} · double-click resets", h.kind.name())
     }
 }
 

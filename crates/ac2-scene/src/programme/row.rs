@@ -19,7 +19,7 @@ const CLIP_SLOT: usize = 4;
 
 /// Said in the header's hover tip under a loudness ballistic, where the rows read the true
 /// peak: too long for the header line, which must not wrap and push the rows down.
-pub const INPUTS_LOUDNESS_TIP: &str = "loudness is metered per programme in the Programme pane";
+pub const INPUTS_LOUDNESS_TIP: &str = "loudness in the Programme pane";
 
 /// The Inputs header after the strong `Inputs`, from the rig's ballistic (not the frame's,
 /// so it reads before any frame): `true peak · max since R`, `Type I · max since R`.

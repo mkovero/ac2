@@ -287,14 +287,19 @@ pub fn edit_tip(key: Option<&str>) -> String {
     )
 }
 
-/// What a measurement row's tooltip says about editing it: `F2 edits it`, or the edit
+/// What a measurement row's tooltip says about editing it: `F2 edits`, or the edit
 /// button when no key is bound.
 pub fn edit_hint(key: Option<&str>) -> String {
-    key.map_or_else(
-        || "the pencil button edits it".to_owned(),
-        |k| format!("{k} edits it"),
-    )
+    key.map_or_else(|| "the pencil edits".to_owned(), |k| format!("{k} edits"))
 }
+
+/// A measurement row's tooltip line: what a click, the edit key and a drag do.
+pub fn meas_row_tip(edit_key: Option<&str>) -> String {
+    format!("Click shows · {} · drag to a pane", edit_hint(edit_key))
+}
+
+/// A stored trace row's tooltip line.
+pub const TRACE_ROW_TIP: &str = "Click selects · double click renames";
 
 /// One row of the tree.
 #[derive(Clone, Debug, PartialEq)]
@@ -322,7 +327,8 @@ pub struct TreeRow {
     pub dot: Option<(Color, bool)>,
     /// A meter's OSC cue state ([`crate::osc::meter_state`]), shown as a chip.
     pub chip: Option<CueState>,
-    /// Everything about the row in one sentence (the tooltip, and what a screen reader says).
+    /// What the row is, past its name: the tooltip's first line. The list shows the longest
+    /// detail that fits, so the whole detail is here.
     pub describe: String,
 }
 
@@ -567,7 +573,7 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                 },
                 dot: Some((item.color, !item.hidden)),
                 chip: None,
-                describe: format!("{}: the live curve, {state}", m.config.name),
+                describe: format!("live curve · {state}"),
             });
         }
         let owned: Vec<&TraceMeta> = input
@@ -625,7 +631,7 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                 depth: 1,
                 last: false,
                 name: m.config.name.clone(),
-                describe: format!("{}: {}", m.config.name, details[0]),
+                describe: details[0].clone(),
                 details,
                 collapsed: None,
                 hidden: item.hidden,
@@ -671,15 +677,13 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                         && n > 0
                         && children.iter().all(|c| c.hidden));
                 let chip = input.rig.and_then(|r| crate::osc::meter_state(r, m.id));
-                let describe = match chip {
-                    Some(c) => format!(
-                        "{} {}: {detail}, OSC cue {}",
-                        kind_name(&m.config.kind),
-                        m.config.name,
-                        crate::osc::state_word(c)
-                    ),
-                    None => format!("{} {}: {detail}", kind_name(&m.config.kind), m.config.name),
-                };
+                let mut describe = kind_name(&m.config.kind).to_owned();
+                if !detail.is_empty() {
+                    describe.push_str(&format!(": {detail}"));
+                }
+                if let Some(c) = chip {
+                    describe.push_str(&format!(" · OSC cue {}", crate::osc::state_word(c)));
+                }
                 TreeRow {
                     key: TreeKey::Meas(m.id),
                     depth: 0,
@@ -714,7 +718,7 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                     depth: 0,
                     last: false,
                     name: "Imported".to_owned(),
-                    describe: format!("Imported: {detail}, under no measurement"),
+                    describe: "Traces under no measurement".to_owned(),
                     details: vec![detail],
                     collapsed: Some(folded),
                     hidden: false,
@@ -738,7 +742,7 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                 TreeKey::Session,
                 crate::osc::SESSION,
                 vec!["saved and loaded with the session".into()],
-                "Session: the measurements saved and loaded with the session".into(),
+                "The session's measurements".into(),
             ));
         }
         rows.push(header);
@@ -753,10 +757,10 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
 fn rig_header(meters: usize, rig: Option<&Rig>) -> TreeRow {
     let rig = rig.cloned().unwrap_or_default();
     let details = crate::osc::rig_details(meters, &rig);
-    let describe = format!(
-        "Rig: meters kept by the rig across session loads, {}; opens the Rig monitor settings",
-        crate::osc::status_line(&rig)
-    );
+    let mut describe = "Meters kept across session loads".to_owned();
+    if let Some(e) = &rig.osc.last_error {
+        describe.push_str(&format!(" · OSC error: {e}"));
+    }
     heading_row(TreeKey::Rig, crate::osc::RIG, details, describe)
 }
 

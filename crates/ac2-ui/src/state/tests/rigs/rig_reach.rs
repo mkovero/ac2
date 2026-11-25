@@ -90,7 +90,7 @@ fn switching_the_rig_shown_changes_the_list() {
             .expect("test rig's heading");
     assert_eq!(head.details, ["48 kHz UNKNOWN"]);
     assert!(
-        head.describe.starts_with("test rig: another rig, paired;"),
+        head.describe.starts_with("Paired rig\nUNKNOWN: "),
         "{}",
         head.describe
     );

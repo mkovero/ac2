@@ -316,7 +316,7 @@ fn plate_kind_loudness() {
             kind: PlateKind::Loudness,
             grip: false
         })
-        .starts_with("drag: move the loudness readout")
+        .starts_with("Drag moves the loudness readout")
     );
 }
 

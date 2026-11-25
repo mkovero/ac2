@@ -45,7 +45,7 @@ fn line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
 }
 
 /// What a standing relation rests on, where a reader could take it for the audio-fed one.
-pub const FROM_LEVELS: &str = "measured from the rigs' level frames, no audio streamed";
+pub const FROM_LEVELS: &str = "from the rigs' level frames";
 
 /// What rig `s`'s levels say of the clocks, in `status_lines`' words without its session
 /// or its link, the figure naming whose clock runs against whose: *clocks agree · ketunkolo
@@ -67,20 +67,26 @@ pub fn evidence_at(r: &RemoteState, s: &StandingRig, now: Option<WallNs>, here: 
     parts.join(" · ")
 }
 
-/// [`evidence`] with what it is measured from: the line a hover adds beside the pairing.
-pub fn evidence_line(r: &RemoteState, s: &StandingRig, now: Option<WallNs>) -> String {
-    format!("{} · {FROM_LEVELS}", evidence(r, s, now))
+/// The relation in short with what it is measured from: the line a hover adds beside the
+/// pairing, *clocks agree (+0.12 ppm over 60 s) · from the rigs' level frames*. The count
+/// and the marks' age are `ac2 status -v`'s ([`evidence`]).
+pub fn evidence_line(r: &RemoteState, s: &StandingRig) -> String {
+    evidence_line_at(r, s, "this rig")
 }
 
-/// [`evidence_at`] with what it is measured from: the line a tree tip adds beside a
-/// stream's verdict or the other daemon's.
-pub fn evidence_line_at(
-    r: &RemoteState,
-    s: &StandingRig,
-    now: Option<WallNs>,
-    here: &str,
-) -> String {
-    format!("{} · {FROM_LEVELS}", evidence_at(r, s, now, here))
+/// [`evidence_line`] where the reporting rig has a name of its own beside others (the
+/// app's tree): the line a tree tip adds beside a stream's verdict or the other daemon's.
+pub fn evidence_line_at(r: &RemoteState, s: &StandingRig, here: &str) -> String {
+    let rel = relation_text(r, &s.name, &s.clock.relation).replace("this rig", here);
+    let fig = match (&s.clock.relation, s.clock.ppm.zip(s.clock.span)) {
+        (PeerRelation::NotLocked { .. }, _) | (_, None) => String::new(),
+        (_, Some((p, span))) => format!(
+            " ({} ppm over {} s)",
+            format::signed(p, 2),
+            format::fixed(span.0, 0)
+        ),
+    };
+    format!("{rel}{fig} · {FROM_LEVELS}")
 }
 
 /// Rig `who`'s sample clock against rig `against`'s: *ketunkolo runs +0.12 ppm against

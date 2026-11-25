@@ -267,10 +267,10 @@ fn unseen(rig: &str, side: Side, u: Unseen) -> String {
         Side::There => rig,
     };
     match u {
-        Unseen::NotHeld => format!("the app does not hold {who}: connect to it to see"),
-        Unseen::NotConnected => format!("the app is not connected to {who} now"),
+        Unseen::NotHeld => format!("{who} not connected"),
+        Unseen::NotConnected => format!("{who} unreachable"),
         Unseen::Asking => format!("asking {who}…"),
-        Unseen::Unanswered => format!("{who} did not answer the app"),
+        Unseen::Unanswered => format!("{who} did not answer"),
         Unseen::NetworkOff => format!("{who}'s network is off"),
     }
 }
@@ -291,58 +291,55 @@ pub fn cant_tell(rig: &str, h: &Halves) -> String {
     )
 }
 
-/// A *Paired rigs* row's hover: each half in words, then the clocks as this rig's daemon
-/// hears them in `rig`'s levels (`clocks`: [`crate::standing::evidence_line`], `None` when it
-/// lists no standing relation with it), then what the keys do there. `reachable`: the app
-/// is connected to both rigs, so Enter can pair the missing halves.
+/// A *Paired rigs* row's hover, at most four lines: each direction's two halves, why a
+/// half cannot be told, the clocks as this rig's daemon hears them in `rig`'s levels
+/// (`clocks`: [`crate::standing::evidence_line`], `None` when it lists no standing relation
+/// with it), then the key. `reachable`: the app is connected to both rigs, so Enter can
+/// pair the missing halves.
 pub fn tip(rig: &str, h: &Halves, clocks: Option<&str>, reachable: bool) -> String {
-    let line = |half: &Half, yes: String, no: String, what: String| match half {
-        Half::Yes => yes,
-        Half::No => no,
-        Half::Unknown { side, why } => {
-            format!("  can't tell whether {what} ({})", unseen(rig, *side, *why))
+    let mut why: Vec<String> = Vec::new();
+    let mut word = |half: &Half, yes: &str, no: &str| match half {
+        Half::Yes => yes.to_owned(),
+        Half::No => no.to_owned(),
+        Half::Unknown { side, why: u } => {
+            push_new(&mut why, unseen(rig, *side, *u));
+            "can't tell".to_owned()
         }
-        Half::Unchecked { side, why } => {
-            format!("{yes} (can't check its key: {})", unseen(rig, *side, *why))
+        Half::Unchecked { side, why: u } => {
+            push_new(&mut why, unseen(rig, *side, *u));
+            format!("{yes} (key unchecked)")
         }
     };
-    let mut lines = vec![
-        format!("This rig takes {rig}'s inputs when both of these hold:"),
-        line(
-            &h.here_lists,
-            format!("  this rig lists {rig} as paired"),
-            format!("  this rig does not list {rig}"),
-            format!("this rig lists {rig}"),
-        ),
-        line(
-            &h.there_admits,
-            format!("  {rig} has admitted this rig"),
-            format!("  {rig} has not admitted this rig"),
-            format!("{rig} has admitted this rig"),
-        ),
-        format!("{rig} takes this rig's inputs when both of these hold:"),
-        line(
-            &h.there_lists,
-            format!("  {rig} lists this rig as paired"),
-            format!("  {rig} does not list this rig"),
-            format!("{rig} lists this rig"),
-        ),
-        line(
-            &h.here_admits,
-            format!("  this rig has admitted {rig}"),
-            format!("  this rig has not admitted {rig}"),
-            format!("this rig has admitted {rig}"),
-        ),
-    ];
+    // Audio from `rig` comes here when this rig lists it and it has admitted this rig.
+    let from = format!(
+        "{rig} → here: {}, {}",
+        word(&h.here_lists, "paired", "not paired"),
+        word(&h.there_admits, "admitted", "not admitted")
+    );
+    let to = format!(
+        "here → {rig}: {}, {}",
+        word(&h.there_lists, "paired", "not paired"),
+        word(&h.here_admits, "admitted", "not admitted")
+    );
+    let mut lines = vec![from, to];
+    if !why.is_empty() {
+        lines.push(format!("can't tell: {}", why.join("; ")));
+    }
     lines.extend(clocks.map(str::to_owned));
-    lines.push(if h.both_ways() {
-        "Delete twice unpairs both ways".into()
-    } else if h.missing() && reachable {
-        "Enter pairs the missing halves · Delete twice unpairs".into()
-    } else {
-        "Delete twice unpairs".into()
-    });
+    if lines.len() < 4 {
+        lines.push(if h.missing() && reachable && !h.both_ways() {
+            "Enter pairs the missing halves".into()
+        } else {
+            "Delete twice unpairs".into()
+        });
+    }
     lines.join("\n")
+}
+
+fn push_new(v: &mut Vec<String>, s: String) {
+    if !v.contains(&s) {
+        v.push(s);
+    }
 }
 
 /// A rig offered by *Pair with rig…*: `ketunkolo`, or `ketunkolo · pairs the missing
@@ -553,29 +550,28 @@ mod tests {
         use Half::*;
         let all = halves(Yes, Yes, Yes, Yes);
         assert_eq!(row("ketunkolo", &all), "ketunkolo · paired both ways");
-        assert!(tip("ketunkolo", &all, None, true).ends_with("Delete twice unpairs both ways"));
+        assert_eq!(
+            tip("ketunkolo", &all, None, true),
+            "ketunkolo → here: paired, admitted\nhere → ketunkolo: paired, admitted\nDelete \
+             twice unpairs"
+        );
         let one = halves(Yes, No, Yes, Yes);
         assert_eq!(
             row("ketunkolo", &one),
             "ketunkolo · it takes this rig's inputs · not the other way"
         );
-        assert!(
-            tip("ketunkolo", &one, None, true).contains("  ketunkolo has not admitted this rig"),
-            "{}",
-            tip("ketunkolo", &one, None, true)
-        );
         // Enter is promised only where it can pair the missing halves.
-        assert!(
-            tip("ketunkolo", &one, None, true)
-                .ends_with("Enter pairs the missing halves · Delete twice unpairs")
+        assert_eq!(
+            tip("ketunkolo", &one, None, true),
+            "ketunkolo → here: paired, not admitted\nhere → ketunkolo: paired, admitted\nEnter \
+             pairs the missing halves"
         );
         assert!(tip("ketunkolo", &one, None, false).ends_with("\nDelete twice unpairs"));
         // The clocks the levels show read between the halves and the keys.
-        let clocks = "clocks agree · +0.12 ppm over 60 s · marks for 5 min 12 s · measured \
-                      from the rigs' level frames, no audio streamed";
+        let clocks = "clocks agree · +0.12 ppm over 60 s · from the rigs' level frames";
         assert!(
             tip("ketunkolo", &all, Some(clocks), true).ends_with(&format!(
-                "  this rig has admitted ketunkolo\n{clocks}\nDelete twice unpairs both ways"
+                "here → ketunkolo: paired, admitted\n{clocks}\nDelete twice unpairs"
             ))
         );
         let two = halves(No, Yes, Yes, No);
@@ -602,19 +598,15 @@ mod tests {
         assert_eq!(row("ketunkolo", &h), "ketunkolo · can't tell its side");
         let t = tip("ketunkolo", &h, None, false);
         assert!(t.ends_with("\nDelete twice unpairs"), "{t}");
-        assert!(
-            t.contains(
-                "can't tell whether ketunkolo has admitted this rig (the app does not hold \
-                 ketunkolo: connect to it to see)"
-            ),
-            "{t}"
+        assert_eq!(
+            t,
+            "ketunkolo → here: paired, can't tell\nhere → ketunkolo: can't tell, admitted\n\
+             can't tell: ketunkolo not connected\nDelete twice unpairs"
         );
-        assert!(!t.contains("has not admitted"), "{t}");
         assert!(!h.missing() && !h.both_ways() && h.any());
         assert_eq!(
             cant_tell("ketunkolo", &h),
-            "can't tell whether ketunkolo is paired both ways: the app does not hold \
-             ketunkolo: connect to it to see"
+            "can't tell whether ketunkolo is paired both ways: ketunkolo not connected"
         );
     }
 
@@ -634,9 +626,7 @@ mod tests {
         let t = tip("ketunkolo", &h, None, true);
         assert!(t.ends_with("\nDelete twice unpairs"), "{t}");
         assert!(
-            t.contains(
-                "can't tell whether this rig has admitted ketunkolo (this rig's network is off)"
-            ),
+            t.ends_with("here → ketunkolo: paired, can't tell\ncan't tell: this rig's network is off\nDelete twice unpairs"),
             "{t}"
         );
         assert!(!t.contains("ketunkolo's network"), "{t}");
@@ -681,13 +671,10 @@ mod tests {
         );
         let t = tip("ketunkolo", &h, None, false);
         assert!(
-            t.contains(
-                "  this rig lists ketunkolo as paired (can't check its key: the app does not \
-                 hold ketunkolo: connect to it to see)"
-            ),
+            t.starts_with("ketunkolo → here: paired (key unchecked), can't tell\n"),
             "{t}"
         );
-        assert!(!t.contains("can't tell whether this rig lists"), "{t}");
+        assert!(t.contains("\ncan't tell: ketunkolo not connected\n"), "{t}");
     }
 
     /// The row says how the two directions stand in a few words, every class of halves:
@@ -818,8 +805,7 @@ mod tests {
         );
         assert_eq!(
             unpair_admission_unseen("ketunkolo", Side::Here, Unseen::Unanswered),
-            "Can't tell whether this rig admits ketunkolo (this rig did not answer the app): if \
-             it does, that stays; revoke it under Authorized clients once seen"
+            "Can't tell whether this rig admits ketunkolo (this rig did not answer): if it does, that stays; revoke it under Authorized clients once seen"
         );
         assert_eq!(
             unpair_admission_unseen("ketunkolo", Side::There, Unseen::NetworkOff),

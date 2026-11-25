@@ -132,7 +132,9 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
         pane.unit
     );
     assert!(
-        pane.unit_help.as_deref().is_some_and(|h| h.contains("RTA")),
+        pane.unit_help
+            .as_deref()
+            .is_some_and(|h| h.ends_with("a sine reads its RMS, noise reads low")),
         "{:?}",
         pane.unit_help
     );

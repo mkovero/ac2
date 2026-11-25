@@ -25,12 +25,9 @@ pub fn network_row(on: bool) -> &'static str {
 /// The network row's tip: what on and off mean for this rig's own links and for those to it.
 pub fn network_tip(on: bool) -> &'static str {
     if on {
-        "turning it off cuts every app and rig connected to this rig over the network; this \
-         rig's own links to other rigs stay"
+        "On: authorized apps and rigs can connect to this rig"
     } else {
-        "while off, this rig still pairs with, authorizes and reads other rigs; only \
-         connections to it are off. Turned on, apps and rigs whose keys this rig authorized \
-         can connect to it"
+        "Off: nothing can connect to this rig. Its own links stay."
     }
 }
 
@@ -47,15 +44,13 @@ pub fn fixed_row(listen: Option<&str>) -> String {
 }
 
 /// The fixed row's tip.
-pub const FIXED_TIP: &str =
-    "ac2d's command line is the setting for as long as it runs: this page only reads it";
+pub const FIXED_TIP: &str = "Set by ac2d's command line: read only here";
 
 /// The network row of a daemon running inside its program: it has no network to turn on.
 pub const EMBEDDED_ROW: &str = "Network: none · this daemon runs inside its program";
 
 /// The in-process row's tip.
-pub const EMBEDDED_TIP: &str = "it serves its own program only: no other program can connect, so it has no network to \
-     turn on";
+pub const EMBEDDED_TIP: &str = "Serves its own program only";
 
 /// The network row of a daemon that keeps no files: without a server key there is nothing
 /// to serve CURVE with, so its network cannot go on.
@@ -67,8 +62,7 @@ pub fn no_key_store_row(kind: NetSettingKind) -> String {
 }
 
 /// The no-key-store row's tip.
-pub const NO_KEY_STORE_TIP: &str = "this ac2d runs without a config directory, so it has nowhere to keep the server key the \
-     network needs: its network cannot be turned on";
+pub const NO_KEY_STORE_TIP: &str = "Start ac2d with a config directory to turn it on";
 
 /// The network row of a rig reached over the network: a network client may not switch it
 /// (it would cut itself off, or open the rig where it was reached some other way).
@@ -80,8 +74,7 @@ pub fn peer_row(kind: NetSettingKind) -> String {
 }
 
 /// The remote row's tip.
-pub const PEER_TIP: &str = "only an app on the rig's own computer may turn its network on or \
-     off: from here it could cut this app off";
+pub const PEER_TIP: &str = "Read only from another computer";
 
 fn state_word(kind: NetSettingKind) -> &'static str {
     match kind {
@@ -107,16 +100,10 @@ pub enum ChoiceFrom {
 /// The interface and port rows' tip.
 pub fn choice_tip(from: ChoiceFrom) -> &'static str {
     match from {
-        ChoiceFrom::InForce => "where the network is on now; another picked here moves it",
-        ChoiceFrom::Picked => "picked here: used when the network is turned on, or moved",
-        ChoiceFrom::Kept => {
-            "kept from when the network was last on: turning it on uses it unless another is \
-             picked here"
-        }
-        ChoiceFrom::Default => {
-            "the daemon's default, as its network has not been on yet: turning it on uses it \
-             unless another is picked here"
-        }
+        ChoiceFrom::InForce => "In use now: picking another moves it",
+        ChoiceFrom::Picked => "Picked: used when the network goes on or moves",
+        ChoiceFrom::Kept => "Kept from when the network was last on",
+        ChoiceFrom::Default => "Default: the network has not been on yet",
     }
 }
 

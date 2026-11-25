@@ -5,8 +5,8 @@
 //! appears its clock relation is said next to it, in words.
 
 use ac2_proto::model::{
-    CrossRigTransfer, CrossTfState, Measurement, NotLockedReason, PeerRelation, RelockOutcome,
-    RemoteRig, RemoteSide, RemoteState, StopWhy,
+    CrossRigTransfer, CrossTfState, NotLockedReason, PeerRelation, RelockOutcome, RemoteRig,
+    RemoteSide, RemoteState, StopWhy,
 };
 
 use crate::between_rigs::{cant_tell_why, name_of};
@@ -147,10 +147,10 @@ fn late_text(r: &RemoteState) -> String {
     format!("link offset too small: raise Wait for remote inputs{now}")
 }
 
-/// Why the clocks stop it and what to do: the detail of its pane banner and a line of
-/// `ac2 status`. `ours`: this rig's name. `None` while it averages or only waits for the
-/// clocks to be measured.
-fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) -> Option<String> {
+/// Why the clocks stop it, and the fix where one helps: the detail of its pane banner and a
+/// line of `ac2 status -v`. `ours`: this rig's name. `None` while it averages or only waits
+/// for the clocks to be measured.
+pub fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) -> Option<String> {
     let rig = r.rigs.iter().find(|g| g.rig == x.rig)?;
     let theirs = &rig.name;
     let CrossTfState::Stopped { why, .. } = x.state else {
@@ -160,8 +160,7 @@ fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) -> Opt
         (StopWhy::Measuring, _) => None,
         (StopWhy::NotLocked, PeerRelation::NotLocked { reason }) => Some(match reason {
             NotLockedReason::CrossRate { ppm, .. } => format!(
-                "{label} stopped: {ours} and {theirs} are not on one clock ({} ppm). Lock both \
-                 interfaces to one reference.",
+                "{label} stopped: clocks {} ppm apart · lock both to one reference",
                 format::signed(ppm, 1)
             ),
             // One rig's interface against its own host: its crystal, or a host whose
@@ -169,8 +168,7 @@ fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) -> Opt
             NotLockedReason::OwnClock { rig: who, ppm } => {
                 let who = if who == x.rig { theirs.as_str() } else { ours };
                 format!(
-                    "{label} stopped: {who}'s interface runs {} ppm against its host. Lock it \
-                     to the reference its host is disciplined from.",
+                    "{label} stopped: {who}'s interface runs {} ppm off",
                     format::signed(ppm, 1)
                 )
             }
@@ -180,16 +178,13 @@ fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) -> Opt
             ),
         }),
         (StopWhy::NotLocked, _) => Some(format!(
-            "{label} stopped: {ours} and {theirs} are not on one clock. Lock both interfaces \
-             to one reference."
+            "{label} stopped: clocks not locked · lock both to one reference"
         )),
         (StopWhy::CantTell, PeerRelation::CantTell { reason }) => Some(format!(
-            "{label} stopped: can't tell whether {ours} and {theirs} share a clock: {}.",
+            "{label} stopped: can't tell the clocks: {}",
             cant_tell_why(r, theirs, &reason)
         )),
-        (StopWhy::CantTell, _) => Some(format!(
-            "{label} stopped: can't tell whether {ours} and {theirs} share a clock."
-        )),
+        (StopWhy::CantTell, _) => Some(format!("{label} stopped: can't tell the clocks")),
     }
 }
 
@@ -239,31 +234,6 @@ pub fn delay_basis_short(delay_s: f64) -> String {
         "{} · incl. the rigs' clock offset (not measured)",
         format::delay(delay_s)
     )
-}
-
-/// `ac2 status` lines, one block per cross-rig transfer function of `measurements`: its
-/// title, then its status lines and delay with its basis, indented. `ours`: this rig's name.
-pub fn status_cli(r: &RemoteState, measurements: &[Measurement], ours: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for x in &r.transfers {
-        let Some(m) = measurements.iter().find(|m| m.id == x.meas) else {
-            continue;
-        };
-        out.push(format!("between rigs {}", pane_title(&m.config.name, x, r)));
-        for l in status_lines(x, r, "`ac2 delay find`") {
-            out.push(format!("  {l}"));
-        }
-        if let Some(b) = banner(&m.config.name, x, r, ours) {
-            out.push(format!("  {b}"));
-        }
-        if let Some(d) = &m.delay {
-            out.push(format!(
-                "  delay {}",
-                delay_basis(d.applied.0, ours, &name_of(r, x.rig))
-            ));
-        }
-    }
-    out
 }
 
 /// The clocks between this rig and remote rig `rig`, for that rig's heading in the
@@ -331,26 +301,15 @@ pub fn pane_banners(
 ) -> Vec<PaneBanner> {
     let rig = name_of(r, x.rig);
     let mut out = Vec::new();
-    if let (Some(v), CrossTfState::Stopped { why, held }) = (stop_verdict(x), x.state) {
+    if let (Some(v), CrossTfState::Stopped { why, .. }) = (stop_verdict(x), x.state) {
         let why_text = match why {
-            StopWhy::Measuring => Some(format!(
-                "less than a minute of audio from {rig} since the stream started: the clocks \
-                 between the rigs are not known yet."
-            )),
+            StopWhy::Measuring => Some(format!("under a minute of audio from {rig} yet")),
             _ => banner(label, x, r, ours),
         };
-        let kept = if held {
-            "The result from before stands; its phase is faint."
-        } else {
-            "No result was kept from before."
-        };
-        let detail = match why_text {
-            Some(w) => format!("{w} {kept}"),
-            None => kept.to_owned(),
-        };
+        // Whether a result from before stands shows on the plot: its phase drawn faint.
         out.push(PaneBanner {
             text: v.to_owned(),
-            detail: Some(detail),
+            detail: why_text,
             warn: why != StopWhy::Measuring,
         });
     }
@@ -361,9 +320,7 @@ pub fn pane_banners(
         );
         out.push(PaneBanner {
             text: t,
-            detail: asks.then(|| {
-                format!("{find} runs the delay finder; the phase is faint until the delay is found again")
-            }),
+            detail: None,
             warn: asks,
         });
     }
@@ -380,11 +337,7 @@ pub fn pane_banners(
     if let Some(d) = drift_text(x) {
         out.push(PaneBanner {
             text: format!("{d}: path or clocks"),
-            detail: Some(
-                "the delay moved more than 0.05 ms a minute over two minutes: a path or the \
-                 clocks are moving"
-                    .into(),
-            ),
+            detail: Some("over 0.05 ms a minute for two minutes".into()),
             warn: false,
         });
     }
@@ -392,8 +345,7 @@ pub fn pane_banners(
         out.push(PaneBanner {
             text: late_text(r),
             detail: Some(format!(
-                "audio from {rig} keeps arriving after it is needed: Settings › Connection › \
-                 {LINK_OFFSET}"
+                "audio from {rig} arrives late · Settings › Connection"
             )),
             warn: true,
         });
@@ -421,6 +373,21 @@ pub fn link_offset_line(set: Option<ac2_proto::units::Seconds>, r: &RemoteState)
         (None, None) => "default".to_owned(),
     };
     format!("{LINK_OFFSET} (link offset): {v}")
+}
+
+/// `ac2 status`'s short form: `link offset 15 ms`, whether set or the daemon's default.
+pub fn link_offset_short(set: Option<ac2_proto::units::Seconds>, r: &RemoteState) -> String {
+    let v = match (set, r.link_offset) {
+        (Some(s), Some(o)) if o.0 > s.0 && format::ms(o.0, 0) != format::ms(s.0, 0) => format!(
+            "{} set, {} in force",
+            format::ms(s.0, 0),
+            format::ms(o.0, 0)
+        ),
+        (Some(s), _) => format::ms(s.0, 0),
+        (None, Some(o)) => format::ms(o.0, 0),
+        (None, None) => "default".to_owned(),
+    };
+    format!("link offset {v}")
 }
 
 /// What the link offset control asks while it is typed.

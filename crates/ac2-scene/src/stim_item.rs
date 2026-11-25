@@ -82,7 +82,7 @@ pub struct StimInputs<'a> {
     pub keys: StimKeys,
     /// More than one rig: the rig shown, by name, so the keys are read as acting on it.
     pub rig: Option<&'a str>,
-    /// The long form of what Space or Enter starts next, for the hover.
+    /// The long form of what Space or Enter starts next, for the hover while off.
     pub next_long: Option<&'a str>,
     /// Where the level and the signal are set, for the hover.
     pub tip: &'a str,
@@ -121,7 +121,8 @@ impl StimItem {
     }
 
     /// The item for a bar with less room, `step` 0 being all of it: the keys go first, then
-    /// who holds it, then what plays, down to the state word; the hover keeps all of it.
+    /// who holds it, then what plays, down to the state word; the hover then says what plays
+    /// and who holds it.
     pub fn narrowed(&self, step: usize) -> StimItem {
         let mut n = self.clone();
         if step >= 1 {
@@ -131,7 +132,12 @@ impl StimItem {
             n.held = None;
         }
         if step >= 3 && n.state != n.short {
-            n.hover = format!("{} · {}", self.text(), self.hover);
+            let plays = self.state.strip_prefix(&self.short).unwrap_or("").trim();
+            n.hover = [Some(plays), self.held.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ");
             n.state = n.short.clone();
         }
         n
@@ -267,26 +273,25 @@ pub fn stim_item(i: &StimInputs<'_>) -> StimItem {
         StimKeys::ElsewherePlaying => Some(ELSEWHERE_PLAYING_KEYS),
     }
     .map(str::to_owned);
-    let mut hover = Vec::new();
-    if !s.live() {
-        hover.push(i.plays.to_owned());
-    }
-    match i.keys {
-        StimKeys::ElsewhereArmed => hover.push(ARMED_ELSEWHERE.to_owned()),
-        StimKeys::ElsewherePlaying => hover.push(PLAYING_ELSEWHERE.to_owned()),
-        _ => {}
-    }
-    if let Some(l) = i.next_long {
-        hover.push(l.to_owned());
-    }
-    hover.push(i.tip.to_owned());
+    // One fact the item does not already show: off, what the next key starts (or what
+    // would play); someone else's lease from this name, whose it is; else the level key.
+    let hover = match i.keys {
+        StimKeys::ElsewhereArmed => "armed elsewhere under this name".to_owned(),
+        StimKeys::ElsewherePlaying => "playing elsewhere under this name".to_owned(),
+        _ if !s.live() => i
+            .next_long
+            .filter(|l| Some(*l) != i.off_keys)
+            .unwrap_or(i.plays)
+            .to_owned(),
+        _ => i.tip.to_owned(),
+    };
     StimItem {
         state,
         tone,
         strong: s.live(),
         keys,
         held: i.held_by.map(|w| format!("held by {w}")),
-        hover: hover.join(" · "),
+        hover,
         short,
     }
 }
@@ -363,11 +368,10 @@ mod tests {
     fn off_the_hover_says_what_would_play() {
         let mut i = at(StimState::Off);
         i.next_long = Some("Space arms: pink −20 dBFS → out 1, 2");
-        assert_eq!(
-            stim_item(&i).hover,
-            "pink −20.0 dBFS → out 1, 2 · Space arms: pink −20 dBFS → out 1, 2 · L types the \
-             level"
-        );
+        assert_eq!(stim_item(&i).hover, "Space arms: pink −20 dBFS → out 1, 2");
+        i.off_keys = Some("L types a level");
+        i.next_long = Some("L types a level");
+        assert_eq!(stim_item(&i).hover, "pink −20.0 dBFS → out 1, 2");
         assert_eq!(stim_item(&at(StimState::Firing)).hover, "L types the level");
     }
 
@@ -433,7 +437,7 @@ mod tests {
         );
         assert_eq!(
             item.narrowed(3).hover,
-            "pupu: FIRING pink −20.0 dBFS → out 1, 2 · held by alice · L types the level"
+            "pink −20.0 dBFS → out 1, 2 · held by alice"
         );
         let off = stim_item(&at(StimState::Off));
         assert_eq!(off.narrowed(3).text(), "STIM OFF");
@@ -467,17 +471,11 @@ mod tests {
         let mut i = at(StimState::Armed);
         i.keys = StimKeys::ElsewhereArmed;
         assert_eq!(text(i), "ARMED pink −20.0 dBFS → out 1, 2 · Space disarms");
-        assert_eq!(
-            stim_item(&i).hover,
-            "armed elsewhere under this name: Space disarms · L types the level"
-        );
+        assert_eq!(stim_item(&i).hover, "armed elsewhere under this name");
         i.state = StimState::Firing;
         i.keys = StimKeys::ElsewherePlaying;
         assert_eq!(text(i), "FIRING pink −20.0 dBFS → out 1, 2 · Space stops");
-        assert_eq!(
-            stim_item(&i).hover,
-            "playing elsewhere under this name: Space stops · L types the level"
-        );
+        assert_eq!(stim_item(&i).hover, "playing elsewhere under this name");
     }
 
     #[test]
