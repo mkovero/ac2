@@ -28,10 +28,10 @@ for _ in $(seq 100); do [ -S "$AC2_RUNTIME_DIR/ctrl.sock" ] && break; sleep 0.05
 "$bin/ac2" status > /dev/null
 step "daemon up"
 
-"$bin/ac2" session open --backend fake --in 1-2 > /dev/null
+"$bin/ac2" stream open --backend fake --in 1-2 > /dev/null
 "$bin/ac2" meas new tf --ref 1 --meas 2 --name demo > /dev/null
 "$bin/ac2" meas start demo > /dev/null
-step "session open, transfer measurement running"
+step "audio I/O open, transfer measurement running"
 
 # Arm, fire (an empty line is Enter when stdin is not a terminal), stop after 6 s.
 { echo; sleep 6; echo q; } | "$bin/ac2" gen pink --out 1 --level -30dbfs > /dev/null &
