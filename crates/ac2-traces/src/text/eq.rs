@@ -164,7 +164,7 @@ fn params(s: &EqShape) -> String {
             b2,
             a1,
             a2,
-            rate,
+            sample_rate_hz: rate,
         } => format!("b0={b0} b1={b1} b2={b2} a1={a1} a2={a2} rate={}", rate.0),
         EqShape::Response { trace } => format!("trace={}", trace.0),
     }
@@ -174,7 +174,9 @@ fn params(s: &EqShape) -> String {
 pub fn write(body: &EqBody) -> String {
     let mut t = format!("{HEADER}\nname = {}\n", body.name.replace('\n', " "));
     let _ = match body.realisation {
-        EqRealisation::Digital { rate } => writeln!(t, "realisation = digital {}", rate.0),
+        EqRealisation::Digital {
+            sample_rate_hz: rate,
+        } => writeln!(t, "realisation = digital {}", rate.0),
         EqRealisation::Analog => writeln!(t, "realisation = analog"),
     };
     let _ = writeln!(t, "peak_q = {}", peak_q_word(body.peak_q));
@@ -414,7 +416,7 @@ fn section_of(line: &str) -> Result<EqSection, String> {
             b2: k.need("b2")?,
             a1: k.need("a1")?,
             a2: k.need("a2")?,
-            rate: Hz(k.need("rate")?),
+            sample_rate_hz: Hz(k.need("rate")?),
         },
         "response" => {
             let t = k.need("trace")?;
@@ -468,7 +470,7 @@ pub fn read(text: &str) -> Result<EqBody, EqTextError> {
                     realisation = Some(match value.split_whitespace().collect::<Vec<_>>()[..] {
                         ["analog"] => EqRealisation::Analog,
                         ["digital", rate] => EqRealisation::Digital {
-                            rate: Hz(rate
+                            sample_rate_hz: Hz(rate
                                 .parse::<f64>()
                                 .ok()
                                 .filter(|r| r.is_finite() && *r > 0.0)
@@ -510,7 +512,9 @@ mod tests {
         };
         EqBody {
             name: "EQ 1".into(),
-            realisation: EqRealisation::Digital { rate: Hz(96_000.0) },
+            realisation: EqRealisation::Digital {
+                sample_rate_hz: Hz(96_000.0),
+            },
             peak_q: PeakQ::Minus3dbFromPeak,
             enabled: false,
             sections: vec![
@@ -595,7 +599,7 @@ mod tests {
                     b2: 0.91,
                     a1: -1.8,
                     a2: 0.82,
-                    rate: Hz(48_000.0),
+                    sample_rate_hz: Hz(48_000.0),
                 }),
                 s(EqShape::Response { trace: TraceId(7) }),
             ],
@@ -623,7 +627,12 @@ mod tests {
         let b = read(t).unwrap();
         assert_eq!(b.sections.len(), 3);
         assert!(!b.sections[2].enabled);
-        assert_eq!(b.realisation, EqRealisation::Digital { rate: Hz(96_000.0) });
+        assert_eq!(
+            b.realisation,
+            EqRealisation::Digital {
+                sample_rate_hz: Hz(96_000.0)
+            }
+        );
     }
 
     #[test]

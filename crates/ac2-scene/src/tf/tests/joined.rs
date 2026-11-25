@@ -27,8 +27,8 @@ fn thinned_cols() -> Cols {
 fn span(c: &Cols, lo: usize, hi: usize, bin_hz: f64) -> BinRange {
     let edge = |i: usize| c.freqs[i] * 2f64.powf(1.0 / 24.0);
     BinRange {
-        lo: Hz(if lo == 0 { c.freqs[0] } else { edge(lo - 1) }),
-        hi: Hz(edge(hi)),
+        lo_hz: Hz(if lo == 0 { c.freqs[0] } else { edge(lo - 1) }),
+        hi_hz: Hz(edge(hi)),
         bin_hz: Hz(bin_hz),
     }
 }

@@ -381,7 +381,7 @@ impl RigPage {
         (rig.monitor_at_start != on).then(|| {
             let word = if on { "on" } else { "off" };
             (
-                Command::RigMonitorStart { base: self.rev, on },
+                Command::RigMonitorAtStart { base: self.rev, on },
                 format!("monitor at start {word}"),
             )
         })

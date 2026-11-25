@@ -44,8 +44,8 @@ fn frames(t: &mut T, bins: bool, stage: Option<u8>) {
             ]
             .into_iter()
             .map(|(lo, hi, b)| BinRange {
-                lo: Hz(lo),
-                hi: Hz(hi),
+                lo_hz: Hz(lo),
+                hi_hz: Hz(hi),
                 bin_hz: Hz(b),
             })
             .collect(),
@@ -296,8 +296,8 @@ fn laid_out(ids: &[u32]) -> ConnEvent {
             tf.meta.smoothing = None;
             tf.meta.bins = Some(Box::new(ac2_proto::samples::bin_layout()));
             tf.meta.unresolved = Some(vec![BinRange {
-                lo: Hz(812.5),
-                hi: Hz(1623.0),
+                lo_hz: Hz(812.5),
+                hi_hz: Hz(1623.0),
                 bin_hz: Hz(11.72),
             }]);
         }

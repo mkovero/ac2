@@ -86,7 +86,7 @@ BIN_LAYOUT = {
         {"first_bin": 88, "bins": 189, "bin_hz": 2.9296875},
         {"first_bin": 1, "bins": 207, "bin_hz": 0.9765625},
     ],
-    "blends": [{"lo": 812.5, "hi": 1023.75}, {"lo": 203.125, "hi": 256.0}],
+    "blends": [{"lo_hz": 812.5, "hi_hz": 1023.75}, {"lo_hz": 203.125, "hi_hz": 256.0}],
 }
 
 
@@ -104,14 +104,14 @@ def bins_frame():
         {
             "stage": 1,
             "factor": 4,
-            "rate": 12000.0,
+            "sample_rate_hz": 12000.0,
             "bin_hz": 2.9296875,
             "first_bin": 88,
             "hop": 4096,
             "delay": 0.0125,
             "nudged": 0.0,
             "mic_curve": True,
-            "mic_range": {"lo": 20.0, "hi": 20000.0},
+            "mic_range": {"lo_hz": 20.0, "hi_hz": 20000.0},
             "blocks": 12,
             "eff_avg": 9.5,
         },
@@ -138,7 +138,7 @@ def tf_frame():
             "nudged": 0.0,
             "smoothing": {"fraction": "sixth", "mode": "magnitude"},
             "mic_curve": True,
-            "mic_range": {"lo": 20.0, "hi": 20000.0},
+            "mic_range": {"lo_hz": 20.0, "hi_hz": 20000.0},
             "math": {
                 "operands": [
                     {"operand": {"type": "meas", "meas": 2}, "status": {"type": "included"}},
@@ -178,11 +178,11 @@ def tf_frame():
                 "range": {"type": "percentiles", "positions": 8},
             },
             "unresolved": [
-                {"lo": 31.25, "hi": 135.5, "bin_hz": 0.9765625},
-                {"lo": 1625.0, "hi": 3250.0, "bin_hz": 23.4375},
+                {"lo_hz": 31.25, "hi_hz": 135.5, "bin_hz": 0.9765625},
+                {"lo_hz": 1625.0, "hi_hz": 3250.0, "bin_hz": 23.4375},
             ],
             "bins": BIN_LAYOUT,
-            "settling": {"lo": 7.8125, "hi": 68.0},
+            "settling": {"lo_hz": 7.8125, "hi_hz": 68.0},
             "filled": 0.625,
         },
         [
@@ -207,7 +207,7 @@ def tf_frame():
 CAL_AT = 1_789_000_000_000_000_000
 
 def mic(name, curve):
-    return {"kind": "mic", "mic": name, "curve": curve}
+    return {"type": "mic", "mic": name, "curve": curve}
 
 
 INPUTS = {
@@ -215,16 +215,16 @@ INPUTS = {
         {"channel": 1, "kind": mic("M30 #1234", {"type": "curve", "label": "0°"}), "pair": None},
         {"channel": 2, "kind": mic(None, {"type": "not_chosen"}), "pair": None},
         {"channel": 3, "kind": mic("ECM", {"type": "off"}), "pair": None},
-        {"channel": 4, "kind": {"kind": "line"}, "pair": "left"},
-        {"channel": 5, "kind": {"kind": "line"}, "pair": "right"},
-        {"channel": 6, "kind": {"kind": "digital"}, "pair": None},
+        {"channel": 4, "kind": {"type": "line"}, "pair": "left"},
+        {"channel": 5, "kind": {"type": "line"}, "pair": "right"},
+        {"channel": 6, "kind": {"type": "digital"}, "pair": None},
     ],
     "pairs": [{"left": 4, "right": 5, "name": "Main"}],
 }
 
 PREVIEW_INPUTS = [
-    {"channel": 0, "kind": {"kind": "line"}},
-    {"channel": 1, "kind": {"kind": "line"}},
+    {"channel": 0, "kind": {"type": "line"}},
+    {"channel": 1, "kind": {"type": "line"}},
 ]
 PREVIEW_PAIRS = [{"left": 0, "right": 1, "name": None}]
 PAIR_LOUDNESS = {
@@ -270,7 +270,7 @@ def frames():
             "d/1/ir",
             "ir",
             None,
-            {"sample_rate": 48000.0, "t0": -0.005, "dt": 1.0 / 12000.0, "inserted_delay": 0.0125},
+            {"sample_rate_hz": 48000.0, "t0": -0.005, "dt": 1.0 / 12000.0, "inserted_delay": 0.0125},
             [
                 (
                     arr("ir_linear", "full_scale"),
@@ -293,7 +293,7 @@ def frames():
                     "basis": {"type": "acoustic", "calibrator_level": 94.0},
                 },
                 "mic_curve": True,
-                "mic_range": {"lo": 20.0, "hi": 20000.0},
+                "mic_range": {"lo_hz": 20.0, "hi_hz": 20000.0},
                 "math": None,
             },
             [
@@ -339,7 +339,7 @@ def frames():
                     ],
                     "unresolved": {
                         "resolution": "forty_eighth",
-                        "ranges": [{"lo": 7.8125, "hi": 101.5}],
+                        "ranges": [{"lo_hz": 7.8125, "hi_hz": 101.5}],
                     },
                 },
                 "harmonics": {

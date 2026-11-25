@@ -194,7 +194,7 @@ pub(super) fn sweep_data(id: u32) -> (Arc<TraceData>, Arc<GridDef>) {
                 etc_db: vec![-90.0; 200],
             },
             info: SweepInfo {
-                sample_rate: Hz(48_000.0),
+                sample_rate_hz: Hz(48_000.0),
                 rate: Seconds(0.45),
                 duration: Seconds(3.1),
                 repeats: 1,

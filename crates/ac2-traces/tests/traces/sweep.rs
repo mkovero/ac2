@@ -63,7 +63,7 @@ pub(super) fn sweep_trace(id: u32) -> StoredTrace {
                 etc_db: vec![-200.0, -6.0, -12.0, -18.0],
             },
             info: SweepInfo {
-                sample_rate: Hz(48_000.0),
+                sample_rate_hz: Hz(48_000.0),
                 rate: Seconds(0.45),
                 duration: Seconds(3.1),
                 repeats: 2,
@@ -85,8 +85,8 @@ pub(super) fn sweep_trace(id: u32) -> StoredTrace {
                 harmonics: Unresolved {
                     resolution: Resolution::FortyEighth,
                     ranges: vec![FreqRange {
-                        lo: Hz(20.0),
-                        hi: Hz(350.5),
+                        lo_hz: Hz(20.0),
+                        hi_hz: Hz(350.5),
                     }],
                 },
             }),
@@ -139,7 +139,7 @@ fn sweep_csv_and_session_round_trip() {
     let csv = export_csv(&t);
     assert!(csv.contains("# kind: sweep"));
     assert!(
-        csv.contains("# sweep_info: {\"sample_rate\":48000.0,"),
+        csv.contains("# sweep_info: {\"sample_rate_hz\":48000.0,"),
         "{}",
         &csv[..1500]
     );
@@ -181,7 +181,7 @@ fn sweep_csv_and_session_round_trip() {
     // An export written before sweeps said where they are unresolved (v4) is the same
     // sweep without that.
     let v4: String = csv
-        .replacen("# ac2 trace export v6", "# ac2 trace export v4", 1)
+        .replacen("# ac2 trace export v7", "# ac2 trace export v4", 1)
         .lines()
         .filter(|l| !l.starts_with("# sweep_unresolved"))
         .map(|l| format!("{l}\n"))
@@ -189,7 +189,7 @@ fn sweep_csv_and_session_round_trip() {
     // An export written before sweeps kept the reference's own harmonics (v5) is the same
     // sweep without them.
     let v5 = csv
-        .replacen("# ac2 trace export v6", "# ac2 trace export v5", 1)
+        .replacen("# ac2 trace export v7", "# ac2 trace export v5", 1)
         .replace(
             ",ref_h2_db,ref_h2_floor_db,ref_h3_db,ref_h3_floor_db\n",
             "\n",
@@ -205,6 +205,17 @@ fn sweep_csv_and_session_round_trip() {
             }
         })
         .collect();
+    // An export written before the header lines named their units (v6) is the same sweep.
+    let v6 = csv
+        .replacen("# ac2 trace export v7", "# ac2 trace export v6", 1)
+        .replace("\"sample_rate_hz\":", "\"sample_rate\":")
+        .replace("\"lo_hz\":", "\"lo\":")
+        .replace("\"hi_hz\":", "\"hi\":");
+    assert!(v6.contains("\"lo\":") && v6.contains("\"sample_rate\":"));
+    let old = import(v6.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
+    let old = old.sweep.unwrap();
+    assert_eq!(old.info, s.info);
+    assert_eq!(old.unresolved, s.unresolved);
     let old = import(v5.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
     let old = old.sweep.unwrap();
     assert!(old.reference_harmonics.is_none());
@@ -215,7 +226,7 @@ fn sweep_csv_and_session_round_trip() {
     assert_eq!(old.room, s.room);
     // An export written before the room parameters (v2) is the same sweep without them.
     let v2: String = csv
-        .replacen("# ac2 trace export v6", "# ac2 trace export v2", 1)
+        .replacen("# ac2 trace export v7", "# ac2 trace export v2", 1)
         .lines()
         .filter(|l| !l.starts_with("# room_metrics"))
         .map(|l| format!("{l}\n"))
@@ -288,7 +299,7 @@ pub(super) fn transfer_with_ir(id: u32) -> StoredTrace {
         .map(|v| (20.0 * v.abs().log10()).max(-200.0))
         .collect();
     t.ir = Some(TransferIr {
-        sample_rate: Hz(fs),
+        sample_rate_hz: Hz(fs),
         ir: TraceIr {
             t0: Seconds(-2048.0 / fs),
             dt: Seconds(1.0 / fs),
@@ -303,9 +314,9 @@ pub(super) fn transfer_with_ir(id: u32) -> StoredTrace {
 fn transfer_ir_csv_and_session_round_trip() {
     let t = transfer_with_ir(6);
     let csv = export_csv(&t);
-    assert!(csv.starts_with("# ac2 trace export v6\n"));
+    assert!(csv.starts_with("# ac2 trace export v7\n"));
     assert!(
-        csv.contains("\n# transfer_ir: {\"sample_rate\":48000.0,\"t0\":-0.042666666666666665,"),
+        csv.contains("\n# transfer_ir: {\"sample_rate_hz\":48000.0,\"t0\":-0.042666666666666665,"),
         "{}",
         &csv[..1500]
     );
@@ -324,7 +335,7 @@ fn transfer_ir_csv_and_session_round_trip() {
     assert!(tgt.ir.is_none());
     // An export written before transfer traces kept their IR (v3) imports without one.
     let v3: String = csv[..csv.find("# impulse response").unwrap()]
-        .replacen("# ac2 trace export v6", "# ac2 trace export v3", 1)
+        .replacen("# ac2 trace export v7", "# ac2 trace export v3", 1)
         .lines()
         .filter(|l| !l.starts_with("# transfer_ir"))
         .map(|l| format!("{l}\n"))

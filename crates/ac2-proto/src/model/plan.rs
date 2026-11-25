@@ -79,7 +79,7 @@ pub struct SurfaceTag {
 
 /// One surface of the prism a plan describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Surface {
     /// The wall standing on outline edge `edge` (0-based: vertex `edge` to `edge + 1`).
     Wall {

@@ -134,7 +134,7 @@ pub fn import(content: &[u8], opts: IrImport) -> Result<Imported, ImportError> {
         coherence: None,
     };
     let ir = TransferIr {
-        sample_rate: Hz(fs),
+        sample_rate_hz: Hz(fs),
         ir: TraceIr {
             t0: Seconds(-resp.delay_s),
             dt: Seconds(1.0 / fs),
@@ -143,7 +143,7 @@ pub fn import(content: &[u8], opts: IrImport) -> Result<Imported, ImportError> {
         },
     };
     let ir_file = IrFile {
-        sample_rate: Hz(fs),
+        sample_rate_hz: Hz(fs),
         channels: info.channels,
         channel,
         frames: info.frames,
@@ -160,8 +160,8 @@ pub fn import(content: &[u8], opts: IrImport) -> Result<Imported, ImportError> {
                 .unresolved
                 .iter()
                 .map(|&(lo, hi)| FreqRange {
-                    lo: Hz(lo),
-                    hi: Hz(hi),
+                    lo_hz: Hz(lo),
+                    hi_hz: Hz(hi),
                 })
                 .collect(),
         },
@@ -210,8 +210,8 @@ pub enum IrExportError {
 /// sample, as stored (an imported file's samples come back bit-exact).
 pub fn export(t: &StoredTrace) -> Result<Vec<u8>, IrExportError> {
     let (fs, ir) = match (&t.ir, &t.sweep) {
-        (Some(x), _) => (x.sample_rate.0, &x.ir),
-        (None, Some(s)) => (s.info.sample_rate.0, &s.ir),
+        (Some(x), _) => (x.sample_rate_hz.0, &x.ir),
+        (None, Some(s)) => (s.info.sample_rate_hz.0, &s.ir),
         (None, None) => return Err(IrExportError::NoIr),
     };
     let every = ir.dt.0 * fs;

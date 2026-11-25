@@ -491,7 +491,7 @@ fn joined_columns(t: &TfTrace<'_>, n: usize) -> Vec<Option<Joined>> {
     (0..n)
         .map(|i| {
             let f = t.freqs[i];
-            let inside = ranges.iter().any(|r| f >= r.lo.0 && f <= r.hi.0);
+            let inside = ranges.iter().any(|r| f >= r.lo_hz.0 && f <= r.hi_hz.0);
             let v = validity.get(i).copied().unwrap_or(ValidityMask::NONE);
             if !inside {
                 None
@@ -918,7 +918,7 @@ pub fn import_note(n: ImportNote) -> &'static str {
 /// `IR · channel 2 of 2 · 48 kHz · 4096 samples · peak at 2.083 ms · whole file · phase re peak`.
 pub fn ir_file_text(f: &ac2_proto::model::IrFile) -> String {
     use ac2_proto::model::{IrAlign, IrImportWindow};
-    let rate = format!("{} kHz", f.sample_rate.0 / 1000.0);
+    let rate = format!("{} kHz", f.sample_rate_hz.0 / 1000.0);
     let samples = if u64::from(f.kept) == f.frames {
         format!("{} samples", f.frames)
     } else {

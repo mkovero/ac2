@@ -667,8 +667,8 @@ impl Form {
                 a,
                 b,
                 band: AlignBand {
-                    lo: ac2_proto::units::Hz(0.0),
-                    hi: ac2_proto::units::Hz(0.0),
+                    lo_hz: ac2_proto::units::Hz(0.0),
+                    hi_hz: ac2_proto::units::Hz(0.0),
                 },
                 max_delay: ALIGN_MAX_DELAY_DEFAULT,
             }),

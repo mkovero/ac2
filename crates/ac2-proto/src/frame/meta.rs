@@ -134,7 +134,7 @@ impl OperandStatus {
 #[serde(deny_unknown_fields)]
 pub struct IrMeta {
     /// Sample rate of the underlying IR.
-    pub sample_rate: Hz,
+    pub sample_rate_hz: Hz,
     /// Time of point 0.
     pub t0: Seconds,
     /// Point spacing after decimation.

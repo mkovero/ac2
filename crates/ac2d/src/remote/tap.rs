@@ -105,7 +105,7 @@ impl SourceTap {
             frames: block.frames,
             flags,
             capture_ns: (self.capture_stamps && block.capture_stamp).then_some(block.host_ns),
-            rate: self.rate,
+            sample_rate_hz: self.rate,
             incarnation: self.incarnation,
         };
         // The header is the same for every channel of the block: encoded once, by the
@@ -171,7 +171,7 @@ mod tests {
                 frames: 3,
                 flags: AudioFlags::XRUN.with(AudioFlags::GAP),
                 capture_ns: Some(1_000 + start),
-                rate: 96_000,
+                sample_rate_hz: 96_000,
                 incarnation,
             };
             let column: Vec<f32> = data.iter().skip(1).step_by(2).copied().collect();

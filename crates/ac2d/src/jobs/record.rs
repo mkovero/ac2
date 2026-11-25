@@ -99,7 +99,7 @@ impl Recorder {
         progress: SharedProgress,
         to: Sender<ControlMsg>,
     ) -> Self {
-        let rate = f64::from(sidecar.audio.sample_rate);
+        let rate = f64::from(sidecar.audio.sample_rate_hz);
         let max_frames = (sidecar.limits.max_duration.0 * rate).floor().max(0.0) as u64;
         let per_frame = u64::from(writer.channels()) * 4;
         let max_bytes_frames = sidecar
@@ -364,7 +364,7 @@ impl Analysis for Recorder {
             self.end_now(reason);
             return;
         }
-        let every = PROGRESS_S * u64::from(self.sidecar.audio.sample_rate);
+        let every = PROGRESS_S * u64::from(self.sidecar.audio.sample_rate_hz);
         if frames >= self.reported + every {
             self.reported = frames;
             self.publish();

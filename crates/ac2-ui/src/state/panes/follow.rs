@@ -120,7 +120,7 @@ fn drawn_levels(data: &FrameData, freqs: &[f64], offset: f64) -> Option<Vec<f64>
                 let ok =
                     validity.is_none_or(|v| v.get(i).is_some_and(|m| *m == ValidityMask::NONE));
                 let resolved = unresolved
-                    .is_none_or(|u| !u.ranges.iter().any(|r| *f >= r.lo.0 && *f <= r.hi.0));
+                    .is_none_or(|u| !u.ranges.iter().any(|r| *f >= r.lo_hz.0 && *f <= r.hi_hz.0));
                 if ok && resolved {
                     f64::from(*l) + offset
                 } else {

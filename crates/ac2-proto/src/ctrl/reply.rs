@@ -99,7 +99,7 @@ pub enum ReplyBody {
     Inputs(InputSetups),
     /// `stream.outputs`: every output label.
     Outputs(Vec<OutputSetup>),
-    /// `server.info`, `server.authorize`, `server.revoke`, `auth.admit_rig`.
+    /// `server.info`, `auth.authorize`, `auth.revoke`, `auth.admit_rig`.
     Server(ServerInfo),
     /// `source.state`.
     SourceState(Box<SourceState>),
@@ -139,7 +139,7 @@ pub enum ReplyBody {
     Sim(crate::model::SimState),
 }
 
-/// A ctrl reply. `result` is msgpack `{"Ok": ReplyBody}` or `{"Err": ProtoError}`.
+/// A ctrl reply. `result` is msgpack `{"ok": ReplyBody}` or `{"err": ProtoError}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Reply {
@@ -148,6 +148,7 @@ pub struct Reply {
     /// Id of the request answered.
     pub id: RequestId,
     /// Outcome.
+    #[serde(with = "snake_result")]
     pub result: Result<ReplyBody, ProtoError>,
     /// What a successful command did that the caller should know about (empty mostly).
     pub warnings: Vec<Warning>,
@@ -185,5 +186,50 @@ impl Reply {
                 }),
             }),
         )
+    }
+}
+
+/// `Result` with its variants in snake case, as every other enum on the wire; serde's own
+/// impl spells them `Ok` / `Err`.
+mod snake_result {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "snake_case")]
+    enum Ser<'a, T, E> {
+        Ok(&'a T),
+        Err(&'a E),
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum De<T, E> {
+        Ok(T),
+        Err(E),
+    }
+
+    pub(super) fn serialize<S, T, E>(r: &Result<T, E>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: Serialize,
+        E: Serialize,
+    {
+        match r {
+            Ok(t) => Ser::Ok(t),
+            Err(e) => Ser::Err(e),
+        }
+        .serialize(s)
+    }
+
+    pub(super) fn deserialize<'de, D, T, E>(d: D) -> Result<Result<T, E>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+        E: Deserialize<'de>,
+    {
+        Ok(match De::deserialize(d)? {
+            De::Ok(t) => Ok(t),
+            De::Err(e) => Err(e),
+        })
     }
 }

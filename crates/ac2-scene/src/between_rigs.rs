@@ -49,7 +49,10 @@ pub fn relation_text(r: &RemoteState, other: &str, rel: &PeerRelation) -> String
                 name_of(r, *rig),
                 ppm(*p)
             ),
-            NotLockedReason::OtherRate { theirs, ours } => {
+            NotLockedReason::OtherRate {
+                theirs_hz: theirs,
+                ours_hz: ours,
+            } => {
                 format!("CLOCKS NOT LOCKED: {}", other_rate(other, *theirs, *ours))
             }
         },

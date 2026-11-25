@@ -5,7 +5,7 @@ use super::*;
 
 fn trace(id: u32) -> StoredTrace {
     let info = DynamicsInfo {
-        sample_rate: Hz(44_100.0),
+        sample_rate_hz: Hz(44_100.0),
         carrier: Hz(44_100.0 / 44.0),
         period: 44,
         onset: DynamicsOnset::Peak,
@@ -157,7 +157,7 @@ fn dynamics_csv_and_session_round_trip() {
     let d = t.dynamics.as_deref().unwrap();
     let csv = export_csv(&t);
     assert!(csv.contains("# kind: dynamics\n"), "{}", &csv[..600]);
-    assert!(csv.contains("\n# dynamics_info: {\"sample_rate\":44100.0,"));
+    assert!(csv.contains("\n# dynamics_info: {\"sample_rate_hz\":44100.0,"));
     assert!(csv.contains("\n# dynamics_steps: {\"rows\":8}\ninput,step,level_dbfs,"));
     assert!(csv.contains("\n# dynamics_envelopes: {\"rows\":40}\ninput,step,edge,t_s,"));
     for token in [

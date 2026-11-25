@@ -13,7 +13,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
     // No stream: a calibration needs the capture device it is tied to.
     let e = c
         .call(Command::CalSpl {
-            input: 1,
+            channel: 1,
             mic: "M30".into(),
             calibrator_level: DbSpl(94.0),
             calibrator_freq: Hz(1000.0),
@@ -87,7 +87,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
     let entry = loop {
         match c
             .call(Command::CalSpl {
-                input: 1,
+                channel: 1,
                 mic: "M30".into(),
                 calibrator_level: DbSpl(94.0),
                 calibrator_freq: Hz(1000.0),
@@ -132,7 +132,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
             label: None,
             file_name: "bad.frd".into(),
             content: Blob(b"20 0\n10 1\n".to_vec()),
-            input: Some(1),
+            channel: Some(1),
         })
         .await
         .unwrap_err();
@@ -394,7 +394,7 @@ async fn a_damaged_store_is_set_aside_and_a_new_one_written() {
         label: None,
         file_name: "c.txt".into(),
         content: Blob(CURVE.as_bytes().to_vec()),
-        input: None,
+        channel: None,
     })
     .await
     .unwrap();

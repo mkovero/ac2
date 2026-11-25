@@ -215,8 +215,8 @@ pub enum Command {
     },
     /// Whether the daemon reopens the last stream's device capture-only when it starts,
     /// so the rig measurements meter with no client connected (`rig.monitor_at_start`).
-    #[serde(rename = "rig.monitor_start")]
-    RigMonitorStart {
+    #[serde(rename = "rig.monitor_at_start")]
+    RigMonitorAtStart {
         /// The `rig.rev` the edit was made on; another is refused with `conflict`.
         base: Rev,
         /// On or off.
@@ -470,7 +470,7 @@ pub enum Command {
     #[serde(rename = "cal.spl")]
     CalSpl {
         /// Input channel.
-        input: u16,
+        channel: u16,
         /// Mic name.
         mic: String,
         /// Calibrator level.
@@ -499,8 +499,8 @@ pub enum Command {
         file_name: String,
         /// File content (`.frd`, `.txt`, CSV); the daemon parses and validates it.
         content: Blob,
-        /// Input whose mic name is set.
-        input: Option<u16>,
+        /// Input channel whose mic name is set.
+        channel: Option<u16>,
     },
     /// Rename a curve; inputs that chose it follow.
     #[serde(rename = "cal.curve_rename")]
@@ -914,8 +914,8 @@ pub enum Command {
     },
     /// Authorize a client key under `name`. Applies to connections from now on, network on
     /// or off; written to the authorized-clients file.
-    #[serde(rename = "server.authorize")]
-    ServerAuthorize {
+    #[serde(rename = "auth.authorize")]
+    AuthAuthorize {
         /// Name the client's requests will carry (1 … 64 characters, no spaces).
         name: String,
         /// The client's public key (Z85, 40 characters).
@@ -923,14 +923,14 @@ pub enum Command {
     },
     /// Revoke the client key named `name`: its requests are refused at once,
     /// and it cannot connect again. A client cannot revoke its own key.
-    #[serde(rename = "server.revoke")]
-    ServerRevoke {
+    #[serde(rename = "auth.revoke")]
+    AuthRevoke {
         /// The authorized name.
         name: String,
     },
     /// Admit another rig's key as a rig, network on or off: it may then take this rig's captured
     /// inputs (`audio/` topics) and read `source.state`, and nothing else. The operator's app,
-    /// authorized on both rigs, gives this rig the other's key. Removed with `server.revoke`
+    /// authorized on both rigs, gives this rig the other's key. Removed with `auth.revoke`
     /// under `name`, which ends its stream at once.
     #[serde(rename = "auth.admit_rig")]
     AuthAdmitRig {
@@ -963,7 +963,7 @@ pub enum Command {
     #[serde(rename = "rig.unpair")]
     RigUnpair {
         /// The paired rig's identity.
-        rig: RigId,
+        rig_id: RigId,
     },
     /// What a rig taking this rig's inputs may know: its clocks with the stamp map, and its
     /// stream's rate and captured inputs with their setup and calibration.

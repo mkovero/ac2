@@ -374,7 +374,7 @@ pub enum StopCause {
 
 /// Reopening a stopped stream's configuration, attempt by attempt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Recovery {
     /// Attempt `attempt` (1-based) is opening the stream since `started`; an audio server
     /// that hangs may keep it there.

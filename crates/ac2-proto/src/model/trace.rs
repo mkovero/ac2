@@ -101,7 +101,7 @@ pub enum IrAlign {
 #[serde(deny_unknown_fields)]
 pub struct IrFile {
     /// Sample rate of the file.
-    pub sample_rate: Hz,
+    pub sample_rate_hz: Hz,
     /// Channels in the file.
     pub channels: u16,
     /// Channel read, 0-based.
@@ -403,7 +403,7 @@ pub struct TraceEdit {
     /// Name.
     pub name: String,
     /// Colour.
-    pub color: Rgb,
+    pub colour: Rgb,
     /// Shown.
     pub visible: bool,
     /// Protected from edits and deletion.
@@ -633,7 +633,7 @@ pub struct TraceData {
 #[serde(deny_unknown_fields)]
 pub struct TransferIr {
     /// Sample rate of the measurement.
-    pub sample_rate: Hz,
+    pub sample_rate_hz: Hz,
     /// The samples, time zero at the trace's `delay` (the inserted delay at capture).
     pub ir: TraceIr,
 }

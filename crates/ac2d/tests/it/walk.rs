@@ -797,6 +797,14 @@ fn the_plan_library_keeps_checked_plans_on_disk() {
         vec![ac2_proto::samples::plan()]
     );
     let plan_dir = dir.clone();
+    // The file is versioned; one of no version (or another) is left out of the library.
+    let file: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("Hall.json")).unwrap()).unwrap();
+    assert_eq!(file["version"], 1);
+    let mut old = file.clone();
+    old.as_object_mut().unwrap().remove("version");
+    old["name"] = "Old".into();
+    std::fs::write(dir.join("Old.json"), old.to_string()).unwrap();
     let tmp = std::mem::replace(&mut r.dir, tempfile::tempdir().unwrap());
     r.shutdown();
 

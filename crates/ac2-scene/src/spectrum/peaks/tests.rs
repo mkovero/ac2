@@ -214,8 +214,8 @@ fn a_loud_peak_in_an_unresolved_range_is_tracked_first() {
     let unresolved = Unresolved {
         resolution: Resolution::FortyEighth,
         ranges: vec![FreqRange {
-            lo: Hz(0.0),
-            hi: Hz(200.0),
+            lo_hz: Hz(0.0),
+            hi_hz: Hz(200.0),
         }],
     };
     let p = find_peaks(&PeakInput {

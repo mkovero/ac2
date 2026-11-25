@@ -152,14 +152,14 @@ fn import(a: &RecImportArgs, out: &mut Out<'_>) -> Result<(), CliError> {
 
 pub(crate) fn import_text(src: &Path, path: &Path, s: &ac2_traces::raw::Sidecar) -> String {
     let frames = s.end.as_ref().map_or(0, |e| e.frames);
-    let secs = frames as f64 / f64::from(s.audio.sample_rate.max(1));
+    let secs = frames as f64 / f64::from(s.audio.sample_rate_hz.max(1));
     format!(
         "{} imported as {}: {} channel(s) at {} Hz, {:.1} s\nreplay it in real time (file \
          second t is the replay's start + t on the meter's clock): ac2 stream replay \"{}\"",
         src.display(),
         path.display(),
         s.audio.channels.len(),
-        s.audio.sample_rate,
+        s.audio.sample_rate_hz,
         secs,
         path.display()
     )

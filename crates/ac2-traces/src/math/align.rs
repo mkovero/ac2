@@ -76,8 +76,8 @@ pub fn align(
         &hb,
         coh.as_deref(),
         &Params {
-            lo: band.lo.0,
-            hi: band.hi.0,
+            lo: band.lo_hz.0,
+            hi: band.hi_hz.0,
             max_delay: max_delay.0,
         },
     );

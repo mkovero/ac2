@@ -9,7 +9,7 @@ pub fn ir_frame(d: &TraceData) -> Option<ac2_proto::frame::IrFrame> {
     Some(ac2_proto::frame::IrFrame {
         meas: ac2_proto::units::MeasId(0),
         meta: ac2_proto::frame::IrMeta {
-            sample_rate: s.info.sample_rate,
+            sample_rate_hz: s.info.sample_rate_hz,
             t0: s.ir.t0,
             dt: s.ir.dt,
             inserted_delay: s.info.arrival,

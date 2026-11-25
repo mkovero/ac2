@@ -7,7 +7,9 @@ use num_complex::Complex64;
 const FS: f64 = 48_000.0;
 
 fn digital() -> EqRealisation {
-    EqRealisation::Digital { rate: Hz(FS) }
+    EqRealisation::Digital {
+        sample_rate_hz: Hz(FS),
+    }
 }
 
 fn body(sections: Vec<EqSection>) -> EqBody {

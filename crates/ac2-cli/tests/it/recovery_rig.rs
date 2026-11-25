@@ -75,7 +75,7 @@ async fn status_shows_stopped_audio_until_the_daemon_reopens_it() {
     assert!(text.contains("audio I/O open"), "{text}");
     let json: serde_json::Value = serde_json::from_str(&status(&ep, true).await).unwrap();
     assert_eq!(json["stream"]["stopped"]["cause"]["type"], "host_ended");
-    assert_eq!(json["stream"]["stopped"]["recovery"]["state"], "waiting");
+    assert_eq!(json["stream"]["stopped"]["recovery"]["type"], "waiting");
 
     backend.restore();
     let text = status_until(&ep, "reopened stream", |t| !t.contains("STOPPED")).await;

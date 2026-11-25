@@ -198,7 +198,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             sweep: None,
             dynamics: None,
             ir: Some(TransferIr {
-                sample_rate: Hz(48_000.0),
+                sample_rate_hz: Hz(48_000.0),
                 ir: TraceIr {
                     t0: Seconds(-2.0 / 48_000.0),
                     dt: Seconds(1.0 / 48_000.0),

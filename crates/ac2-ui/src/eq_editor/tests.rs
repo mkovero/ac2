@@ -71,15 +71,19 @@ fn field_steps() {
 
 #[test]
 fn realisation_cycles_through_analog() {
-    let d48 = EqRealisation::Digital { rate: Hz(48_000.0) };
+    let d48 = EqRealisation::Digital {
+        sample_rate_hz: Hz(48_000.0),
+    };
     assert_eq!(
         step_realisation(d48, 1),
-        EqRealisation::Digital { rate: Hz(88_200.0) }
+        EqRealisation::Digital {
+            sample_rate_hz: Hz(88_200.0)
+        }
     );
     assert_eq!(
         step_realisation(
             EqRealisation::Digital {
-                rate: Hz(192_000.0)
+                sample_rate_hz: Hz(192_000.0)
             },
             1
         ),
@@ -87,7 +91,9 @@ fn realisation_cycles_through_analog() {
     );
     assert_eq!(
         step_realisation(EqRealisation::Analog, 1),
-        EqRealisation::Digital { rate: Hz(44_100.0) }
+        EqRealisation::Digital {
+            sample_rate_hz: Hz(44_100.0)
+        }
     );
 }
 

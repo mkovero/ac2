@@ -128,7 +128,7 @@ impl Value {
 pub(super) fn coarsest_bins(each: &[&[BinRange]]) -> Vec<BinRange> {
     let mut edges: Vec<f64> = each
         .iter()
-        .flat_map(|r| r.iter().flat_map(|b| [b.lo.0, b.hi.0]))
+        .flat_map(|r| r.iter().flat_map(|b| [b.lo_hz.0, b.hi_hz.0]))
         .collect();
     edges.sort_by(f64::total_cmp);
     edges.dedup();
@@ -138,17 +138,17 @@ pub(super) fn coarsest_bins(each: &[&[BinRange]]) -> Vec<BinRange> {
         let Some(bin) = each
             .iter()
             .flat_map(|r| r.iter())
-            .filter(|b| b.lo.0 <= mid && mid <= b.hi.0)
+            .filter(|b| b.lo_hz.0 <= mid && mid <= b.hi_hz.0)
             .map(|b| b.bin_hz.0)
             .reduce(f64::max)
         else {
             continue;
         };
         match out.last_mut() {
-            Some(last) if last.hi.0 == w[0] && last.bin_hz.0 == bin => last.hi = Hz(w[1]),
+            Some(last) if last.hi_hz.0 == w[0] && last.bin_hz.0 == bin => last.hi_hz = Hz(w[1]),
             _ => out.push(BinRange {
-                lo: Hz(w[0]),
-                hi: Hz(w[1]),
+                lo_hz: Hz(w[0]),
+                hi_hz: Hz(w[1]),
                 bin_hz: Hz(bin),
             }),
         }
@@ -518,8 +518,8 @@ pub(crate) fn combine(
         .iter()
         .filter_map(|(_, v)| v.settling)
         .reduce(|a, b| FreqRange {
-            lo: Hz(a.lo.0.min(b.lo.0)),
-            hi: Hz(a.hi.0.max(b.hi.0)),
+            lo_hz: Hz(a.lo_hz.0.min(b.lo_hz.0)),
+            hi_hz: Hz(a.hi_hz.0.max(b.hi_hz.0)),
         });
     // Known only when every included operand states its ranges.
     let unresolved = included
@@ -636,10 +636,12 @@ pub(super) fn intersection(
     ranges
         .into_iter()
         .reduce(|a, b| match (a, b) {
-            (Some(a), Some(b)) if a.lo.0.max(b.lo.0) <= a.hi.0.min(b.hi.0) => Some(FreqRange {
-                lo: Hz(a.lo.0.max(b.lo.0)),
-                hi: Hz(a.hi.0.min(b.hi.0)),
-            }),
+            (Some(a), Some(b)) if a.lo_hz.0.max(b.lo_hz.0) <= a.hi_hz.0.min(b.hi_hz.0) => {
+                Some(FreqRange {
+                    lo_hz: Hz(a.lo_hz.0.max(b.lo_hz.0)),
+                    hi_hz: Hz(a.hi_hz.0.min(b.hi_hz.0)),
+                })
+            }
             _ => None,
         })
         .flatten()

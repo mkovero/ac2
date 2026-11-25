@@ -13,7 +13,8 @@ use super::table::{
 };
 use super::{
     AC2_CSV_MAGIC, AC2_CSV_MAGIC_V1, AC2_CSV_MAGIC_V2, AC2_CSV_MAGIC_V3, AC2_CSV_MAGIC_V4,
-    AC2_CSV_MAGIC_V5, AC2_CSV_PREFIX, IR_HEADER, ImportError, Imported, IrAnnounce, fail,
+    AC2_CSV_MAGIC_V5, AC2_CSV_MAGIC_V6, AC2_CSV_PREFIX, IR_HEADER, ImportError, Imported,
+    IrAnnounce, fail,
 };
 
 pub(super) fn kind_from_header(v: &str) -> Option<TraceKind> {
@@ -129,6 +130,7 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
     let magic = first.1.trim();
     if ![
         AC2_CSV_MAGIC,
+        AC2_CSV_MAGIC_V6,
         AC2_CSV_MAGIC_V5,
         AC2_CSV_MAGIC_V4,
         AC2_CSV_MAGIC_V3,
@@ -140,13 +142,45 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
         let msg = if magic.starts_with(AC2_CSV_PREFIX) {
             format!(
                 "{magic:?}: another ac2 CSV version; this build reads {AC2_CSV_MAGIC:?}, \
-                 {AC2_CSV_MAGIC_V5:?}, {AC2_CSV_MAGIC_V4:?}, {AC2_CSV_MAGIC_V3:?}, {AC2_CSV_MAGIC_V2:?} and {AC2_CSV_MAGIC_V1:?}"
+                 {AC2_CSV_MAGIC_V6:?}, {AC2_CSV_MAGIC_V5:?}, {AC2_CSV_MAGIC_V4:?}, {AC2_CSV_MAGIC_V3:?}, {AC2_CSV_MAGIC_V2:?} and {AC2_CSV_MAGIC_V1:?}"
             )
         } else {
             format!("not an ac2 CSV file (expected {AC2_CSV_MAGIC:?})")
         };
         return Err(fail(Some(first.0), ImportProblem::BadHeader, msg));
     }
+    if magic != AC2_CSV_MAGIC {
+        let owned: Vec<(usize, String)> = lines
+            .iter()
+            .map(|&(no, l)| (no, unit_names(l).unwrap_or_else(|| l.to_owned())))
+            .collect();
+        let view: Vec<(usize, &str)> = owned.iter().map(|(no, l)| (*no, l.as_str())).collect();
+        return import_current(&view);
+    }
+    import_current(lines)
+}
+
+/// A JSON header line of a version 6 export or older under this version's names (`None`:
+/// the line is not one of them, and is read as it is). These lines hold no string that
+/// could contain a quoted key, and no other `sample_rate`, `lo` or `hi`, so renaming the
+/// keys in the text is exact (a parse and rewrite would round the numbers).
+fn unit_names(l: &str) -> Option<String> {
+    const LINES: [&str; 4] = [
+        "# sweep_info: ",
+        "# sweep_unresolved: ",
+        "# transfer_ir: ",
+        "# dynamics_info: ",
+    ];
+    let t = l.trim();
+    LINES.iter().find(|p| t.starts_with(*p))?;
+    Some(
+        t.replace("\"sample_rate\":", "\"sample_rate_hz\":")
+            .replace("\"lo\":", "\"lo_hz\":")
+            .replace("\"hi\":", "\"hi_hz\":"),
+    )
+}
+
+fn import_current(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
     if header_kind_of(lines) == Some(TraceKind::Dynamics) {
         return import_dynamics(lines);
     }
@@ -337,7 +371,7 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
         Some((IrAnnounce::Transfer(h), ir)) => (
             None,
             Some(TransferIr {
-                sample_rate: h.sample_rate,
+                sample_rate_hz: h.sample_rate_hz,
                 ir,
             }),
         ),

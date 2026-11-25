@@ -168,7 +168,7 @@ fn an_spl_meter_needs_a_microphone() {
     // So does a sensitivity calibration on a line input: there is no capsule to calibrate.
     let e = c
         .call(Command::CalSpl {
-            input: 1,
+            channel: 1,
             mic: "M30".into(),
             calibrator_level: ac2_proto::units::DbSpl(94.0),
             calibrator_freq: ac2_proto::units::Hz(1000.0),

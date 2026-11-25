@@ -200,7 +200,7 @@
     "content": {
      "$bin": "3230202d302e350a323030303020312e350a"
     },
-    "input": 1
+    "channel": 1
    }
   },
   "expect_rev": 41
@@ -244,7 +244,7 @@
      {
       "channel": 1,
       "kind": {
-       "kind": "mic",
+       "type": "mic",
        "mic": "M30 #1234",
        "curve": {
         "type": "curve",
@@ -256,7 +256,7 @@
      {
       "channel": 2,
       "kind": {
-       "kind": "mic",
+       "type": "mic",
        "mic": null,
        "curve": {
         "type": "not_chosen"
@@ -267,7 +267,7 @@
      {
       "channel": 3,
       "kind": {
-       "kind": "mic",
+       "type": "mic",
        "mic": "ECM",
        "curve": {
         "type": "off"
@@ -278,21 +278,21 @@
      {
       "channel": 4,
       "kind": {
-       "kind": "line"
+       "type": "line"
       },
       "pair": "left"
      },
      {
       "channel": 5,
       "kind": {
-       "kind": "line"
+       "type": "line"
       },
       "pair": "right"
      },
      {
       "channel": 6,
       "kind": {
-       "kind": "digital"
+       "type": "digital"
       },
       "pair": null
      }
@@ -335,13 +335,13 @@
      {
       "channel": 0,
       "kind": {
-       "kind": "line"
+       "type": "line"
       }
      },
      {
       "channel": 1,
       "kind": {
-       "kind": "line"
+       "type": "line"
       }
      }
     ],
@@ -428,7 +428,7 @@
   "cmd": {
    "op": "cal.spl_electrical",
    "args": {
-    "input": 1,
+    "channel": 1,
     "mic": "M30 #1234",
     "connection": "in_line",
     "volts": 0.015,
@@ -559,7 +559,7 @@
   "v": 105,
   "id": 59,
   "cmd": {
-   "op": "server.revoke",
+   "op": "auth.revoke",
    "args": {
     "name": "laptop"
    }
@@ -771,7 +771,7 @@
   "v": 105,
   "id": 79,
   "cmd": {
-   "op": "rig.monitor_start",
+   "op": "rig.monitor_at_start",
    "args": {
     "base": 38,
     "on": true
@@ -1129,7 +1129,7 @@
   "cmd": {
    "op": "rig.unpair",
    "args": {
-    "rig": 1801811061
+    "rig_id": 1801811061
    }
   },
   "expect_rev": 41

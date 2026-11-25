@@ -281,8 +281,8 @@ fn alignment_prefills_the_band() {
             a: Operand::Meas { meas: MeasId(1) },
             b: Operand::Meas { meas: MeasId(2) },
             band: AlignBand {
-                lo: ac2_proto::units::Hz(65.0),
-                hi: ac2_proto::units::Hz(130.0),
+                lo_hz: ac2_proto::units::Hz(65.0),
+                hi_hz: ac2_proto::units::Hz(130.0),
             },
             max_delay: ac2_proto::units::Seconds(0.05),
         }
@@ -317,7 +317,7 @@ fn alignment_band_is_asked_without_curves() {
     else {
         panic!()
     };
-    assert_eq!((band.lo.0, band.hi.0), (800.0, 1800.0));
+    assert_eq!((band.lo_hz.0, band.hi_hz.0), (800.0, 1800.0));
     assert!((max_delay.0 - 0.02).abs() < 1e-12, "{max_delay:?}");
     focus(&mut f, FieldId::AlignTo);
     f.select_all();
@@ -342,8 +342,8 @@ fn alignment_edit_prefills_its_rows() {
                     a: Operand::Meas { meas: MeasId(2) },
                     b: Operand::Meas { meas: MeasId(1) },
                     band: AlignBand {
-                        lo: ac2_proto::units::Hz(60.0),
-                        hi: ac2_proto::units::Hz(120.0),
+                        lo_hz: ac2_proto::units::Hz(60.0),
+                        hi_hz: ac2_proto::units::Hz(120.0),
                     },
                     max_delay: ac2_proto::units::Seconds(0.03),
                 },

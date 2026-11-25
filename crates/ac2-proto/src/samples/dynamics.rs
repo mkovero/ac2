@@ -167,7 +167,7 @@ pub fn dynamics_data() -> DynamicsData {
     };
     DynamicsData {
         info: DynamicsInfo {
-            sample_rate: Hz(48_000.0),
+            sample_rate_hz: Hz(48_000.0),
             carrier: Hz(1000.0),
             period: 48,
             onset: DynamicsOnset::Peak,

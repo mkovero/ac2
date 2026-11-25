@@ -180,8 +180,8 @@ pub fn alignment(cli: &Cli) -> R {
                 meas: id_of(cli, "Main L")?,
             },
             band: AlignBand {
-                lo: Hz(60.0),
-                hi: Hz(120.0),
+                lo_hz: Hz(60.0),
+                hi_hz: Hz(120.0),
             },
             max_delay: Seconds(0.05),
         },
@@ -240,7 +240,9 @@ pub fn walk(cli: &Cli) -> R {
 pub fn eq_body() -> EqBody {
     EqBody {
         name: "EQ 1".into(),
-        realisation: EqRealisation::Digital { rate: Hz(48_000.0) },
+        realisation: EqRealisation::Digital {
+            sample_rate_hz: Hz(48_000.0),
+        },
         peak_q: PeakQ::HalfGain,
         enabled: true,
         sections: vec![
@@ -330,7 +332,7 @@ pub fn rig_monitor(cli: &Cli) -> R {
         base: base()?,
         seconds: Seconds(1.5),
     })?;
-    cli.call(Command::RigMonitorStart {
+    cli.call(Command::RigMonitorAtStart {
         base: base()?,
         on: true,
     })?;
@@ -354,7 +356,7 @@ pub fn calibrations(cli: &Cli) -> R {
             label: Some(label.into()),
             file_name: file.into(),
             content: ac2_proto::units::Blob(std::fs::read(path)?),
-            input: None,
+            channel: None,
         })?;
     }
     cli.call(Command::StreamInputs {
@@ -385,7 +387,7 @@ pub fn calibrations(cli: &Cli) -> R {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         match cli.call(Command::CalSpl {
-            input: 1,
+            channel: 1,
             mic: mic.into(),
             calibrator_level: DbSpl(94.0),
             calibrator_freq: Hz(1000.0),

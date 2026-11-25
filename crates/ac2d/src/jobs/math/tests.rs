@@ -233,8 +233,8 @@ fn bins(a: Answer, ranges: &[(f64, f64, f64)]) -> Answer {
         ranges
             .iter()
             .map(|&(lo, hi, bin)| ac2_proto::model::BinRange {
-                lo: ac2_proto::units::Hz(lo),
-                hi: ac2_proto::units::Hz(hi),
+                lo_hz: ac2_proto::units::Hz(lo),
+                hi_hz: ac2_proto::units::Hz(hi),
                 bin_hz: ac2_proto::units::Hz(bin),
             })
             .collect(),
@@ -243,10 +243,11 @@ fn bins(a: Answer, ranges: &[(f64, f64, f64)]) -> Answer {
 }
 
 fn spans(f: &TfFrame) -> Option<Vec<(f64, f64, f64)>> {
-    f.meta
-        .unresolved
-        .as_ref()
-        .map(|r| r.iter().map(|b| (b.lo.0, b.hi.0, b.bin_hz.0)).collect())
+    f.meta.unresolved.as_ref().map(|r| {
+        r.iter()
+            .map(|b| (b.lo_hz.0, b.hi_hz.0, b.bin_hz.0))
+            .collect()
+    })
 }
 
 /// Live operands' ranges carry into the result, each piece at the coarsest width covering
@@ -783,8 +784,8 @@ fn at_bins(a: Answer, mic: (f64, f64)) -> Answer {
     }));
     t.meta.mic_curve = true;
     t.meta.mic_range = Some(ac2_proto::model::FreqRange {
-        lo: ac2_proto::units::Hz(mic.0),
-        hi: ac2_proto::units::Hz(mic.1),
+        lo_hz: ac2_proto::units::Hz(mic.0),
+        hi_hz: ac2_proto::units::Hz(mic.1),
     });
     Answer::Result(f)
 }
@@ -803,7 +804,7 @@ fn stage_of(a: &Answer, mag: Vec<f32>) -> Option<Vec<BinsFrame>> {
         meta: ac2_proto::frame::BinsMeta {
             stage: 0,
             factor: 1,
-            rate: ac2_proto::units::Hz(48_000.0),
+            sample_rate_hz: ac2_proto::units::Hz(48_000.0),
             bin_hz: ac2_proto::units::Hz(10.0),
             first_bin: 10,
             hop: ac2_proto::units::Samples(2400),
@@ -834,8 +835,8 @@ fn a_stage_bin_without_an_operand_value_has_none() {
         stage_of(&answers[1], vec![-6.0; 4]),
     ];
     let both = Some(ac2_proto::model::FreqRange {
-        lo: ac2_proto::units::Hz(20.0),
-        hi: ac2_proto::units::Hz(16_000.0),
+        lo_hz: ac2_proto::units::Hz(20.0),
+        hi_hz: ac2_proto::units::Hz(16_000.0),
     });
     for (c, coherence) in [
         (binary(meas(1), MathOp::Subtract, meas(2)), false),

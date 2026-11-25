@@ -53,7 +53,7 @@ pub(crate) async fn rig(cli: &Cli, cmd: &RigCmd, out: &mut Out<'_>) -> Result<()
     match cmd {
         RigCmd::MonitorAtStart { on } => {
             let on = on.on();
-            let rig = rig_edit(&c, |base| Command::RigMonitorStart { base, on }).await?;
+            let rig = rig_edit(&c, |base| Command::RigMonitorAtStart { base, on }).await?;
             out.emit(&rig, || {
                 if rig.monitor_at_start {
                     "monitor at start on: a restarted daemon reopens the last stream's \

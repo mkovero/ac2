@@ -89,7 +89,7 @@ pub(super) fn eq_sections() -> Vec<EqSection> {
             b2: 0.91,
             a1: -1.88,
             a2: 0.9,
-            rate: Hz(48_000.0),
+            sample_rate_hz: Hz(48_000.0),
         }),
         sec(EqShape::Response { trace: TraceId(8) }),
     ]
@@ -98,7 +98,9 @@ pub(super) fn eq_sections() -> Vec<EqSection> {
 pub(super) fn eq_body() -> EqBody {
     EqBody {
         name: "EQ 1".into(),
-        realisation: EqRealisation::Digital { rate: Hz(96_000.0) },
+        realisation: EqRealisation::Digital {
+            sample_rate_hz: Hz(96_000.0),
+        },
         peak_q: PeakQ::HalfGain,
         enabled: true,
         sections: eq_sections(),

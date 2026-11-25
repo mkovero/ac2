@@ -512,8 +512,8 @@ fn unresolved_ranges_are_shaded_and_named() {
     let un: Vec<BinRange> = [(50.0, 135.0, 0.977), (1625.0, 3250.0, 23.4)]
         .iter()
         .map(|&(lo, hi, bin)| BinRange {
-            lo: Hz(lo),
-            hi: Hz(hi),
+            lo_hz: Hz(lo),
+            hi_hz: Hz(hi),
             bin_hz: Hz(bin),
         })
         .collect();

@@ -281,9 +281,9 @@ impl SpecLevel {
 #[serde(deny_unknown_fields)]
 pub struct FreqRange {
     /// Lower edge.
-    pub lo: Hz,
+    pub lo_hz: Hz,
     /// Upper edge.
-    pub hi: Hz,
+    pub hi_hz: Hz,
 }
 
 /// Where a curve stored at `resolution` has columns closer together than its analysis
@@ -308,9 +308,9 @@ pub struct Unresolved {
 #[serde(deny_unknown_fields)]
 pub struct BinRange {
     /// Lower edge.
-    pub lo: Hz,
+    pub lo_hz: Hz,
     /// Upper edge.
-    pub hi: Hz,
+    pub hi_hz: Hz,
     /// Bin spacing of the serving stage. A range is split where another stage takes over,
     /// so it states one.
     pub bin_hz: Hz,

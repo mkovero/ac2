@@ -91,7 +91,7 @@ async fn two_curves_of_one_mic_switched_on_an_input() {
     // so those columns are uncorrected. No curve, no range.
     let r = at90.meta.mic_range.expect("the applied curve's range");
     let points = MicCurve::parse(&ninety).unwrap();
-    assert_eq!((r.lo.0, r.hi.0), (points.f_lo(), points.f_hi()));
+    assert_eq!((r.lo_hz.0, r.hi_hz.0), (points.f_lo(), points.f_hi()));
     assert_eq!(off.meta.mic_range, None);
     for &k in &cols {
         let f = grid_f(k as i32 - 336);

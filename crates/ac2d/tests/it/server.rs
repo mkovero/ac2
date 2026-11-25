@@ -93,7 +93,7 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
 
     // Bad input is refused without touching the file.
     let e = c
-        .call(Command::ServerAuthorize {
+        .call(Command::AuthAuthorize {
             name: "tablet".into(),
             key: "not a key".into(),
         })
@@ -101,7 +101,7 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
     assert_eq!(e.code, ErrorCode::Invalid);
 
     // Authorized from the laptop: the tablet connects, and its refusals are forgotten.
-    let authorized = c.server(Command::ServerAuthorize {
+    let authorized = c.server(Command::AuthAuthorize {
         name: "tablet".into(),
         key: tablet.public.to_z85(),
     });
@@ -124,20 +124,20 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
 
     // Nobody revokes their own key; an unknown name is not found.
     let e = c
-        .call(Command::ServerRevoke {
+        .call(Command::AuthRevoke {
             name: "laptop".into(),
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
     let e = c
-        .call(Command::ServerRevoke {
+        .call(Command::AuthRevoke {
             name: "phone".into(),
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound);
 
     // Revoked from the laptop: the tablet's connection is refused from the next request on.
-    let s = c.server(Command::ServerRevoke {
+    let s = c.server(Command::AuthRevoke {
         name: "tablet".into(),
     });
     assert_eq!(names(&s), vec!["laptop"]);
@@ -179,7 +179,7 @@ fn a_revoked_connection_stays_refused_when_its_name_goes_to_a_new_key() {
     );
     old.ok(Command::StreamStatus);
 
-    c.ok(Command::ServerRevoke {
+    c.ok(Command::AuthRevoke {
         name: "tablet".into(),
     });
     let e = old.call(Command::StreamStatus).unwrap_err();
@@ -187,7 +187,7 @@ fn a_revoked_connection_stays_refused_when_its_name_goes_to_a_new_key() {
 
     // The name goes to a different key while the old connection is still open: the new key
     // holds that authorization, the old connection does not get it back.
-    c.ok(Command::ServerAuthorize {
+    c.ok(Command::AuthAuthorize {
         name: "tablet".into(),
         key: new_tablet.public.to_z85(),
     });
@@ -237,7 +237,7 @@ fn a_local_daemon_has_no_client_keys() {
         }
     );
     let e = c
-        .call(Command::ServerAuthorize {
+        .call(Command::AuthAuthorize {
             name: "x".into(),
             key: KeyPair::generate().unwrap().public.to_z85(),
         })

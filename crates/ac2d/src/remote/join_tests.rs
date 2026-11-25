@@ -126,7 +126,7 @@ impl Rig {
                     frames: BLOCK,
                     flags: AudioFlags::NONE,
                     capture_ns: self.stamps.then(|| stamp(local)),
-                    rate,
+                    sample_rate_hz: rate,
                     incarnation: INC,
                 },
                 samples: (start..start + u64::from(BLOCK)).map(value).collect(),

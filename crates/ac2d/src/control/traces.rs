@@ -167,7 +167,7 @@ fn common_smoothing(inputs: &[&StoredTrace], kind: TraceKind) -> Option<Smoothin
 fn transfer_ir(f: ac2_proto::frame::IrFrame) -> Option<TransferIr> {
     let etc_db = f.etc?;
     (etc_db.len() == f.linear.len()).then_some(TransferIr {
-        sample_rate: f.meta.sample_rate,
+        sample_rate_hz: f.meta.sample_rate_hz,
         ir: TraceIr {
             t0: f.meta.t0,
             dt: f.meta.dt,

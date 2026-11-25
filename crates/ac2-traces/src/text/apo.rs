@@ -86,7 +86,9 @@ fn shelf_corner(
     };
     match real {
         EqRealisation::Analog => Some(f * ratio),
-        EqRealisation::Digital { rate } => {
+        EqRealisation::Digital {
+            sample_rate_hz: rate,
+        } => {
             let fs = rate.0;
             (f < fs / 2.0).then(|| fs / PI * ((PI * f / fs).tan() * ratio).atan())
         }
@@ -564,7 +566,10 @@ pub fn write(body: &EqBody, skip_unsupported: bool) -> Result<String, Vec<Export
     }
     let mut out = String::new();
     let _ = writeln!(out, "# {} · ac2 EQ", body.name);
-    if let EqRealisation::Digital { rate } = body.realisation {
+    if let EqRealisation::Digital {
+        sample_rate_hz: rate,
+    } = body.realisation
+    {
         let _ = writeln!(
             out,
             "# designed at {} Hz; APO runs at the device's rate",

@@ -266,7 +266,7 @@ pub fn check_output_label(l: &str) -> Result<(), String> {
 /// AES feed from an analogue one, so nothing is inferred. The kind fixes the dB reference
 /// and which calibrations are offered.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputKind {
     /// A measurement microphone: dB SPL through its sensitivity calibration. The mic name
     /// and curve live here, so a line or digital input cannot carry a mic name at all.

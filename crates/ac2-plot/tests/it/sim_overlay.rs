@@ -97,7 +97,7 @@ fn frame() -> IrFrame {
     IrFrame {
         meas: MeasId(1),
         meta: IrMeta {
-            sample_rate: Hz(48_000.0),
+            sample_rate_hz: Hz(48_000.0),
             t0: Seconds(-0.005),
             dt: Seconds(dt),
             inserted_delay: Seconds(0.0),

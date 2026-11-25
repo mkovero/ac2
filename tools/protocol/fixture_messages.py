@@ -163,12 +163,12 @@ BAND_LEQ_CONFIG = {
         "measured_at": 1789500000000000000,
         "origin": "measured",
         "bands": [
-            {"status": "unchecked", "attenuation": 20.0},
-            {"status": "clean", "attenuation": 25.5},
-            {"status": "corrected", "attenuation": 30.0, "margin": 5.5},
-            {"status": "unusable", "at_least": 35.0},
+            {"type": "unchecked", "attenuation": 20.0},
+            {"type": "clean", "attenuation": 25.5},
+            {"type": "corrected", "attenuation": 30.0, "margin": 5.5},
+            {"type": "unusable", "at_least": 35.0},
         ]
-        + [{"status": "missing"}] * 24,
+        + [{"type": "missing"}] * 24,
     },
 }
 
@@ -493,7 +493,7 @@ ALIGN_MEASUREMENT = {
                     "type": "align",
                     "a": {"type": "trace", "trace": 7},
                     "b": {"type": "meas", "meas": 1},
-                    "band": {"lo": 60.0, "hi": 120.0},
+                    "band": {"lo_hz": 60.0, "hi_hz": 120.0},
                     "max_delay": 0.05,
                 },
                 "reference": {"type": "operand", "operand": {"type": "trace", "trace": 7}},
@@ -611,7 +611,7 @@ def requests():
                 "label": "0°",
                 "file_name": "M30-1234.frd",
                 "content": b"20 -0.5\n20000 1.5\n",
-                "input": 1,
+                "channel": 1,
             },
         ),
         req(
@@ -663,7 +663,7 @@ def requests():
             48,
             "cal.spl_electrical",
             {
-                "input": 1,
+                "channel": 1,
                 "mic": "M30 #1234",
                 "connection": "in_line",
                 "volts": 0.015,
@@ -714,7 +714,7 @@ def requests():
             {"outputs": [{"channel": 0, "label": "Main L"}, {"channel": 1, "label": None}]},
         ),
         req(57, "server.info", mutation=False),
-        req(59, "server.revoke", {"name": "laptop"}),
+        req(59, "auth.revoke", {"name": "laptop"}),
         req(
             60,
             "auth.admit_rig",
@@ -777,7 +777,7 @@ def requests():
             "osc.test",
             {"msg": osc_message("/light/red", [{"type": "int", "value": 1}], True)},
         ),
-        req(79, "rig.monitor_start", {"base": 38, "on": True}),
+        req(79, "rig.monitor_at_start", {"base": 38, "on": True}),
         req(
             80,
             "artnet.target",
@@ -883,7 +883,7 @@ def requests():
         ),
         req(106, "dynamics.table", {"trace": 14}, mutation=False),
         req(107, "dynamics.envelope", {"trace": 14, "input": 4, "step": 0}, mutation=False),
-        req(108, "rig.unpair", {"rig": 0x6B657475}),
+        req(108, "rig.unpair", {"rig_id": 0x6B657475}),
         req(109, "auth.revoke_rig", {"rig_id": 0x70757075}),
     ]
 

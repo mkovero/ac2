@@ -247,7 +247,7 @@ pub fn missing_text(meas: Option<&str>, run: &str, new: &str) -> String {
 /// Whether `a` and `b` compare step by step.
 pub fn programmes(a: &DynamicsInfo, b: &DynamicsInfo) -> Match {
     let near = |x: f64, y: f64| (x - y).abs() <= 1e-9 * x.abs().max(y.abs()).max(1.0);
-    let same = near(a.sample_rate.0, b.sample_rate.0)
+    let same = near(a.sample_rate_hz.0, b.sample_rate_hz.0)
         && near(a.carrier.0, b.carrier.0)
         && a.period == b.period
         && a.onset == b.onset
@@ -263,7 +263,7 @@ pub fn programmes(a: &DynamicsInfo, b: &DynamicsInfo) -> Match {
     if !same {
         return Match::Differ;
     }
-    let sample = 1.0 / a.sample_rate.0;
+    let sample = 1.0 / a.sample_rate_hz.0;
     if a.steps
         .iter()
         .zip(&b.steps)

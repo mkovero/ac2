@@ -13,7 +13,7 @@ fn sidecar(name: &str) -> Sidecar {
         },
         audio: AudioFile {
             file: format!("{name}{AUDIO_SUFFIX}"),
-            sample_rate: 48_000,
+            sample_rate_hz: 48_000,
             channels: vec![
                 RecordedChannel {
                     input: 0,
@@ -303,7 +303,7 @@ fn a_recorders_wav_imports_as_a_finished_recording() {
     pcm16(&src, &[16_384, -32_768, 1, 0]);
     let s = import_wav(&src, dir.path(), "bedroom", 1_000_000_000).expect("import");
     assert_eq!(s.device.input_device.0, "file:ZOOM0001.WAV");
-    assert_eq!(s.audio.sample_rate, 48_000);
+    assert_eq!(s.audio.sample_rate_hz, 48_000);
     assert_eq!(s.end.as_ref().map(|e| e.frames), Some(4));
     assert_eq!(read_sidecar(dir.path(), "bedroom").expect("read"), s);
     let mut r = WavReader::open(&audio_path(dir.path(), "bedroom")).expect("open");

@@ -221,7 +221,7 @@ impl Control {
             },
             audio: AudioFile {
                 file: format!("{name}{}", raw::AUDIO_SUFFIX),
-                sample_rate: rt.sample_rate,
+                sample_rate_hz: rt.sample_rate,
                 channels: req
                     .inputs
                     .iter()
@@ -565,7 +565,7 @@ impl Control {
         })?;
         let info = reader.info();
         drop(reader);
-        if info.sample_rate != s.audio.sample_rate
+        if info.sample_rate != s.audio.sample_rate_hz
             || usize::from(info.channels) != s.audio.channels.len()
         {
             return Err(invalid(format!(
@@ -574,7 +574,7 @@ impl Control {
                 info.channels,
                 info.sample_rate,
                 s.audio.channels.len(),
-                s.audio.sample_rate
+                s.audio.sample_rate_hz
             )));
         }
         let inputs = replay_inputs(&s.audio.channels);
@@ -607,7 +607,7 @@ impl Control {
         let backend = Arc::new(ReplayBackend::new(ReplayConfig {
             device_id: device.clone(),
             device_name: format!("recording {name}"),
-            sample_rate: s.audio.sample_rate,
+            sample_rate: s.audio.sample_rate_hz,
             block_frames: block,
             inputs: inputs.clone(),
             input_names,
@@ -636,7 +636,7 @@ impl Control {
             input_channels: inputs,
             spare_inputs: 0,
             output_channels: 0,
-            sample_rate_hz: Some(s.audio.sample_rate),
+            sample_rate_hz: Some(s.audio.sample_rate_hz),
             buffer_frames: Some(block),
             loopback: None,
             remote_inputs: Vec::new(),
@@ -712,7 +712,7 @@ fn run_of(dir: &std::path::Path, name: &str, s: &Sidecar) -> RecordingRun {
         name: name.to_owned(),
         path: dir.join(&s.audio.file).to_string_lossy().into_owned(),
         inputs: s.audio.channels.iter().map(|c| c.input).collect(),
-        sample_rate_hz: s.audio.sample_rate,
+        sample_rate_hz: s.audio.sample_rate_hz,
         stream_epoch: StreamEpoch(s.device.stream_epoch.0),
         start_sample: s.start.stream_sample,
         started_at: s.start.wall_ns,

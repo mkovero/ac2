@@ -508,7 +508,7 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         ac2_proto::model::Resolution::NinetySixth
     );
     assert!(
-        unresolved.response.ranges.iter().all(|r| r.hi.0 < 200.0),
+        unresolved.response.ranges.iter().all(|r| r.hi_hz.0 < 200.0),
         "{:?}",
         unresolved.response
     );
@@ -517,7 +517,7 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         .ranges
         .last()
         .expect("harmonics range")
-        .hi
+        .hi_hz
         .0;
     assert!(top > 300.0 && top < 2000.0, "{:?}", unresolved.harmonics);
     let room = s.room.clone().expect("room parameters");
@@ -673,7 +673,7 @@ fn a_sweep_through_a_corrected_mic_applies_its_curve() {
         label: None,
         file_name: "M30.frd".into(),
         content: Blob(CURVE.as_bytes().to_vec()),
-        input: Some(1),
+        channel: Some(1),
     });
     let k = MicCurve::from_points(&[(20.0, 0.0), (1000.0, 0.0), (4000.0, 6.0), (24000.0, 6.0)])
         .unwrap()

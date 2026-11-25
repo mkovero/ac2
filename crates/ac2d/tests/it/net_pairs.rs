@@ -104,7 +104,7 @@ fn a_local_looking_name_is_refused_but_one_already_on_file_still_connects() {
 
     let mut c = Client::connect_with(&ctx, &net, Some(&curve(&h, &laptop)));
     let e = c
-        .call(Command::ServerAuthorize {
+        .call(Command::AuthAuthorize {
             name: "local-y".into(),
             key: KeyPair::generate().unwrap().public.to_z85(),
         })

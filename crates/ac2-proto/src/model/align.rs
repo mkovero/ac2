@@ -11,15 +11,18 @@ use crate::units::{Hz, Seconds};
 #[serde(deny_unknown_fields)]
 pub struct AlignBand {
     /// Lowest frequency.
-    pub lo: Hz,
+    pub lo_hz: Hz,
     /// Highest frequency.
-    pub hi: Hz,
+    pub hi_hz: Hz,
 }
 
 impl AlignBand {
     /// Whether the band is one: finite, `0 < lo < hi`.
     pub fn is_valid(self) -> bool {
-        self.lo.0.is_finite() && self.hi.0.is_finite() && self.lo.0 > 0.0 && self.lo.0 < self.hi.0
+        self.lo_hz.0.is_finite()
+            && self.hi_hz.0.is_finite()
+            && self.lo_hz.0 > 0.0
+            && self.lo_hz.0 < self.hi_hz.0
     }
 }
 

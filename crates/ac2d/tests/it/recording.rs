@@ -291,7 +291,7 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     assert_eq!(end.reason, RecordingEnd::Stopped);
     assert_eq!(end.at.stream_sample.0, live_end);
     assert_eq!(s.device.backend, BackendKind::Fake);
-    assert_eq!(s.audio.sample_rate, FS);
+    assert_eq!(s.audio.sample_rate_hz, FS);
     assert!(
         s.audio.channels[0]
             .roles

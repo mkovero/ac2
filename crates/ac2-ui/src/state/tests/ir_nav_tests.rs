@@ -31,7 +31,7 @@ pub(super) fn ir_event(meas: u32) -> ConnEvent {
         data: FrameData::Ir(IrFrame {
             meas: MeasId(meas),
             meta: IrMeta {
-                sample_rate: Hz(48_000.0),
+                sample_rate_hz: Hz(48_000.0),
                 t0: Seconds(-0.0005),
                 dt: Seconds(0.0001),
                 inserted_delay: Seconds(0.0125),
@@ -330,7 +330,7 @@ fn a_stopped_measurement_keeps_its_last_ir() {
     let mut linear = vec![0.0f32; 64];
     linear[40] = 0.75;
     let ir = TransferIr {
-        sample_rate: Hz(48_000.0),
+        sample_rate_hz: Hz(48_000.0),
         ir: TraceIr {
             t0: Seconds(-32.0 / 48_000.0),
             dt: Seconds(1.0 / 48_000.0),
@@ -406,7 +406,7 @@ fn the_transfer_ir_view_shows_the_selected_stored_ir() {
     let mut linear = vec![0.0f32; 64];
     linear[40] = 0.75;
     let ir = TransferIr {
-        sample_rate: Hz(48_000.0),
+        sample_rate_hz: Hz(48_000.0),
         ir: TraceIr {
             t0: Seconds(-32.0 / 48_000.0),
             dt: Seconds(1.0 / 48_000.0),

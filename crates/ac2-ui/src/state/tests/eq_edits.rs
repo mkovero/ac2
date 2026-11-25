@@ -18,7 +18,7 @@ fn with_set(t: &mut T) {
             body: EqBody {
                 name: "EQ 1".into(),
                 realisation: EqRealisation::Digital {
-                    rate: ac2_proto::units::Hz(48_000.0),
+                    sample_rate_hz: ac2_proto::units::Hz(48_000.0),
                 },
                 peak_q: PeakQ::HalfGain,
                 enabled: true,

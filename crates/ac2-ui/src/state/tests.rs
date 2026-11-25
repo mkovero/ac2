@@ -541,7 +541,7 @@ fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
         edit: TraceEdit {
             owner: ac2_proto::model::TraceOwner::Imported,
             name: format!("t{id}"),
-            color: Rgb { r: 1, g: 2, b: 3 },
+            colour: Rgb { r: 1, g: 2, b: 3 },
             visible: true,
             locked: false,
             order: id,

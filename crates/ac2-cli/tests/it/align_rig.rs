@@ -120,8 +120,8 @@ async fn alignment_by_name() {
     assert_eq!(code, 0, "{text}");
     let doc: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(doc["name"], "Sub ↔ Main");
-    assert_eq!(doc["band"]["lo"], 60.0);
-    assert_eq!(doc["band"]["hi"], 120.0);
+    assert_eq!(doc["band"]["lo_hz"], 60.0);
+    assert_eq!(doc["band"]["hi_hz"], 120.0);
     let headline = doc["readout"]["headline"].as_str().unwrap();
     assert!(headline.contains(": delay "), "{text}");
     assert!(headline.contains(" @ 20 °C · "), "{text}");

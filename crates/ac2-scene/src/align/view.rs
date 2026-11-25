@@ -114,7 +114,7 @@ impl AlignScene {
 }
 
 fn band_hint(c: &mut Canvas, plot: Rect, x: &Axis, band: AlignBand, theme: &Theme) {
-    let (x0, x1) = (x.mapping.to_px(band.lo.0), x.mapping.to_px(band.hi.0));
+    let (x0, x1) = (x.mapping.to_px(band.lo_hz.0), x.mapping.to_px(band.hi_hz.0));
     let (l, r) = (x0.max(plot.x), x1.min(plot.right()));
     if r > l {
         c.base.rects.push(FillRect::clipped(

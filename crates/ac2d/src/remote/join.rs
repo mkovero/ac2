@@ -382,9 +382,9 @@ impl Joiner {
             .iter_mut()
             .filter(|i| i.rig == r && i.channel == a.channel)
         {
-            if h.rate != ours {
+            if h.sample_rate_hz != ours {
                 i.audio = RemoteAudio::RateMismatch {
-                    theirs: h.rate,
+                    theirs: h.sample_rate_hz,
                     ours,
                 };
                 i.restart();

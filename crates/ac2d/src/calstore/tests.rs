@@ -339,15 +339,15 @@ fn file_round_trip_and_atomic_write() {
 #[test]
 fn pairs_in_the_file_are_checked() {
     let head =
-        r#"{"format":"ac2-calibrations","version":4,"sensitivities":[],"lines":[],"mics":[],"#;
+        r#"{"format":"ac2-calibrations","version":5,"sensitivities":[],"lines":[],"mics":[],"#;
     let ok = format!(
-        r#"{head}"inputs":[{{"channel":0,"kind":{{"kind":"line"}},"pair":"left"}},{{"channel":1,"kind":{{"kind":"line"}},"pair":"right"}}],"pairs":[{{"left":0,"right":1,"name":null}}]}}"#
+        r#"{head}"inputs":[{{"channel":0,"kind":{{"type":"line"}},"pair":"left"}},{{"channel":1,"kind":{{"type":"line"}},"pair":"right"}}],"pairs":[{{"left":0,"right":1,"name":null}}]}}"#
     );
     let (c, _) = parse(ok.as_bytes()).expect("valid");
     assert_eq!(c.pairs.len(), 1);
     assert_eq!(c.inputs[1].pair, Some(PairSide::Right));
     let sides_wrong = format!(
-        r#"{head}"inputs":[{{"channel":0,"kind":{{"kind":"line"}},"pair":null}},{{"channel":1,"kind":{{"kind":"line"}},"pair":"right"}}],"pairs":[{{"left":0,"right":1,"name":null}}]}}"#
+        r#"{head}"inputs":[{{"channel":0,"kind":{{"type":"line"}},"pair":null}},{{"channel":1,"kind":{{"type":"line"}},"pair":"right"}}],"pairs":[{{"left":0,"right":1,"name":null}}]}}"#
     );
     assert!(
         parse(sides_wrong.as_bytes())
@@ -355,14 +355,14 @@ fn pairs_in_the_file_are_checked() {
             .contains("pair sides")
     );
     let mic_pair = format!(
-        r#"{head}"inputs":[{{"channel":0,"kind":{{"kind":"mic","mic":null,"curve":{{"type":"not_chosen"}}}},"pair":"left"}},{{"channel":1,"kind":{{"kind":"line"}},"pair":"right"}}],"pairs":[{{"left":0,"right":1,"name":null}}]}}"#
+        r#"{head}"inputs":[{{"channel":0,"kind":{{"type":"mic","mic":null,"curve":{{"type":"not_chosen"}}}},"pair":"left"}},{{"channel":1,"kind":{{"type":"line"}},"pair":"right"}}],"pairs":[{{"left":0,"right":1,"name":null}}]}}"#
     );
     assert!(
         parse(mic_pair.as_bytes())
             .expect_err("microphone")
             .contains("microphone")
     );
-    let dup_line = r#"{"format":"ac2-calibrations","version":4,"sensitivities":[],"lines":[{"key":{"device":"d","channel":0},"line":{"v_fs":1.0,"volts":0.5,"measured":-6.0,"calibrated_at":1}},{"key":{"device":"d","channel":0},"line":{"v_fs":2.0,"volts":0.5,"measured":-12.0,"calibrated_at":2}}],"mics":[],"inputs":[],"pairs":[]}"#;
+    let dup_line = r#"{"format":"ac2-calibrations","version":5,"sensitivities":[],"lines":[{"key":{"device":"d","channel":0},"line":{"v_fs":1.0,"volts":0.5,"measured":-6.0,"calibrated_at":1}},{"key":{"device":"d","channel":0},"line":{"v_fs":2.0,"volts":0.5,"measured":-12.0,"calibrated_at":2}}],"mics":[],"inputs":[],"pairs":[]}"#;
     assert!(
         parse(dup_line.as_bytes())
             .expect_err("duplicate line")
@@ -499,8 +499,8 @@ fn a_damaged_file_is_set_aside_and_its_previous_copy_read() {
         b"",
         b"\0\0\0\0\0\0",
         br#"{"format":"other","version":2,"sensitivities":[],"mics":[],"inputs":[]}"#,
-        br#"{"format":"ac2-calibrations","version":4,"sensitivities":[],"lines":[],"mics":[{"name":"m","curves":[{"reference":{"label":"0deg","file_name":"c","content_hash":"0","points":2,"f_lo":20.0,"f_hi":10.0,"imported_at":1,"stated_sensitivity":null},"points":[[20.0,0.0],[10.0,0.0]]}]}],"inputs":[],"pairs":[]}"#,
-        br#"{"format":"ac2-calibrations","version":4,"sensitivities":[],"lines":[],"mics":[{"name":"m","curves":[]}],"inputs":[],"pairs":[]}"#,
+        br#"{"format":"ac2-calibrations","version":5,"sensitivities":[],"lines":[],"mics":[{"name":"m","curves":[{"reference":{"label":"0deg","file_name":"c","content_hash":"0","points":2,"f_lo":20.0,"f_hi":10.0,"imported_at":1,"stated_sensitivity":null},"points":[[20.0,0.0],[10.0,0.0]]}]}],"inputs":[],"pairs":[]}"#,
+        br#"{"format":"ac2-calibrations","version":5,"sensitivities":[],"lines":[],"mics":[{"name":"m","curves":[]}],"inputs":[],"pairs":[]}"#,
     ] {
         // No previous copy: an empty store, writable.
         let _ = std::fs::remove_file(crate::damage::prev_path(&path));

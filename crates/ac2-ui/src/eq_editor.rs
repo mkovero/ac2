@@ -492,7 +492,9 @@ pub fn type_field(shape: &mut EqShape, field: FieldKind, typed: &str) -> Option<
 /// ←/→ on the header's realisation: through the digital rates, then analog.
 pub fn step_realisation(r: EqRealisation, d: i32) -> EqRealisation {
     let at = match r {
-        EqRealisation::Digital { rate } => RATES
+        EqRealisation::Digital {
+            sample_rate_hz: rate,
+        } => RATES
             .iter()
             .position(|x| (*x - rate.0).abs() < 0.5)
             .unwrap_or(1),
@@ -502,7 +504,7 @@ pub fn step_realisation(r: EqRealisation, d: i32) -> EqRealisation {
     RATES
         .get(next)
         .map_or(EqRealisation::Analog, |&rate| EqRealisation::Digital {
-            rate: Hz(rate),
+            sample_rate_hz: Hz(rate),
         })
 }
 

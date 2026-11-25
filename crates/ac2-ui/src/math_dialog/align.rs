@@ -120,8 +120,8 @@ impl Form {
                 .map_err(|e| format!("overlap {what}: {}", e.0))
         };
         let band = AlignBand {
-            lo: hz(FieldId::AlignFrom, "from")?,
-            hi: hz(FieldId::AlignTo, "to")?,
+            lo_hz: hz(FieldId::AlignFrom, "from")?,
+            hi_hz: hz(FieldId::AlignTo, "to")?,
         };
         if !band.is_valid() {
             return Err("the overlap band needs from below to (Hz)".into());
@@ -135,7 +135,7 @@ impl Form {
 
 /// `band` as the rows hold it.
 pub(super) fn band_texts(band: AlignBand) -> (String, String) {
-    let Hz(lo) = band.lo;
-    let Hz(hi) = band.hi;
+    let Hz(lo) = band.lo_hz;
+    let Hz(hi) = band.hi_hz;
     (hz_text(lo), hz_text(hi))
 }

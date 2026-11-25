@@ -46,7 +46,7 @@ fn import_curve(c: &mut Client, mic: &str, input: u16, curve: &str) {
         label: None,
         file_name: format!("{mic}.frd"),
         content: Blob(curve.as_bytes().to_vec()),
-        input: Some(input),
+        channel: Some(input),
     });
 }
 

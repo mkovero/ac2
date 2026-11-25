@@ -218,7 +218,7 @@ fn shape(a: &EqSectionArgs, s: &State) -> Result<EqShape, CliError> {
                 b2: c[2],
                 a1: c[3],
                 a2: c[4],
-                rate,
+                sample_rate_hz: rate,
             }
         }
         A::Response => {
@@ -316,7 +316,9 @@ pub(crate) async fn meas_eq(
             let m = find_meas(&s, meas)?;
             let realisation = match (analog, r) {
                 (true, _) => Some(EqRealisation::Analog),
-                (_, Some(f)) => Some(EqRealisation::Digital { rate: f.0 }),
+                (_, Some(f)) => Some(EqRealisation::Digital {
+                    sample_rate_hz: f.0,
+                }),
                 _ => None,
             };
             let before: Vec<EqSetId> = m.eq.iter().map(|x| x.id).collect();
@@ -571,7 +573,7 @@ pub(crate) async fn meas_eq(
                     // the set will be evaluated at.
                     let realisation = target.map_or(
                         EqRealisation::Digital {
-                            rate: Hz(f64::from(rate(&s).unwrap_or(48_000))),
+                            sample_rate_hz: Hz(f64::from(rate(&s).unwrap_or(48_000))),
                         },
                         |t| t.body.realisation,
                     );

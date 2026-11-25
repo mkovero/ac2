@@ -75,8 +75,8 @@
       "resolution": "forty_eighth",
       "ranges": [
        {
-        "lo": 7.8125,
-        "hi": 101.5
+        "lo_hz": 7.8125,
+        "hi_hz": 101.5
        }
       ]
      }

@@ -46,7 +46,7 @@ fn edit(name: &str) -> TraceEdit {
     TraceEdit {
         owner: ac2_proto::model::TraceOwner::Imported,
         name: name.into(),
-        color: Rgb { r: 1, g: 2, b: 3 },
+        colour: Rgb { r: 1, g: 2, b: 3 },
         visible: true,
         locked: false,
         order: 0,

@@ -80,12 +80,12 @@ impl AppState {
             ConnAction::Authorize { name, key } => out.push(Request::ServerCall {
                 what: format!("client {name} authorized"),
                 failed: format!("cannot authorize {name}"),
-                cmd: Command::ServerAuthorize { name, key },
+                cmd: Command::AuthAuthorize { name, key },
             }),
             ConnAction::Revoke(name) => out.push(Request::ServerCall {
                 what: format!("client {name} revoked"),
                 failed: format!("cannot revoke {name}"),
-                cmd: Command::ServerRevoke { name },
+                cmd: Command::AuthRevoke { name },
             }),
             ConnAction::Network {
                 enabled,

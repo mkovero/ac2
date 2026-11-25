@@ -64,7 +64,7 @@ fn the_rig_page_sends_its_edits_on_the_rev_it_shows() {
     let r = t.key("ArrowRight");
     assert_eq!(
         call(&r).map(|c| c.0),
-        Some(&Command::RigMonitorStart {
+        Some(&Command::RigMonitorAtStart {
             base: Rev(7),
             on: true,
         })

@@ -138,7 +138,7 @@ pub(super) fn imported_trace_meta() -> TraceMeta {
             format: ImportFormat::Ac2Csv,
             notes: vec![ImportNote::SweepWithoutAnalysis, ImportNote::IrTruncated],
             ir_file: Some(Box::new(IrFile {
-                sample_rate: Hz(48_000.0),
+                sample_rate_hz: Hz(48_000.0),
                 channels: 2,
                 channel: 1,
                 frames: 200_000,
@@ -268,7 +268,7 @@ pub(super) fn sweep_data() -> SweepData {
             etc_db: vec![-200.0, -6.0, -12.0],
         },
         info: SweepInfo {
-            sample_rate: Hz(48_000.0),
+            sample_rate_hz: Hz(48_000.0),
             rate: Seconds(0.6875),
             duration: Seconds(4.75),
             repeats: 2,
@@ -295,8 +295,8 @@ pub(super) fn sweep_data() -> SweepData {
             harmonics: Unresolved {
                 resolution: Resolution::FortyEighth,
                 ranges: vec![FreqRange {
-                    lo: Hz(20.0),
-                    hi: Hz(212.5),
+                    lo_hz: Hz(20.0),
+                    hi_hz: Hz(212.5),
                 }],
             },
         }),

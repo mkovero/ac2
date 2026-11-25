@@ -491,8 +491,8 @@ fn alignment_by_alt_m_opens_its_own_pane() {
             a: Operand::Meas { meas: MeasId(1) },
             b: Operand::Trace { trace: TraceId(4) },
             band: AlignBand {
-                lo: Hz(60.0),
-                hi: Hz(120.0),
+                lo_hz: Hz(60.0),
+                hi_hz: Hz(120.0),
             },
             max_delay: Seconds(0.05),
         }

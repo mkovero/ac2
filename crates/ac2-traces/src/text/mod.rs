@@ -3,7 +3,7 @@
 //! # ac2 CSV
 //!
 //! ```text
-//! # ac2 trace export v6
+//! # ac2 trace export v7
 //! # name: Main L pre EQ
 //! # kind: transfer
 //! # source: captured from "main-l" (measurement 1), stream epoch 3, sample 480000
@@ -42,10 +42,12 @@
 //! Such an export re-imports as the sweep trace it was.
 //!
 //! A transfer trace captured with an impulse response ([`TransferIr`]) writes it the same
-//! way: `# transfer_ir: {"sample_rate":…,"t0":…,"dt":…,"points":n}` and the same
+//! way: `# transfer_ir: {"sample_rate_hz":…,"t0":…,"dt":…,"points":n}` and the same
 //! `t_s,linear,etc_db` table after the frequency rows, `t_s` re the trace's `delay_ms` (the
 //! inserted delay at capture). It re-imports with the trace.
 //!
+//! A version 6 export and older name the sample rate `sample_rate` and a range's edges
+//! `lo` / `hi` in their JSON header lines; they are read under the names with the unit.
 //! A version 5 export (written before sweeps kept the reference input's own harmonics)
 //! imports as a sweep without them. A version 4 export (written before sweeps said where their columns are finer than
 //! their windows resolve) imports as a sweep without that. A version 3 export (written before transfer traces kept their impulse response) imports
@@ -94,7 +96,10 @@ use ac2::import_ac2;
 use table::{on_import_grid, table, validate};
 
 /// First line of an ac2 CSV file of this format version.
-pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v6";
+pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v7";
+/// First line of the previous version, still read: its JSON header lines name a sample
+/// rate `sample_rate` and a frequency range's edges `lo` / `hi`, without their unit.
+const AC2_CSV_MAGIC_V6: &str = "# ac2 trace export v6";
 /// First line of the previous version, still read: no sweep in it has the reference
 /// input's own harmonics (and nothing else differs).
 const AC2_CSV_MAGIC_V5: &str = "# ac2 trace export v5";
@@ -137,7 +142,7 @@ impl IrHeader {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TransferIrHeader {
-    sample_rate: Hz,
+    sample_rate_hz: Hz,
     t0: Seconds,
     dt: Seconds,
     points: u32,
@@ -165,7 +170,7 @@ impl IrAnnounce {
         crate::check::ir_points(h.points)?;
         crate::check::ir_timing(h.t0.0, h.dt.0)?;
         if let Self::Transfer(t) = self
-            && !(t.sample_rate.0.is_finite() && t.sample_rate.0 > 0.0)
+            && !(t.sample_rate_hz.0.is_finite() && t.sample_rate_hz.0 > 0.0)
         {
             return Err("impulse response sample rate must be finite and above 0".into());
         }

@@ -290,7 +290,7 @@ async fn calibrate(c: &Client) {
     loop {
         match c
             .call(Command::CalSpl {
-                input: 1,
+                channel: 1,
                 mic: "M30".into(),
                 calibrator_level: DbSpl(94.0),
                 calibrator_freq: Hz(1000.0),
@@ -448,7 +448,7 @@ async fn monitor_at_start_cues_with_no_client() {
         set_target(&c, rx.addr()).await;
         let m = create(&c, rig_scope(meter("Stage", vec![window(None, "m")], None))).await;
         c.call(Command::MeasStart { meas: m }).await.unwrap();
-        c.call(Command::RigMonitorStart {
+        c.call(Command::RigMonitorAtStart {
             base: rig_rev(&c),
             on: true,
         })

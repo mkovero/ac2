@@ -122,7 +122,7 @@ pub(crate) fn trace_data(a: &SweepAnalysis, resolution: Resolution) -> (Columns,
             etc_db: finite(&a.ir_etc_db, ac2_core::ir_view::FLOOR_DB as f32),
         },
         info: SweepInfo {
-            sample_rate: Hz(a.sample_rate),
+            sample_rate_hz: Hz(a.sample_rate),
             rate: Seconds(a.rate_s),
             duration: Seconds(a.duration_s),
             repeats: u8::try_from(a.repeats).unwrap_or(u8::MAX),
@@ -153,8 +153,8 @@ pub(crate) fn unresolved(resolution: Resolution, ranges: &[(f64, f64)]) -> Unres
         ranges: ranges
             .iter()
             .map(|&(lo, hi)| FreqRange {
-                lo: Hz(lo),
-                hi: Hz(hi),
+                lo_hz: Hz(lo),
+                hi_hz: Hz(hi),
             })
             .collect(),
     }

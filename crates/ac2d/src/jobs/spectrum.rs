@@ -277,8 +277,8 @@ impl Spectrum {
                     .unresolved_ranges(&grid)
                     .into_iter()
                     .map(|(lo, hi)| FreqRange {
-                        lo: Hz(lo),
-                        hi: Hz(hi),
+                        lo_hz: Hz(lo),
+                        hi_hz: Hz(hi),
                     })
                     .collect();
                 let analyzer = MultiResAnalyzer::new(

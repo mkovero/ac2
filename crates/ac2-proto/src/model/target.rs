@@ -6,7 +6,7 @@ use crate::units::{Db, Hz, Phon};
 
 /// A generated target curve: its shape and the parameters it was made from.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "shape", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TargetCurve {
     /// 0 dB at every frequency.
     Flat,

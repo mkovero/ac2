@@ -64,7 +64,7 @@ async fn trace_commands_json() -> R {
             "id": 1,
             "edit": {
                 "name": "a",
-                "color": { "r": 230, "g": 159, "b": 0 },
+                "colour": { "r": 230, "g": 159, "b": 0 },
                 "visible": true,
                 "locked": false,
                 "order": 1,
@@ -360,7 +360,7 @@ async fn trace_target_adds_a_named_generated_curve() -> R {
     );
     assert_eq!(t["kind"], json!({ "type": "target" }));
     assert_eq!(t["source"]["type"], "generated");
-    assert_eq!(t["source"]["curve"]["shape"], "tilt");
+    assert_eq!(t["source"]["curve"]["type"], "tilt");
     let l = ok_json(
         &f,
         &["trace", "target", "--name", "louder", "loudness", "--json"],
@@ -369,7 +369,7 @@ async fn trace_target_adds_a_named_generated_curve() -> R {
     assert_eq!(l["edit"]["name"], "louder");
     assert_eq!(
         l["source"]["curve"],
-        json!({ "shape": "loudness_shift", "from": 85.0, "to": 100.0 })
+        json!({ "type": "loudness_shift", "from": 85.0, "to": 100.0 })
     );
     let r = ac2(&f, &["trace", "target", "loudness", "--to", "120phon"]).await?;
     assert_ne!(r.code, 0);

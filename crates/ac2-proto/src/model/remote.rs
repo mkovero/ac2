@@ -420,9 +420,9 @@ pub enum NotLockedReason {
     /// The two streams run at different nominal rates.
     OtherRate {
         /// The remote rig's, Hz.
-        theirs: u32,
+        theirs_hz: u32,
         /// This rig's, Hz.
-        ours: u32,
+        ours_hz: u32,
     },
 }
 

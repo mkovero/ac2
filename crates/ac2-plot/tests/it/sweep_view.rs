@@ -52,7 +52,7 @@ fn run() -> TraceData {
             edit: TraceEdit {
                 owner: TraceOwner::Imported,
                 name: "Run 1".into(),
-                color: Rgb { r: 1, g: 2, b: 3 },
+                colour: Rgb { r: 1, g: 2, b: 3 },
                 visible: true,
                 locked: false,
                 order: 3,
@@ -121,7 +121,7 @@ fn run() -> TraceData {
                 etc_db: vec![0.0, -90.0],
             },
             info: SweepInfo {
-                sample_rate: Hz(48_000.0),
+                sample_rate_hz: Hz(48_000.0),
                 rate: Seconds(0.4),
                 duration: Seconds(3.1),
                 repeats: 2,

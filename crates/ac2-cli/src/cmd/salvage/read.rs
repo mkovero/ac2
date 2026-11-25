@@ -572,6 +572,11 @@ fn moved(key: &str, v: &Value) -> Option<(&'static str, Value)> {
             "resolution",
             serde_json::json!({ "type": "fixed", "fft_len": v }),
         )),
+        // Field names took their unit and the British spelling of the wire.
+        "color" => Some(("colour", v.clone())),
+        "lo" => Some(("lo_hz", v.clone())),
+        "hi" => Some(("hi_hz", v.clone())),
+        "sample_rate" => Some(("sample_rate_hz", v.clone())),
         _ => None,
     }
 }

@@ -41,7 +41,7 @@ pub struct BinsMeta {
     /// Decimation factor from the full rate.
     pub factor: u32,
     /// Stage sample rate.
-    pub rate: Hz,
+    pub sample_rate_hz: Hz,
     /// Bin spacing.
     pub bin_hz: Hz,
     /// Bin of element 0.

@@ -113,7 +113,9 @@ impl Control {
                 EqSet::MAX_SECTIONS
             )));
         }
-        if let EqRealisation::Digital { rate } = body.realisation
+        if let EqRealisation::Digital {
+            sample_rate_hz: rate,
+        } = body.realisation
             && !(rate.0.is_finite() && rate.0 > 0.0)
         {
             return Err(invalid("the processor's sample rate must be positive"));
@@ -271,7 +273,7 @@ impl Control {
                 let body = EqBody {
                     name: name.unwrap_or_else(|| Self::free_eq_name(&m)),
                     realisation: realisation.unwrap_or(EqRealisation::Digital {
-                        rate: Hz(self.stream_rate()),
+                        sample_rate_hz: Hz(self.stream_rate()),
                     }),
                     peak_q: peak_q.unwrap_or(PeakQ::HalfGain),
                     enabled: true,
