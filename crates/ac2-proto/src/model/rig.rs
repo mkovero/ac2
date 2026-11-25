@@ -102,6 +102,8 @@ pub enum StateFile {
     RigId,
     /// The network setting (`network.json`).
     NetworkSettings,
+    /// A room plan of the plan library (`plans/<name>.json`).
+    Plan,
 }
 
 /// `Option<SocketAddr>` as `"ip:port"` text: msgpack has no address type, and the text

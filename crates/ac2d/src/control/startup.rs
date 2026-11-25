@@ -53,6 +53,12 @@ impl Control {
         let mut damaged = std::mem::take(&mut s.damaged);
         damaged.extend(cal.take_damage());
         damaged.extend(rig.take_damage());
+        let (plans, plan_damage) = s
+            .plan_dir
+            .as_deref()
+            .map(walks::load_plans)
+            .unwrap_or_default();
+        damaged.extend(plan_damage);
         let ceiling = crate::rig::start_ceiling(saved.ceiling_dbfs, s.ceiling_bound);
         match crate::stimulus::peak_limit(ceiling) {
             Ok(m) => {
@@ -86,12 +92,7 @@ impl Control {
             })
             .with_peers(saved.peers.clone())
             .with_calibrations(contents)
-            .with_plans(
-                s.plan_dir
-                    .as_deref()
-                    .map(walks::load_plans)
-                    .unwrap_or_default(),
-            )
+            .with_plans(plans)
             .with_autosave(Autosave {
                 state: status,
                 saved_at: None,

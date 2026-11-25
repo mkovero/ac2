@@ -372,8 +372,9 @@ so a daylight-saving change is an ordinary `rig` event),
 `reason`, `at`: `WallNs`}: state files found damaged at this start, set aside and replaced
 by their previous copy or a default; empty on a sound start, kept until the daemon restarts).
 `StateFile` is `autosave`, `trace`, `spl_log`, `band_log`, `working`, `rig_settings`,
-`rig_logs`, `calibrations`, `server_key`, `authorized_clients`, `rig_id` or
-`network_settings`. `CueSubject` is
+`rig_logs`, `calibrations`, `server_key`, `authorized_clients`, `rig_id`,
+`network_settings` or `plan` (a plan file the library left out: another version, unreadable,
+misnamed or invalid; left on disk where it is). `CueSubject` is
 tagged by `type`: `meter` (the whole meter: the worst state of its limits), `window`
 {duration, weighting}, `peak` {quantity}, `band` {duration, weighting, nominal},
 `predicted`. `CueState` is `ok` (under the limit, or none), `near`, `over` or `fault` (the rig

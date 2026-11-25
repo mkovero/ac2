@@ -12,8 +12,8 @@ use std::path::Path;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
     CaptureContext, EqMark, MathConfig, MathDomain, MathExpr, MathReference, MeasConfig, MeasKind,
-    MeasScope, Operand, PlanSpec, PointState, TraceMeta, TraceOwner, TracePosition, WalkKind,
-    WalkMic, WalkPoint, WalkPointSpec, WalkState,
+    MeasScope, Operand, PlanSpec, PointState, StateFile, TraceMeta, TraceOwner, TracePosition,
+    WalkKind, WalkMic, WalkPoint, WalkPointSpec, WalkState,
 };
 use ac2_proto::units::{MeasId, Seconds, TraceId, WalkId};
 use ac2_proto::{ProtoError, ReplyBody};
@@ -713,12 +713,15 @@ pub(super) fn check_walk_items(
 const PLAN_FILE_VERSION: u64 = 1;
 
 /// The plan library in `dir`: every `<name>.json` of [`PLAN_FILE_VERSION`] that parses, is
-/// named as its file and validates. One that does not is left on disk and logged.
-pub(crate) fn load_plans(dir: &Path) -> Vec<PlanSpec> {
+/// named as its file and validates. One that does not is left on disk as it is (a plan of
+/// another version is the operator's to convert) and comes back as damage, so that clients
+/// show the plan missing from the library.
+pub(crate) fn load_plans(dir: &Path) -> (Vec<PlanSpec>, Vec<crate::damage::Damage>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let mut plans: Vec<PlanSpec> = Vec::new();
+    let mut damage = Vec::new();
     for e in entries.flatten() {
         let path = e.path();
         if path.extension().and_then(|x| x.to_str()) != Some("json") {
@@ -741,11 +744,20 @@ pub(crate) fn load_plans(dir: &Path) -> Vec<PlanSpec> {
             });
         match read {
             Ok(p) => plans.push(p),
-            Err(e) => tracing::warn!("plan file {} skipped: {e}", path.display()),
+            Err(e) => {
+                let d = crate::damage::Damage {
+                    kind: StateFile::Plan,
+                    path,
+                    set_aside_as: None,
+                    reason: format!("{e}; left on disk, not in the plan library"),
+                };
+                d.log();
+                damage.push(d);
+            }
         }
     }
     plans.sort_by(|a, b| a.name.cmp(&b.name));
-    plans
+    (plans, damage)
 }
 
 fn read_plan(b: &[u8]) -> Result<PlanSpec, String> {

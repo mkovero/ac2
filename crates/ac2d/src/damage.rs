@@ -64,6 +64,7 @@ fn kind_name(k: StateFile) -> &'static str {
         StateFile::AuthorizedClients => "authorized clients",
         StateFile::RigId => "rig id",
         StateFile::NetworkSettings => "network setting",
+        StateFile::Plan => "plan file",
     }
 }
 

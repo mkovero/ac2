@@ -820,6 +820,14 @@ fn the_plan_library_keeps_checked_plans_on_disk() {
     let (mut c, _sub) = connect(&h, &[]);
     let p = c.plans(Command::PlanList);
     assert_eq!(p, vec![ac2_proto::samples::plan()]);
+    // The plan left out is shown as such and stays on disk as it was.
+    let d = c.state().rig.damaged_files;
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].kind, StateFile::Plan);
+    assert!(d[0].path.ends_with("Old.json"), "{d:?}");
+    assert!(d[0].reason.contains("version"), "{d:?}");
+    assert_eq!(d[0].set_aside_as, None);
+    assert!(plan_dir.join("Old.json").is_file());
     c.ok(Command::PlanDelete {
         name: "Hall".into(),
     });
