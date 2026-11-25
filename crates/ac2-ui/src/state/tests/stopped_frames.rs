@@ -18,6 +18,7 @@ fn main_l_frames(tf: u64, bins: u64) -> ConnEvent {
             since_new: std::time::Duration::ZERO,
             age: Some(0.0),
             stale: false,
+            broken: false,
         };
         latest.frames.insert(f.topic.to_string().into(), f);
     }
@@ -84,5 +85,34 @@ fn a_stopped_measurements_frames_go_by_their_own_rev() {
     assert_eq!(held_revs(&t), (Some(7), Some(7)));
     // Reset while stopped: a newer rev and no result re-sent.
     t.conn(stopped_at(9));
+    assert_eq!(held_revs(&t), (None, None));
+}
+
+/// A stopped transfer whose delay moved: its frames carry the newer of the configuration's
+/// and the delay's rev, so the kept result's frames go once the delay's rev passes them.
+#[test]
+fn a_stopped_transfers_frames_go_when_its_delay_moves() {
+    let moved = |delay_rev: u64| {
+        let mut s = with_delays(daemon_state());
+        let m = s
+            .measurements
+            .iter_mut()
+            .find(|m| m.id == MeasId(1))
+            .expect("Main L");
+        m.running = false;
+        m.config_rev = Rev(7);
+        let d = s
+            .delays
+            .iter_mut()
+            .find(|d| d.meas == MeasId(1))
+            .expect("delay");
+        d.rev = Rev(delay_rev);
+        mirror(s)
+    };
+    let mut t = T::new();
+    t.conn(moved(7));
+    t.conn(main_l_frames(7, 7));
+    assert_eq!(held_revs(&t), (Some(7), Some(7)));
+    t.conn(moved(9));
     assert_eq!(held_revs(&t), (None, None));
 }

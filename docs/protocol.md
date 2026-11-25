@@ -1484,7 +1484,8 @@ display edits and are never applied to the stored data.
   or still has frames there, or the audio closing while it kept one, gives it a new
   `config_rev`; a job that sends no final frames leaves its last ones, except a topic
   last sent at an older `config_rev` than its result, which goes from the slots: a client drops each frame it holds of a stopped measurement
-  whose own `config_rev` is older than the measurement's (frame by frame, so the order a
+  whose `config_rev` stamp is older than the newer of the measurement's `config_rev` and
+  its `delay`'s `rev` (frame by frame, so the order a
   frame and the state change arrive in does not matter). A capture of a
   kept result is described as at the stop: `created_at` is the stop's time, and `cal`,
   `mic`, `eq_in` and a math capture's operand names are those of the stop. It needs a result in the current stream epoch (`invalid` otherwise:

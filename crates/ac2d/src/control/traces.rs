@@ -318,9 +318,7 @@ impl Control {
         };
         let super::Captured { frame, ir } = captured;
         if frame.stamp.stream_epoch != self.epoch() {
-            return Err(invalid(
-                "the newest result is from an earlier stream epoch",
-            ));
+            return Err(invalid("the newest result is from an earlier stream epoch"));
         }
         let (kind, columns) = ops::capture_columns(&frame.data).ok_or_else(|| {
             invalid("only transfer, spectrum and RTA measurements can be captured")

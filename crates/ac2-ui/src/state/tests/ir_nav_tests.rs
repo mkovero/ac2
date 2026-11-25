@@ -508,7 +508,7 @@ fn ir_value_navigation_starts_from_the_drawn_range() {
     let mut linear = vec![0.0f32; 64];
     linear[40] = 1.0;
     let ir = TransferIr {
-        sample_rate: Hz(48_000.0),
+        sample_rate_hz: Hz(48_000.0),
         ir: TraceIr {
             t0: Seconds(-32.0 / 48_000.0),
             dt: Seconds(1.0 / 48_000.0),

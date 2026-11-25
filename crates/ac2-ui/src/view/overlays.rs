@@ -509,7 +509,7 @@ fn channel_list(
                                         .get(&c)
                                         .cloned()
                                         .unwrap_or_else(ac2_scene::meter::MeterReading::none);
-                                    super::session::meter(ui, &m, ch);
+                                    super::stream::meter(ui, &m, ch);
                                 }
                             });
                         }

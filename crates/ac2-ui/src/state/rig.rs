@@ -285,7 +285,12 @@ impl RigState {
                 .measurements
                 .iter()
                 .find(|m| m.id == *meas && !m.running)
-                .map(|m| m.config_rev),
+                // A frame carries the newer of its configuration's and its delay's rev.
+                .map(|m| {
+                    state
+                        .delay(m.id)
+                        .map_or(m.config_rev, |d| d.rev.max(m.config_rev))
+                }),
             _ => None,
         };
         let outdated = |f: &ac2_client::TopicFrame| {

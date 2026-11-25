@@ -325,7 +325,7 @@ fn a_recovered_file_is_written_back_at_start() {
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
     ceiling(&mut c, -36.0, false).unwrap();
-    c.outputs(Command::SessionOutputs {
+    c.outputs(Command::StreamOutputs {
         outputs: vec![OutputSetup {
             channel: 0,
             label: Some("Main L".into()),
@@ -445,7 +445,7 @@ fn another_setting_saved_stores_the_level_in_force() {
     mode(0o755);
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
-    c.outputs(Command::SessionOutputs {
+    c.outputs(Command::StreamOutputs {
         outputs: vec![OutputSetup {
             channel: 0,
             label: Some("Main L".into()),

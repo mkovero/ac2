@@ -264,10 +264,10 @@ fn slow_what_keeps_and_what_drops_the_kept_result() {
 
     // The audio closing ends every job and what they kept.
     run_and_stop(&mut r);
-    r.c.ok(Command::SessionClose);
+    r.c.ok(Command::StreamClose);
     assert!(meas_frames(&r, MeasId(1)).is_empty());
-    r.c.ok(Command::SessionOpen {
-        config: session(true),
+    r.c.ok(Command::StreamOpen {
+        config: stream(true),
     });
     assert!(r.c.state().measurements.iter().any(|m| m.id == MeasId(1)));
     nothing_kept(&mut r);
@@ -630,7 +630,7 @@ fn a_stopped_spectrum_captures_its_mic_of_the_stop() {
         label: None,
         file_name: "M30.frd".into(),
         content: Blob(CURVE.as_bytes().to_vec()),
-        input: Some(1),
+        channel: Some(1),
     });
     let after = capture(&mut r.c, "after");
     assert_ne!(
@@ -715,9 +715,10 @@ fn a_stopped_math_captures_its_operands_of_the_stop() {
     r.c.update_ok(MeasId(1), cfg);
     let mut body = m.eq[0].body.clone();
     body.sections = vec![section(-3.0)];
+    let base = r.c.state().measurements[0].eq[0].rev;
     r.c.ok(Command::MeasEq {
         meas: MeasId(1),
-        edit: EqEdit::Put { set, body },
+        edit: EqEdit::Put { set, base, body },
     });
     let after = capture(&mut r.c, "after");
     assert_eq!(names(&after), names(&before));
@@ -815,7 +816,7 @@ fn a_session_close_ends_the_kept_result_on_view() {
     r.c.ok(Command::MeasStop { meas: MeasId(1) });
     let rev = |c: &mut Client| c.state().measurements[0].config_rev;
     let stopped = rev(&mut r.c);
-    r.c.ok(Command::SessionClose);
+    r.c.ok(Command::StreamClose);
     assert!(rev(&mut r.c) > stopped);
     assert!(meas_frames(&r, MeasId(1)).is_empty());
     r.h.shutdown();

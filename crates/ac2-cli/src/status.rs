@@ -10,7 +10,7 @@ use ac2_proto::Welcome;
 use ac2_proto::cal::state_input_use;
 use ac2_proto::model::{
     AutosaveState, ClockRelation, CrossTfState, InputKind, PeerRelation, RemoteInput, RemoteLink,
-    RemoteState, State, Stream, StopWhy, remote_slot,
+    RemoteState, State, StopWhy, Stream, remote_slot,
 };
 use ac2_proto::units::WallNs;
 use ac2_scene::between_rigs as br;

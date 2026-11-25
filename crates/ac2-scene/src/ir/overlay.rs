@@ -139,7 +139,7 @@ mod tests {
         IrFrame {
             meas: MeasId(1),
             meta: IrMeta {
-                sample_rate: Hz(rate),
+                sample_rate_hz: Hz(rate),
                 t0: Seconds(-(at as f64) * dt),
                 dt: Seconds(dt),
                 inserted_delay: Seconds(delay),

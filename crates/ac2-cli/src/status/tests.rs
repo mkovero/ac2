@@ -4,8 +4,8 @@ use ac2_proto::model::{
     CrossRigTransfer, CurveChoice, DamagedFile, DeviceClock, DeviceId, DeviceSelector, Drift,
     ElectricalConnection, InputSetup, LoopbackRoute, Mic, MicCurveRef, MinuteCount,
     NotLockedReason, OpenStream, Pair, PairSide, PeerClock, Recovery, RemoteAudio, RemoteRig,
-    RemoteSide, SampleClock, SensitivitySource, StreamConfig, SplCal, StandingRig,
-    StandingStream, StateFile, StopCause, SystemClock,
+    RemoteSide, SampleClock, SensitivitySource, SplCal, StandingRig, StandingStream, StateFile,
+    StopCause, StreamConfig, SystemClock,
 };
 use ac2_proto::units::{
     ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, MvPerPa, Rev, RigId, Seconds, StreamEpoch,
@@ -28,6 +28,7 @@ fn welcome(name: &str) -> Welcome {
         rev: Rev(3274),
         rig_id: RigId(0x26b1_c286_d80b_073e),
         name: name.into(),
+        role: ac2_proto::model::ClientRole::Operator,
     }
 }
 
@@ -201,6 +202,7 @@ fn lone(input_channels: Vec<u16>) -> State {
             },
         }),
         stamp_map: None,
+        rtc: true,
     };
     st.remote = RemoteState {
         peers: Vec::new(),
@@ -247,7 +249,7 @@ fn pupu() -> State {
     input.slips = 0;
     let meas = st.measurements[0].id;
     st.measurements[0].config.name = "Reference -> usb-behku".into();
-    if let Some(d) = &mut st.measurements[0].delay {
+    if let Some(d) = st.delays.iter_mut().find(|d| d.meas == meas) {
         d.applied = Seconds(-0.145_062);
     }
     st.remote = RemoteState {

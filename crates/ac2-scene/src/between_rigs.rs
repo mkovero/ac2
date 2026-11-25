@@ -74,8 +74,11 @@ pub fn relation_short(other: &str, rel: &PeerRelation) -> String {
             NotLockedReason::CrossRate { ppm, .. } | NotLockedReason::OwnClock { ppm, .. } => {
                 format!("CLOCKS NOT LOCKED {} ppm", format::signed(*ppm, 1))
             }
-            NotLockedReason::OtherRate { theirs, ours } => {
-                format!("CLOCKS NOT LOCKED: {}", other_rate(other, *theirs, *ours))
+            NotLockedReason::OtherRate { theirs_hz, ours_hz } => {
+                format!(
+                    "CLOCKS NOT LOCKED: {}",
+                    other_rate(other, *theirs_hz, *ours_hz)
+                )
             }
         },
         PeerRelation::CantTell { .. } => "CLOCKS: CAN'T TELL".into(),
@@ -717,8 +720,8 @@ mod tests {
             relation_short(
                 "k",
                 &not_locked(NotLockedReason::OtherRate {
-                    theirs: 48_000,
-                    ours: 96_000
+                    theirs_hz: 48_000,
+                    ours_hz: 96_000
                 })
             ),
             format!("CLOCKS NOT LOCKED: {}", other_rate("k", 48_000, 96_000))
