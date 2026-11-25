@@ -514,7 +514,9 @@ nothing. Each run has a number, `run: u32`, rising within the log. An empty log 
 
 **Boot clock.** Every distance below is taken on a clock that counts suspend, never on
 `Instant` (which stops during suspend on Linux and macOS): `CLOCK_BOOTTIME` on Linux,
-`mach_continuous_time` on macOS, `QueryInterruptTime` on Windows. A laptop that sleeps for
+`clock_gettime(CLOCK_MONOTONIC)` on macOS (which, unlike `CLOCK_UPTIME_RAW`, counts sleep
+there; `mach_continuous_time` in ms without a timebase conversion), `QueryInterruptTime` on
+Windows. A laptop that sleeps for
 hours and reopens its stream in the same process sees hours, not seconds. Inside a run the
 job compares it with the audio clock at each row: when the boot clock advanced more than 2 s
 further than the audio clock since the row before (a suspend or stall the backend did not
@@ -613,7 +615,8 @@ headers `# ac2 spl log v3`, `# meas`, `# name`, `# input`, `# mic`, `# zone` and
 
 **Wire.** `SplLogRow` gains `second: u64`, `run: u32`, `clock: LogClock` (`synced`,
 `unsynced`, `derived`, `not_stated`), `gap: Option<LogGap>` (`known`, `unknown`);
-`BandLogRow` the same plus `utc_offset_s: i32`, and its `period` becomes
+the band log's wire row `BandLogSecond` (the file's row is `ac2_traces::band_log::BandLogRow`,
+which gains the same) the same plus `utc_offset_s: i32`, and its `period` becomes
 `Option<BandPeriod>` (nil: can't tell). `SplLogPage` gains `started_at: WallNs`, so a
 downloader that sees it change mid-download restarts. `HistorySpan::Range` takes `from: u64,
 to: u64` as second indices and keeps `step_s`; its buckets are the whole multiples of `step_s`
@@ -628,6 +631,39 @@ versions in a session of another format version. Each recovered log becomes a st
 measurement of session scope, named `<name> (salvaged)`, default configuration on the
 logged input, holding the log as its current log. `Salvage` gains `spl_logs: Vec<MeasId>`;
 a log of another version is reported in `refused` and stays on disk as plain CSV.
+
+Decided in `pn-logs`:
+- **Mark file.** `<log>.mark` is the SPL log's file name plus `.mark` (`spl/<gen>-<meas>.csv.mark`),
+  JSON `{format: "ac2-log-mark", version: 1, highest_run, anchor: {boot_id, run, second,
+  boot_ms}}`, `boot_ms` in ms where second `second` ends, so a restart on the same boot
+  leaves out the whole seconds since that end. The band log shares it (its rows carry the SPL log's keys). A
+  mark of another version reads as missing. When a compaction or `spl.log_new` moves the
+  log to a new file, the mark is written beside the new file and the old one removed, so a
+  mark never lies beside a file it does not bound.
+- **Held rows only with a write thread.** A run's first rows wait for its anchor only while
+  a write thread keeps the log on disk (the autosave or a rig log directory); a daemon
+  without one has nothing a power cut could replay, and serves at once.
+- **Can't tell on the wire.** `LeqJudgement` gains `cant_tell`, and `leq_flags` `CANT_TELL`
+  128 (with `LIMIT`), so a band frame says it without a new field. It applies to a window
+  with a `day_offset`, and to the predicted LAeq when its day limit differs from its night
+  one; a window with one limit for both is judged as ever. OSC sends it as `fault`.
+- **History buckets.** A bucket's point is keyed by its newest second (`second[k]`, its
+  `at[k]` that second's end); `log_start` / `log_until` stay beside `first_second` /
+  `last_second` as their wall annotations. A range is inclusive (`from ..= to`); `to <
+  from` is `invalid`; the point count is `to / step_s − from / step_s + 1`.
+- **Old-version logs at start.** Moved whole into `<autosave>.old-version-files/` as
+  `<file>.v<N>-<time>` (`ac2_paths::set_aside_as`), reported in `rig.damaged_files` with
+  the reason "… as plain CSV of its own version; the meter starts a new log". A loaded
+  session with one is `unsupported`. The converter converts no log: §*Versions and deploy*
+  says none (inside sessions).
+- **Band row offset.** A band row's `utc_offset_s` beyond ±18 h is damage.
+- **Salvage pairing.** The other version's manifest is not read, so `file.salvage` pairs a
+  log with its band log and mark by file name. The CLI's local salvage (`ac2 session salvage
+  <folder>`, which rebuilds measurements setting by setting over commands) still reports
+  logs as not restored: no command loads a log into a meter, and a session of another
+  format version holds logs of another log version anyway.
+- **The app's history strip** stays on wall time for drawing and asks ranges by index,
+  mapping a wall time to an index from the newest second it holds.
 
 ### 8. Local pair on ipc everywhere
 
