@@ -31,7 +31,10 @@ pub use ctrl::{
     ReplyBody, Request, SweepRunArgs, TraceImportArgs, Warning, Welcome, decode_reply,
     decode_request, encode_reply, encode_request, peek_envelope,
 };
-pub use event::{Change, Event, EventError, Patch, StateSnapshot, decode_event, encode_event};
+pub use event::{
+    Change, Event, EventError, Patch, SnapshotTransfer, StateSnapshot, decode_event,
+    decode_snapshot, encode_event, encode_snapshot,
+};
 pub use flow::{
     DataRequest, DataUp, FlowNotice, MAX_DATA_PART_BYTES, MAX_DATA_REQUEST_BYTES,
     TRANSPORT_SLACK_BYTES, decode_data_request, decode_notice, encode_data_request, encode_notice,

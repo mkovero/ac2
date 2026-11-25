@@ -415,7 +415,8 @@ impl Change {
     }
 }
 
-/// Reply to `state.snapshot`.
+/// Reply to `state.snapshot`: inline, or as the bytes of a [`SnapshotTransfer`] when it would
+/// not fit a ctrl message ([`encode_snapshot`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StateSnapshot {
@@ -427,6 +428,36 @@ pub struct StateSnapshot {
     pub daemon_incarnation: DaemonIncarnation,
     /// Epoch.
     pub stream_epoch: StreamEpoch,
+}
+
+/// What `state.snapshot` replies when the state does not fit a ctrl message: its bytes
+/// ([`encode_snapshot`] of the [`StateSnapshot`] the inline reply would have carried) are held
+/// as a download, fetched with `file.download_chunk` and closed with `file.download_end`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotTransfer {
+    /// Rev of the snapshot the transfer holds.
+    pub rev: Rev,
+    /// The download (`file_name` `state-<rev>.msgpack`).
+    pub transfer: crate::model::Transfer,
+}
+
+impl SnapshotTransfer {
+    /// The download's file name for a snapshot at `rev`.
+    pub fn file_name(rev: Rev) -> String {
+        format!("state-{}.msgpack", rev.0)
+    }
+}
+
+/// A snapshot as a snapshot transfer carries it: msgpack, as inline in a reply.
+pub fn encode_snapshot(s: &StateSnapshot) -> Result<Vec<u8>, EventError> {
+    rmp_serde::to_vec_named(s).map_err(|x| EventError::Encode(x.to_string()))
+}
+
+/// The snapshot of a snapshot transfer's bytes. No size bound of its own: the transfer
+/// stated its size and checksum before a byte was fetched.
+pub fn decode_snapshot(b: &[u8]) -> Result<StateSnapshot, EventError> {
+    rmp_serde::from_slice(b).map_err(|x| EventError::Malformed(x.to_string()))
 }
 
 /// Event decode failures.

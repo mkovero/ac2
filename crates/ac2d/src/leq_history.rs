@@ -34,8 +34,9 @@ pub(crate) fn rows_needed(cfg: &LeqConfig, seconds: u32) -> usize {
 /// before the first row can be released up to `RELEASE_HOLD_S` seconds early). A second's time is its end; a second
 /// without a row gets none (no frame was sent for it). Seconds before the replay is settled
 /// (begun part way through the log, the longest window not yet holding only replayed rows)
-/// are left out, as are those before the last change of unit and those more than `seconds`
-/// before the newest.
+/// are left out, as are those before the last change of unit and those not among the
+/// newest `seconds` (ending `seconds` or more before the newest ends): at most `seconds`
+/// points.
 pub(crate) fn history(
     meas: MeasId,
     cfg: &LeqConfig,
@@ -46,7 +47,7 @@ pub(crate) fn history(
     let mut h = replay(meas, cfg, rows, from_log_start);
     if let Some(newest) = h.at.last().copied() {
         let from =
-            h.at.partition_point(|t| t.0 + u64::from(seconds) * NS < newest.0);
+            h.at.partition_point(|t| t.0 + u64::from(seconds) * NS <= newest.0);
         h.at.drain(..from);
         h.leq.iter_mut().for_each(|v| drop(v.drain(..from)));
         h.over.iter_mut().for_each(|v| drop(v.drain(..from)));
@@ -346,7 +347,7 @@ mod tests {
     fn history_equals_the_live_frames() {
         let (c, rows) = (cfg(), rows());
         let live = live(&c, &rows);
-        let h = history(MeasId(4), &c, &rows, true, SplHistory::MAX_SECONDS);
+        let h = history(MeasId(4), &c, &rows, true, SplHistory::MAX_POINTS);
         assert_eq!(h.scale, LevelScale::DbSpl);
         assert_eq!(h.windows, c.windows);
         assert_same(&live, &h);
@@ -355,8 +356,8 @@ mod tests {
         // The newest 300 s only.
         let h = history(MeasId(4), &c, &rows, true, 300);
         let newest = h.at.last().expect("seconds").0;
-        assert!(h.at.iter().all(|t| t.0 + 300 * NS >= newest));
-        assert!(h.at.len() > 290 && h.at.len() <= 301, "{}", h.at.len());
+        assert!(h.at.iter().all(|t| t.0 + 300 * NS > newest));
+        assert!(h.at.len() > 290 && h.at.len() <= 300, "{}", h.at.len());
         assert_same(&live[live.len() - h.at.len()..], &h);
     }
 
@@ -366,7 +367,7 @@ mod tests {
     fn history_from_part_way_starts_once_settled() {
         let (c, rows) = (cfg(), rows());
         let live = live(&c, &rows);
-        let h = history(MeasId(4), &c, &rows[200..], false, SplHistory::MAX_SECONDS);
+        let h = history(MeasId(4), &c, &rows[200..], false, SplHistory::MAX_POINTS);
         assert!(
             h.at.len() < rows.len() - 200 && h.at.len() > 400,
             "{}",
@@ -383,10 +384,10 @@ mod tests {
         for r in &mut rows[..500] {
             r.sensitivity = None;
         }
-        let h = history(MeasId(4), &c, &rows, true, SplHistory::MAX_SECONDS);
+        let h = history(MeasId(4), &c, &rows, true, SplHistory::MAX_POINTS);
         assert_eq!(h.scale, LevelScale::DbSpl);
         assert_eq!(h.at.len(), rows.len() - 500);
-        let h = history(MeasId(4), &c, &[], true, SplHistory::MAX_SECONDS);
+        let h = history(MeasId(4), &c, &[], true, SplHistory::MAX_POINTS);
         assert!(h.at.is_empty() && h.leq.iter().all(Vec::is_empty));
     }
 

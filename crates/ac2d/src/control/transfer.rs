@@ -9,6 +9,9 @@
 //! session directory (`.incoming/`, never listed: names starting with `.` are not session
 //! names) — on the same file system as the sessions, so `file.import` is a rename, and not
 //! in a RAM-backed temporary directory a big session could fill.
+//!
+//! A snapshot too large for a ctrl reply goes as a download too ([`snapshot`]), held apart
+//! from these and outside their quota.
 
 use std::collections::HashMap;
 use std::fs;
@@ -26,6 +29,8 @@ use super::file_jobs::{Cancel, FileDone, Pending, Work};
 use super::files::{info, session_err};
 use crate::route::Peer;
 use crate::util::{internal, invalid, missing, perr, perr_detail, refused};
+
+mod snapshot;
 
 /// Largest chunk, bytes: well inside a 4 MiB ctrl message with its framing.
 pub(crate) const CHUNK_BYTES: u32 = 1 << 20;
@@ -77,6 +82,7 @@ pub(crate) struct Transfers {
     map: HashMap<TransferId, Xfer>,
     staged: u32,
     lifetime: Duration,
+    snapshots: snapshot::Snapshots,
 }
 
 impl Default for Transfers {
@@ -132,7 +138,15 @@ impl Transfers {
             map: HashMap::new(),
             staged: 0,
             lifetime,
+            snapshots: snapshot::Snapshots::default(),
         }
+    }
+
+    /// A transfer id neither table holds: snapshot transfers share the id space, as they
+    /// share `file.download_chunk` and `file.download_end`.
+    fn next_id(&mut self) -> TransferId {
+        self.next = self.next.wrapping_add(1).max(1);
+        TransferId(self.next)
     }
 
     fn prune(&mut self, now: Instant) {
@@ -158,8 +172,7 @@ impl Transfers {
                 "{MAX_TRANSFERS} transfers are under way; try again when one is done"
             )));
         }
-        self.next = self.next.wrapping_add(1).max(1);
-        let id = TransferId(self.next);
+        let id = self.next_id();
         self.map.insert(
             id,
             Xfer {
@@ -230,6 +243,7 @@ impl Transfers {
     pub(crate) fn forget_key(&mut self, key: &ac2_zmq::PublicKey) {
         self.map
             .retain(|_, x| x.client.curve().is_none_or(|(_, k)| k != key));
+        self.snapshots.forget_key(key);
     }
 
     pub(crate) fn remove(&mut self, id: TransferId) {
@@ -480,6 +494,9 @@ impl Control {
         id: TransferId,
         offset: u64,
     ) -> Result<ReplyBody, ProtoError> {
+        if let Some(r) = self.transfers.snapshots.chunk(client, id, offset) {
+            return r;
+        }
         let x = self.transfers.get(client, id)?;
         let Kind::Download { data, .. } = &x.kind else {
             return Err(invalid(format!("transfer {id} is an upload")));
@@ -501,6 +518,15 @@ impl Control {
         id: TransferId,
         saved_as: Option<String>,
     ) -> Result<ReplyBody, ProtoError> {
+        if let Some(r) = self
+            .transfers
+            .snapshots
+            .end(client, id, saved_as.as_deref())
+        {
+            return r.map(|()| ReplyBody::Ack {
+                rev: self.store.rev(),
+            });
+        }
         let x = self.transfers.get(client, id)?;
         let Kind::Download { working, .. } = &x.kind else {
             return Err(invalid(format!("transfer {id} is an upload")));

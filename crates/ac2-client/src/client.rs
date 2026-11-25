@@ -593,11 +593,10 @@ impl Client {
         self.inner.core.call(cmd, retry).await
     }
 
-    /// `state.snapshot`.
+    /// `state.snapshot`, fetched as a transfer when it does not fit one reply.
     pub async fn snapshot(&self) -> Result<StateSnapshot, ClientError> {
-        let op = "state.snapshot";
-        let r = self.call(Command::StateSnapshot).await?;
-        expect_body!(op, r, ReplyBody::Snapshot(s) => *s)
+        let core = &self.inner.core;
+        crate::snapshot::take(core, core.retry, &mut || {}).await
     }
 
     /// Current mirror view.
@@ -938,9 +937,14 @@ async fn run_sync(
                         None
                     }
                 },
-                Need::Snapshot => match core.call(Command::StateSnapshot, core.retry).await {
-                    Ok(ReplyBody::Snapshot(s)) => mirror.on_snapshot(*s, Instant::now()),
-                    _ => {
+                Need::Snapshot => match crate::snapshot::take(&core, core.retry, &mut || {
+                    mirror.on_answer(Instant::now());
+                    publish(&view_tx, &mirror, &welcome);
+                })
+                .await
+                {
+                    Ok(s) => mirror.on_snapshot(s, Instant::now()),
+                    Err(_) => {
                         mirror.on_request_failed(Instant::now());
                         None
                     }
@@ -963,12 +967,16 @@ async fn run_sync(
         // each keeps watchers simple. Keepalives come at 4 Hz, events at commit rate.
         // Liveness itself is derived by watchers from `last_ka`, so idle ticks publish
         // nothing.
-        let v = match welcome.lock() {
-            Ok(w) => view_of(&mirror, &w),
-            Err(_) => mirror.view(),
-        };
-        view_tx.send_replace(Arc::new(v));
+        publish(&view_tx, &mirror, &welcome);
     }
+}
+
+fn publish(view_tx: &watch::Sender<Arc<MirrorView>>, mirror: &Mirror, welcome: &Mutex<Welcome>) {
+    let v = match welcome.lock() {
+        Ok(w) => view_of(mirror, &w),
+        Err(_) => mirror.view(),
+    };
+    view_tx.send_replace(Arc::new(v));
 }
 
 /// The request half against a ROUTER the test answers by hand: a reply the daemon sent but

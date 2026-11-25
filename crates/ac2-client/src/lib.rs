@@ -27,6 +27,7 @@ pub mod keys;
 mod lease;
 pub mod mirror;
 pub mod sessions;
+mod snapshot;
 pub mod spl_log;
 
 pub use body::body_name;

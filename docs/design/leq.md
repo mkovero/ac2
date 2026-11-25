@@ -330,7 +330,7 @@ code that made the frames.
   log starts — from this app or any other client: the log empties (`spl_log.started_at`
   back to none) or its rows are numbered from 0 again (the frame's `logged` falls). A new
   log clears the history first. An answer to an earlier request is dropped.
-- **What**: the newest 4 h (`SplHistory::MAX_SECONDS`) of the *current* log, one point per
+- **What**: the newest 4 h (`SplHistory::MAX_POINTS` seconds) of the *current* log, one point per
   logged second: its end, and per window the Leq (f32 in the meter's unit, as the frame
   carries it) and whether it was over. The daemon reads 4 h plus the longest window of rows
   (at most 5 h of a log that keeps 48): the longest window before the first point is what

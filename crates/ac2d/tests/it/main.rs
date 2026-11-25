@@ -5,6 +5,7 @@
 mod artnet;
 mod autosave;
 mod band_leq;
+mod big_state;
 mod bin_streams;
 mod calibration;
 mod ceiling;

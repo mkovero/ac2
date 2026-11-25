@@ -215,6 +215,54 @@ fn a_viewer_holds_one_transfer_and_viewers_half() {
     rig.h.shutdown();
 }
 
+/// A viewer syncs a state over one ctrl message with every transfer slot taken: a
+/// snapshot transfer is outside the transfer quota, the viewers' share of it and a viewer's
+/// one at a time, so resyncing takes nothing from an operator and is never refused for room.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_viewer_syncs_a_big_state_with_every_transfer_slot_taken() {
+    use crate::big_state::{PLANS_OVER_CTRL, UNDER_EVENT_BOUND, big_plan};
+    let dir = tempfile::tempdir().unwrap();
+    let rig = start(dir.path());
+    let mut host = rig.local();
+    for i in 0..PLANS_OVER_CTRL {
+        host.ok(Command::PlanSave {
+            plan: big_plan(&format!("big {i}"), UNDER_EVENT_BOUND),
+        });
+    }
+    // The viewers' share held by the phone and the tablet, the rest by the operator.
+    let mut phone = rig.ctrl(&rig.phone);
+    phone.transfer(working_download());
+    let mut tablet = rig.ctrl(&rig.tablet);
+    tablet.transfer(working_download());
+    let mut laptop = rig.ctrl(&rig.laptop);
+    laptop.transfer(working_download());
+    laptop.transfer(working_download());
+    let e = refused(host.call(working_download()));
+    assert!(e.msg.contains("transfers are under way"), "{e:?}");
+
+    // The phone, holding its one transfer, is sent the state as a transfer all the same.
+    let t = match phone.call(Command::StateSnapshot).unwrap() {
+        ac2_proto::ReplyBody::SnapshotTransfer(t) => t,
+        other => panic!("{other:?}"),
+    };
+    assert!(t.transfer.bytes as usize > ac2_proto::MAX_CTRL_BYTES);
+
+    // A viewer's mirror connecting now syncs from such a transfer.
+    let (ctrl, data) = net_endpoints(&rig.h);
+    let mut cc = ac2_client::ClientConfig::new(ac2_client::Endpoints { ctrl, data }, "watch");
+    cc.curve = Some(rig.curve(&rig.watch));
+    let watch = ac2_client::Client::connect(cc).await.unwrap();
+    watch.wait_synced(T).await.unwrap();
+    assert_eq!(watch.role(), ClientRole::Viewer);
+    let v = watch.view();
+    assert_eq!(v.state.as_ref().unwrap().plans.len(), PLANS_OVER_CTRL);
+    assert_eq!(v.snapshots, 1);
+    drop(watch);
+    tokio::task::spawn_blocking(move || rig.h.shutdown())
+        .await
+        .unwrap();
+}
+
 /// A transfer kept busy still ends at its lifetime.
 #[test]
 fn a_transfer_ends_at_its_lifetime_however_busy() {
