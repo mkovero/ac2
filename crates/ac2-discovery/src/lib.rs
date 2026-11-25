@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -353,29 +353,17 @@ pub fn instance_name(s: &str) -> String {
     out
 }
 
-/// Which addresses an advert names.
+/// Which addresses an advert names: only addresses the daemon's socket answers on, since a
+/// browser follows any address an advert lists.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Bind {
-    /// The daemon listens on every interface: advertise every current address (kept up to
-    /// date as interfaces come and go).
-    Any,
-    /// The daemon listens on one address.
+    /// The daemon listens on every IPv4 address (`tcp://*:port`, which libzmq binds as
+    /// `0.0.0.0` while its IPv6 option is off): advertise every current IPv4 address (kept
+    /// up to date as interfaces come and go), never an IPv6 one, where nothing listens.
+    AllIpv4,
+    /// The daemon listens on one address. The IPv4 wildcard `0.0.0.0` reads as
+    /// [`Bind::AllIpv4`]: an advert naming it would send browsers to an unroutable address.
     Addr(IpAddr),
-    /// The daemon listens on one interface by name (`tcp://eth0:47820`).
-    Interface(String),
-}
-
-impl Bind {
-    /// From the host part of a `tcp://host:port` endpoint.
-    pub fn from_listen_host(host: &str) -> Self {
-        let h = host.trim_start_matches('[').trim_end_matches(']');
-        match h {
-            "*" | "0.0.0.0" | "::" => Self::Any,
-            _ => h
-                .parse()
-                .map_or_else(|_| Self::Interface(h.to_owned()), Self::Addr),
-        }
-    }
 }
 
 /// Something the responder reports while an advert runs.
@@ -394,6 +382,18 @@ pub enum AdvertEvent {
         /// The name now in use.
         to: String,
     },
+}
+
+/// The interfaces an advert is announced on; with an automatic address list, also the
+/// addresses it names.
+fn advertised_on(bind: &Bind, opts: &Options) -> Vec<IfKind> {
+    if opts.loopback_only {
+        return vec![IfKind::LoopbackV4];
+    }
+    match bind {
+        Bind::Addr(IpAddr::V6(_)) => vec![IfKind::IPv6],
+        Bind::Addr(IpAddr::V4(_)) | Bind::AllIpv4 => vec![IfKind::IPv4],
+    }
 }
 
 /// A registered advert. Dropping it sends the goodbye and stops the responder.
@@ -450,25 +450,20 @@ impl Advertiser {
             return Err(Error("empty rig name".into()));
         }
         let txt = advert.txt();
-        let info = match bind {
-            Bind::Addr(ip) => ServiceInfo::new(SERVICE_TYPE, &name, &host, *ip, port, &txt[..]),
-            Bind::Any | Bind::Interface(_) => {
+        let mut info = match bind {
+            Bind::AllIpv4 | Bind::Addr(IpAddr::V4(Ipv4Addr::UNSPECIFIED)) => {
                 ServiceInfo::new(SERVICE_TYPE, &name, &host, "", port, &txt[..])
                     .map(ServiceInfo::enable_addr_auto)
             }
+            // Which addresses an IPv6 wildcard answers on depends on the socket's dual-stack
+            // option, which the advert cannot see.
+            Bind::Addr(IpAddr::V6(ip)) if ip.is_unspecified() => {
+                return Err(Error("an IPv6 wildcard bind is not advertised".into()));
+            }
+            Bind::Addr(ip) => ServiceInfo::new(SERVICE_TYPE, &name, &host, *ip, port, &txt[..]),
         }
         .map_err(merr)?;
-        let info = if opts.loopback_only {
-            let mut i = info;
-            i.set_interfaces(vec![IfKind::LoopbackV4]);
-            i
-        } else if let Bind::Interface(n) = bind {
-            let mut i = info;
-            i.set_interfaces(vec![IfKind::Name(n.clone())]);
-            i
-        } else {
-            info
-        };
+        info.set_interfaces(advertised_on(bind, opts));
         let fullname = info.get_fullname().to_owned();
         daemon.register(info).map_err(merr)?;
         let status = daemon
@@ -799,16 +794,29 @@ mod tests {
         assert_eq!(instance_name("  my.rig\\x\n"), "my-rig-x");
         assert!(instance_name(&"ä".repeat(100)).len() <= MAX_NAME_LEN);
         assert!(!local_host_label().is_empty());
-        assert_eq!(Bind::from_listen_host("0.0.0.0"), Bind::Any);
-        assert_eq!(Bind::from_listen_host("*"), Bind::Any);
-        assert_eq!(Bind::from_listen_host("[::]"), Bind::Any);
-        assert_eq!(
-            Bind::from_listen_host("10.1.2.3"),
-            Bind::Addr("10.1.2.3".parse().unwrap_or(IpAddr::from([0u8; 4])))
-        );
-        assert_eq!(
-            Bind::from_listen_host("eth0"),
-            Bind::Interface("eth0".into())
-        );
+        let open = Options {
+            mdns_port: 5353,
+            loopback_only: false,
+        };
+        let v4 = |s: &str| IpAddr::V4(s.parse().unwrap_or(Ipv4Addr::UNSPECIFIED));
+        // An IPv4 wildcard bind is advertised on IPv4 only: nothing listens on IPv6.
+        for b in [
+            Bind::AllIpv4,
+            Bind::Addr(v4("0.0.0.0")),
+            Bind::Addr(v4("10.1.2.3")),
+        ] {
+            let on = advertised_on(&b, &open);
+            assert!(matches!(on[..], [IfKind::IPv4]), "{b:?}: {on:?}");
+        }
+        let v6 = Bind::Addr("fd00::5".parse().unwrap_or(IpAddr::from([0u8; 16])));
+        assert!(matches!(advertised_on(&v6, &open)[..], [IfKind::IPv6]));
+        let lo = Options {
+            loopback_only: true,
+            ..open
+        };
+        assert!(matches!(
+            advertised_on(&Bind::AllIpv4, &lo)[..],
+            [IfKind::LoopbackV4]
+        ));
     }
 }

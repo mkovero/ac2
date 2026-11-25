@@ -11,7 +11,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac2_discovery::{Browser, Options, Rig, Update};
-use ac2_proto::model::RigPeer;
+use ac2_proto::model::{RemoteLink, RigPeer};
+use ac2_proto::units::WallNs;
 
 use super::RemoteMsg;
 use crate::control::ControlMsg;
@@ -40,30 +41,98 @@ fn endpoint(host: &str, port: u16) -> String {
     }
 }
 
+/// Whether this rig's links can reach `a`: their sockets are IPv4 only (libzmq's IPv6
+/// option is off), so an IPv6 address never answers here however routable it is.
+fn reachable(a: &IpAddr) -> bool {
+    a.is_ipv4()
+}
+
 /// Where `peer` answers now by `advert`: its ctrl and data endpoints, when the advert
-/// carries the key the app pinned for `peer` and not the endpoint `peer` was paired at.
-/// `None` for another rig's advert, one that resolved no address, or one still naming the
-/// paired endpoint (a rig on several networks lists all its addresses). A rig still at its
-/// paired host but on another port keeps the host as paired (a name stays a name).
-pub(crate) fn followed(peer: &RigPeer, advert: &Rig) -> Option<(String, String)> {
+/// carries the key the app pinned for `peer` and the endpoint `peer` is paired at is not one
+/// of the advert's reachable addresses, or is one of `failed`. `None` for another rig's
+/// advert, one that resolved no address, one still naming the paired endpoint (a rig on
+/// several networks lists all its addresses), or one whose reachable addresses all failed
+/// (the link keeps trying the paired one). A rig still at its paired host but on another port
+/// keeps the host as paired (a name stays a name).
+pub(crate) fn followed(
+    peer: &RigPeer,
+    advert: &Rig,
+    failed: &[IpAddr],
+) -> Option<(String, String)> {
     if advert.advert.server_key != peer.key || advert.addresses.is_empty() {
         return None;
     }
     let (paired, port) = host_port(&peer.ctrl)?;
+    let paired_ip = paired.parse::<IpAddr>().ok();
+    // Best first, as the advert ranks them.
+    let mut usable = advert
+        .addresses
+        .iter()
+        .filter(|a| reachable(a) && !failed.contains(a));
     let host_there = paired.eq_ignore_ascii_case(&advert.host)
-        || paired
-            .parse::<IpAddr>()
-            .is_ok_and(|ip| advert.addresses.contains(&ip));
-    if host_there && port == advert.port {
-        return None;
-    }
+        || paired_ip.is_some_and(|ip| usable.clone().any(|a| *a == ip));
     let host = if host_there {
+        if port == advert.port {
+            return None;
+        }
         paired.to_owned()
     } else {
-        advert.connect_host()
+        usable.next()?.to_string()
     };
     let data = advert.port.checked_add(1)?;
     Some((endpoint(&host, advert.port), endpoint(&host, data)))
+}
+
+/// What a paired rig's link has shown about the addresses it was followed to since it was
+/// last up. An address is given up when the link there fails, so an advert listing it
+/// cannot keep the rig on it; the paired address the operator gave is never given up, since
+/// a rig that is merely off fails the same way.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Followed {
+    gave_up: Vec<IpAddr>,
+    /// The address followed last and when the link to it started.
+    last: Option<(IpAddr, WallNs)>,
+}
+
+impl Followed {
+    /// Follows `peer` by `advert` while its link shows `link` (`None`: no link yet): the new
+    /// endpoints, noted as followed at `now`. A link that is up keeps its endpoint whatever
+    /// the advert lists.
+    pub(crate) fn follow(
+        &mut self,
+        peer: &RigPeer,
+        advert: &Rig,
+        link: Option<&RemoteLink>,
+        now: WallNs,
+    ) -> Option<(String, String)> {
+        if matches!(link, Some(RemoteLink::Up)) {
+            return None;
+        }
+        let paired = host_port(&peer.ctrl).and_then(|(h, _)| h.parse::<IpAddr>().ok());
+        let mut failed = self.gave_up.clone();
+        if let Some((ip, at)) = self.last
+            && paired == Some(ip)
+            && link.is_some_and(|l| fails_since(l, at))
+        {
+            failed.push(ip);
+        }
+        let (ctrl, data) = followed(peer, advert, &failed)?;
+        let to = host_port(&ctrl).and_then(|(h, _)| h.parse::<IpAddr>().ok());
+        self.gave_up = failed;
+        self.last = to.map(|ip| (ip, now));
+        Some((ctrl, data))
+    }
+}
+
+/// Whether `link` says its address does not lead to the rig, for a link started at `at`.
+/// An unreachable report from before `at` is the previous link's; a rig that turned its
+/// network off or has not admitted this one would refuse at any address.
+fn fails_since(link: &RemoteLink, at: WallNs) -> bool {
+    match link {
+        RemoteLink::Unreachable { since } => *since >= at,
+        RemoteLink::KeyChanged | RemoteLink::OtherRig { .. } => true,
+        _ => false,
+    }
 }
 
 /// The browse that hands every resolved advert to the control thread, running until
@@ -168,13 +237,13 @@ mod tests {
         let p = peer("tcp://10.0.0.5:7000");
         let k = "k".repeat(40);
         assert_eq!(
-            followed(&p, &advert(&k, "ketunkolo.local", &["10.0.0.9"], 7000)),
+            followed(&p, &advert(&k, "ketunkolo.local", &["10.0.0.9"], 7000), &[]),
             Some(("tcp://10.0.0.9:7000".into(), "tcp://10.0.0.9:7001".into()))
         );
         // Its ports come from the advert too: the daemon may have been started on others.
         assert_eq!(
-            followed(&p, &advert(&k, "ketunkolo.local", &["fd00::9"], 7100)),
-            Some(("tcp://[fd00::9]:7100".into(), "tcp://[fd00::9]:7101".into()))
+            followed(&p, &advert(&k, "ketunkolo.local", &["10.0.0.9"], 7100), &[]),
+            Some(("tcp://10.0.0.9:7100".into(), "tcp://10.0.0.9:7101".into()))
         );
     }
 
@@ -183,14 +252,14 @@ mod tests {
         let k = "k".repeat(40);
         let a = advert(&k, "ketunkolo.local", &["10.0.0.5"], 7100);
         assert_eq!(
-            followed(&peer("tcp://ketunkolo.local:7000"), &a),
+            followed(&peer("tcp://ketunkolo.local:7000"), &a, &[]),
             Some((
                 "tcp://ketunkolo.local:7100".into(),
                 "tcp://ketunkolo.local:7101".into()
             ))
         );
         assert_eq!(
-            followed(&peer("tcp://10.0.0.5:7000"), &a),
+            followed(&peer("tcp://10.0.0.5:7000"), &a, &[]),
             Some(("tcp://10.0.0.5:7100".into(), "tcp://10.0.0.5:7101".into()))
         );
     }
@@ -200,7 +269,7 @@ mod tests {
         let p = peer("tcp://10.0.0.5:7000");
         // Another rig, whatever it calls itself.
         let other = advert(&"o".repeat(40), "ketunkolo.local", &["10.0.0.9"], 7000);
-        assert_eq!(followed(&p, &other), None);
+        assert_eq!(followed(&p, &other, &[]), None);
     }
 
     #[test]
@@ -208,18 +277,110 @@ mod tests {
         let k = "k".repeat(40);
         // One of several addresses, or the host name it was paired by.
         let a = advert(&k, "ketunkolo.local", &["10.0.0.5", "192.168.1.4"], 7000);
-        assert_eq!(followed(&peer("tcp://10.0.0.5:7000"), &a), None);
-        assert_eq!(followed(&peer("tcp://ketunkolo.local:7000"), &a), None);
+        assert_eq!(followed(&peer("tcp://10.0.0.5:7000"), &a, &[]), None);
+        assert_eq!(followed(&peer("tcp://ketunkolo.local:7000"), &a, &[]), None);
         assert_eq!(
             followed(
                 &peer("tcp://[fe80::1]:7000"),
-                &advert(&k, "h", &["fe80::1"], 7000)
+                &advert(&k, "h", &["fe80::1"], 7000),
+                &[]
             ),
             None
         );
         // An advert that resolved no address says nothing about where the rig is.
         assert_eq!(
-            followed(&peer("tcp://10.0.0.5:7000"), &advert(&k, "h", &[], 7000)),
+            followed(
+                &peer("tcp://10.0.0.5:7000"),
+                &advert(&k, "h", &[], 7000),
+                &[]
+            ),
+            None
+        );
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn an_address_this_rig_cannot_reach_is_never_followed() {
+        let k = "k".repeat(40);
+        let p = peer("tcp://192.168.9.27:7000");
+        // The ULA alone (as a resolve that heard AAAA first gives it): the paired address stays.
+        let ula = advert(&k, "pupu.local", &["fddd::27"], 7000);
+        assert_eq!(followed(&p, &ula, &[]), None);
+        // Both families: the paired IPv4 address is listed, so nothing moves.
+        let both = advert(&k, "pupu.local", &["fddd::27", "192.168.9.27"], 7000);
+        assert_eq!(followed(&p, &both, &[]), None);
+        // A peer saved at the ULA moves to the IPv4 address even though the ULA is listed.
+        assert_eq!(
+            followed(&peer("tcp://[fddd::27]:7000"), &both, &[]),
+            Some((
+                "tcp://192.168.9.27:7000".into(),
+                "tcp://192.168.9.27:7001".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_link_that_is_up_keeps_its_endpoint() {
+        let k = "k".repeat(40);
+        let p = peer("tcp://10.0.0.5:7000");
+        let elsewhere = advert(&k, "ketunkolo.local", &["10.0.0.9"], 7000);
+        let mut f = Followed::default();
+        assert_eq!(
+            f.follow(&p, &elsewhere, Some(&RemoteLink::Up), WallNs(1)),
+            None
+        );
+        assert_eq!(f, Followed::default());
+        // Down, the same advert moves it.
+        assert!(
+            f.follow(&p, &elsewhere, Some(&RemoteLink::Connecting), WallNs(2))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_followed_address_that_never_connects_is_given_up() {
+        let k = "k".repeat(40);
+        // On two networks; this rig reaches only the second.
+        let a = advert(&k, "ketunkolo.local", &["10.0.0.9", "10.1.0.9"], 7000);
+        let mut f = Followed::default();
+        let mut p = peer("tcp://10.0.0.5:7000");
+        let (ctrl, _) = f
+            .follow(&p, &a, Some(&RemoteLink::Connecting), WallNs(100))
+            .unwrap();
+        assert_eq!(ctrl, "tcp://10.0.0.9:7000");
+        p.ctrl = ctrl;
+        // Still connecting, or an unreachable report the previous link sent: it stays.
+        for link in [
+            None,
+            Some(RemoteLink::Connecting),
+            Some(RemoteLink::Unreachable { since: WallNs(50) }),
+        ] {
+            assert_eq!(f.follow(&p, &a, link.as_ref(), WallNs(101)), None);
+        }
+        // Unreachable there: the next advert (or link report) moves it on.
+        let down = RemoteLink::Unreachable { since: WallNs(103) };
+        let (ctrl, _) = f.follow(&p, &a, Some(&down), WallNs(104)).unwrap();
+        assert_eq!(ctrl, "tcp://10.1.0.9:7000");
+        p.ctrl = ctrl;
+        assert_eq!(f.gave_up, vec![ip("10.0.0.9")]);
+        // Both failed: it stays where it is, its link retrying, until an advert names another.
+        let down = RemoteLink::Unreachable { since: WallNs(110) };
+        assert_eq!(f.follow(&p, &a, Some(&down), WallNs(111)), None);
+        let moved = advert(&k, "ketunkolo.local", &["10.2.0.9"], 7000);
+        assert!(f.follow(&p, &moved, Some(&down), WallNs(112)).is_some());
+    }
+
+    #[test]
+    fn the_operators_address_is_kept_while_the_rig_is_off() {
+        let k = "k".repeat(40);
+        let p = peer("tcp://10.0.0.5:7000");
+        let a = advert(&k, "ketunkolo.local", &["10.0.0.5", "10.1.0.5"], 7000);
+        let down = RemoteLink::Unreachable { since: WallNs(5) };
+        assert_eq!(
+            Followed::default().follow(&p, &a, Some(&down), WallNs(9)),
             None
         );
     }

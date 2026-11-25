@@ -176,8 +176,9 @@ methods take the socket their peer's origin picks).
   when it comes back, bind, `Listening`. A listener on a vanished address would otherwise
   silently accept nothing. `Failed` (ZAP death) retries on the same backoff with a new
   context; the timer runs for `Fixed` and `FromSettings` alike.
-- mDNS advertises with `ac2_discovery::Bind` from the setting (`Any`, `Addr`, `Interface`),
-  which the responder already honours; it starts at `Listening` and stops on leaving it.
+- mDNS advertises with `ac2_discovery::Bind` from the bound host (`AllIpv4` for `All`, else
+  `Addr`): the advert names only addresses the socket answers on, so an IPv4 wildcard bind
+  advertises no IPv6 address. It starts at `Listening` and stops on leaving it.
 
 ## Wire changes (PROTO_VERSION 92 → 93, `fixtures/protocol/WIRE_LOCK`)
 

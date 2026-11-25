@@ -20,6 +20,7 @@ use ac2_zmq::PublicKey;
 
 use crate::calstore::{self, InputCal};
 use crate::outbox::Outbox;
+use crate::remote::follow::Followed;
 use crate::remote::join::{JoinInput, JoinSetup, Joiner};
 use crate::remote::link::{self, LinkFrame, LinkHandle};
 use crate::remote::peer_clock::{Evidence, PeerClockWatch};
@@ -71,6 +72,8 @@ pub(super) struct RemoteCtl {
     /// The last mDNS advert seen per server key: a rig may announce its new address before
     /// its link here notices the old one is gone, or before it is paired.
     adverts: BTreeMap<String, ac2_discovery::Rig>,
+    /// Per paired rig, the addresses adverts moved it to since its link was last up.
+    followed: BTreeMap<RigId, Followed>,
     system_synced: Arc<AtomicBool>,
     pub(super) started: Instant,
     /// This rig's own timing, written by the fan-out, read by every link.
@@ -95,6 +98,7 @@ impl RemoteCtl {
             cross: BTreeMap::new(),
             fed: BTreeSet::new(),
             adverts: BTreeMap::new(),
+            followed: BTreeMap::new(),
             system_synced: Arc::new(AtomicBool::new(false)),
             started: Instant::now(),
             local_clock: Arc::new(LocalClock::default()),
@@ -228,6 +232,9 @@ impl Control {
             .standing
             .retain(|rig, _| peers.iter().any(|p| p.rig == *rig));
         self.remote
+            .followed
+            .retain(|rig, _| peers.iter().any(|p| p.rig == *rig));
+        self.remote
             .fed
             .retain(|rig| self.remote.links.contains_key(rig));
         let Some(keys) = keys else {
@@ -277,6 +284,8 @@ impl Control {
             )));
         }
         peers.retain(|p| p.rig != peer.rig);
+        // An address the operator pairs at is theirs to keep, whatever adverts said before.
+        self.remote.followed.remove(&peer.rig);
         peers.push(peer);
         self.set_rig_peers(peers)
     }
@@ -522,21 +531,23 @@ impl Control {
     }
 
     /// Pairs `rig` at the address its last advert names, when its link is not up and the
-    /// advert carries its pinned key but not the address it was paired at (saved, its link
-    /// started over).
+    /// advert carries its pinned key but not a working address it is paired at (saved, its
+    /// link started over).
     fn follow_peer(&mut self, rig: RigId) {
-        if matches!(self.remote.link_state.get(&rig), Some((RemoteLink::Up, ..))) {
-            return;
-        }
         let mut peers = self.store.state().remote.peers.clone();
         let Some(p) = peers.iter_mut().find(|p| p.rig == rig) else {
             return;
         };
-        let Some((ctrl, data)) = self
-            .remote
-            .adverts
-            .get(&p.key)
-            .and_then(|a| crate::remote::follow::followed(p, a))
+        let Some(advert) = self.remote.adverts.get(&p.key) else {
+            return;
+        };
+        let link = self.remote.link_state.get(&rig).map(|s| &s.0);
+        let Some((ctrl, data)) =
+            self.remote
+                .followed
+                .entry(rig)
+                .or_default()
+                .follow(p, advert, link, WallNs(wall_ns()))
         else {
             return;
         };
@@ -566,7 +577,9 @@ impl Control {
                     self.remote
                         .link_state
                         .insert(rig, (link, bytes_per_s, window));
-                    if !up {
+                    if up {
+                        self.remote.followed.remove(&rig);
+                    } else {
                         self.follow_peer(rig);
                     }
                 }

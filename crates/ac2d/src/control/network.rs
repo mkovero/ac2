@@ -630,7 +630,7 @@ impl NetCtl {
             return;
         }
         let bind = match host {
-            Host::Any => ac2_discovery::Bind::Any,
+            Host::Any => ac2_discovery::Bind::AllIpv4,
             Host::Addr(a) => ac2_discovery::Bind::Addr(a),
         };
         self.advert = advertise(&self.name, &m.options, &kp.public, ctrl, &bind);
