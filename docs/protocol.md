@@ -395,7 +395,7 @@ read — a peak detector in `ppm`: `true_peak` (BS.1770 Annex 2, 4× oversampled
 default), `type1` (IEC 60268-10 Type I quasi-peak), `type2` (Type II) or `vu` (IEC 60268-17;
 offered on a `line` input with a line calibration only — elsewhere `ppm` carries the true
 peak and the row says so); or a loudness window of each bar's source: `momentary` (BS.1770
-momentary, 400 ms, LUFS) or `short_term` (3 s), read from the frame's `loudness` — under
+momentary, 400 ms, LUFS) or `short_term` (3 s), read from the frame's `lufs_m` / `lufs_s` — under
 these two every input's `ppm` and `max` carry its true peak and true-peak hold (dBTP), so a
 frame stays self-describing, and an input without a source (a mic, a partner not captured, a
 rate outside the meter's) reads its true peak; `correlation_window` is the correlator's exponential window, `short` (0.3 s) or `long`
@@ -2700,8 +2700,9 @@ receives nothing. A paired rig subscribes it whenever its link is up, with or wi
 inputs: each frame's `mark` (§5.4) pairs with this rig's own capture at the same system
 time, and that pairing over a minute is the clock relation in `remote.standing` (§4.1).
 A frame spans the two meter intervals since the one before: `peak`, `true_peak`, `clip` and
-`ppm` are the highest of the two, `rms` their mean power; `max`, `overs`, `pair_levels` and
-`loudness` are the newest interval's, as they hold or run on their own. Its period is two
+`ppm` are the highest of the two, `rms` their mean power; `max`, `overs`, the per-pair arrays
+(`pair_corr`, `pair_quiet`, by `meta.pairs`) and the per-source ones (`lufs_m` … `loud_s`, by
+`meta.sources`) are the newest interval's, as they hold or run on their own. Its period is two
 meter periods, so a reader must not count a ballistic's decay in frames.
 
 ### 5.2 Layout
