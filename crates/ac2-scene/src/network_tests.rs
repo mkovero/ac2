@@ -234,31 +234,14 @@ fn turning_on_names_where() {
 
 #[test]
 fn ports_are_checked_before_sending() {
-    assert_eq!(parse_port(" 47820 ", &[]), Ok(47820));
+    assert_eq!(parse_port(" 47820 "), Ok(47820));
     for bad in ["0", "65535", "x", ""] {
         assert_eq!(
-            parse_port(bad, &[]),
+            parse_port(bad),
             Err("type a port from 1 to 65534 (data takes the next one)".into()),
             "{bad}"
         );
     }
-    // Windows: the local pair is loopback TCP 47822/47823, which the network may not take.
-    let local = local_tcp_ports(Some(&LocalServer::Local {
-        ctrl: "tcp://127.0.0.1:47822".into(),
-        data: "tcp://127.0.0.1:47823".into(),
-    }));
-    assert_eq!(local, [47822, 47823]);
-    assert_eq!(parse_port("47820", &local), Ok(47820));
-    assert_eq!(
-        parse_port("47821", &local),
-        Err(
-            "port 47821 (data 47822) would take TCP 47822 and 47823, which apps on this computer \
-             reach ac2d on (as on Windows): pick another port"
-                .into()
-        )
-    );
-    assert!(parse_port("47823", &local).is_err());
-    assert!(local_tcp_ports(server_info().local.as_ref()).is_empty());
     assert_eq!(
         parse_address("192.168.1.20"),
         Ok(IpAddr::from([192, 168, 1, 20]))

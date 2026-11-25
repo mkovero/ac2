@@ -215,8 +215,10 @@ fn an_interface_is_waited_for_and_followed_while_it_comes_and_goes() {
     h.shutdown();
 }
 
+/// Loopback TCP is open to every user of the machine, so the local pair (served without
+/// CURVE) refuses it before anything binds.
 #[test]
-fn a_network_port_on_the_local_ones_is_refused_at_the_command_line() {
+fn a_tcp_local_pair_is_refused_at_the_command_line() {
     let dir = tempfile::tempdir().unwrap();
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_ac2d"))
         .args([
@@ -226,9 +228,7 @@ fn a_network_port_on_the_local_ones_is_refused_at_the_command_line() {
             "tcp://127.0.0.1:47950",
             "--data",
             "tcp://127.0.0.1:47951",
-            "--listen",
-            "tcp://127.0.0.1:47949",
-            // Should the clash go unnoticed, the daemon must not outlive the test.
+            // Should the refusal go missing, the daemon must not outlive the test.
             "--stop-on-stdin-eof",
         ])
         .env("AC2_RUNTIME_DIR", dir.path().join("run"))
@@ -242,12 +242,13 @@ fn a_network_port_on_the_local_ones_is_refused_at_the_command_line() {
         .env("XDG_RUNTIME_DIR", dir.path().join("xdg/runtime"))
         .output()
         .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(
         out.status.code(),
         Some(i32::from(ac2d::instance::exit::SETUP)),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
+        "{stderr}"
     );
+    assert!(stderr.contains("only ipc://"), "{stderr}");
 }
 
 /// The rig case: the port is taken when the daemon starts (a previous instance still
@@ -295,17 +296,13 @@ fn a_taken_port_waits_and_binds_once_it_is_free() {
 
 #[test]
 fn an_ephemeral_daemon_takes_no_network() {
+    let dir = tempfile::tempdir().unwrap();
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_ac2d"))
-        .args([
-            "--ephemeral",
-            "--ctrl",
-            "tcp://127.0.0.1:0",
-            "--data",
-            "tcp://127.0.0.1:0",
-            "--listen",
-            "tcp://127.0.0.1:47949",
-            "--stop-on-stdin-eof",
-        ])
+        .args(["--ephemeral", "--ctrl"])
+        .arg(format!("ipc://{}", dir.path().join("ctrl.sock").display()))
+        .arg("--data")
+        .arg(format!("ipc://{}", dir.path().join("data.sock").display()))
+        .args(["--listen", "tcp://127.0.0.1:47949", "--stop-on-stdin-eof"])
         .output()
         .unwrap();
     assert_eq!(

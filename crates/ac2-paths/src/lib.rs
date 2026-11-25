@@ -18,13 +18,12 @@
 //! Logs are neither: they are disposable diagnostics of this machine, so each OS's own log
 //! location ([`log_dir`]). With the `log` feature, [`log`] installs the shared tracing
 //! subscriber (stderr plus a per-program file there).
-// The one exception is asking the OS for this process's user (`socket_dir`).
+// The one exception is asking the OS for this process's user (`socket_dir`, Unix).
 #![deny(unsafe_code)]
 
 #[cfg(feature = "log")]
 pub mod log;
 pub mod notify;
-#[cfg(unix)]
 pub mod socket_dir;
 
 use std::fs;
@@ -51,6 +50,29 @@ pub fn config_dir() -> PathBuf {
             |d| d.config_dir().to_path_buf(),
         )
     })
+}
+
+/// Per-user directory of the local daemon's sockets, instance lock, pid and endpoints
+/// files: `$AC2_RUNTIME_DIR`; else on Windows `%LOCALAPPDATA%\ac2\run`, under the profile
+/// whose ACL closes it to other users ([`socket_dir`]) and short, since a socket path holds
+/// at most [`socket_dir::MAX_SOCKET_PATH`] bytes; else `$XDG_RUNTIME_DIR/ac2`; else
+/// `<temp>/ac2-<user>`.
+pub fn runtime_dir() -> PathBuf {
+    if let Some(d) = env_dir("AC2_RUNTIME_DIR") {
+        return d;
+    }
+    #[cfg(windows)]
+    if let Some(b) = directories::BaseDirs::new() {
+        return b.data_local_dir().join("ac2").join("run");
+    }
+    #[cfg(not(windows))]
+    if let Some(d) = env_dir("XDG_RUNTIME_DIR") {
+        return d.join("ac2");
+    }
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "user".to_owned());
+    std::env::temp_dir().join(format!("ac2-{user}"))
 }
 
 /// Per-user data directory (table above). Without a home directory: `./ac2-data`.

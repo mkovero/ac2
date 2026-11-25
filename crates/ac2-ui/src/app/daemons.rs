@@ -390,7 +390,6 @@ impl App {
 /// not this user's own (the file is not read from there), or the file does not say where it
 /// listens.
 fn holder_unread() -> String {
-    #[cfg(unix)]
     if let Err(e) = ac2_paths::socket_dir::check(&ac2_client::endpoint::runtime_dir()) {
         return format!("another ac2d is running for this user, but {e}");
     }

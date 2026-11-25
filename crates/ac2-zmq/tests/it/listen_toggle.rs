@@ -79,17 +79,14 @@ fn zap_address_identifies_the_transport() -> TestResult {
     let tcp = router.last_endpoint()?;
     assert_eq!(c.refused_address(&tcp)?, "127.0.0.1");
 
-    #[cfg(unix)]
-    {
-        let dir = tempfile::tempdir()?;
-        let ipc = format!("ipc://{}", dir.path().join("ctrl").display());
-        router.bind(&ipc)?;
-        // The libzmq built here reads no peer credentials, so ipc names no user, only the
-        // transport, and not the same way on every OS; the socket file's permissions are the
-        // whole boundary.
-        let a = c.refused_address(&ipc)?;
-        assert!(a == "localhost" || a.is_empty(), "{a:?}");
-    }
+    let dir = tempfile::tempdir()?;
+    let ipc = format!("ipc://{}", dir.path().join("ctrl").display());
+    router.bind(&ipc)?;
+    // The libzmq built here reads no peer credentials, so ipc names no user, only the
+    // transport, and not the same way on every OS; the socket file's permissions are the
+    // whole boundary.
+    let a = c.refused_address(&ipc)?;
+    assert!(a == "localhost" || a.is_empty(), "{a:?}");
     Ok(())
 }
 

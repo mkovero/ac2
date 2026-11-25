@@ -23,7 +23,7 @@ async fn previous_page(c: &Client) -> Result<SplLogPage, ClientError> {
 async fn slow_a_new_log_starts_over_and_keeps_the_windows() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = steady_config(realtime_rig(), local_tcp());
+    let mut cfg = steady_config(realtime_rig(), local_ipc());
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;
@@ -169,7 +169,7 @@ async fn a_long_log_in_pages_and_its_history() {
     use ac2_traces::session::{SavedMeasurement, SavedSplLog, Session};
     init_log();
     let dir = tempfile::tempdir().unwrap();
-    let h = Daemon::start(steady_config(realtime_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(steady_config(realtime_rig(), local_ipc())).unwrap();
     let c = connect(&h).await;
     let n = SplLogPage::MAX_ROWS as u64 * 2 + 5000;
     let t0 = 1_790_000_000_000_000_000;

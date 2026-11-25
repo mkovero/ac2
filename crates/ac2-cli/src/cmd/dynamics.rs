@@ -499,10 +499,7 @@ mod tests {
             let (b, stop) = (backend.clone(), stop.clone());
             move || drive(&b, &stop)
         });
-        let listen = ac2d::Listen::Local {
-            ctrl: "tcp://127.0.0.1:0".into(),
-            data: "tcp://127.0.0.1:0".into(),
-        };
+        let listen = ac2d::Listen::apart();
         let h = ac2d::Daemon::start(ac2d::DaemonConfig::new(Arc::new(backend), listen, -10.0))?;
         let ep = Endpoints {
             ctrl: h.ctrl_endpoint().to_owned(),

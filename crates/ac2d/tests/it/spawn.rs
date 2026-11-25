@@ -24,8 +24,6 @@ use common::Client;
 const T: Duration = Duration::from_secs(10);
 /// The daemon's wait after the last edit of a burst before it writes the autosave.
 const DEBOUNCE: Duration = Duration::from_millis(1500);
-/// Loopback TCP on a free port, so runs never meet on the default endpoints.
-const ANY_PORT: &str = "tcp://127.0.0.1:0";
 
 /// A private home for one daemon run: every directory the daemon may touch.
 struct Home {
@@ -45,6 +43,18 @@ impl Home {
 
     fn runtime(&self) -> PathBuf {
         self.path("runtime")
+    }
+
+    /// `--ctrl`/`--data` on an ipc pair of this home's named `name`, apart from the
+    /// default endpoints so runs never meet there.
+    fn pair(&self, name: &str) -> [String; 4] {
+        let dir = self.path(name);
+        [
+            "--ctrl".into(),
+            format!("ipc://{}", dir.join("ctrl.sock").display()),
+            "--data".into(),
+            format!("ipc://{}", dir.join("data.sock").display()),
+        ]
     }
 
     fn logs(&self) -> PathBuf {
@@ -218,7 +228,6 @@ fn read(p: &Path) -> String {
     std::fs::read_to_string(p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
 }
 
-#[cfg(unix)]
 fn ipc_ctrl(home: &Home) -> String {
     format!("ipc://{}", home.runtime().join("ctrl.sock").display())
 }
@@ -248,14 +257,13 @@ fn a_held_lock_refuses_a_second_daemon() {
     );
     assert!(!home.logs().join("ac2d.log.1").exists());
     assert_eq!(read(&home.runtime().join("ac2d.pid")), "4242\n");
-    assert!(!home.runtime().join("ctrl.sock").exists());
+    assert!(std::fs::symlink_metadata(home.runtime().join("ctrl.sock")).is_err());
     assert!(!home.path("data").exists(), "{:?}", home.files());
 }
 
 /// Without the lock, libzmq would let a second daemon unlink and take over `ctrl.sock`
 /// while the first keeps the audio interface: the second exits 3 and the first keeps
 /// serving on its socket, its pid file untouched.
-#[cfg(unix)]
 #[test]
 fn a_second_daemon_leaves_the_first_serving() {
     let home = Home::new();
@@ -276,9 +284,8 @@ fn a_second_daemon_leaves_the_first_serving() {
 }
 
 /// `kill -9` leaves `ctrl.sock` and the pid file behind, but the OS drops the lock with
-/// the process: the next daemon starts, serves and writes its own pid; stopped in order it
-/// removes the pid file.
-#[cfg(unix)]
+/// the process: the next daemon starts, binds over the stale socket, serves and writes its
+/// own pid; stopped in order it removes the pid file.
 #[test]
 fn a_hard_killed_daemon_does_not_block_the_next() {
     let home = Home::new();
@@ -286,7 +293,9 @@ fn a_hard_killed_daemon_does_not_block_the_next() {
     let mut first = Daemon::spawn(home.ac2d_with_stores());
     wait_for("pid file", || pid_file.exists());
     first.kill();
-    assert!(home.runtime().join("ctrl.sock").exists());
+    // A Windows AF_UNIX socket file is a reparse point that `exists` (which follows it)
+    // may read as absent.
+    assert!(std::fs::symlink_metadata(home.runtime().join("ctrl.sock")).is_ok());
     assert!(pid_file.exists());
     let mut p = home.ac2d_with_stores();
     p.arg("--stop-on-stdin-eof").stdin(Stdio::piped());
@@ -310,7 +319,7 @@ fn explicit_endpoints_still_lock_and_ephemeral_never_does() {
     let home = Home::new();
     let explicit = || {
         let mut p = home.ac2d_with_stores();
-        p.args(["--ctrl", ANY_PORT, "--data", ANY_PORT]);
+        p.args(home.pair("explicit"));
         p
     };
     let ctx = Context::new().unwrap();
@@ -330,7 +339,7 @@ fn explicit_endpoints_still_lock_and_ephemeral_never_does() {
     );
 
     let mut p = home.ac2d();
-    p.args(["--ephemeral", "--ctrl", ANY_PORT, "--data", ANY_PORT]);
+    p.arg("--ephemeral").args(home.pair("sim"));
     let (_sim, sim_ctrl, _) = Daemon::spawn_printing(p);
     assert!(answers(&ctx, &sim_ctrl));
     assert!(answers(&ctx, &ctrl));
@@ -381,23 +390,15 @@ fn a_networked_daemon_locks_and_names_its_local_endpoints() {
     assert_eq!(local.wait(T).code(), Some(i32::from(exit::ANOTHER_RUNNING)));
 }
 
-/// `tcp://127.0.0.1:0` passes local-mode validation and `--print-endpoints` reports the
-/// ports the OS chose, where a client reaches the daemon.
+/// `--print-endpoints` reports the pair the daemon bound, where a client reaches it.
 #[test]
-fn print_endpoints_reports_the_bound_ports() {
+fn print_endpoints_reports_the_bound_endpoints() {
     let home = Home::new();
     let mut p = home.ac2d();
-    p.args(["--ephemeral", "--ctrl", ANY_PORT, "--data", ANY_PORT]);
+    let pair = home.pair("printed");
+    p.arg("--ephemeral").args(&pair);
     let (_d, ctrl, data) = Daemon::spawn_printing(p);
-    for e in [&ctrl, &data] {
-        let port: u16 = e
-            .strip_prefix("tcp://127.0.0.1:")
-            .unwrap_or_else(|| panic!("{e}"))
-            .parse()
-            .unwrap();
-        assert_ne!(port, 0, "{e}");
-    }
-    assert_ne!(ctrl, data);
+    assert_eq!([&ctrl, &data], [&pair[1], &pair[3]]);
     assert!(answers(&Context::new().unwrap(), &ctrl));
 }
 
@@ -407,14 +408,9 @@ fn print_endpoints_reports_the_bound_ports() {
 fn stdin_eof_stops_in_order_with_the_autosave_written() {
     let home = Home::new();
     let mut p = home.ac2d_with_stores();
-    p.args([
-        "--ctrl",
-        ANY_PORT,
-        "--data",
-        ANY_PORT,
-        "--stop-on-stdin-eof",
-    ])
-    .stdin(Stdio::piped());
+    p.args(home.pair("pair"))
+        .arg("--stop-on-stdin-eof")
+        .stdin(Stdio::piped());
     let (mut d, ctrl, _) = Daemon::spawn_printing(p);
     let stdin = d.stdin();
     let ctx = Context::new().unwrap();
@@ -437,14 +433,9 @@ fn stdin_eof_stops_in_order_with_the_autosave_written() {
 fn an_early_stdin_eof_is_logged_as_an_error() {
     let home = Home::new();
     let mut p = home.ac2d();
-    p.args([
-        "--ephemeral",
-        "--ctrl",
-        ANY_PORT,
-        "--data",
-        ANY_PORT,
-        "--stop-on-stdin-eof",
-    ]);
+    p.arg("--ephemeral")
+        .args(home.pair("pair"))
+        .arg("--stop-on-stdin-eof");
     let mut d = Daemon::spawn(p);
     assert!(d.wait(T).success());
     let log = read(&home.logs().join("ac2d-sim.log"));
@@ -462,15 +453,10 @@ fn an_early_stdin_eof_is_logged_as_an_error() {
 fn ephemeral_writes_nothing_but_its_log() {
     let home = Home::new();
     let mut p = home.ac2d();
-    p.args([
-        "--ephemeral",
-        "--ctrl",
-        ANY_PORT,
-        "--data",
-        ANY_PORT,
-        "--stop-on-stdin-eof",
-    ])
-    .stdin(Stdio::piped());
+    p.arg("--ephemeral")
+        .args(home.pair("pair"))
+        .arg("--stop-on-stdin-eof")
+        .stdin(Stdio::piped());
     let (mut d, ctrl, _) = Daemon::spawn_printing(p);
     let stdin = d.stdin();
     let mut c = Client::connect(&Context::new().unwrap(), &ctrl);
@@ -499,7 +485,7 @@ fn slow_a_kill_around_the_autosave_write_leaves_a_loadable_autosave() {
     for offset_ms in [0u64, 5, 10, 20, 40] {
         let home = Home::new();
         let mut p = home.ac2d_with_stores();
-        p.args(["--ctrl", ANY_PORT, "--data", ANY_PORT]);
+        p.args(home.pair("pair"));
         let (mut d, ctrl, _) = Daemon::spawn_printing(p);
         let mut c = Client::connect(&Context::new().unwrap(), &ctrl);
         import(&mut c, "first");
@@ -512,7 +498,7 @@ fn slow_a_kill_around_the_autosave_write_leaves_a_loadable_autosave() {
         d.kill();
         drop(c);
         let mut p = home.ac2d_with_stores();
-        p.args(["--ctrl", ANY_PORT, "--data", ANY_PORT]);
+        p.args(home.pair("pair"));
         let (_next, ctrl, _) = Daemon::spawn_printing(p);
         let mut c = Client::connect(&Context::new().unwrap(), &ctrl);
         let snap = c.snapshot(Command::StateSnapshot);

@@ -96,7 +96,7 @@ fn stalled_subscriber_recovers_inproc() {
 
 #[test]
 fn stalled_subscriber_recovers_tcp() {
-    stalled_subscriber_recovers(local_tcp());
+    stalled_subscriber_recovers(local_ipc());
 }
 
 #[test]

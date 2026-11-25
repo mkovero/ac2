@@ -2,7 +2,7 @@
 
 use super::harness::{DEADLINE, Driver, NAME, R, connected, measure_from_empty};
 use ac2_client::{ClientConfig, Endpoints};
-use ac2_e2e::{Setup, sim_daemon};
+use ac2_e2e::{Setup, local_pair, sim_daemon};
 use ac2_proto::model::MeasKind;
 use ac2_proto::topic::Topic;
 use ac2_ui::forms::FormKind;
@@ -14,16 +14,7 @@ use std::time::{Duration, Instant};
 fn empty_local_daemon_measures_from_the_app() -> R {
     // A stand-alone daemon as `ac2 daemon start` runs it, here on the simulated rig.
     let dir = tempfile::tempdir()?;
-    #[cfg(unix)]
-    let listen = ac2d::Listen::Local {
-        ctrl: format!("ipc://{}", dir.path().join("ctrl.sock").display()),
-        data: format!("ipc://{}", dir.path().join("data.sock").display()),
-    };
-    #[cfg(not(unix))]
-    let listen = ac2d::Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
+    let listen = local_pair(dir.path());
     let audio = ac2d::backend(ac2d::BackendChoice::Fake)?;
     let mut config = ac2d::DaemonConfig::new(audio, listen, -10.0);
     config.session_dir = dir.path().join("sessions");
@@ -47,10 +38,7 @@ fn empty_local_daemon_measures_from_the_app() -> R {
 fn a_stream_plays_on_another_device_than_it_captures_from() -> R {
     use ac2_proto::model::ClockRelation;
     let dir = tempfile::tempdir()?;
-    let listen = ac2d::Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
+    let listen = local_pair(dir.path());
     let audio = std::sync::Arc::new(ac2d::fake_rig_endpoints()?);
     let mut config = ac2d::DaemonConfig::new(audio, listen, -10.0);
     config.session_dir = dir.path().join("sessions");
@@ -79,10 +67,7 @@ fn a_stream_plays_on_another_device_than_it_captures_from() -> R {
 
 /// A stand-alone daemon on the simulated rig with an autosave directory.
 fn autosaving_daemon(dir: &std::path::Path) -> R<(ac2d::Handle, Endpoints)> {
-    let listen = ac2d::Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
+    let listen = local_pair(dir);
     let audio = ac2d::backend(ac2d::BackendChoice::Fake)?;
     let mut config = ac2d::DaemonConfig::new(audio, listen, -10.0);
     config.session_dir = dir.join("sessions");

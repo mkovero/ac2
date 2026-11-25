@@ -106,7 +106,7 @@ fn meter(bands: Option<BandLeqConfig>) -> MeasConfig {
 async fn start(clock: LocalClock) -> (Handle, Client, tempfile::TempDir) {
     init_log();
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = config(realtime_rig(), local_tcp());
+    let mut cfg = config(realtime_rig(), local_ipc());
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     cfg.local_clock = clock;
     // The client refreshes the lease every 0.5 s, but a slow runner can stall the refresher

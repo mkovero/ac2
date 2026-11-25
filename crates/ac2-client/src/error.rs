@@ -55,9 +55,9 @@ pub enum ClientError {
     /// The client's I/O thread has stopped.
     #[error("client is closed")]
     Closed,
-    /// A local socket's directory is not this user's own, closed to others: a socket there
-    /// could be anyone's, answering in the daemon's place.
-    #[cfg(unix)]
+    /// A local socket's directory is not closed to other users (a socket there could be
+    /// anyone's, answering in the daemon's place), or its path is too long for the socket
+    /// address.
     #[error("{0}")]
     SocketDir(ac2_paths::socket_dir::SocketDirError),
     /// Remote mode without a pairing for the host: no client key pair yet, or no pinned

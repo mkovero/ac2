@@ -70,7 +70,6 @@ async fn a_socket_directory_open_to_others_is_refused() {
 
 /// A socket directory not made yet (the daemon not started) is a daemon not running, as
 /// a missing socket is: no answer, not a socket-directory fault.
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_socket_directory_not_there_yet_is_no_daemon() {
     let t = tempfile::tempdir().unwrap();
@@ -84,6 +83,26 @@ async fn a_socket_directory_not_there_yet_is_no_daemon() {
         panic!("connected with no daemon");
     };
     assert!(matches!(e, ClientError::Timeout { .. }), "{e}");
+}
+
+/// A socket path longer than the socket address holds is refused by its length before any
+/// connect, not left to wait on a connect libzmq can never make.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_socket_path_too_long_is_refused_by_length() {
+    let t = tempfile::tempdir().unwrap();
+    let dir = t
+        .path()
+        .join("d".repeat(ac2_paths::socket_dir::MAX_SOCKET_PATH));
+    let mut cfg = ClientConfig::new(crate::Endpoints::local_in(&dir), "socket-path test");
+    cfg.retry = Retry {
+        timeout: Duration::from_millis(100),
+        retries: 1,
+    };
+    let Err(e) = Client::connect(cfg).await else {
+        panic!("connected through a path no socket address holds");
+    };
+    assert!(matches!(e, ClientError::SocketDir(_)), "{e}");
+    assert!(e.to_string().contains("bytes"), "{e}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

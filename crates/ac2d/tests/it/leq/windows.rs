@@ -6,7 +6,7 @@ use super::*;
 async fn slow_windows_go_over_and_recover_and_survive() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = steady_config(realtime_rig(), local_tcp());
+    let mut cfg = steady_config(realtime_rig(), local_ipc());
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;
@@ -277,7 +277,7 @@ async fn slow_windows_go_over_and_recover_and_survive() {
 async fn slow_a_filling_window_goes_over_when_its_budget_is_spent() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = steady_config(realtime_rig(), local_tcp());
+    let mut cfg = steady_config(realtime_rig(), local_ipc());
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;

@@ -60,7 +60,7 @@ async fn start_with(
     recordings: Option<std::path::PathBuf>,
 ) -> (Handle, Client, MeasId, MeasId) {
     init_log();
-    let mut cfg = config(backend.clone(), local_tcp());
+    let mut cfg = config(backend.clone(), local_ipc());
     cfg.recording_dir = recordings;
     cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
@@ -432,7 +432,7 @@ async fn a_driver_panel_change_reopens_the_stream_at_the_drivers_new_rate() {
 async fn a_panel_of_an_unknown_device_is_refused() {
     let backend = realtime_rig();
     init_log();
-    let h = Daemon::start(config(backend.clone(), local_tcp())).unwrap();
+    let h = Daemon::start(config(backend.clone(), local_ipc())).unwrap();
     let c = connect(&h).await;
     let e = c
         .call(Command::StreamControlPanel {

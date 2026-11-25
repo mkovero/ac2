@@ -98,26 +98,18 @@ pub fn inproc(name: &str) -> Listen {
     Listen::Inproc { name: unique(name) }
 }
 
-/// Local endpoints for a test: ipc in a temp dir on Unix, loopback TCP elsewhere.
+/// Local endpoints for a test in `dir`: ipc, as every local pair is.
 pub fn local(dir: &std::path::Path) -> Listen {
-    #[cfg(unix)]
-    {
-        Listen::Local {
-            ctrl: format!("ipc://{}", dir.join("ctrl").display()),
-            data: format!("ipc://{}", dir.join("data").display()),
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = dir;
-        local_tcp()
+    Listen::Local {
+        ctrl: format!("ipc://{}", dir.join("ctrl").display()),
+        data: format!("ipc://{}", dir.join("data").display()),
     }
 }
 
 /// [`config`] with the network on: CURVE on loopback, OS-chosen ports, local endpoints
 /// beside it. [`net_endpoints`] says where it bound.
 pub fn net_config(backend: FakeBackend, security: ac2d::NetworkSecurity) -> DaemonConfig {
-    let mut cfg = config(backend, local_tcp());
+    let mut cfg = config(backend, local_ipc());
     cfg.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {
         bind: ac2d::NetBind::Addr {
             addr: std::net::Ipv4Addr::LOCALHOST.into(),
@@ -184,11 +176,9 @@ pub fn free_pair() -> u16 {
     }
 }
 
-pub fn local_tcp() -> Listen {
-    Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    }
+/// A local pair of its own: ipc, the only local transport, apart from the user's daemon.
+pub fn local_ipc() -> Listen {
+    Listen::apart()
 }
 
 pub fn stream(loopback: bool) -> StreamConfig {

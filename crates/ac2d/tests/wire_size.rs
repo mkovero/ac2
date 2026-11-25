@@ -226,7 +226,7 @@ fn run(meas: &[MeasConfig], seconds: f64) -> Sizes {
 
 fn run_with(setup: &Setup<'_>, seconds: f64) -> (Sizes, Option<Starved>) {
     init_log();
-    let mut config = DaemonConfig::new(Arc::new(noisy_rig()), local_tcp(), -10.0);
+    let mut config = DaemonConfig::new(Arc::new(noisy_rig()), local_ipc(), -10.0);
     if let Some(fps) = setup.fps {
         config.publish_fps = fps;
     }

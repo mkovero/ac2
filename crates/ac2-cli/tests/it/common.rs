@@ -13,12 +13,9 @@ use ac2d::{BackendChoice, Daemon, DaemonConfig, Handle, Listen};
 use clap::Parser;
 use serde_json::Value;
 
-/// Port 0: the OS picks, so tests running side by side never share a daemon.
+/// A pair of its own, so tests running side by side never share a daemon.
 pub fn local() -> Listen {
-    Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    }
+    Listen::apart()
 }
 
 pub fn fake_backend() -> Arc<dyn Backend> {

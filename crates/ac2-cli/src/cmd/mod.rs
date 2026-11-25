@@ -137,11 +137,12 @@ pub(crate) async fn connect_with(
 ) -> Result<Client, CliError> {
     let (mut cfg, what) = target(cli)?;
     adjust(&mut cfg);
-    #[cfg(unix)]
     if is_local(cli) {
-        // An ipc connect to a missing socket file would just wait; say so at once.
+        // An ipc connect to a missing socket file would just wait; say so at once. Not
+        // followed: a Windows AF_UNIX socket file is a reparse point a following look
+        // cannot open, so `exists` would read it as missing.
         let sock = ac2_client::endpoint::runtime_dir().join("ctrl.sock");
-        if !sock.exists() {
+        if std::fs::symlink_metadata(&sock).is_err() {
             return Err(CliError::NotRunning(format!(
                 "local daemon is not running (no {}); start it with `ac2 daemon start`",
                 sock.display()

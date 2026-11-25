@@ -423,9 +423,7 @@ impl Client {
     pub async fn connect(cfg: ClientConfig) -> Result<Self, ClientError> {
         // A socket directory not there yet is a daemon not running, as a missing socket
         // is; it is checked once a daemon answered in it.
-        #[cfg(unix)]
         let mut absent = Vec::new();
-        #[cfg(unix)]
         for ep in [&cfg.endpoints.ctrl, &cfg.endpoints.data] {
             if !ac2_paths::socket_dir::check_endpoint_present(ep).map_err(ClientError::SocketDir)? {
                 absent.push(ep.clone());
@@ -499,7 +497,6 @@ impl Client {
             key: curve.map(|c| c.keys.public),
         });
         let welcome = hello(&core, &cfg.name).await?;
-        #[cfg(unix)]
         for ep in &absent {
             ac2_paths::socket_dir::check_endpoint(ep).map_err(ClientError::SocketDir)?;
         }

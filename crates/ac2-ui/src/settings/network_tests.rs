@@ -251,27 +251,6 @@ fn off_goes_at_once_and_a_network_that_is_on_moves_on_enter() {
     );
 }
 
-#[test]
-fn windows_local_ports_are_refused_before_sending() {
-    let mut s = off();
-    s.local = Some(LocalServer::Local {
-        ctrl: "tcp://127.0.0.1:47822".into(),
-        data: "tcp://127.0.0.1:47823".into(),
-    });
-    let mut p = page(s);
-    focus(&mut p, ConnLine::Port);
-    p.edit = Some((ConnEdit::Port, "47822".into()));
-    assert_eq!(p.enter(), None);
-    assert!(
-        p.error.as_deref().is_some_and(
-            |e| e.starts_with("port 47822 (data 47823) would take TCP 47822 and 47823")
-        ),
-        "{:?}",
-        p.error
-    );
-    assert!(p.typing(), "the typed port stays to be corrected");
-}
-
 /// Whether the page offers the switch is the daemon's answer ([`NetToggle`]), nothing else.
 #[test]
 fn the_daemons_toggle_decides_the_switch() {

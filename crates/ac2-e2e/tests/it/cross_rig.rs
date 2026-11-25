@@ -40,7 +40,25 @@ pub(crate) fn rig(
     keys: &KeyPair,
 ) -> R<ac2d::Handle> {
     let d = dir.join(name);
-    std::fs::create_dir_all(&d)?;
+    let listen = ac2_e2e::local_pair(&d);
+    let mut cfg = ac2d::DaemonConfig::new(std::sync::Arc::clone(&device), listen, -10.0);
+    on_loopback(&mut cfg, &d, app, keys)?;
+    cfg.backends = vec![device];
+    cfg.name = name.into();
+    cfg.system_clock =
+        ac2d::config::SystemClockSource::Stated(SystemClock::Synced { maxerror_us: 100 });
+    Ok(ac2d::Daemon::start(cfg)?)
+}
+
+/// `cfg` with the network on loopback (an OS-chosen port), CURVE with `keys` (files in
+/// `d`) and `app` authorized as an operator.
+pub(crate) fn on_loopback(
+    cfg: &mut ac2d::DaemonConfig,
+    d: &std::path::Path,
+    app: &KeyPair,
+    keys: &KeyPair,
+) -> R {
+    std::fs::create_dir_all(d)?;
     let mut authorized = AuthorizedKeys::new();
     authorized.insert("app", app.public, ac2_zmq::Role::Operator)?;
     authorized.save(&d.join("authorized_clients"))?;
@@ -58,11 +76,6 @@ pub(crate) fn rig(
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o600))?;
     }
-    let listen = ac2d::Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let mut cfg = ac2d::DaemonConfig::new(std::sync::Arc::clone(&device), listen, -10.0);
     cfg.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {
         bind: ac2d::NetBind::Addr {
             addr: std::net::Ipv4Addr::LOCALHOST.into(),
@@ -73,11 +86,7 @@ pub(crate) fn rig(
         server_key_file: key_file,
         authorized_clients_file: d.join("authorized_clients"),
     });
-    cfg.backends = vec![device];
-    cfg.name = name.into();
-    cfg.system_clock =
-        ac2d::config::SystemClockSource::Stated(SystemClock::Synced { maxerror_us: 100 });
-    Ok(ac2d::Daemon::start(cfg)?)
+    Ok(())
 }
 
 /// The network ctrl and data endpoints of a daemon listening there.

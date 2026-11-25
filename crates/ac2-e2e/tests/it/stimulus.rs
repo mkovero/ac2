@@ -56,10 +56,8 @@ fn banner_texts(s: &AppState) -> Vec<String> {
 #[test]
 fn audio_stopped_comes_and_goes_by_itself() -> R {
     let rig = ac2d::fake_rig()?;
-    let listen = ac2d::Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
+    let dir = tempfile::tempdir()?;
+    let listen = ac2_e2e::local_pair(dir.path());
     let handle = ac2d::Daemon::start(ac2d::DaemonConfig::new(
         Arc::new(rig.clone()),
         listen,

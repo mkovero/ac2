@@ -69,7 +69,6 @@ mod remote;
 mod rig;
 mod rig_id;
 mod route;
-#[cfg(unix)]
 mod runtime_dir;
 mod sim;
 mod state;
@@ -89,9 +88,8 @@ use ac2_proto::units::DaemonIncarnation;
 use ac2_zmq::{Context, PublicKey, Socket, SocketType, TcpLiveness};
 
 pub use config::{
-    AutosaveConfig, DEFAULT_PORT, DaemonConfig, DedupLimits, LOCAL_PORT, Listen, ListenError,
-    LocalClock, Mdns, NetworkSecurity, ReplayLimits, RigIdSource, SystemClockSource, pid_file,
-    runtime_dir,
+    AutosaveConfig, DEFAULT_PORT, DaemonConfig, DedupLimits, Listen, ListenError, LocalClock, Mdns,
+    NetworkSecurity, ReplayLimits, RigIdSource, SystemClockSource, pid_file, runtime_dir,
 };
 pub use network::{
     Backoff, Interfaces, NetBind, NetInterface, NetListen, NetPort, NetReason, NetStatus,
@@ -152,7 +150,8 @@ pub enum StartError {
     Io(std::io::Error),
     /// No audio backend was given.
     NoBackend,
-    /// The directory of the local sockets is not this user's alone.
+    /// The directory of the local sockets is not this user's alone, or a socket path is too
+    /// long for the socket address.
     RuntimeDir {
         /// The directory.
         dir: std::path::PathBuf,
@@ -170,12 +169,9 @@ impl fmt::Display for StartError {
             Self::Zmq { what, source } => write!(f, "{what}: {source}"),
             Self::Io(e) => write!(f, "{e}"),
             Self::NoBackend => f.write_str("no audio backend"),
-            Self::RuntimeDir { dir, problem } => write!(
-                f,
-                "socket directory {}: {problem}; it must be a directory of this user's, \
-                 mode 700",
-                dir.display()
-            ),
+            Self::RuntimeDir { dir, problem } => {
+                write!(f, "socket directory {}: {problem}", dir.display())
+            }
         }
     }
 }
@@ -327,6 +323,14 @@ impl Handle {
         };
         if let Some(t) = self.io.take() {
             let _ = t.join();
+            // libzmq leaves a bound ipc socket's file behind when the socket closes; the
+            // io thread held both, so they are closed now. A file left by a daemon that
+            // died is bound over by the next one instead.
+            for e in [&self.ctrl, &self.data] {
+                if let Some(file) = ac2_paths::socket_dir::socket_file(e) {
+                    let _ = std::fs::remove_file(file);
+                }
+            }
         }
         ended
     }
@@ -341,14 +345,8 @@ impl Drop for Handle {
     }
 }
 
-#[cfg(unix)]
 fn prepare_ipc(endpoint: &str) -> Result<(), StartError> {
     runtime_dir::prepare(endpoint)
-}
-
-#[cfg(not(unix))]
-fn prepare_ipc(_endpoint: &str) -> Result<(), StartError> {
-    Ok(())
 }
 
 /// Options of a ctrl ROUTER, local or network, set before it binds.
@@ -453,7 +451,6 @@ impl Daemon {
         let attach = io::AttachQueue::default();
         let (mut network, damage) = control::network::NetCtl::new(control::network::NetSetup {
             choice: config.network.clone(),
-            local: config.listen.clone(),
             files: config.keys.clone(),
             interfaces: config.interfaces.clone(),
             retry: config.net_retry,

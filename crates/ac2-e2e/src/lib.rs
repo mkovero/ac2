@@ -27,6 +27,11 @@ impl SimDaemon {
         &self.endpoints
     }
 
+    /// The running daemon (its network status, its server key).
+    pub fn handle(&self) -> Option<&ac2d::Handle> {
+        self.handle.as_ref()
+    }
+
     /// As the app describes the simulated rig's link.
     pub fn describe(&self) -> String {
         "simulated rig".into()
@@ -56,7 +61,17 @@ impl Drop for SimDaemon {
     }
 }
 
-/// Starts a simulated rig on loopback port 0 with `setup` (the demo the app sets up, or no
+/// The local pair of a daemon of a test, in `dir`: ipc, as every local pair is (a socket
+/// directory closed to other users, made by the daemon).
+pub fn local_pair(dir: &std::path::Path) -> ac2d::Listen {
+    let ep = Endpoints::local_in(&dir.join("run"));
+    ac2d::Listen::Local {
+        ctrl: ep.ctrl,
+        data: ep.data,
+    }
+}
+
+/// Starts a simulated rig on an ipc local pair of its own with `setup` (the demo the app sets up, or no
 /// session).
 pub fn sim_daemon(setup: Setup) -> Result<SimDaemon, Box<dyn std::error::Error>> {
     sim_daemon_with(setup, |_| {})
@@ -69,18 +84,15 @@ pub fn sim_daemon_with(
     setup: Setup,
     edit: impl FnOnce(&mut ac2d::DaemonConfig),
 ) -> Result<SimDaemon, Box<dyn std::error::Error>> {
-    let listen = ac2d::Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
+    // A test that saves a session must not leave it in the platform directory, where the
+    // next run (and the operator's own app) would find it; the sockets go beside it.
+    let sessions = tempfile::tempdir()?;
+    let listen = local_pair(sessions.path());
     let audio = ac2d::backends(ac2d::BackendChoice::Fake)?;
     // The same global maximum as a stand-alone `ac2d` without `--max-level`.
     let mut config = ac2d::DaemonConfig::new(std::sync::Arc::clone(&audio[0]), listen, -10.0);
     config.backends = audio;
     config.name = "Simulated rig".into();
-    // A test that saves a session must not leave it in the platform directory, where the
-    // next run (and the operator's own app) would find it.
-    let sessions = tempfile::tempdir()?;
     config.session_dir = sessions.path().to_owned();
     edit(&mut config);
     let handle = ac2d::Daemon::start(config)?;

@@ -181,7 +181,7 @@ async fn rig_cue_until(c: &Client, meas: MeasId, state: CueState) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cues_follow_the_meters_and_repeat() {
     init_log();
-    let h = Daemon::start(steady_config(realtime_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(steady_config(realtime_rig(), local_ipc())).unwrap();
     let c = connect(&h).await;
     let rx = Receiver::new();
 
@@ -319,7 +319,7 @@ fn level_of(m: &rosc::OscMessage) -> f32 {
 async fn slow_a_tone_over_the_limit_lights_over_and_back_ok() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = steady_config(realtime_rig(), local_tcp());
+    let mut cfg = steady_config(realtime_rig(), local_ipc());
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;
@@ -358,7 +358,7 @@ async fn slow_a_tone_over_the_limit_lights_over_and_back_ok() {
 
 /// A daemon keeping its rig settings, sessions, rig logs and autosave in `dir`.
 fn rig_config(dir: &std::path::Path) -> DaemonConfig {
-    let mut cfg = steady_config(realtime_rig(), local_tcp());
+    let mut cfg = steady_config(realtime_rig(), local_ipc());
     cfg.session_dir = dir.join("sessions");
     cfg.rig_settings = Some(dir.join("rig.json"));
     cfg.rig_logs = Some(dir.join("rig-logs"));

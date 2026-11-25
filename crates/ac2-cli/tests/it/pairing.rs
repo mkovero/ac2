@@ -35,10 +35,7 @@ async fn unpaired_client_is_told_to_pair() {
 #[tokio::test(flavor = "multi_thread")]
 async fn unauthorized_client_hears_its_fingerprint() {
     let dir = tempfile::tempdir().unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
+    let listen = Listen::apart();
     let backend = ac2d::backend(BackendChoice::Fake).unwrap();
     let mut cfg = DaemonConfig::new(backend, listen, -10.0);
     cfg.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {

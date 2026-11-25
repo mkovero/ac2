@@ -77,8 +77,8 @@ pub enum LocalServer {
     /// In this process only (a daemon embedded in an app or a test): there is no network
     /// to turn on.
     Embedded,
-    /// This machine only (`ipc://` or loopback TCP): the operating system's user boundary
-    /// is the trust boundary.
+    /// This machine only (`ipc://` on every OS): the socket directory, which only the
+    /// user may enter, is the trust boundary.
     Local {
         /// Ctrl endpoint.
         ctrl: String,

@@ -703,10 +703,7 @@ mod tests {
         use ac2_client::{ClientConfig, Endpoints};
         use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
         let backend = ac2d::backend(BackendChoice::Fake)?;
-        let listen = Listen::Local {
-            ctrl: "tcp://127.0.0.1:0".into(),
-            data: "tcp://127.0.0.1:0".into(),
-        };
+        let listen = Listen::apart();
         let h = Daemon::start(DaemonConfig::new(backend, listen, -10.0))?;
         let ep = Endpoints {
             ctrl: h.ctrl_endpoint().to_owned(),
