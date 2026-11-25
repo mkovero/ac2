@@ -197,10 +197,10 @@ run_backend() {
     echo "== [$b] session on $ID, recording $SECONDS_REC s; delay finder on in 2 vs in 1 (sox delays in 2 by $DELAY samples)"
     daemon_start "$b-session"
     stimulus_start pink
-    ac2j "$b-session-open" 30 session open --backend "$b" --device "$ID" --out-device "$ID" --in 1-2 --outputs 2 \
+    ac2j "$b-stream-open" 30 stream open --backend "$b" --device "$ID" --out-device "$ID" --in 1-2 --outputs 2 \
         --buffer "${BUFFER}samples"
-    rate=$(jq -r .open.sample_rate_hz "$LOG/$b-session-open.json")
-    echo "  $rate Hz, buffer $(jq -r .open.buffer_frames "$LOG/$b-session-open.json") frames, clock $(jq -r .open.clock "$LOG/$b-session-open.json")"
+    rate=$(jq -r .open.sample_rate_hz "$LOG/$b-stream-open.json")
+    echo "  $rate Hz, buffer $(jq -r .open.buffer_frames "$LOG/$b-stream-open.json") frames, clock $(jq -r .open.clock "$LOG/$b-stream-open.json")"
     ac2j "$b-rec-start" 15 rec start --name "blackhole-$b" --max "$((SECONDS_REC + 60))s"
     ac2j "$b-meas-new" 15 meas new tf --name bh --ref 1 --meas 2
     ac2j "$b-meas-start" 15 meas start bh
@@ -208,14 +208,14 @@ run_backend() {
     sleep "$half"
     ac2j "$b-delay-find" 30 delay find bh
     sleep "$((SECONDS_REC - half))"
-    ac2j "$b-session-status" 15 session status
+    ac2j "$b-stream-status" 15 stream status
     ac2j "$b-rec-stop" 30 rec stop
-    ac2j "$b-session-close" 15 session close
+    ac2j "$b-stream-close" 15 stream close
     stimulus_stop
     daemon_stop
 
-    stopped=$(jq -c '.stopped // empty' "$LOG/$b-session-status.json")
-    [[ -z "$stopped" ]] || problems+=("[$b] session audio stopped: $stopped")
+    stopped=$(jq -c '.stopped // empty' "$LOG/$b-stream-status.json")
+    [[ -z "$stopped" ]] || problems+=("[$b] audio stopped: $stopped")
     frames=$(jq -r .frames "$LOG/$b-rec-stop.json")
     disc=$(jq -r .discontinuities "$LOG/$b-rec-stop.json")
     expected=$((rate * SECONDS_REC))

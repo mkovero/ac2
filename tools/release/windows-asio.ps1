@@ -123,7 +123,7 @@ function Watch-Soak {
         }
         $wall = $Clock.Elapsed.TotalSeconds
         $rec = Invoke-Ac2 'soak-rec-status' @('rec', 'status') -Soft
-        $ses = Invoke-Ac2 'soak-session-status' @('session', 'status') -Soft
+        $ses = Invoke-Ac2 'soak-stream-status' @('stream', 'status') -Soft
         $daemon.Refresh()
         $cpu = $daemon.TotalProcessorTime.TotalSeconds
         $row = [pscustomobject]@{
@@ -227,7 +227,7 @@ try {
         if ($daemon.HasExited) { throw "ac2d exited $($daemon.ExitCode) at startup" }
         Invoke-Ac2 'status-2' @('status') -Soft
     } | Out-Null
-    $s = Invoke-Ac2 'session-open' @('session', 'open', '--backend', 'asio',
+    $s = Invoke-Ac2 'stream-open' @('stream', 'open', '--backend', 'asio',
         '--device', $Driver, '--in', '1-2', '--outputs', '2')
     $rate = [int]$s.open.sample_rate_hz
     Write-Host "  $rate Hz, buffer $($s.open.buffer_frames) frames, clock $($s.open.clock)"
@@ -240,12 +240,12 @@ try {
     else {
         Start-Sleep -Seconds $Seconds
     }
-    $status = Invoke-Ac2 'session-status' @('session', 'status')
+    $status = Invoke-Ac2 'stream-status' @('stream', 'status')
     $run = Invoke-Ac2 'rec-stop' @('rec', 'stop')
     $elapsed = $clock.Elapsed.TotalSeconds
-    Invoke-Ac2 'session-close' @('session', 'close') | Out-Null
+    Invoke-Ac2 'stream-close' @('stream', 'close') | Out-Null
 
-    if ($status.stopped) { $problems += "session audio stopped: $($status.stopped | ConvertTo-Json -Compress)" }
+    if ($status.stopped) { $problems += "audio stopped: $($status.stopped | ConvertTo-Json -Compress)" }
     if ($SoakMinutes -gt 0) {
         # The device clock is not the wall clock: a virtual cable is paced by a software timer
         # (VB-CABLE runs about 0.13 % slow against the performance counter), a crystal stays
