@@ -419,7 +419,7 @@ on one word clock hold it; two free crystals do not for long.
   rigs, nothing emitted; never a step a user runs): 24 h of the locked pair logged, and a
   word clock pull. It fixes N, the cap and the scatter bound in the code, and shows whether
   the feed trips together with the audio-fed windows. A user only ever sees the tag move by
-  itself: `UNKNOWN`, `AGREE` within about a minute, `LOCKED` after about half an hour
+  itself: `TIMING`, `AGREE` within about a minute, `LOCKED` after about half an hour
   without drift.
 
 **Did the earlier rule foresee this?** No. `remote-inputs.md` §3.1 withholds *locked*
@@ -546,8 +546,8 @@ All five were accepted as recommended (operator, 2026-11-19: "1-5 ok").
    drift held ≥ 30 min, the figure on hover (*no drift: < 0.03 ppm over 42 min*);
    **`AGREE`** = rates within 2 ppm, measured (the gate passes; also the first half hour
    and after any reset); **`FREE`** = the built 2 ppm rule says not locked, or another
-   nominal rate; **`UNKNOWN`** = no usable evidence, measuring included, the reason on
-   hover. Until that check has set the thresholds, the app ships with `AGREE` at best. This overrules
+   nominal rate; **`TIMING`** = a daemon is still measuring, a verdict on its way;
+   **`UNKNOWN`** = no usable evidence, the reason on hover. Until that check has set the thresholds, the app ships with `AGREE` at best. This overrules
    `remote-inputs.md` §3.1 (*no rig is called locked*) on evidence that rule did not
    foresee. The alternative keeps §3.1: `AGREE` / `MEASURING` / `NOT LOCKED` / `CAN'T
    TELL`, `LOCKED` never shown.

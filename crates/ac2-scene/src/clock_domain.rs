@@ -1,5 +1,5 @@
 //! Which rigs of a list share a sample clock, as a tag on each rig's row and the words
-//! behind it: `AGREE`, `FREE`, `UNKNOWN`.
+//! behind it: `AGREE`, `FREE`, `TIMING`, `UNKNOWN`.
 //!
 //! A transfer function between two rigs means something only when both count samples on
 //! one clock. Three kinds of evidence say whether they do, strongest first:
@@ -8,7 +8,7 @@
 //! 2. a daemon's own verdict on the stream it takes from the other rig
 //!    ([`PeerClock`], the *between rigs* line); where neither rig takes an input from the
 //!    other, a daemon's verdict from the paired rig's always-on levels ([`StandingRig`],
-//!    the *from levels* line) in its place, *can't tell* until it has one;
+//!    the *from levels* line) in its place, `TIMING` until it has one;
 //! 3. each rig's sample clock against its own system clock, which compares the two rigs
 //!    only while both system clocks are held to a common time closely enough.
 //!
@@ -110,7 +110,7 @@ pub enum Domain {
 /// One rig's row tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomainTag {
-    /// The tag: `AGREE`, `AGREE A`, `FREE`, `UNKNOWN`; `None`
+    /// The tag: `AGREE`, `AGREE A`, `FREE`, `TIMING`, `UNKNOWN`; `None`
     /// where there is nothing to say (no session, or no other rig to compare with).
     pub tag: Option<String>,
     /// The tooltip: the other rigs of the group and the basis, or what differs, or what is
@@ -157,7 +157,7 @@ pub struct ClockDomains {
 /// daemon's from levels.
 #[derive(Debug, Clone, PartialEq)]
 struct Beside {
-    /// The tag it would earn alone: `AGREE`, `FREE` or `UNKNOWN`.
+    /// The tag it would earn alone: `AGREE`, `FREE`, `TIMING` or `UNKNOWN`.
     tag: &'static str,
     /// It in words ([`standing::evidence_line_at`]).
     line: String,
@@ -179,6 +179,8 @@ enum Pair {
     },
     Differ(Differ),
     CantTell(Vec<String>),
+    /// A daemon is still measuring the two: no evidence yet, but a verdict is coming.
+    Measuring(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -377,8 +379,14 @@ pub fn clock_domains(rigs: &[RigClockFacts<'_>]) -> ClockDomains {
                 domain: Domain::Own,
             }
         } else {
+            // Only a wait reads TIMING: anything else missing would still be missing once
+            // the measuring ends.
+            let waiting = out.broken[i].is_none()
+                && others().any(|j| matches!(out.pairs[i][j], Pair::Measuring(_)))
+                && others()
+                    .all(|j| matches!(out.pairs[i][j], Pair::Measuring(_) | Pair::Differ(_)));
             DomainTag {
-                tag: Some("UNKNOWN".into()),
+                tag: Some(if waiting { "TIMING" } else { "UNKNOWN" }.into()),
                 tip: Some(out.cant_tell_tip(i, others())),
                 domain: Domain::CantTell,
             }
@@ -397,8 +405,12 @@ impl ClockDomains {
                 continue;
             };
             for b in self.beside[i].iter().flatten() {
-                // Already in the tip as what the tag rests on, or the same tag again.
-                if !tag.starts_with(b.tag) {
+                // Already in the tip as what the tag rests on, or the same tag again; a
+                // verdict still being measured and one that cannot be had are both no
+                // verdict, so neither is news beside the other.
+                let no_verdict = |t: &str| t == "TIMING" || t == "UNKNOWN";
+                let same = tag.starts_with(b.tag) || (no_verdict(tag) && no_verdict(b.tag));
+                if !same {
                     tip.push('\n');
                     tip.push_str(&b.line);
                 }
@@ -429,7 +441,7 @@ impl ClockDomains {
             Pair::Differ(_) => SameDomain::No {
                 reason: self.sentence(a, b),
             },
-            Pair::CantTell(why) => SameDomain::CantTell {
+            Pair::CantTell(why) | Pair::Measuring(why) => SameDomain::CantTell {
                 reason: why.join(" · "),
             },
             // Agreeing rigs outside one group: the chain they are in contradicts itself.
@@ -599,7 +611,7 @@ impl ClockDomains {
             parts.push(why.clone());
         }
         for j in others {
-            if let Pair::CantTell(why) = &self.pairs[i][j] {
+            if let Pair::CantTell(why) | Pair::Measuring(why) = &self.pairs[i][j] {
                 for w in why {
                     push_new(&mut parts, w.clone());
                 }
@@ -622,7 +634,7 @@ fn pair(rigs: &[RigClockFacts<'_>], i: usize, j: usize) -> (Pair, Vec<Beside>) {
     // daemons watch different feeds, and a difference seen on either is a difference.
     let rank = |p: &Pair| match p {
         Pair::Differ(_) => 0,
-        Pair::CantTell(_) => 1,
+        Pair::CantTell(_) | Pair::Measuring(_) => 1,
         _ => 2,
     };
     // Each daemon's standing relation with the other, as seen from `i`.
@@ -665,9 +677,22 @@ fn pair(rigs: &[RigClockFacts<'_>], i: usize, j: usize) -> (Pair, Vec<Beside>) {
             levels: None,
         },
         (Ok(pa), Ok(pb)) => Pair::Differ(Differ::BySystemClocks { ppm: pa - pb }),
+        // The system clocks cannot place the two, but a stream's verdict is on its way.
+        (ea, eb) if stream_measuring(a, b) || stream_measuring(b, a) => {
+            Pair::Measuring(ea.err().into_iter().chain(eb.err()).collect())
+        }
         (ea, eb) => Pair::CantTell(ea.err().into_iter().chain(eb.err()).collect()),
     };
     (p, beside)
+}
+
+/// `by`'s daemon is still measuring the stream it takes from `other`.
+fn stream_measuring(by: &RigClockFacts<'_>, other: &RigClockFacts<'_>) -> bool {
+    other.id.is_some_and(|id| {
+        by.between
+            .iter()
+            .any(|r| r.rig == id && r.clock.relation == PeerRelation::Measuring)
+    })
 }
 
 /// What backs a standing verdict in words: its figure as the reporting daemon sees it
@@ -693,13 +718,14 @@ fn standing_of<'a>(
     Some((l, l.remote.standing.iter().find(|s| s.rig == id)?))
 }
 
-/// The tag a relation earns between two rigs alone: a lock is never claimed, and anything
-/// short of a verdict is *can't tell*.
+/// The tag a relation earns between two rigs alone: a lock is never claimed, a verdict still
+/// being measured reads apart from one that cannot be had, and the rest is *can't tell*.
 fn tag_of(rel: &PeerRelation) -> &'static str {
     match rel {
         PeerRelation::Agree => "AGREE",
         PeerRelation::NotLocked { .. } => "FREE",
-        PeerRelation::Measuring | PeerRelation::CantTell { .. } => "UNKNOWN",
+        PeerRelation::Measuring => "TIMING",
+        PeerRelation::CantTell { .. } => "UNKNOWN",
     }
 }
 
@@ -721,8 +747,8 @@ fn verdict(by: &RigClockFacts<'_>, other: &RigClockFacts<'_>) -> Option<Pair> {
 
 /// `clock`, `by`'s daemon's relation with `other`, as a pair's evidence; `levels`: it is a
 /// standing relation, with what backs it. A stream still measuring is no evidence (the
-/// system clocks are judged instead); levels still measuring are *can't tell*, since a
-/// standing relation is the pair's only evidence where no stream runs.
+/// system clocks are judged instead); levels still measuring are a wait for a verdict,
+/// since a standing relation is the pair's only evidence where no stream runs.
 fn judged(
     by: &RigClockFacts<'_>,
     other: &RigClockFacts<'_>,
@@ -744,7 +770,7 @@ fn judged(
     Some(match &clock.relation {
         PeerRelation::Measuring => match &levels {
             None => return None,
-            Some(_) => Pair::CantTell(vec![said(between_rigs::MEASURING.to_owned())]),
+            Some(_) => Pair::Measuring(vec![said(between_rigs::MEASURING.to_owned())]),
         },
         PeerRelation::Agree => Pair::Agree {
             direct: true,

@@ -230,7 +230,8 @@ is never only a colour):
   stream, *ketunkolo runs +0.12 ppm against pupu over 60 s* from levels) or
   *by each rig's system clock*, where two free clocks can meet by chance; with more than
   one such group the tags carry a letter (`AGREE A`, `AGREE B`). `FREE`: shown to differ
-  from every other rig listed. `UNKNOWN`: *can't tell*, and what is missing. No tag says
+  from every other rig listed. `TIMING`: a daemon is still measuring the clocks and a
+  verdict is on its way. `UNKNOWN`: *can't tell*, and what is missing. No tag says
   the rigs are locked: agreement within 2 ppm does not prove one clock. After the tag the
   line says the pairing (*paired · streaming*) and leaves the clocks to the tag, except for
   a warning, said first and in capitals: *96 kHz FREE · CLOCKS NOT LOCKED +5.6 ppm · paired ·
@@ -239,8 +240,9 @@ is never only a colour):
   A paired rig needs no remote input for its tag: paired daemons time-stamp the levels
   they always send each other, and the rig shown's daemon judges the clocks from those
   (`ac2 status`, *from levels*). About a minute after both sessions are open the tag reads
-  `AGREE`, or stays `UNKNOWN`; a not-locked verdict from levels needs ten minutes beyond
-  2 ppm, and until then `UNKNOWN`'s tooltip says *measuring clocks…* with the figure, how
+  `AGREE`, or `UNKNOWN` when it can't tell; a not-locked verdict from levels needs ten
+  minutes beyond 2 ppm, and until then the tag reads `TIMING` and its tooltip says
+  *measuring clocks…* with the figure, how
   many minutes have been beyond 2 ppm with the two ways the count ends (a verdict at ten,
   agreement after two minutes running below 1.8 ppm) and how long the marks have come, or why it
   can't tell (*no timing in ketunkolo's levels*, *figure not steady*, *ketunkolo's
@@ -249,7 +251,7 @@ is never only a colour):
   no audio streamed*. Where a remote input from the rig is in use, its stream's verdict is
   the tag, as it is what a cross-rig measurement rests on; if the levels would tag the rig
   otherwise, the tooltip adds their line. A paired rig this app does not read takes its
-  rate from its levels too (*48 kHz UNKNOWN · paired · not connected*, *no session* when its
+  rate from its levels too (*48 kHz TIMING · paired · not connected*, *no session* when its
   session is closed); while the link between the daemons is down the line says whose link
   and how (*link from pupu: unreachable · not connected*) and the tooltip the sentence. What
   a rig's daemon reports of its levels shows only while this app is connected to that rig;

@@ -63,11 +63,11 @@ fn headings(t: &T) -> Vec<(String, String)> {
 fn a_paired_rig_with_no_input_is_tagged_from_its_levels() {
     let mut t = pupu_not_held(Some(up(PeerRelation::Measuring, None)));
     let h = headings(&t);
-    assert_eq!(h[0].0, "test rig / 48 kHz UNKNOWN");
-    assert_eq!(h[1].0, "pupu / 48 kHz UNKNOWN");
+    assert_eq!(h[0].0, "test rig / 48 kHz TIMING");
+    assert_eq!(h[1].0, "pupu / 48 kHz TIMING");
     assert!(
         h[1].1.ends_with(&format!(
-            "\nclock UNKNOWN: can't tell: measuring clocks… · {FROM_LEVELS}"
+            "\nclock TIMING: can't tell: measuring clocks… · {FROM_LEVELS}"
         )),
         "{}",
         h[1].1
@@ -80,7 +80,7 @@ fn a_paired_rig_with_no_input_is_tagged_from_its_levels() {
         .expect("pupu's heading");
     assert_eq!(
         pupu.1.details[0],
-        "48 kHz UNKNOWN · paired · this app is not connected to it"
+        "48 kHz TIMING · paired · this app is not connected to it"
     );
 
     t.remirror(|s| s.remote.standing = vec![up(PeerRelation::Agree, Some(0.12))]);

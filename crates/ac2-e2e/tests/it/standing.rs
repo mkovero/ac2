@@ -95,15 +95,15 @@ fn a_paired_rig_with_no_input_is_measured_from_its_levels() -> R {
         let (Some((line, tip)), Some(rate)) = (kettu_heading(st), heard_rate(st)) else {
             return false;
         };
-        line == format!("{rate} UNKNOWN")
-            && tip.contains("\nclock UNKNOWN: can't tell: measuring clocks…")
+        line == format!("{rate} TIMING")
+            && tip.contains("\nclock TIMING: can't tell: measuring clocks…")
             && tip.ends_with(FROM_LEVELS)
     })?;
     // The rig shown is compared with it too.
     let rows = d.st.list_rows();
     let shown = rows.first().map(|(_, r)| r.details.last().cloned());
     let rate = heard_rate(&d.st).ok_or("kettu's rate")?;
-    assert_eq!(shown, Some(Some(format!("{rate} UNKNOWN"))));
+    assert_eq!(shown, Some(Some(format!("{rate} TIMING"))));
     pupu.shutdown();
     kettu.shutdown();
     Ok(())

@@ -131,9 +131,9 @@ fn levels_that_agree_tag_both_rigs_and_say_what_backs_it() {
 }
 
 #[test]
-fn levels_still_measuring_cannot_tell_and_say_the_count() {
+fn levels_still_measuring_read_timing_and_say_the_count() {
     let d = judge(&standing(PeerRelation::Measuring, None), &[]);
-    assert_eq!(tags(&d), [Some("UNKNOWN"), Some("UNKNOWN")]);
+    assert_eq!(tags(&d), [Some("TIMING"), Some("TIMING")]);
     assert_eq!(
         tip(&d, 1),
         format!("can't tell: measuring clocks… · {LEVELS}")
@@ -146,7 +146,7 @@ fn levels_still_measuring_cannot_tell_and_say_the_count() {
         needed: 10,
     });
     let d = judge(&r, &[]);
-    assert_eq!(tags(&d), [Some("UNKNOWN"), Some("UNKNOWN")]);
+    assert_eq!(tags(&d), [Some("TIMING"), Some("TIMING")]);
     assert_eq!(
         tip(&d, 1),
         format!(
@@ -385,12 +385,13 @@ fn two_daemons_that_disagree_tag_by_the_difference() {
         )
     );
 
-    // Measuring on one side, agreeing on the other: can't tell, the agreement beside it.
+    // Measuring on one side, agreeing on the other: a verdict is coming, the agreement
+    // beside it.
     let mut counting = standing(PeerRelation::Measuring, Some(2.7));
     counting.standing[0].rig = PUPU;
     counting.standing[0].name = "pupu".into();
     let d = both(&ours, &counting);
-    assert_eq!(tags(&d), [Some("UNKNOWN"), Some("UNKNOWN")]);
+    assert_eq!(tags(&d), [Some("TIMING"), Some("TIMING")]);
     assert!(
         tip(&d, 1).starts_with(
             "can't tell: measuring clocks… · pupu runs +2.70 ppm against \
@@ -461,6 +462,28 @@ fn the_newer_reasons_cannot_tell_and_say_why() {
             "can't tell: ketunkolo's timing keeps breaking off before a minute is in · {LEVELS}"
         )
     );
+}
+
+/// A relation still measuring reads TIMING, a verdict on its way; one that cannot tell
+/// reads UNKNOWN; and the two daemons' views combine as before, the earlier rig's daemon
+/// first among equals, so both rigs read the same word.
+#[test]
+fn measuring_reads_timing_and_cant_tell_reads_unknown() {
+    let d = judge(&standing(PeerRelation::Measuring, None), &[]);
+    assert_eq!(tags(&d), [Some("TIMING"), Some("TIMING")]);
+    let d = judge(&standing(cant_tell(CantTellReason::NoMarks), None), &[]);
+    assert_eq!(tags(&d), [Some("UNKNOWN"), Some("UNKNOWN")]);
+
+    let mut theirs = standing(PeerRelation::Measuring, None);
+    theirs.standing[0].rig = PUPU;
+    theirs.standing[0].name = "pupu".into();
+    let d = both(&standing(cant_tell(CantTellReason::NoMarks), None), &theirs);
+    assert_eq!(tags(&d), [Some("UNKNOWN"), Some("UNKNOWN")]);
+    let mut theirs = standing(cant_tell(CantTellReason::NoMarks), None);
+    theirs.standing[0].rig = PUPU;
+    theirs.standing[0].name = "pupu".into();
+    let d = both(&standing(PeerRelation::Measuring, None), &theirs);
+    assert_eq!(tags(&d), [Some("TIMING"), Some("TIMING")]);
 }
 
 /// pupu and ketunkolo both read, each daemon's state `ours` / `theirs`.

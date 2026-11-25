@@ -275,6 +275,20 @@ fn a_daemon_that_cannot_tell_is_not_overruled_and_one_still_measuring_is_no_verd
     assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE")]);
 }
 
+/// A stream still measuring where the system clocks cannot place the two: its verdict is
+/// on its way, so the rigs read TIMING, the tip still saying what the system clocks lack.
+#[test]
+fn a_stream_still_measuring_reads_timing_where_the_system_clocks_cannot_tell() {
+    let loose = at(0.0, 30_000);
+    let sees = remote(KETUNKOLO, PeerRelation::Measuring, None);
+    let d = clock_domains(&pair_with(&loose, &loose, &sees));
+    assert_eq!(tags(&d), [Some("TIMING"), Some("TIMING")]);
+    assert!(tip(&d, 1).starts_with("can't tell: "), "{}", tip(&d, 1));
+
+    let d = clock_domains(&pair_with(&loose, &loose, &[]));
+    assert_eq!(tags(&d), [Some("UNKNOWN"), Some("UNKNOWN")]);
+}
+
 #[test]
 fn figures_that_differ_by_each_system_clock_are_own_clocks() {
     let (a, b) = (at(0.2, 3), at(6.2, 3027));

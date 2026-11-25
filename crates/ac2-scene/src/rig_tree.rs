@@ -70,7 +70,7 @@ pub struct RigRoot<'a> {
 /// tag alone states no basis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClockTag<'a> {
-    /// `AGREE`, `FREE`, `UNKNOWN`.
+    /// `AGREE`, `FREE`, `TIMING`, `UNKNOWN`.
     pub tag: &'a str,
     /// What the tag rests on.
     pub tip: &'a str,
@@ -681,14 +681,14 @@ mod tests {
     /// its levels: the rate and tag, which the narrowest line keeps.
     #[test]
     fn a_paired_rig_not_read_says_its_rate_and_tag_from_its_levels() {
-        let unknown = ClockTag {
-            tag: "UNKNOWN",
+        let timing = ClockTag {
+            tag: "TIMING",
             tip: "can't tell: measuring clocks… · measured from the rigs' level frames, no \
                   audio streamed",
         };
         let heard = Heard {
             audio: RigAudio::Rate(96_000),
-            clock: Some(unknown),
+            clock: Some(timing),
         };
         let h = rig_away_heading(
             RigId(2),
@@ -700,13 +700,13 @@ mod tests {
         assert_eq!(
             h.details,
             [
-                "96 kHz UNKNOWN · paired · this app is not connected to it",
-                "96 kHz UNKNOWN · paired · not connected",
-                "96 kHz UNKNOWN",
+                "96 kHz TIMING · paired · this app is not connected to it",
+                "96 kHz TIMING · paired · not connected",
+                "96 kHz TIMING",
             ]
         );
         assert!(h.describe.ends_with(
-            "\nclock UNKNOWN: can't tell: measuring clocks… · measured from the rigs' level \
+            "\nclock TIMING: can't tell: measuring clocks… · measured from the rigs' level \
              frames, no audio streamed"
         ));
         let idle = Heard {

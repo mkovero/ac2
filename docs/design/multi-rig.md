@@ -208,7 +208,7 @@ crosses rigs only between paired ones.
   the app has no measurements of it and connects to no rig on its own.
 - **A heading** (`rig_tree::RigRoot`): name, the session's rate (`RigAudio`; *no session* /
   *no audio I/O* in the top bar's words), a clock tag when one is given (`clock`: `AGREE`,
-  `FREE`, `UNKNOWN`, its basis in the heading's tooltip; `LOCKED` is reserved for a drift
+  `FREE`, `TIMING`, `UNKNOWN`, its basis in the heading's tooltip; `LOCKED` is reserved for a drift
   test, [remote-auto.md](remote-auto.md) §5.2), and for a paired rig the pairing as the rig
   shown's daemon reports it (`rig_tree::pairing_text`: a link that is not up, else the
   first of its inputs whose audio does not stream, in `between_rigs`' words; *paired* when
