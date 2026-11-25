@@ -583,3 +583,61 @@ fn a_loaded_measurements_pane_references_follow_its_new_number() {
     drop(c);
     hy.shutdown();
 }
+
+/// A start whose restore changes a rig meter (its pane naming a measurement the session
+/// does not hold is pruned) writes the rig settings while starting: the rigs paired with
+/// this one are in that write, so the next start still has them.
+#[test]
+fn a_rig_meter_changed_while_starting_keeps_the_paired_rigs() {
+    let dir = tempfile::tempdir().unwrap();
+    let (h, _backend) = start("rig-meas-peers-1", dir.path());
+    let (mut c, _sub) = connect(&h, &[]);
+    c.ok(Command::MeasCreate {
+        config: rig_meter("Stage"),
+    });
+    c.ok(Command::MeasCreate {
+        config: transfer("main"),
+    });
+    drop(c);
+    h.shutdown();
+
+    let mut pane = ac2_proto::samples::pane_layout().panes()[0].clone();
+    pane.kind = PaneKind::Spl;
+    pane.content = PaneContent::Meter {
+        rig: RigRef::ThisRig,
+        meas: MeasId(9),
+    };
+    let layout = PaneLayout::Pane {
+        pane: Box::new(pane),
+    };
+    let peer = RigPeer {
+        rig: RigId(0x00ab_cdef_0123_4567),
+        name: "rig-b".into(),
+        ctrl: "tcp://127.0.0.1:9".into(),
+        data: "tcp://127.0.0.1:10".into(),
+        key: ac2_zmq::KeyPair::generate().unwrap().public.to_z85(),
+    };
+    let mut rj = rig_json(dir.path());
+    rj["meters"][0]["layout"] = serde_json::to_value(&layout).unwrap();
+    rj["peers"] = serde_json::to_value([&peer]).unwrap();
+    std::fs::write(
+        dir.path().join("rig.json"),
+        serde_json::to_vec_pretty(&rj).unwrap(),
+    )
+    .unwrap();
+
+    let (h, _backend) = start("rig-meas-peers-2", dir.path());
+    let (mut c, _sub) = connect(&h, &[]);
+    assert_eq!(c.state().remote.peers, std::slice::from_ref(&peer));
+    drop(c);
+    h.shutdown();
+    let rj = rig_json(dir.path());
+    let meter: PaneLayout = serde_json::from_value(rj["meters"][0]["layout"].clone()).unwrap();
+    assert_eq!(
+        meter.panes()[0].content,
+        PaneContent::Nothing,
+        "the start pruned the meter's pane and wrote the rig settings"
+    );
+    let peers: Vec<RigPeer> = serde_json::from_value(rj["peers"].clone()).unwrap();
+    assert_eq!(peers, [peer], "the paired rig is still in the rig settings");
+}

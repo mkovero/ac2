@@ -157,7 +157,8 @@ impl Control {
         }
     }
 
-    /// Every rig setting as it stands, to persist with one of them changed.
+    /// Every rig setting as it stands, to persist with one of them changed. Whole from the
+    /// first commit on: the state was made with every part of the file.
     pub(super) fn rig_settings_now(&self) -> RigSettings {
         RigSettings {
             ceiling_dbfs: self.out.ceiling_set,

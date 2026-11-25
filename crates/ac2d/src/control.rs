@@ -541,7 +541,7 @@ impl Control {
         self.sync_levels_policy();
         self.load_rig_meas();
         self.start_autosave();
-        self.remote_start();
+        self.start_links();
         self.start_rig_monitor();
         self.recover_recordings();
         self.publish_damage();

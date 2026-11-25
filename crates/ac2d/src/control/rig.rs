@@ -268,7 +268,7 @@ impl Control {
         );
         // A key made by a change refused after it is still this rig's key from now on.
         if !had_key && self.s.server.network.server_key().is_some() {
-            self.keys_created();
+            self.start_links();
         }
         self.server_sync();
         if r? {

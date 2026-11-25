@@ -70,6 +70,9 @@ impl Control {
                 s.ceiling_bound
             );
         }
+        // Every part of the rig settings is in the state before anything commits: a write of
+        // the file is made from the state, so a part held back until later would be written
+        // as empty by any write in between (a start's own restore writes one).
         let store = Store::new(Dbfs(s.ceiling_dbfs), Dbfs(s.ceiling_bound), s.replay)
             .with_outputs(saved.outputs.clone())
             .with_rig(ac2_proto::model::Rig {
@@ -80,6 +83,7 @@ impl Control {
                 levels: saved.levels,
                 ..Default::default()
             })
+            .with_peers(saved.peers.clone())
             .with_calibrations(contents)
             .with_plans(
                 s.plan_dir
@@ -150,7 +154,7 @@ impl Control {
             transfers: transfer::Transfers::default(),
             file_jobs: file_jobs::FileJobs::default(),
             sims: sim::Sims::default(),
-            remote: remote::RemoteCtl::new(saved.peers.clone()),
+            remote: remote::RemoteCtl::new(),
             rig: RigState {
                 settings: rig,
                 meas: rigm,

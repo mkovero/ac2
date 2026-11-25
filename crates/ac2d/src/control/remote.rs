@@ -57,8 +57,6 @@ struct Joined {
 
 /// What the control thread keeps for remote inputs.
 pub(super) struct RemoteCtl {
-    /// The paired rigs as the rig settings had them, until the links start.
-    at_start: Vec<RigPeer>,
     links: BTreeMap<RigId, LinkHandle>,
     /// Each link's last report: state, bytes per second, window.
     pub(super) link_state: BTreeMap<RigId, (RemoteLink, f64, u32)>,
@@ -87,9 +85,8 @@ pub(super) struct RemoteCtl {
 }
 
 impl RemoteCtl {
-    pub(super) fn new(peers: Vec<RigPeer>) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            at_start: peers,
             links: BTreeMap::new(),
             link_state: BTreeMap::new(),
             sources: BTreeMap::new(),
@@ -194,20 +191,9 @@ fn khz(hz: u32) -> String {
 }
 
 impl Control {
-    /// Starts the links to the rigs the settings pair with this one.
-    pub(super) fn remote_start(&mut self) {
-        let peers = std::mem::take(&mut self.remote.at_start);
-        self.respawn_links(&peers);
-        if self.store.state().remote.peers != peers {
-            let mut r = self.store.state().remote.clone();
-            r.peers = peers;
-            self.commit(Change::Remote(r));
-        }
-        self.remote_publish();
-    }
-
-    /// The server key was just created: links to the paired rigs can start now.
-    pub(super) fn keys_created(&mut self) {
+    /// Starts the links to the paired rigs: at start (the state has held them since it was
+    /// made from the rig settings), and when the server key was just created.
+    pub(super) fn start_links(&mut self) {
         let peers = self.store.state().remote.peers.clone();
         self.respawn_links(&peers);
         self.remote_publish();

@@ -132,6 +132,12 @@ impl Store {
         self
     }
 
+    /// The initial paired rigs, from the rig settings (rev 0, no events).
+    pub(crate) fn with_peers(mut self, peers: Vec<ac2_proto::model::RigPeer>) -> Self {
+        self.state.remote.peers = peers;
+        self
+    }
+
     /// The initial network summary (rev 0, no events).
     pub(crate) fn with_server(mut self, server: ac2_proto::model::ServerSummary) -> Self {
         self.state.server = server;
