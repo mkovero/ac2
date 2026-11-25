@@ -306,8 +306,19 @@ fn session_refusals() {
         session::save(&other, &session_sample()),
         Err(SessionError::NotASession(other.clone()))
     );
-    assert!(session::validate_name("friday show-2").is_ok());
-    for bad in ["", "../x", "a/b", ".hidden", "a\\b", " x"] {
+    for good in [
+        "friday show-2",
+        "v1.2 final",
+        "console",
+        "com10",
+        "nullable",
+    ] {
+        assert!(session::validate_name(good).is_ok(), "{good:?}");
+    }
+    for bad in [
+        "", "..", "../x", "a/b", ".hidden", "a\\b", " x", "show.", "C:x", "CON", "nul.csv", "Com1",
+        "lpt9.old", "aux ",
+    ] {
         assert!(session::validate_name(bad).is_err(), "{bad:?}");
     }
 }
