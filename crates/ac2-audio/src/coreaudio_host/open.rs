@@ -216,6 +216,8 @@ struct Watch {
     source: Arc<dyn HalSource>,
     uids: Vec<String>,
     rate: u32,
+    /// Each device's buffer size once the stream ran, in `uids` order.
+    frames: Vec<Option<u32>>,
     latency: StaticLatency,
     events: Arc<BackendEvents>,
     shared: Vec<Arc<Shared>>,
@@ -229,6 +231,7 @@ impl Watch {
         let mut last_out_minus_in: Vec<Option<u32>> =
             self.shared.iter().map(|s| s.out_minus_in()).collect();
         let mut latency = self.latency.clone();
+        let mut frames = self.frames.clone();
         // A panicked closure stays panicked: the end is reported once, on the change.
         let mut panicked = false;
         while !self.quit.load(Ordering::Acquire) {
@@ -260,7 +263,14 @@ impl Watch {
                 }
             }
             if p.config.swap(false, Ordering::AcqRel) {
-                self.events.config_change();
+                let now = self
+                    .uids
+                    .iter()
+                    .map(|u| self.source.describe(u).ok().map(|d| d.buffer_frames))
+                    .collect();
+                if frames_moved(&mut frames, now) {
+                    self.events.config_change();
+                }
             }
             let now: Vec<Option<u32>> = self.shared.iter().map(|s| s.out_minus_in()).collect();
             let diff_moved = now != last_out_minus_in;
@@ -289,6 +299,15 @@ impl Watch {
             self.shared.first()?.out_minus_in(),
         ))
     }
+}
+
+/// Whether a buffer-size notice is a change, remembering `now` as the size seen. The HAL
+/// also sends the notice for the size ac2 itself set at open, late, after the stream already
+/// runs at it; that notice changes nothing. A device that cannot be read counts as changed.
+fn frames_moved(seen: &mut Vec<Option<u32>>, now: Vec<Option<u32>>) -> bool {
+    let moved = *seen != now;
+    *seen = now;
+    moved
 }
 
 /// Keeps the IOProcs and the watcher; dropping it stops the watcher, then every IOProc.
@@ -553,13 +572,16 @@ pub(crate) fn open_stream(
     let runs = Arc::new(runs);
     let quit = Arc::new(AtomicBool::new(false));
     let mut uids = vec![in_uid.clone()];
+    let mut frames = vec![Some(in_now.buffer_frames)];
     if let Some(o) = out_dev.as_ref().filter(|_| !one_device) {
         uids.push(o.uid.clone());
+        frames.push(Some(out_now.buffer_frames));
     }
     let watch = Watch {
         source: Arc::clone(&source),
         uids,
         rate,
+        frames,
         latency,
         events: Arc::clone(&events),
         shared,
@@ -595,5 +617,21 @@ fn range(d: &DevDesc) -> crate::backend::FrameRange {
     crate::backend::FrameRange {
         min: d.buffer_range.min,
         max: d.buffer_range.max,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frames_moved;
+
+    #[test]
+    fn frames_moved_compares_with_the_size_last_seen() {
+        let mut seen = vec![Some(512), Some(256)];
+        assert!(!frames_moved(&mut seen, vec![Some(512), Some(256)]));
+        assert!(frames_moved(&mut seen, vec![Some(512), Some(1024)]));
+        assert!(!frames_moved(&mut seen, vec![Some(512), Some(1024)]));
+        // A device that cannot be read is a change, once.
+        assert!(frames_moved(&mut seen, vec![None, Some(1024)]));
+        assert!(!frames_moved(&mut seen, vec![None, Some(1024)]));
     }
 }

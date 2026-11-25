@@ -763,6 +763,19 @@ fn a_changed_latency_is_a_config_change_only_when_it_differs() {
 }
 
 #[test]
+fn a_buffer_size_notice_is_a_config_change_only_when_the_size_differs() {
+    let s = Scripted::new(vec![blackhole()]);
+    let st = backend(&s).open(request(vec![0], 2)).expect("open");
+    // The late notice of the size set at open.
+    s.notify(Notice::Device(DeviceProperty::BufferFrameSize));
+    std::thread::sleep(Duration::from_millis(250));
+    assert_eq!(st.events().config_changes, 0);
+    s.set_device("BlackHole2ch_UID", |d| d.buffer_frames = 256);
+    s.notify(Notice::Device(DeviceProperty::BufferFrameSize));
+    wait_until("config change", || st.events().config_changes == 1);
+}
+
+#[test]
 fn a_panicking_cycle_is_silent_and_ends_the_stream() {
     let s = Scripted::new(vec![blackhole()]);
     let st = backend(&s).open(request(vec![0], 2)).expect("open");
