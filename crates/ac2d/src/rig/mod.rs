@@ -107,9 +107,9 @@ pub(crate) struct RigStore {
     unreadable: Option<String>,
     /// The file was damaged at start and set aside.
     damage: Option<crate::damage::Damage>,
-    /// What was loaded is the file on disk, whole: nothing missing, set aside, recovered
-    /// or salvaged. Otherwise the start writes what is in force, so the next start reads it.
-    intact: bool,
+    /// The max level the file on disk holds, as last read whole or written: `None` when
+    /// the file was missing, set aside, recovered or salvaged and not written since.
+    stored: std::cell::Cell<Option<f64>>,
 }
 
 impl RigStore {
@@ -119,13 +119,14 @@ impl RigStore {
             path: None,
             unreadable: None,
             damage: None,
-            intact: true,
+            stored: std::cell::Cell::new(None),
         }
     }
 
-    /// Whether the settings were read whole from the file on disk.
-    pub(crate) fn intact(&self) -> bool {
-        self.intact
+    /// The max level the file on disk holds, as last read whole or written; `None` when
+    /// it may hold none or another.
+    pub(crate) fn stored_ceiling(&self) -> Option<f64> {
+        self.stored.get()
     }
 
     /// What was found damaged at start, once.
@@ -144,7 +145,7 @@ impl RigStore {
             path: Some(path.to_owned()),
             unreadable: None,
             damage: None,
-            intact: false,
+            stored: std::cell::Cell::new(None),
         };
         let text = match std::fs::read(path) {
             Ok(t) => t,
@@ -195,8 +196,9 @@ impl RigStore {
             }
         };
         if lost.is_empty() {
-            store.intact = true;
-            return (store, sections.settings());
+            let s = sections.settings();
+            store.stored.set(s.ceiling_dbfs);
+            return (store, s);
         }
         let (s, reason) = salvage(path, sections, &lost);
         match ac2_paths::set_aside_damaged(path) {
@@ -252,11 +254,29 @@ impl RigStore {
     pub(crate) fn persist(&self, s: &RigSettings) -> Result<(), ProtoError> {
         self.check()?;
         let Some(path) = &self.path else {
+            self.stored.set(s.ceiling_dbfs);
             return Ok(());
         };
         let text = file::write(s).map_err(|e| internal(format!("rig settings: {e}")))?;
-        crate::damage::write_with_prev(path, &text)
-            .map_err(|e| internal(format!("cannot write rig settings {}: {e}", path.display())))
+        let failed = |e: std::io::Error| {
+            internal(format!("cannot write rig settings {}: {e}", path.display()))
+        };
+        crate::damage::write_with_prev(path, &text).map_err(failed)?;
+        // The previous copy is what a start reads when this file is torn: it must never
+        // hold a higher max level than the one now in force, or a torn write would raise
+        // it. A lowered level is written there too.
+        let prev = crate::damage::prev_path(path);
+        let higher = std::fs::read(&prev)
+            .ok()
+            .and_then(|b| read_whole(&b).ok())
+            .and_then(|p| p.ceiling_dbfs)
+            .zip(s.ceiling_dbfs)
+            .is_some_and(|(was, now)| was > now);
+        if higher {
+            ac2_paths::write_private_atomic(&prev, &text).map_err(failed)?;
+        }
+        self.stored.set(s.ceiling_dbfs);
+        Ok(())
     }
 }
 

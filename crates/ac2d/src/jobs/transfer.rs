@@ -8,7 +8,7 @@ use ac2_core::ir_view::{IrEngine, UniformTf, amp_db};
 use ac2_core::mic_curve::Correction;
 use ac2_core::mtw::{Mtw, MtwConfig, MtwFrame, SampleGate, Validity};
 use ac2_core::protection::{BlockDecision, BlockLevels, Guard, ProtectionConfig};
-use ac2_core::smoothing::{Smoother, SmoothingMode, TfColumns};
+use ac2_core::smoothing::{Smoother, SmoothingMode};
 use ac2_proto::frame::{
     BinsFrame, FrameData, IrFrame, IrMeta, ProtectionFlags, TfFrame, TfMeta, ValidityMask,
 };
@@ -27,6 +27,7 @@ use ac2_proto::units::SessionEpoch;
 use super::bins::{Shared, StageStreams, send_final};
 use super::cross_rig::{ClockGate, CrossEvent, CrossRig};
 use super::finder::{Finder, RelockSeen};
+use super::tf_smooth::smoother;
 use super::{
     Analysis, Due, Emitter, Flush, JobCmd, JobCtx, LevelsMeter, Pace, SmoothingChange, StampArgs,
 };
@@ -200,17 +201,6 @@ fn column_correction(grid: &LogGrid, c: &Correction) -> ColumnCorrection {
     let db: Vec<f64> = grid.frequencies().into_iter().map(|f| c.db(f)).collect();
     let gain = db.iter().map(|d| 10f64.powf(-d / 20.0)).collect();
     ColumnCorrection { db, gain }
-}
-
-/// The kernel for `smoothing` on `grid`.
-fn smoother(
-    grid: LogGrid,
-    smoothing: Option<ac2_proto::model::Smoothing>,
-) -> Option<(Smoother, SmoothingMode)> {
-    smoothing.map(|s| {
-        let (f, m) = conv::smoothing(s);
-        (Smoother::new(grid, f), m)
-    })
 }
 
 /// The delay tracking compares its whole-sample estimates with: the arrival (the applied
@@ -581,7 +571,6 @@ impl Transfer {
             // Display smoothing averages the corrected curve, so a capture re-smoothed at
             // this setting reads the same as this frame.
             Some((sm, mode)) => {
-                let valid: Vec<bool> = validity.iter().map(|v| *v == ValidityMask::NONE).collect();
                 let h: &[Complex64] = match &self.corr {
                     None => &f.h1,
                     Some(c) => {
@@ -591,27 +580,7 @@ impl Transfer {
                         &self.hbuf
                     }
                 };
-                let s = sm.smooth(
-                    TfColumns {
-                        h,
-                        coherence: &f.coherence,
-                        valid: &valid,
-                    },
-                    *mode,
-                );
-                s.h.iter()
-                    .zip(&s.valid)
-                    .map(|(h, ok)| {
-                        if *ok {
-                            (
-                                (20.0 * h.norm().log10()) as f32,
-                                h.arg().to_degrees() as f32,
-                            )
-                        } else {
-                            (f32::NAN, f32::NAN)
-                        }
-                    })
-                    .unzip()
+                super::tf_smooth::smoothed((sm, *mode), h, &f.coherence, &validity)
             }
         };
         TfFrame {
@@ -895,27 +864,29 @@ impl Analysis for Transfer {
             .and(bins_flush)
     }
 
-    fn final_frames(&mut self, e: &Emitter) {
+    fn final_frames(&mut self, e: &Emitter) -> Vec<ac2_proto::Frame> {
+        let mut kept = Vec::new();
         let Some(end) = self.end else {
-            return;
+            return kept;
         };
         let stamp = self.stamp(end, self.last_prot);
         let tf = match self.stopped_frame(false) {
             Some(f) => f,
             None => self.tf_frame(true),
         };
-        send_final(e, stamp, FrameData::Tf(tf));
+        send_final(e, stamp, FrameData::Tf(tf), &mut kept);
         let shared = self.shared();
         if let Some(b) = &mut self.bins {
-            b.final_frames(e, &self.mtw, stamp, &shared);
+            b.final_frames(e, &self.mtw, stamp, &shared, &mut kept);
         }
         if let Some(ir) = self.capture_ir() {
             let stamp = StampArgs {
                 grid_id: None,
                 ..stamp
             };
-            send_final(e, stamp, FrameData::Ir(ir));
+            send_final(e, stamp, FrameData::Ir(ir), &mut kept);
         }
+        kept
     }
 
     fn capture(&mut self) -> Option<(StampArgs, FrameData)> {

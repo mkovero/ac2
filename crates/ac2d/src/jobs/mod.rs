@@ -49,6 +49,7 @@ pub(crate) mod rta;
 pub(crate) mod spectrum;
 pub(crate) mod spl;
 pub(crate) mod sweep;
+pub(crate) mod tf_smooth;
 pub(crate) mod timing;
 pub(crate) mod transfer;
 
@@ -106,6 +107,8 @@ pub(crate) struct Emitter {
     outbox: Outbox,
     env: JobEnv,
     asked: RefCell<Asked>,
+    /// The config rev of the last frame sent.
+    last_rev: std::cell::Cell<Option<Rev>>,
 }
 
 /// Which of the topics this thread asks about have a subscriber, as of `generation` of the
@@ -130,6 +133,7 @@ impl Emitter {
             outbox,
             env,
             asked: RefCell::default(),
+            last_rev: std::cell::Cell::default(),
         }
     }
 
@@ -173,6 +177,7 @@ impl Emitter {
     pub(crate) fn send(&self, s: StampArgs, data: FrameData) -> bool {
         let topic = data.topic();
         let frame = self.frame(s, self.env.seqs.next(topic), data);
+        self.last_rev.set(Some(s.config_rev));
         match ac2_proto::CodedFrame::from_frame(&frame) {
             Ok(coded) => {
                 let sent = self.env.frames.send(coded);
@@ -253,7 +258,7 @@ pub(crate) enum JobMsg {
     CaptureTrace(SyncSender<Option<Captured>>),
     /// Send the final frames and end; with a channel, also answer there with the result a
     /// `trace.capture` would take at that moment.
-    Stop(Option<SyncSender<Option<Captured>>>),
+    Stop(Option<SyncSender<Option<Stopped>>>),
 }
 
 /// One analysis.
@@ -309,8 +314,11 @@ pub(crate) trait Analysis: Send {
     /// On stop, the frames that outlive the job: a transfer sends its `tf`, its impulse
     /// response and (at the `bins` resolution) every stage's bins from the same averages
     /// under one stamp, past its publish schedule and whether or not anyone subscribes, so
-    /// a view opened or a client connected after the stop gets the final result.
-    fn final_frames(&mut self, _e: &Emitter) {}
+    /// a view opened or a client connected after the stop gets the final result. Returns
+    /// them as sent, in that order.
+    fn final_frames(&mut self, _e: &Emitter) -> Vec<Frame> {
+        Vec::new()
+    }
 }
 
 /// Longest `trace.capture` waits for a job to form its result. The request wakes the job like
@@ -333,6 +341,16 @@ pub(crate) struct Captured {
     pub(crate) frame: Frame,
     /// Its impulse response, when the job forms one.
     pub(crate) ir: Option<IrFrame>,
+}
+
+/// What a job leaves as it stops: the result a capture takes, and the final frames it sent
+/// (none for a job that sends none: its views keep its last frames).
+#[derive(Clone, Debug)]
+pub(crate) struct Stopped {
+    pub(crate) captured: Captured,
+    pub(crate) finals: Vec<Frame>,
+    /// The config rev of the last frame it sent before the stop.
+    pub(crate) last_rev: Option<Rev>,
 }
 
 /// A running job thread.
@@ -381,13 +399,13 @@ impl JobHandle {
     /// Stops the job and returns the result a `trace.capture` would have taken as it
     /// stopped, formed after its final frames from the same state, so a capture of the
     /// stopped measurement stores what its views show. `None` when it had none yet.
-    pub(crate) fn stop_keeping(mut self) -> Option<Captured> {
+    pub(crate) fn stop_keeping(mut self) -> Option<Stopped> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.stop_inner(Some(tx));
         rx.try_recv().ok().flatten()
     }
 
-    fn stop_inner(&mut self, keep: Option<SyncSender<Option<Captured>>>) {
+    fn stop_inner(&mut self, keep: Option<SyncSender<Option<Stopped>>>) {
         let _ = self.tx.send(JobMsg::Stop(keep));
         self.wake();
         if let Some(t) = self.thread.take() {
@@ -600,8 +618,13 @@ fn run(
                     // Only a `meas.stop` leaves a result: a job ended for a delete, a
                     // restart or the audio closing leaves nothing for the views to draw.
                     if let Some(reply) = keep {
-                        a.final_frames(em);
-                        let _ = reply.send(captured(a, em));
+                        let last_rev = em.last_rev.get();
+                        let finals = a.final_frames(em);
+                        let _ = reply.send(captured(a, em).map(|captured| Stopped {
+                            captured,
+                            finals,
+                            last_rev,
+                        }));
                     }
                     return;
                 }

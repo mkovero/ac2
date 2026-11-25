@@ -908,3 +908,38 @@ fn a_stored_measurement_name_outside_the_rule_still_loads() {
     c.update_ok(id, config);
     h.shutdown();
 }
+
+/// A loaded capture names the curve it was taken of; a measurement made after the load
+/// never gets that id, so its captures never take the slot of that stranger's.
+#[test]
+fn a_new_measurement_never_takes_a_loaded_captures_source_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("source-ids", dir.path(), false);
+    let (mut c, _sub) = connect(&h, &[]);
+    import(&mut c, "rew_export.txt");
+    c.ok(Command::MeasCreate {
+        config: transfer("tf"),
+    });
+    save(&mut c, "good", false).unwrap();
+    h.shutdown();
+    edited_copy(dir.path(), "good", "stranger", |v| {
+        v["traces"][0]["meta"]["source"] = serde_json::json!({
+            "type": "captured",
+            "meas": 9,
+            "meas_name": "gone",
+            "epoch": 1,
+            "at_sample": 0,
+        });
+    });
+    let h = start("source-ids-2", dir.path(), false);
+    let (mut c, _sub) = connect(&h, &[]);
+    c.ok(Command::FileLoad {
+        session: named("stranger"),
+        discard: true,
+    });
+    let m = c.measurement(Command::MeasCreate {
+        config: transfer("new"),
+    });
+    assert!(m.id.0 > 9, "{:?}", m.id);
+    h.shutdown();
+}

@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use ac2_proto::Frame;
 use ac2_proto::frame::{FrameData, MathState};
 use ac2_proto::model::{CalState, EqSnapshot, MeasKind, Measurement, MicState, Operand};
 use ac2_proto::units::{MeasId, Rev, WallNs};
@@ -29,6 +30,9 @@ pub(super) struct AtStop {
 #[derive(Clone, Debug)]
 pub(super) struct KeptResult {
     pub(super) captured: Captured,
+    /// The final frames its job sent, in the order sent (seq unset): what goes out again
+    /// when the result is relabelled.
+    pub(super) finals: Vec<Frame>,
     pub(super) at: AtStop,
 }
 
@@ -81,13 +85,8 @@ impl Control {
 
 impl Kept {
     /// What `meas`'s job left as it stopped; `None` (no result yet) keeps nothing.
-    pub(super) fn keep(&mut self, meas: MeasId, c: Option<(Captured, AtStop)>) {
-        match c {
-            Some((captured, at)) => {
-                self.0.insert(meas, KeptResult { captured, at });
-            }
-            None => self.forget(meas),
-        }
+    pub(super) fn keep(&mut self, meas: MeasId, k: KeptResult) {
+        self.0.insert(meas, k);
     }
 
     pub(super) fn get(&self, meas: MeasId) -> Option<&KeptResult> {
@@ -112,11 +111,19 @@ impl Kept {
         let Some(c) = self.0.get_mut(&meas) else {
             return false;
         };
-        let c = &mut c.captured;
-        match (&mut c.frame.data, change) {
+        let KeptResult {
+            captured, finals, ..
+        } = c;
+        match (&mut captured.frame.data, change) {
             (FrameData::Tf(f), SmoothingChange::Transfer(s)) => {
                 f.meta.smoothing = *s;
-                c.frame.stamp.config_rev = rev;
+                captured.frame.stamp.config_rev = rev;
+                for f in finals.iter_mut() {
+                    f.stamp.config_rev = rev;
+                    if let FrameData::Tf(t) = &mut f.data {
+                        t.meta.smoothing = *s;
+                    }
+                }
                 true
             }
             _ => {

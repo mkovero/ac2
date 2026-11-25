@@ -206,7 +206,7 @@ impl Control {
                         // traces holds is not taken from it.
                         let held = self.store.state().traces.iter().any(|o| {
                             o.id != t.id
-                                && o.edit.owner == TraceOwner::Imported
+                                && o.slot_holder() == t.slot_holder()
                                 && o.edit.slot.is_some()
                                 && o.edit.slot == t.edit.slot
                         });

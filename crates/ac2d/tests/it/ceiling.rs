@@ -390,3 +390,71 @@ fn a_level_not_stored_at_start_is_stored_when_set() {
     let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
     assert_eq!(v["ceiling_dbfs"], serde_json::json!(-40.0));
 }
+
+/// Lowering the level leaves no copy on disk with a higher one: torn after a lowering, the
+/// file's previous copy gives the lowered level back, never the one before.
+#[test]
+fn a_lowered_level_survives_a_torn_file() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("rig.json");
+    let start = |bound: f64| {
+        let mut cfg = config(manual_rig(), inproc("ceiling-torn-lowered"));
+        cfg.max_level_dbfs = bound;
+        cfg.rig_settings = Some(file.clone());
+        Daemon::start(cfg).unwrap()
+    };
+    let h = start(-10.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    ceiling(&mut c, -40.0, false).unwrap();
+    h.shutdown();
+    std::fs::write(&file, b"{\"ceil").unwrap();
+
+    let h = start(-10.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    assert_eq!(c.state().generator.ceiling, Dbfs(-40.0));
+    h.shutdown();
+}
+
+/// A start whose capped level could not be stored: the next setting saved stores the level
+/// in force with it, so a later start with a higher bound keeps it.
+#[cfg(unix)]
+#[test]
+fn another_setting_saved_stores_the_level_in_force() {
+    use std::os::unix::fs::PermissionsExt;
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("rig.json");
+    let start = |bound: f64| {
+        let mut cfg = config(manual_rig(), inproc("ceiling-other-setting"));
+        cfg.max_level_dbfs = bound;
+        cfg.rig_settings = Some(file.clone());
+        Daemon::start(cfg).unwrap()
+    };
+    let h = start(-20.0);
+    h.shutdown();
+    let mode =
+        |m: u32| std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(m)).unwrap();
+    mode(0o555);
+    if std::fs::write(dir.path().join("probe"), b"").is_ok() {
+        mode(0o755);
+        return;
+    }
+    let h = start(-40.0);
+    mode(0o755);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    c.outputs(Command::SessionOutputs {
+        outputs: vec![OutputSetup {
+            channel: 0,
+            label: Some("Main L".into()),
+        }],
+    });
+    h.shutdown();
+
+    let h = start(-10.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    assert_eq!(c.state().generator.ceiling, Dbfs(-40.0));
+    h.shutdown();
+}

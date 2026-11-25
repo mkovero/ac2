@@ -122,7 +122,6 @@ impl Control {
                 level: None,
                 source: None,
                 tone: None,
-                ceiling_set: stored_ceiling,
             },
             grids: HashMap::new(),
             seqs: Arc::new(Seqs::default()),
@@ -181,7 +180,7 @@ impl Control {
         // (no file, one set aside or recovered from its previous copy) is written now: after
         // the start the file always holds what is in force, so the next start cannot find
         // it missing and take a higher bound.
-        if self.rig.settings.intact() && stored == Some(now) {
+        if self.rig.settings.stored_ceiling() == Some(now) {
             return;
         }
         if self.rig.settings.check().is_err() {
@@ -193,7 +192,7 @@ impl Control {
             ..self.rig_settings_now()
         };
         match self.rig.settings.persist(&s) {
-            Ok(()) => self.out.ceiling_set = Some(now),
+            Ok(()) => {}
             Err(e) => {
                 let then = match stored {
                     Some(s) if s > now => format!(

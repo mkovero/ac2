@@ -514,9 +514,6 @@ struct Output {
     source: Option<SourceKey>,
     /// The firing sine the spectrum jobs were last told (Hz).
     tone: Option<f64>,
-    /// The system max level a client last set (kept in the rig settings); `None`: never
-    /// set, the bound applies.
-    ceiling_set: Option<f64>,
 }
 
 /// The rig's persistent settings, its meters and the cue senders they drive.

@@ -158,10 +158,11 @@ impl Control {
     }
 
     /// Every rig setting as it stands, to persist with one of them changed. Whole from the
-    /// first commit on: the state was made with every part of the file.
+    /// first commit on: the state was made with every part of the file. The max level is
+    /// the one in force, so whichever setting is saved, the file holds it.
     pub(super) fn rig_settings_now(&self) -> RigSettings {
         RigSettings {
-            ceiling_dbfs: self.out.ceiling_set,
+            ceiling_dbfs: Some(self.s.ceiling_dbfs),
             outputs: self.store.state().outputs.clone(),
             meters: self.rig.meas.saved.clone(),
             monitor_at_start: self.store.state().rig.monitor_at_start,

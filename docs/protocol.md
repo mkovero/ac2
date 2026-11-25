@@ -1360,13 +1360,15 @@ display edits and are never applied to the stored data.
   final frames, from the same state, with its IR) and a capture stores that, stamped as
   its final frames; it goes when the measurement starts again, is reset, gets a new
   delay or a configuration that would have restarted a running job's averages (a display
-  smoothing change of a transfer keeps it, with the new smoothing, and its final `tf`
-  frame is sent again under the new `config_rev`, display-smoothed as a running job sends
-  it; a spectrum's smoothing change drops it), is deleted, or the session closes. A
-  second `meas.stop` keeps it. When a stopped measurement's kept result goes, its frames
-  (`d/<meas>/…`, `bins/<meas>/…`) are cleared from the daemon's latest slots, and a reset
-  of a stopped measurement gives it a new `config_rev`: a client drops the frames it holds
-  of a stopped measurement whose newest frame is of an older `config_rev`. A capture of a
+  smoothing change of a transfer keeps it, with the new smoothing, and every final frame
+  (`tf`, each bins stage, IR) is sent again in the order sent under the new `config_rev`,
+  the `tf` display-smoothed as a running job sends it; a spectrum's smoothing change drops
+  it), is deleted, or the session closes. A second `meas.stop` keeps it. When a stopped
+  measurement's kept result goes, its frames (`d/<meas>/…`, `bins/<meas>/…`) are cleared
+  from the daemon's latest slots, and a reset of a stopped measurement that kept a result
+  gives it a new `config_rev`: a client drops each frame it holds of a stopped measurement
+  whose own `config_rev` is older than the measurement's (frame by frame, so the order a
+  frame and the state change arrive in does not matter). A capture of a
   kept result is described as at the stop: `created_at` is the stop's time, and `cal`,
   `mic`, `eq_in` and a math capture's operand names are those of the stop. It needs a result in the current session epoch (`invalid` otherwise:
   none yet while running, none kept while stopped, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,

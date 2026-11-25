@@ -262,12 +262,34 @@ impl Control {
                     rt.fanout.detach(h.fanout_id);
                 }
                 if keep {
-                    let kept = h.stop_keeping().and_then(|c| {
-                        let m = self.meas(id).ok()?.clone();
-                        let at = self.at_stop(&m, &c);
-                        Some((c, at))
-                    });
-                    self.kept.keep(id, kept);
+                    match h.stop_keeping() {
+                        // A job that sends no final frames leaves its last ones on view: if
+                        // those are of an older configuration than its result (stopped
+                        // right after a change, before its next frame), the views and a
+                        // capture would disagree, so neither stands.
+                        Some(s)
+                            if s.finals.is_empty()
+                                && s.last_rev
+                                    .is_some_and(|r| r != s.captured.frame.stamp.config_rev) =>
+                        {
+                            self.drop_kept(id);
+                        }
+                        Some(s) => match self.meas(id).ok().cloned() {
+                            Some(m) => {
+                                let at = self.at_stop(&m, &s.captured);
+                                self.kept.keep(
+                                    id,
+                                    super::kept::KeptResult {
+                                        captured: s.captured,
+                                        finals: s.finals,
+                                        at,
+                                    },
+                                );
+                            }
+                            None => self.kept.forget(id),
+                        },
+                        None => self.kept.forget(id),
+                    }
                 } else {
                     self.kept.forget(id);
                     drop(h);
@@ -292,40 +314,56 @@ impl Control {
         }
     }
 
-    /// A stopped transfer's kept result relabelled (a smoothing change): its final `tf`
-    /// goes out again under the new config rev, display-smoothed as a running job would
-    /// send it, so the views draw what a capture now shows.
-    pub(super) fn republish_kept(&self, meas: MeasId) {
+    /// A stopped transfer's kept result relabelled (a smoothing change): every final frame
+    /// its job sent goes out again, in the same order, under the new config rev, the `tf`
+    /// smoothed from the kept averages as the job smooths its own, so the views draw what
+    /// a capture now shows. A result whose grid is gone cannot be smoothed: it goes, with
+    /// its frames.
+    pub(super) fn republish_kept(&mut self, meas: MeasId) {
+        use ac2_proto::frame::FrameData;
         if self.jobs.contains_key(&meas) {
             return;
         }
-        let Some(c) = self.kept.get(meas) else {
+        let Some(k) = self.kept.get(meas) else {
             return;
         };
-        let mut f = c.captured.frame.clone();
-        let grid = f.stamp.grid_id.and_then(|g| self.grids.get(&g));
-        if let (ac2_proto::frame::FrameData::Tf(tf), Some(grid)) = (&mut f.data, grid)
-            && let Some(s) = tf.meta.smoothing
-        {
-            let cols = ac2_traces::Columns {
-                mag_db: tf.mag.clone(),
-                phase_deg: Some(tf.phase.clone()),
-                coherence: None,
-            };
-            let out = ac2_traces::smooth::smooth(grid, &cols, s);
-            tf.mag = out.mag_db;
-            if let Some(p) = out.phase_deg {
-                tf.phase = p;
-            }
-        }
-        f.stamp.seq = self.seqs.next(f.data.topic());
-        match ac2_proto::CodedFrame::from_frame(&f) {
-            Ok(coded) => {
-                if self.s.frames.send(coded) {
-                    self.s.outbox.wake();
+        let FrameData::Tf(raw) = &k.captured.frame.data else {
+            return;
+        };
+        let grid = k
+            .captured
+            .frame
+            .stamp
+            .grid_id
+            .and_then(|g| self.grids.get(&g))
+            .and_then(|g| match *g {
+                GridDef::Log { ppo, k_min, k_max } => {
+                    Some(ac2_core::grid::LogGrid { ppo, k_min, k_max })
                 }
+                _ => None,
+            });
+        let Some(grid) = grid else {
+            tracing::error!("measurement {meas}: its kept result's grid is not registered");
+            self.drop_kept(meas);
+            return;
+        };
+        let tf = jobs::tf_smooth::resmooth(raw, grid);
+        for f in &k.finals {
+            let mut f = f.clone();
+            if let FrameData::Tf(t) = &mut f.data {
+                *t = tf.clone();
             }
-            Err(e) => tracing::error!("measurement {meas}: kept frame not encodable: {e}"),
+            f.stamp.seq = self.seqs.next(f.data.topic());
+            match ac2_proto::CodedFrame::from_frame(&f) {
+                Ok(coded) => {
+                    if self.s.frames.send(coded) {
+                        self.s.outbox.wake();
+                    } else {
+                        tracing::warn!("measurement {meas}: a relabelled final frame dropped");
+                    }
+                }
+                Err(e) => tracing::error!("measurement {meas}: kept frame not encodable: {e}"),
+            }
         }
     }
 

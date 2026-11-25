@@ -457,3 +457,251 @@ fn a_slot_is_the_source_curves() {
     assert!([a2.id, b.id].contains(&in_1[0].id));
     r.h.shutdown();
 }
+
+/// Main's newest `tf` frame a late subscriber gets.
+fn late_tf(r: &Rig) -> (Rev, ac2_proto::frame::TfFrame) {
+    late_frames(r, &[b"d/1/tf"])
+        .into_iter()
+        .rev()
+        .find_map(|f| match f.data {
+            FrameData::Tf(t) => Some((f.stamp.config_rev, t)),
+            _ => None,
+        })
+        .expect("a tf frame")
+}
+
+fn main_smoothing(c: &mut Client, s: Option<Smoothing>) {
+    let mut cfg = c.state().measurements[0].config.clone();
+    if let MeasKind::Transfer { config } = &mut cfg.kind {
+        config.smoothing = s;
+    }
+    c.update_ok(MeasId(1), cfg);
+}
+
+/// The result re-sent at a smoothing changed while stopped is the frame the running job
+/// sends at that smoothing for the same average, masked columns and all: a column the
+/// job leaves out of the smoothing (unresolved, low coherence) is left out again.
+#[test]
+fn a_resmoothed_result_is_what_the_job_sends() {
+    let mut r = rig("stopped-resmooth");
+    let third = Some(Smoothing {
+        fraction: SmoothingFraction::Third,
+        mode: SmoothingMode::Magnitude,
+    });
+    main_smoothing(&mut r.c, third);
+    settle(&mut r.d, &mut r.c, &r.sub, r.tok, 0);
+    r.c.ok(Command::MeasStop { meas: MeasId(1) });
+    let (_, sent) = late_tf(&r);
+    assert!(
+        sent.validity
+            .iter()
+            .any(|v| *v != ac2_proto::frame::ValidityMask::NONE),
+        "some columns masked"
+    );
+    main_smoothing(&mut r.c, None);
+    main_smoothing(&mut r.c, third);
+    let (rev, again) = late_tf(&r);
+    assert_eq!(rev, r.c.state().measurements[0].config_rev);
+    assert_eq!(again.validity, sent.validity);
+    let same = |a: f32, b: f32, tol: f32| (a.is_nan() && b.is_nan()) || (a - b).abs() <= tol;
+    for (i, (a, b)) in sent.mag.iter().zip(&again.mag).enumerate() {
+        assert!(
+            same(*a, *b, 1e-3),
+            "column {i}: {a} dB sent, {b} dB re-sent"
+        );
+    }
+    for (i, (a, b)) in sent.phase.iter().zip(&again.phase).enumerate() {
+        assert!(
+            same(*a, *b, 1e-3),
+            "column {i}: phase {a} sent, {b} re-sent"
+        );
+    }
+    r.h.shutdown();
+}
+
+/// A stopped `bins` transfer re-sends every final frame at a smoothing change: its `tf`,
+/// each stage's bins and its IR, all at the new configuration rev, so a view that drops a
+/// stopped measurement's frames of an older rev keeps the whole result.
+#[test]
+fn a_smoothing_change_while_stopped_resends_every_final_frame() {
+    let mut r = rig("stopped-bins-resend");
+    let mut m = transfer("bins");
+    if let MeasKind::Transfer { config } = &mut m.kind {
+        config.resolution = TransferResolution::Bins;
+    }
+    let m = r.c.measurement(Command::MeasCreate { config: m });
+    r.c.ok(Command::MeasStart { meas: m.id });
+    settle(&mut r.d, &mut r.c, &r.sub, r.tok, 0);
+    r.c.ok(Command::MeasStop { meas: m.id });
+    let mut cfg = m.config.clone();
+    if let MeasKind::Transfer { config } = &mut cfg.kind {
+        config.smoothing = Some(Smoothing {
+            fraction: SmoothingFraction::Sixth,
+            mode: SmoothingMode::Magnitude,
+        });
+    }
+    r.c.update_ok(m.id, cfg);
+    let rev =
+        r.c.state()
+            .measurements
+            .iter()
+            .find(|x| x.id == m.id)
+            .expect("listed")
+            .config_rev;
+    let topics: Vec<String> = std::iter::once(format!("d/{}/", m.id.0))
+        .chain((0..4).map(|s| format!("bins/{}/{s}", m.id.0)))
+        .collect();
+    let p: Vec<&[u8]> = topics.iter().map(|t| t.as_bytes()).collect();
+    let got = late_frames(&r, &p);
+    let has = |k: fn(&FrameData) -> bool| got.iter().any(|f| k(&f.data));
+    assert!(has(|d| matches!(d, FrameData::Tf(_))), "tf");
+    assert!(has(|d| matches!(d, FrameData::Ir(_))), "ir");
+    assert!(has(|d| matches!(d, FrameData::Bins(_))), "bins");
+    for f in &got {
+        assert_eq!(f.stamp.config_rev, rev, "{:?}", f.data.topic());
+    }
+    r.h.shutdown();
+}
+
+/// A stopped spectrum's capture says what it was measured with at the stop: its input's
+/// mic curve changed afterwards is not what its result has subtracted.
+#[test]
+fn a_stopped_spectrum_captures_its_mic_of_the_stop() {
+    const CURVE: &str = "* test mic\n20 0\n1000 0\n4000 0\n8000 6\n24000 6\n";
+    let mut r = rig("stopped-spec-mic");
+    let spec = r.c.measurement(Command::MeasCreate {
+        config: MeasConfig {
+            scope: MeasScope::Session,
+            name: "spec".into(),
+            kind: MeasKind::Spectrum {
+                config: SpectrumConfig::on_input(1),
+            },
+        },
+    });
+    r.c.ok(Command::MeasStart { meas: spec.id });
+    settle(&mut r.d, &mut r.c, &r.sub, r.tok, 0);
+    r.c.ok(Command::MeasStop { meas: spec.id });
+    let capture = |c: &mut Client, name: &str| {
+        c.trace(Command::TraceCapture {
+            meas: spec.id,
+            name: name.into(),
+            slot: None,
+        })
+    };
+    let before = capture(&mut r.c, "before");
+    r.c.ok(Command::CalCurveImport {
+        mic: "M30".into(),
+        label: None,
+        file_name: "M30.frd".into(),
+        content: Blob(CURVE.as_bytes().to_vec()),
+        input: Some(1),
+    });
+    let after = capture(&mut r.c, "after");
+    assert_ne!(
+        before.mic.as_ref().map(|m| m.name.as_str()),
+        Some("M30"),
+        "the curve came after the stop"
+    );
+    assert_eq!(after.mic, before.mic);
+    assert_eq!(after.cal, before.cal);
+    r.h.shutdown();
+}
+
+/// A stopped math trace's capture names its operands and the EQ it applies as they were
+/// at the stop: an operand renamed or its EQ set edited afterwards changes neither.
+#[test]
+fn a_stopped_math_captures_its_operands_of_the_stop() {
+    let mut r = rig("stopped-math-names");
+    let section = |gain: f64| EqSection {
+        enabled: true,
+        shape: EqShape::Peaking {
+            f: Hz(1000.0),
+            gain: Db(gain),
+            bw: Bandwidth::Q { value: 2.0 },
+            q_measured: None,
+        },
+    };
+    let m = match r.c.call(Command::MeasEq {
+        meas: MeasId(1),
+        edit: EqEdit::New {
+            name: None,
+            realisation: None,
+            peak_q: None,
+            sections: vec![section(-6.0)],
+        },
+    }) {
+        Ok(ac2_proto::ReplyBody::Measurement(m)) => m,
+        other => panic!("{other:?}"),
+    };
+    let set = m.eq[0].id;
+    let q = r.c.measurement(Command::MeasCreate {
+        config: MeasConfig {
+            scope: MeasScope::Session,
+            name: "main × EQ".into(),
+            kind: MeasKind::Math {
+                config: MathConfig::of(
+                    TraceOwner::Meas { meas: MeasId(1) },
+                    MathDomain::Transfer,
+                    MathExpr::Binary {
+                        a: Operand::Meas { meas: MeasId(1) },
+                        op: MathOp::Multiply,
+                        b: Operand::Eq {
+                            meas: MeasId(1),
+                            set,
+                        },
+                    },
+                ),
+            },
+        },
+    });
+    r.c.ok(Command::MeasStart { meas: q.id });
+    settle(&mut r.d, &mut r.c, &r.sub, r.tok, 0);
+    r.c.ok(Command::MeasStop { meas: q.id });
+    let capture = |c: &mut Client, name: &str| {
+        c.trace(Command::TraceCapture {
+            meas: q.id,
+            name: name.into(),
+            slot: None,
+        })
+    };
+    let before = capture(&mut r.c, "before");
+    let names = |t: &TraceMeta| match &t.source {
+        TraceSource::Math { operands, .. } => {
+            operands.iter().map(|o| o.name.clone()).collect::<Vec<_>>()
+        }
+        other => panic!("{other:?}"),
+    };
+    assert!(names(&before).contains(&"main".to_owned()), "{before:?}");
+    assert!(!before.eq_in.is_empty(), "the set it applies");
+
+    let mut cfg = r.c.state().measurements[0].config.clone();
+    cfg.name = "renamed".into();
+    r.c.update_ok(MeasId(1), cfg);
+    let mut body = m.eq[0].body.clone();
+    body.sections = vec![section(-3.0)];
+    r.c.ok(Command::MeasEq {
+        meas: MeasId(1),
+        edit: EqEdit::Put { set, body },
+    });
+    let after = capture(&mut r.c, "after");
+    assert_eq!(names(&after), names(&before));
+    assert_eq!(after.eq_in, before.eq_in);
+    r.h.shutdown();
+}
+
+/// A reset while stopped invalidates the result kept, once: with none kept it changes
+/// nothing, so a view holds no frame it would have to drop again.
+#[test]
+fn a_reset_with_nothing_kept_changes_nothing() {
+    let mut r = rig("stopped-reset-twice");
+    r.c.ok(Command::MeasStop { meas: MeasId(1) });
+    let rev = |c: &mut Client| c.state().measurements[0].config_rev;
+    let stopped = rev(&mut r.c);
+    r.c.ok(Command::MeasReset { meas: MeasId(1) });
+    let reset = rev(&mut r.c);
+    assert!(reset > stopped);
+    nothing_kept(&mut r);
+    r.c.ok(Command::MeasReset { meas: MeasId(1) });
+    assert_eq!(rev(&mut r.c), reset);
+    r.h.shutdown();
+}

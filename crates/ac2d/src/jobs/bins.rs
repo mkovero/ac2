@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use ac2_core::mic_curve::Correction;
 use ac2_core::mtw::{DrawnBins, Mtw};
+use ac2_proto::Frame;
 use ac2_proto::frame::{BinLayout, BinStage, BinsFrame, BinsMeta, FrameData};
 use ac2_proto::model::FreqRange;
 use ac2_proto::topic::{MAX_BIN_STAGES, Topic};
@@ -168,6 +169,7 @@ impl StageStreams {
         mtw: &Mtw,
         stamp: StampArgs,
         shared: &Shared,
+        kept: &mut Vec<Frame>,
     ) {
         let stamp = StampArgs {
             grid_id: None,
@@ -175,7 +177,7 @@ impl StageStreams {
         };
         for i in 0..self.stages.len() {
             let f = self.frame(i, mtw, shared);
-            send_final(e, stamp, FrameData::Bins(f));
+            send_final(e, stamp, FrameData::Bins(f), kept);
         }
     }
 
@@ -285,7 +287,10 @@ impl Probe {
 
 /// Hands a final frame to the I/O thread, which a stop's frames may find full: tried
 /// [`FINAL_TRIES`] times, then dropped with a warning.
-pub(crate) fn send_final(e: &Emitter, stamp: StampArgs, data: FrameData) {
+/// Sends a final frame and keeps it in `kept` (its `seq` unset): the kept result goes out
+/// again from there when it is relabelled.
+pub(crate) fn send_final(e: &Emitter, stamp: StampArgs, data: FrameData, kept: &mut Vec<Frame>) {
+    kept.push(e.frame(stamp, 0, data.clone()));
     let topic = data.topic();
     for _ in 0..FINAL_TRIES {
         if e.send(stamp, data.clone()) {

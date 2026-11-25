@@ -576,6 +576,15 @@ impl Control {
         }
         // Traces first: a math trace's stored operands must be there when it starts.
         for t in data.traces {
+            // A capture names the curve it was taken of, and that curve holds its slot: a
+            // new measurement never gets that id, or its captures would take the slot of a
+            // stranger's.
+            use ac2_proto::model::TraceSource;
+            if let TraceSource::Captured { meas, .. } | TraceSource::Math { meas, .. } =
+                &t.meta.source
+            {
+                self.ids.meas_past(*meas);
+            }
             self.register_grid(t.grid.clone());
             self.traces
                 .insert(t.meta.id, t.grid, t.columns, t.sweep, t.ir, t.mic_curve);

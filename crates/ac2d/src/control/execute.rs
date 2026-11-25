@@ -209,8 +209,13 @@ impl Control {
                         "a math trace holds no averages of its own; reset its operands",
                     ));
                 }
+                self.check_dynamics_idle(meas)?;
                 if let Some(j) = self.jobs.get(&meas) {
                     j.send(JobCmd::Reset);
+                    return ack(self.store.rev());
+                }
+                if self.kept.get(meas).is_none() {
+                    // Stopped with no result kept: no frames of it to invalidate.
                     return ack(self.store.rev());
                 }
                 // Stopped: its kept result goes, and a new config rev tells the views
