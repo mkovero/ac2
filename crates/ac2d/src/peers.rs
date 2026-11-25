@@ -63,6 +63,12 @@ pub(crate) const STALLED_AFTER: Duration = Duration::from_secs(60);
 /// against its list, and the I/O thread serves every client.
 pub(crate) const MAX_SUBSCRIPTIONS: usize = 4096;
 
+/// Most data connections one network key holds at once. One app, a CLI command beside it
+/// and a reconnect or two whose old connection has not stalled out yet; past it the key's
+/// connection heard from longest ago goes, so a reconnecting client always gets in while
+/// a key's holder cannot multiply what [`MAX_SUBSCRIPTIONS`] bounds per connection.
+pub(crate) const MAX_PEERS_PER_KEY: usize = 8;
+
 /// Longest a peer goes without being sent anything while keepalives are produced.
 pub(crate) const KA_IDLE: Duration = Duration::from_secs(1);
 
@@ -505,6 +511,9 @@ impl Peers {
             }
         };
         let known = self.map.contains_key(rid.as_slice());
+        if !known && let Some(c) = client {
+            self.make_room(&c.key, &c.name, interest);
+        }
         if !known {
             match Peer::new(rid, now, client.map(|c| c.key), rig) {
                 Ok(p) => {
@@ -748,6 +757,25 @@ impl Peers {
                 p.staged = None;
             }
         }
+    }
+
+    /// Room for one more connection of `key`: past [`MAX_PEERS_PER_KEY`], the one of its
+    /// connections heard from longest ago is dropped.
+    fn make_room(&mut self, key: &PublicKey, name: &str, interest: &Interest) {
+        let mine = || self.map.values().filter(|p| p.key.as_ref() == Some(key));
+        if mine().count() < MAX_PEERS_PER_KEY {
+            return;
+        }
+        let Some(oldest) = mine().min_by_key(|p| p.heard).map(|p| p.rid.to_vec()) else {
+            return;
+        };
+        if self.refusals.first(Some(*key), "too many data connections") {
+            tracing::warn!(
+                "{name} holds {MAX_PEERS_PER_KEY} data connections: its oldest is dropped for \
+                 each new one (repeats at debug)"
+            );
+        }
+        self.drop_peer(&oldest, interest, "past the data connections of its key");
     }
 
     fn drop_peer(&mut self, rid: &[u8], interest: &Interest, why: &str) {

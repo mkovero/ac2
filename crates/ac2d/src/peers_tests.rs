@@ -676,3 +676,53 @@ fn a_rig_is_refused_stage_bins() {
     r.pump_until(|r| r.interest.count(b"audio/2") == 1);
     assert_eq!(r.interest.count(&bins.to_bytes()), 0);
 }
+
+/// One network key holds at most [`MAX_PEERS_PER_KEY`] data connections: a new one past
+/// them takes the place of the key's connection heard from longest ago, never another
+/// key's.
+#[test]
+fn a_key_holds_a_bounded_number_of_data_connections() {
+    let mut r = Rig::new();
+    let other = CurvePeer {
+        name: "laptop".into(),
+        key: ac2_zmq::KeyPair::generate().unwrap().public,
+    };
+    r.client = Some(other.clone());
+    let _laptop = r.dealer(DATA_WINDOW_DEFAULT);
+    let phone = CurvePeer {
+        name: "phone".into(),
+        key: ac2_zmq::KeyPair::generate().unwrap().public,
+    };
+    r.client = Some(phone.clone());
+    r.admission = Admission::Listed(Role::Viewer);
+    let mut held: Vec<Socket> = (0..MAX_PEERS_PER_KEY)
+        .map(|_| {
+            std::thread::sleep(Duration::from_millis(2));
+            r.dealer(DATA_WINDOW_DEFAULT)
+        })
+        .collect();
+    let of = |r: &Rig, k: &CurvePeer| {
+        r.peers
+            .map
+            .values()
+            .filter(|p| p.key == Some(k.key))
+            .count()
+    };
+    assert_eq!(of(&r, &phone), MAX_PEERS_PER_KEY);
+    let first = r.peer(1).rid.to_vec();
+
+    let d = r.ctx.socket(SocketType::Dealer).unwrap();
+    d.set_linger(Some(Duration::ZERO)).unwrap();
+    d.connect(&r.endpoint).unwrap();
+    up(
+        &d,
+        DataUp::Window {
+            bytes: DATA_WINDOW_DEFAULT,
+        },
+    );
+    r.pump_until(|r| !r.peers.map.contains_key(first.as_slice()));
+    held.push(d);
+    assert_eq!(of(&r, &phone), MAX_PEERS_PER_KEY);
+    assert_eq!(of(&r, &other), 1, "another key's connection stays");
+    assert_eq!(r.peers.len(), MAX_PEERS_PER_KEY + 1);
+}
