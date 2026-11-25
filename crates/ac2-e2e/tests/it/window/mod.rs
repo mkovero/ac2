@@ -101,6 +101,21 @@ impl Rig {
     pub fn call(&self, cmd: Command) -> R<ReplyBody> {
         self.cli.call(cmd)
     }
+
+    /// Measurement `id` as the daemon holds it now: asked for, not read off the client's
+    /// mirror, whose events may still trail the replies to the setup's own calls, so an edit
+    /// based on it would name an `edit_rev` already gone.
+    pub fn meas(&self, id: MeasId) -> R<ac2_proto::model::Measurement> {
+        let ReplyBody::Snapshot(s) = self.cli.call(Command::StateSnapshot)? else {
+            return Err("state.snapshot: no snapshot".into());
+        };
+        s.state
+            .measurements
+            .iter()
+            .find(|m| m.id == id)
+            .cloned()
+            .ok_or_else(|| format!("no measurement {id:?}").into())
+    }
 }
 
 fn stream() -> StreamConfig {
