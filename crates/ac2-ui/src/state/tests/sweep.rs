@@ -658,8 +658,7 @@ fn space_on_the_sweep_view_without_a_sweep_opens_the_dialog() {
 }
 
 /// On the transfer, spectrum and spectrograph views Space/Enter drive the generator (pink
-/// at the operator's level), never the sweep; a re-sweep armed on the sweep view and still
-/// silent turns into the noise on Space there.
+/// at the operator's level), never the sweep; armed, Space disarms on every view.
 #[test]
 fn space_on_the_live_views_drives_the_generator() {
     let mut t = T::new();
@@ -694,32 +693,39 @@ fn space_on_the_live_views_drives_the_generator() {
         next_hint(&t).as_deref(),
         Some("Enter fires: pink −50 dBFS → out 1")
     );
-    // Over to the sweep view while armed and silent: Space there re-sets it to the re-sweep.
+    // Over to the sweep view while armed and silent: Space there disarms; the next Space
+    // arms the re-sweep.
     t.go(PaneKind::Distortion);
+    assert!(matches!(t.key("Space").as_slice(), [Request::StimStop]));
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     let r = t.key("Space");
     assert!(
         r.iter().any(|x| matches!(
             x,
-            Request::StimSet(d)
-                if matches!(d.settings.signal, Signal::Ess { .. }) && d.armed && !d.firing
+            Request::StimArm { settings, .. } if matches!(settings.signal, Signal::Ess { .. })
         )),
         "{r:?}"
     );
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     assert_eq!(
         next_hint(&t).as_deref(),
         Some("Enter fires: sweep Sweep 1 · 3 s −50 dBFS")
     );
-    // And back: Space on the transfer view makes it the noise again; Enter fires the noise.
+    // And back: Space on the transfer view disarms the re-sweep, the next arms the noise;
+    // Enter fires the noise.
     t.go(PaneKind::Transfer);
+    assert!(matches!(t.key("Space").as_slice(), [Request::StimStop]));
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert!(t.st.rig.sweep.plan.is_none());
     let r = t.key("Space");
     assert!(
         r.iter().any(|x| matches!(
             x,
-            Request::StimSet(d) if d.settings.signal == Signal::Pink && d.armed && !d.firing
+            Request::StimArm { settings, .. } if settings.signal == Signal::Pink
         )),
         "{r:?}"
     );
-    assert!(t.st.rig.sweep.plan.is_none());
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     let r = t.key("Enter");
     assert!(
         r.iter().any(|x| matches!(

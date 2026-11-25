@@ -567,7 +567,7 @@ impl Form {
             && level > c.0
         {
             return Err(format!(
-                "above the daemon's ceiling {} dBFS",
+                "above the max level {} dBFS",
                 ac2_scene::format::fixed(c.0, 1)
             ));
         }

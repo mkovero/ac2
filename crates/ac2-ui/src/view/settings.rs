@@ -279,7 +279,7 @@ pub(super) fn section(ui: &mut egui::Ui, title: &str, whose: &str, ch: &Chrome) 
 fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) {
     let mut m = None;
     // One focus marker on the page: the max level row's, or a session row's.
-    let focus = (!s.on_ceiling && s.signal.focus.is_none()).then_some(s.session.focus);
+    let focus = (!s.on_ceiling && s.signal.at().is_none()).then_some(s.session.focus);
     section(ui, "Device", "", ch);
     super::session::device_section(ui, &s.session, focus, ch, &mut m);
     let remote = |ui: &mut egui::Ui, m: &mut Option<crate::state::SessionMsg>| {
@@ -409,13 +409,14 @@ fn signal_section(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: 
             ui.scroll_to_cursor(Some(egui::Align::Center));
         }
     }
+    super::settings_stim::stim_rows(app, ui, s, ch, msg);
     if let Some(e) = &s.signal.error {
         ui.label(RichText::new(e).color(ch.fault));
     }
 }
 
 /// A line's title in a fixed-width, left-aligned column.
-fn title_cell(ui: &mut egui::Ui, title: &str, focused: bool, ch: &Chrome) {
+pub(super) fn title_cell(ui: &mut egui::Ui, title: &str, focused: bool, ch: &Chrome) {
     ui.allocate_ui_with_layout(
         egui::vec2(190.0, 20.0),
         egui::Layout::left_to_right(egui::Align::Center),

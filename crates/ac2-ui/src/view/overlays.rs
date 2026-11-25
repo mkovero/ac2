@@ -281,7 +281,7 @@ fn prompt(app: &App, ctx: &egui::Context, ch: &Chrome) {
         .show(ctx, |ui| {
             card(ch).show(ui, |ui| {
                 ui.set_width(380.0);
-                ui.label(RichText::new(p.kind.label()).strong());
+                ui.label(RichText::new(app.state.prompt_title(p.kind)).strong());
                 ui.add_space(4.0);
                 caret_line(ui, &p.text, 18.0, ch);
                 if let Some(e) = &p.error {

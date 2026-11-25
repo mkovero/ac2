@@ -452,17 +452,6 @@ impl AppState {
         out
     }
 
-    /// Stops the stimulus of the rig in `rig` where it is armed or firing, and drops a
-    /// re-arm waiting on a stop.
-    pub(super) fn stop_stimulus_here(&mut self, out: &mut Vec<Request>) {
-        self.rig.stimulus.arm_after_stop = false;
-        self.rig.sweep.arm_after_stop = false;
-        if self.stimulus_live() {
-            self.rig.stimulus.phase = StimPhase::Stopping;
-            out.push(Request::StimStop);
-        }
-    }
-
     /// A rig whose hello named another id than it had (the first hello, or another daemon
     /// at its address): its panes and window follow it.
     fn follow_rig_ids(&mut self, before: &[(u32, RigId)]) {

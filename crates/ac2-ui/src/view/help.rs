@@ -683,7 +683,7 @@ mod tests {
         );
         assert!(b.contains(&("Delete\nBackspace", CommandId::DeleteSelected.title())));
         // The help shows the palette's own words.
-        assert!(b.contains(&("Space", "Arm stimulus")));
+        assert!(b.contains(&("Space", "Arm or stop stimulus")));
         // The plates' mouse gestures under the pane's keys.
         assert!(b.contains(&PLATE_MOUSE[0]));
         let ir = help_rows(&Keymap::default(), Scope::Ir);

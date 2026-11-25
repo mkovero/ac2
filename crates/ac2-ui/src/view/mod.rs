@@ -18,6 +18,7 @@ mod segment;
 mod session;
 mod sessions;
 mod settings;
+mod settings_stim;
 mod top_bar;
 mod walk;
 

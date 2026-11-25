@@ -313,6 +313,9 @@ pub struct Stimulus {
     /// The stop in flight went out with a measurement stop whose reply already says the
     /// stimulus stopped: its own "stimulus stopped" would say it twice.
     pub stop_announced: bool,
+    /// The stop in flight is this app's own, sent while the stimulus played, with the
+    /// preference on: once it lands, the transfers measuring against the loopback stop.
+    pub stop_transfers: bool,
 }
 
 impl Default for Stimulus {
@@ -326,6 +329,7 @@ impl Default for Stimulus {
             phase: StimPhase::Idle,
             arm_after_stop: false,
             stop_announced: false,
+            stop_transfers: false,
         }
     }
 }

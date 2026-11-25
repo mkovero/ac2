@@ -326,7 +326,7 @@ impl AppState {
         let Overlay::Settings(s) = &self.overlay else {
             return false;
         };
-        if s.on_ceiling || s.signal.focus.is_some() {
+        if s.on_ceiling || s.signal.at().is_some() {
             return false;
         }
         if let Some(p) = &s.remote.pick {

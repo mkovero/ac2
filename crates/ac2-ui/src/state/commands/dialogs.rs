@@ -593,7 +593,7 @@ fn above_ceiling(config: &ac2_proto::model::MeasConfig, ceiling: Option<Dbfs>) -
     let c = ceiling?;
     (top > c.0).then(|| {
         format!(
-            "{}'s loudest burst {} is above the daemon's ceiling {}: raise the max level before \
+            "{}'s loudest burst {} is above the max level {}: raise the max level before \
              running it",
             config.name,
             ac2_scene::format::dbfs(top),

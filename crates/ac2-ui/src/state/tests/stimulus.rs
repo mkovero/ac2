@@ -181,7 +181,9 @@ fn level_never_exceeds_the_ceiling() {
     t.text("-3");
     assert!(t.key("Enter").is_empty());
     match &t.st.overlay {
-        Overlay::Prompt(p) => assert!(p.error.as_deref().unwrap_or("").contains("ceiling")),
+        Overlay::Prompt(p) => {
+            assert_eq!(p.error.as_deref(), Some("above the max level −10.0 dBFS"))
+        }
         o => panic!("{o:?}"),
     }
     assert_eq!(t.st.rig.stimulus.level, None);
@@ -194,7 +196,7 @@ fn level_never_exceeds_the_ceiling() {
         [(-10.0, true, false)]
     );
     assert!(t.key("Up").is_empty());
-    assert!(t.last_toast().contains("ceiling"));
+    assert_eq!(t.last_toast(), "at the max level −10.0 dBFS");
 }
 
 #[test]

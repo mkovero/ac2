@@ -17,6 +17,9 @@ struct File {
     warning_toasts: Option<bool>,
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    stop_transfers_with_stimulus: Option<bool>,
+    /// Written only when off (the default is on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     resolution_marker: Option<bool>,
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -755,6 +758,7 @@ impl UiPrefs {
             leq,
             key_hints: f.key_hints.unwrap_or(true),
             warning_toasts: f.warning_toasts.unwrap_or(true),
+            stop_transfers_with_stimulus: f.stop_transfers_with_stimulus.unwrap_or(true),
             resolution_marker: f.resolution_marker.unwrap_or(true),
             range_band: f.range_band.unwrap_or(true),
             sim_hints: f.sim_hints.unwrap_or(true),
@@ -826,6 +830,7 @@ impl UiPrefs {
             key_hints: (!self.key_hints).then_some(false),
             unknown: BTreeMap::new(),
             warning_toasts: (!self.warning_toasts).then_some(false),
+            stop_transfers_with_stimulus: (!self.stop_transfers_with_stimulus).then_some(false),
             resolution_marker: (!self.resolution_marker).then_some(false),
             range_band: (!self.range_band).then_some(false),
             sim_hints: (!self.sim_hints).then_some(false),

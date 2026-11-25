@@ -84,6 +84,7 @@ pub mod spectrum;
 pub mod spl;
 pub mod standing;
 pub mod stim_item;
+pub mod stim_rows;
 pub mod stimulus;
 pub mod stitch;
 pub mod target_curve;

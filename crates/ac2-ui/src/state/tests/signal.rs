@@ -71,6 +71,7 @@ fn signals(r: &[Request]) -> Vec<(Signal, bool, bool)> {
     r.iter()
         .filter_map(|x| match x {
             Request::StimSet(d) => Some((d.settings.signal, d.armed, d.firing)),
+            Request::StimArm { settings, .. } => Some((settings.signal, true, false)),
             _ => None,
         })
         .collect()
@@ -422,8 +423,7 @@ fn the_dialog_refuses_a_frequency_the_generator_cannot_play() {
 }
 
 /// A sweep is armed and run from the sweep view without the signal ever being asked; the
-/// first arm of the generator after it, armed re-sweep or not, still asks, and leaves an
-/// armed sweep alone until answered.
+/// first arm of the generator after it still asks.
 #[test]
 fn a_sweep_arm_never_asks_the_signal() {
     let mut t = T::new();
@@ -438,33 +438,32 @@ fn a_sweep_arm_never_asks_the_signal() {
     );
     assert_eq!(t.st.overlay, Overlay::None);
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
-    // Armed with the sweep, Space on a live view would turn it into the generator's
-    // signal: not before that is chosen.
+    // Armed with the sweep, Space on a live view disarms it, as on every view; the next
+    // Space asks for the generator's signal before anything is armed.
     t.go(PaneKind::Transfer);
+    let r = t.key("Space");
+    assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     let r = t.key("Space");
     assert!(r.is_empty(), "{r:?}");
     assert!(dialog_open(&t));
-    assert!(matches!(t.st.rig.stimulus.signal, Signal::Ess { .. }));
-    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
-    // Esc closes the dialog and nothing else: the sweep stays armed.
+    // Esc closes the dialog and nothing else.
     let r = t.key("Escape");
     assert!(r.is_empty(), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);
-    assert!(matches!(t.st.rig.stimulus.signal, Signal::Ess { .. }));
-    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     t.key("Space");
     assert!(dialog_open(&t));
     let r = t.key("Enter");
     assert!(r.is_empty(), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);
-    assert!(matches!(t.st.rig.stimulus.signal, Signal::Ess { .. }));
     let r = t.key("Space");
     assert_eq!(signals(&r), [(Signal::Pink, true, false)]);
 }
 
-/// A chosen sine is what Space arms on the live views before and after a sweep ran, and
-/// what an armed re-sweep turns back into there; the sweep itself plays its own signal,
-/// and a choice made while a sweep is set up waits for the next live arm.
+/// A chosen sine is what Space arms on the live views before and after a sweep ran; the
+/// sweep itself plays its own signal, and a choice made while a sweep is set up waits for
+/// the next live arm.
 #[test]
 fn a_chosen_sine_outlives_a_sweep() {
     let mut t = T::new();
@@ -490,8 +489,12 @@ fn a_chosen_sine_outlives_a_sweep() {
     }
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
 
-    // Armed and silent, over to the sweep view: Space there arms the sweep's own signal.
+    // Armed and silent, over to the sweep view: Space there disarms, the next arms the
+    // sweep's own signal.
     t.go(PaneKind::Distortion);
+    let r = t.key("Space");
+    assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     let r = t.key("Space");
     assert!(
         matches!(signals(&r).as_slice(), [(Signal::Ess { .. }, true, false)]),
@@ -504,11 +507,14 @@ fn a_chosen_sine_outlives_a_sweep() {
     assert_eq!(t.st.rig.stimulus.generator, Some(SignalKind::Pink));
     assert!(matches!(t.st.rig.stimulus.signal, Signal::Ess { .. }));
     t.key("Escape");
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     assert_eq!(
         next_hint(&t).as_deref(),
         Some("Enter fires: sweep Sweep 1 · 3 s −50 dBFS")
     );
     t.go(PaneKind::Transfer);
+    assert!(matches!(t.key("Space").as_slice(), [Request::StimStop]));
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     let r = t.key("Space");
     assert_eq!(signals(&r), [(Signal::Pink, true, false)]);
     assert_eq!(t.st.rig.stimulus.signal, Signal::Pink);
@@ -529,7 +535,11 @@ fn the_palette_command_opens_settings_at_the_signal_row() {
     assert_eq!(t.st.rig.stimulus.generator, None);
     // On the open view, from another row, it comes back to the row.
     t.key("ArrowDown");
-    assert!(t.st.overlay.settings().is_some_and(|s| s.on_ceiling));
+    assert!(
+        t.st.overlay
+            .settings()
+            .is_some_and(|s| s.signal.app.is_some())
+    );
     open_rows(&mut t);
 }
 

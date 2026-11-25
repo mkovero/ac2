@@ -687,7 +687,7 @@ fn up_down_walk_device_channels_then_the_max_level() {
         (
             s.on_ceiling,
             s.signal.focus,
-            (!s.on_ceiling && s.signal.focus.is_none()).then_some(s.session.focus),
+            (!s.on_ceiling && s.signal.at().is_none()).then_some(s.session.focus),
         )
     };
     t.key("ArrowUp");
@@ -704,12 +704,26 @@ fn up_down_walk_device_channels_then_the_max_level() {
         (false, Some(SignalRow::Signal), None),
         "the signal row after the buffer"
     );
+    use ac2_scene::stim_rows::StimRow;
+    let app = |t: &T| settings(t).signal.app;
+    t.key("ArrowDown");
+    assert_eq!(
+        app(&t),
+        Some(StimRow::StopTransfers),
+        "then this app's stop row"
+    );
+    t.key("ArrowDown");
+    assert_eq!(app(&t), Some(StimRow::Level), "then the stimulus level");
     t.key("ArrowDown");
     assert_eq!(at(&t), (true, None, None), "then the max level row");
+    assert_eq!(app(&t), None);
     t.key("ArrowDown");
     assert_eq!(at(&t), (false, None, Some(Row::Backend)), "wraps");
     t.key("ArrowUp");
     assert!(at(&t).0, "↑ from the backend: the max level row");
+    t.key("ArrowUp");
+    assert_eq!(app(&t), Some(StimRow::Level));
+    t.key("ArrowUp");
     t.key("ArrowUp");
     assert_eq!(at(&t), (false, Some(SignalRow::Signal), None));
     t.key("ArrowUp");
@@ -723,7 +737,7 @@ fn up_down_walk_device_channels_then_the_max_level() {
         assert_eq!(at(&t), (false, Some(row), None));
     }
     t.key("Tab");
-    assert!(at(&t).0);
+    assert_eq!(app(&t), Some(StimRow::StopTransfers));
     t.key("Shift+Tab");
     assert_eq!(at(&t), (false, Some(SignalRow::OnBin), None));
     assert_eq!(page(&t), Page::AudioIo);

@@ -850,16 +850,7 @@ impl App {
                         }
                         continue;
                     }
-                    // Auto-repeat only for navigation; never for stimulus or toggles, so a
-                    // held key cannot ramp the level or flicker a mode. In an open window
-                    // ↑/↓ and the page keys only move or scroll it (the window owns them).
-                    // Ctrl+↑/↓ move the level axis (never the stimulus level, which is ↑/↓
-                    // without Ctrl).
-                    let nav = matches!(key, Key::ArrowLeft | Key::ArrowRight)
-                        || (open && matches!(key, Key::PageUp | Key::PageDown))
-                        || (matches!(key, Key::ArrowUp | Key::ArrowDown)
-                            && (open || (modifiers.command && !modifiers.alt)));
-                    if repeat && !nav {
+                    if repeat && !repeats(key, modifiers, open) {
                         continue;
                     }
                     self.dispatch(Msg::Key(Chord::from_event(key, modifiers)));
@@ -873,6 +864,18 @@ impl App {
     pub fn theme(&self) -> Theme {
         self.state.scene_theme()
     }
+}
+
+/// Whether a held `key` acts again on its auto-repeat: only navigation does, never the
+/// stimulus or a toggle, so a held key cannot ramp the level, flicker a mode, or have a
+/// Space that stopped the stimulus arm it again. In an open window (`open`) ↑/↓ and the
+/// page keys only move or scroll it (the window owns them). Ctrl+↑/↓ move the level axis
+/// (never the stimulus level, which is ↑/↓ without Ctrl).
+pub(crate) fn repeats(key: Key, modifiers: egui::Modifiers, open: bool) -> bool {
+    matches!(key, Key::ArrowLeft | Key::ArrowRight)
+        || (open && matches!(key, Key::PageUp | Key::PageDown))
+        || (matches!(key, Key::ArrowUp | Key::ArrowDown)
+            && (open || (modifiers.command && !modifiers.alt)))
 }
 
 /// The panes' texts that change with time alone: the age of each STALE frame and how long

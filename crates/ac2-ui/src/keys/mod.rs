@@ -152,8 +152,8 @@ commands! {
     KeyHints => "key_hints", "Key hints", [Global];
     WarningToasts => "warning_toasts", "Warning toasts", [Global];
 
-    StimulusArm => "stimulus_arm", "Arm stimulus", [Global];
-    StimulusFire => "stimulus_fire", "Fire stimulus", [Global];
+    StimulusArm => "stimulus_arm", "Arm or stop stimulus", [Global];
+    StimulusFire => "stimulus_fire", "Fire or stop stimulus", [Global];
     StimulusStop => "stimulus_stop", "Stop stimulus", [Global];
     StopAnywhere => "stimulus_stop_anywhere", "Stop stimulus anywhere", [Global];
     LevelUp => "level_up", "Stimulus level +1 dB", [Global];

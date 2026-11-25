@@ -103,7 +103,7 @@ impl SessionDialog {
             && level > c.0
         {
             d.error = Some(format!(
-                "above the daemon's ceiling {} dBFS",
+                "above the max level {} dBFS",
                 format::signed(c.0, 1)
             ));
             return None;

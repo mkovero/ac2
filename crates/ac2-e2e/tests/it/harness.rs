@@ -35,7 +35,11 @@ impl Driver {
             Arc::new(|| {}),
         )?;
         let mut st = AppState::default();
-        st.set_prefs(crate::common::grid_ui_prefs());
+        let mut prefs = crate::common::grid_ui_prefs();
+        // The tests stop the stimulus between steps and go on reading their transfers;
+        // the one test of the rule turns it on.
+        prefs.stop_transfers_with_stimulus = false;
+        st.set_prefs(prefs);
         Ok(Self {
             st,
             keys: Keymap::default(),

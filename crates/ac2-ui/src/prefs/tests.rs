@@ -135,6 +135,24 @@ fn an_unknown_setting_is_dropped_and_the_rest_kept() {
 }
 
 #[test]
+fn stop_transfers_with_stimulus_round_trip() {
+    let mut p = UiPrefs::default();
+    assert!(p.stop_transfers_with_stimulus);
+    // On is the default: a file without the key reads as on, and on is not written.
+    assert!(!p.to_toml().contains("stop_transfers_with_stimulus"));
+    assert!(
+        UiPrefs::from_toml("key_hints = false\n").is_ok_and(|p| p.stop_transfers_with_stimulus)
+    );
+    p.stop_transfers_with_stimulus = false;
+    let text = p.to_toml();
+    assert!(
+        text.contains("stop_transfers_with_stimulus = false"),
+        "{text}"
+    );
+    assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+}
+
+#[test]
 fn warning_toasts_round_trip() {
     let mut p = UiPrefs::default();
     assert!(p.warning_toasts);

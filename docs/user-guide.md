@@ -404,7 +404,7 @@ once).
 
 | Page | What | Opened also by |
 |---|---|---|
-| Audio I/O | backend, input and output device, rate, buffer; inputs and outputs by name, roles, mics, the stimulus outputs, the reference; the **stimulus signal** (pink noise, white noise or a sine; with a sine its frequency and its bin lock); the **system max level**; Enter opens the audio I/O | **Shift+O** (on the input device), palette *Input setup…* (on the first input), *Stimulus outputs…* (on the stimulus output), *Stimulus signal…* (on the signal row) |
+| Audio I/O | backend, input and output device, rate, buffer; inputs and outputs by name, roles, mics, the stimulus outputs, the reference; the **stimulus signal** (pink noise, white noise or a sine; with a sine its frequency and its bin lock); this app's **Stop transfers with the stimulus** (on/off) and **Stimulus level** of the rig shown (typed, Enter); the **system max level**; Enter opens the audio I/O | **Shift+O** (on the input device), palette *Input setup…* (on the first input), *Stimulus outputs…* (on the stimulus output), *Stimulus signal…* (on the signal row) |
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
@@ -421,7 +421,15 @@ I/O page shows it with its bound and who changed it last:
 - a **lower** level applies at once for every client; a stimulus armed or playing above it
   is stopped;
 - a **higher** level asks you to type **raise** first, is refused while anything is armed or
-  playing, and never passes the daemon's bound (`ac2d --max-level`, default −10 dBFS).
+  playing, and never passes the daemon's bound (`ac2d --max-level`, default −10 dBFS); the
+  toast says how to use it: `system max level raised to −30.0 dBFS · L sets the stimulus
+  level`.
+
+Right above it, the **Stimulus level** row (this app's, for the rig shown) shows the level
+set or `not set`; type a level and **Enter**, with the same checks as **L** (whose prompt
+names the max: `Stimulus level (dBFS, max −40.0)`). Above that, **Stop transfers with the
+stimulus** (**←/→**, on by default) is the rule of [Stopping the stimulus stops its
+transfers](#stopping-the-stimulus-stops-its-transfers).
 
 The daemon keeps the level across restarts. CLI: `ac2 gen ceiling`,
 `ac2 gen ceiling -40dbfs`, `ac2 gen ceiling -30dbfs --yes`.
@@ -585,7 +593,8 @@ the same name cannot both be paired with one rig: unpair the one there first. Wi
 
 Nothing on this page is a channel number to type. Rows run in the order you decide them:
 device (backend, input and output device), inputs, outputs, the reference (loopback), sample
-rate and buffer, then the system max level; **↑/↓** walk them and wrap; **Enter** (or the
+rate and buffer, the stimulus signal, this app's stop and level rows, then the system max
+level; **↑/↓** walk them and wrap; **Enter** (or the
 *Open audio I/O* button, kept in view at the foot of the page — *Open new session* after
 Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes without opening.
 
@@ -982,17 +991,35 @@ measures the same way (coherence then shows which frequencies the music covered)
 The generator plays pink, periodic pink, white noise or a sine, and is hard to start by
 accident:
 
-- nothing plays without a typed **level** (`L` in the app, `--level` in the CLI); there is
-  no default; in the app the first Space also asks what to play
+- nothing plays without a typed **level** (`L` in the app, `--level` in the CLI, or the
+  *Stimulus level* row of Settings › Audio I/O, right above the max level it may reach);
+  there is no default; in the app the first Space also asks what to play
   ([Choosing the signal](#choosing-the-signal));
-- **arm** (`Space`) and **fire** (`Enter`) are separate steps; **Esc** stops (with a window
-  open, Esc first closes it), **Shift+Esc** stops from anywhere, from any client, and
-  with several rigs held it stops every rig's stimulus, not only the one shown. While
-  anything is armed or playing the top bar shows **■ Stop: Shift+Esc**. With several rigs
-  the arm line and the level name the rig (`arm pupu's stimulus · Space`, `pupu: −24 dBFS`),
-  and every rig in the background whose stimulus is armed or playing has a chip in the top
-  bar beside the stop: **▶ kettu −24 dBFS** playing, *kettu armed −24 dBFS* armed, with
-  *· held by alice* when another client holds it;
+- **arm** (`Space`) and **fire** (`Enter`) are separate steps; the keys that start it also
+  stop it: while it plays (or a fire is on its way) **Space** or **Enter** stops it, and
+  while it is armed **Space** disarms it. A held key never repeats here, so a Space that
+  stopped never arms again. **Esc** stops (with a window open, Esc first closes it),
+  **Shift+Esc** stops from anywhere, from any client, and with several rigs held it stops
+  every rig's stimulus, not only the one shown;
+- the top bar's right end always shows the stimulus of the rig shown, fixed, never
+  scrolled away: its state and, armed or playing, what plays and where, then what the keys
+  do now, and while anything is armed or playing the stop beside it:
+
+  | State | Top bar |
+  |---|---|
+  | off | `STIM OFF · Space arms` (no level yet: `STIM OFF · L types a level`) |
+  | arming | `ARMING… pink −24.0 dBFS → out 1, 2` |
+  | armed | `ARMED pink −24.0 dBFS → out 1, 2 · Enter fires · Space disarms` |
+  | fire requested | `FIRE… pink −24.0 dBFS → out 1, 2 · Space or Enter stops` |
+  | playing | `FIRING pink −24.0 dBFS → out 1, 2 · Space or Enter stops` |
+  | stopping | `STOPPING…` |
+  | another client's | `FIRING pink −24.0 dBFS → out 1, 2 · held by alice` |
+
+  followed by **■ Stop stimulus: Shift+Esc** while armed or playing. Off, the hover says
+  what Space would arm. With several rigs it names the rig shown (`pupu: STIM OFF · Space
+  arms`), and every rig in the background whose stimulus is armed or playing has a chip in
+  the top bar beside the stop: **▶ kettu −24 dBFS** playing, *kettu armed −24 dBFS* armed,
+  with *· held by alice* when another client holds it;
   closing a rig or quitting the app stops and releases what each rig holds, all at once. Space pressed while
   a stop is finishing arms once it is done (Esc cancels that);
 - one client holds the stimulus at a time (a refreshed lease); if it disappears the daemon
@@ -1034,7 +1061,7 @@ an FFT bin** (on by default). It is this app's setting, kept per rig for as long
 the level: a sweep run and a visit to the sweep view do not drop it. Changed while armed
 or playing, it takes effect at once, as a level does. The top bar names a signal other
 than pink before the level (`sine 999.76 Hz −20.0 dBFS → out 1`), always with the
-frequency that is or would be played; the level rules, the ceiling and the arm / fire /
+frequency that is or would be played; the level rules, the max level and the arm / fire /
 stop keys are the same for every signal.
 
 **Bin lock.** With *On an FFT bin* on, a sine is moved to the nearest bin of the
@@ -1060,9 +1087,10 @@ in the dialog or in Settings: `sine 1000 Hz · as typed`.
 | sweep (the **Sweep / distortion** pane focused) | arms a **run of the selected sweep measurement** with its settings (outputs, level, length, range, repeats, silence after, reference); with no sweep measurement yet, opens the dialog that makes one | plays it |
 
 A level or outputs changed while a sweep is armed become the sweep measurement's settings.
-Armed and still silent, Space on a view of the other kind re-arms that view's stimulus. The
-top bar says what the keys will do: `Space arms: sweep Genelec 1 m · 3 s −50 dBFS`,
-`Enter fires: pink −50 dBFS → out 1`.
+Armed, Space disarms on every view; the next Space arms what the focused view plays. The
+top bar's stimulus item says what the keys will do (`STIM OFF · Space arms`, `ARMED … ·
+Enter fires · Space disarms`), its hover what they would start: `Space arms: sweep Genelec
+1 m · 3 s −50 dBFS`.
 
 ### Stopping the last transfer measurement stops the stimulus
 
@@ -1072,6 +1100,17 @@ holds, armed or playing, as Esc does: `Main L stopped · stimulus stopped (no tr
 measurement left running)`. SPL meters, spectra and RTAs do not keep it playing; a sweep
 and another client's stimulus are never stopped this way; `ac2 meas stop` stops only the
 measurement (a script gets no side effect it did not ask for).
+
+### Stopping the stimulus stops its transfers
+
+The other way round, on by default: when this app stops its own stimulus while it plays
+(Esc, Shift+Esc, Space or Enter, the palette's *stim stop*), the running transfer
+measurements whose reference is the stimulus loopback input stop with it, since from then
+on their reference carries nothing: `stimulus stopped · TF 1, TF 2 stopped`. A transfer on
+another reference (mic to mic, another rig's input) keeps running. Disarming what never
+played stops no measurement, nor does a sweep run's own end, another client's stop or a
+lease that ran out. Stopping one of two transfers with **S** still stops only that one.
+Turn it off in Settings › Audio I/O, row *Stop transfers with the stimulus*.
 
 ## Transfer measurement
 
@@ -4308,8 +4347,8 @@ Everything in the app is reachable from the keyboard.
 - The defaults avoid `[ ] + - =` and other keys that need AltGr or a dead key on Nordic and
   other European layouts.
 
-The stimulus cluster is fixed: **Space** arm, **Enter** fire, **Esc** stop, **↑/↓** level
-±1 dB (Shift: ±3 dB). **Alt+↑/↓** move the display offset of the focused pane's curve instead,
+The stimulus cluster is fixed: **Space** arm (armed: disarm; playing: stop), **Enter** fire
+(playing: stop), **Esc** stop, **↑/↓** level ±1 dB (Shift: ±3 dB). **Alt+↑/↓** move the display offset of the focused pane's curve instead,
 **Ctrl+↑/↓** pan the level axis.
 
 **An open window owns the keyboard.** With the help, the palette, a prompt, a dialog or
@@ -4394,8 +4433,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+P` | Settings… | `settings` |
 | `Ctrl+Q` | Quit | `quit` |
 | `F` or `F11` | Full screen | `fullscreen` |
-| `Space` | Arm stimulus | `stimulus_arm` |
-| `Enter` | Fire stimulus | `stimulus_fire` |
+| `Space` | Arm or stop stimulus | `stimulus_arm` |
+| `Enter` | Fire or stop stimulus | `stimulus_fire` |
 | `Esc` | Stop stimulus | `stimulus_stop` |
 | `Shift+Esc` | Stop stimulus anywhere | `stimulus_stop_anywhere` |
 | `↑` | Stimulus level +1 dB | `level_up` |

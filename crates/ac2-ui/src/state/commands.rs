@@ -352,8 +352,9 @@ impl AppState {
 
             C::WarningToasts => self.toggle_warning_toasts(),
 
-            C::StimulusArm => self.space(false, keymap, out),
+            C::StimulusArm => self.space_key(keymap, out),
             C::StimulusTakeOver => self.space(true, keymap, out),
+            C::StimulusFire if self.enter_stops(out) => {}
             C::StimulusFire => match self.rig.stimulus.phase {
                 StimPhase::Armed if self.rig.dynamics_run.plan.is_some() => self.fire_dynamics(out),
                 StimPhase::Armed if self.rig.sweep.plan.is_some() => self.fire_sweep(out),
@@ -371,14 +372,7 @@ impl AppState {
                 StimPhase::Idle => self.warn("not armed: Space arms first"),
                 _ => {}
             },
-            C::StimulusStop | C::StopAnywhere => {
-                self.rig.stimulus.arm_after_stop = false;
-                self.rig.sweep.arm_after_stop = false;
-                if self.stimulus_live() {
-                    self.rig.stimulus.phase = StimPhase::Stopping;
-                    out.push(Request::StimStop);
-                }
-            }
+            C::StimulusStop | C::StopAnywhere => self.stop_stimulus_here(out),
             C::LevelUp => self.step_level(1.0, out),
             C::LevelDown => self.step_level(-1.0, out),
             C::LevelUpCoarse => self.step_level(3.0, out),

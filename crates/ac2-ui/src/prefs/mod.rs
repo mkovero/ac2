@@ -385,6 +385,10 @@ pub struct UiPrefs {
     /// Warnings and Leq limit alarms pop up in the corner (on until the operator turns it
     /// off); off, they go only to the notification log.
     pub warning_toasts: bool,
+    /// This app's stimulus stop, while it plays, stops the transfer measurements measuring
+    /// against the stimulus loopback: their reference just went silent, and what they
+    /// would average from then on is noise (on until the operator turns it off).
+    pub stop_transfers_with_stimulus: bool,
     /// The transfer and sweep panes shade the ranges a curve's analysis does not resolve
     /// at its grid (on until the operator turns it off).
     pub resolution_marker: bool,
@@ -515,6 +519,7 @@ impl Default for UiPrefs {
             leq: LeqLayout::default(),
             key_hints: true,
             warning_toasts: true,
+            stop_transfers_with_stimulus: true,
             resolution_marker: true,
             range_band: true,
             sim_hints: true,

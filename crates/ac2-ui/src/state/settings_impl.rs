@@ -29,6 +29,8 @@ pub enum SettingsMsg {
     CeilingApply,
     /// A stimulus signal row of the Audio I/O page: focused, and ‹/› on a choice row.
     Signal(SignalRow, i32),
+    /// A row of this app's stimulus settings: focused, and ‹/› on a choice row.
+    Stim(ac2_scene::stim_rows::StimRow, i32),
     /// ‹/› on a line of the Display page (0: the line's action).
     Display(DisplayRow, i32),
     /// A line of the Connection page: focused and acted on.
@@ -443,6 +445,15 @@ impl AppState {
             }
             return;
         }
+        if let Some(row) = s.signal.app {
+            match chord.key {
+                Key::ArrowUp => s.io_move(-1, sine),
+                Key::Tab if chord.shift => s.io_move(-1, sine),
+                Key::ArrowDown | Key::Tab => s.io_move(1, sine),
+                _ => self.stim_row_key(row, chord, swallow, out),
+            }
+            return;
+        }
         if let Some(row) = s.signal.focus {
             let typed = row == SignalRow::Frequency;
             match chord.key {
@@ -606,13 +617,14 @@ impl AppState {
     /// Enter on the system max level row.
     fn apply_ceiling(&mut self, out: &mut Vec<Request>) {
         let live = self.stimulus_live();
+        let level_key = self.keys.reach(CommandId::StimulusLevel);
         let g = self.daemon().map(|s| s.generator.clone());
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
         if let (Some((to, confirm)), Some(g)) = (s.ceiling.enter(g.as_ref(), live), &g) {
             out.push(Request::Call {
-                what: ac2_scene::rig::ceiling_changed(g.ceiling, to),
+                what: ac2_scene::stim_rows::max_changed(g.ceiling, to, &level_key),
                 cmd: Command::GenCeiling {
                     ceiling: to,
                     confirm_raise: confirm,
@@ -628,11 +640,11 @@ impl AppState {
         };
         match s.page {
             Page::AudioIo if s.on_ceiling => s.ceiling.type_text(t),
-            Page::AudioIo if s.signal.focus == Some(SignalRow::Frequency) => {
+            Page::AudioIo if s.signal.typed() => {
                 s.signal.error = None;
                 s.signal.text.push_str(t);
             }
-            Page::AudioIo if s.signal.focus.is_some() => {}
+            Page::AudioIo if s.signal.at().is_some() => {}
             Page::AudioIo => s.session.type_text(t),
             Page::Calibration => s.cal.type_text(t),
             Page::Leq => {
@@ -664,7 +676,7 @@ impl AppState {
         };
         match s.page {
             Page::AudioIo if s.on_ceiling => s.ceiling.backspace(),
-            Page::AudioIo if s.signal.focus.is_some() => {
+            Page::AudioIo if s.signal.at().is_some() => {
                 s.signal.text.pop();
             }
             Page::AudioIo => s.session.backspace(),
@@ -717,6 +729,7 @@ impl AppState {
                 }
                 self.signal_row(row, d, out);
             }
+            SettingsMsg::Stim(row, d) => self.stim_row_click(row, d),
             SettingsMsg::CeilingApply => {
                 if let Overlay::Settings(s) = &mut self.overlay {
                     s.focus_ceiling();

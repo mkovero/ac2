@@ -154,7 +154,7 @@ fn the_chooser_opens_the_dynamics_form_and_it_creates_without_playing() {
     assert_eq!(c.pilot, Dbfs(-33.0));
     assert_eq!(c.bursts, vec![Dbfs(-20.0), Dbfs(-8.0)]);
     assert!(
-        t.last_toast().contains("above the daemon's ceiling")
+        t.last_toast().contains("above the max level")
             && t.last_toast().contains("raise the max level"),
         "{}",
         t.last_toast()

@@ -20,7 +20,6 @@
 use ac2_proto::model::{Generator, ServerInfo};
 use ac2_proto::units::Dbfs;
 use ac2_scene::rig::{RAISE_WHILE_LIVE, RAISE_WORD};
-use ac2_scene::stimulus::SignalRow;
 
 use crate::cal_view::CalView;
 use crate::leq_dialog::LeqDialog;
@@ -47,7 +46,7 @@ pub use display::{
 pub use network::{IfacePick, NetPicks, Switch, read_only_row, switch};
 pub use pairing::{PairOffer, PairedRow, Pairing};
 pub use rig::{RigPage, RigRow, levels_set};
-pub use signal::SignalRows;
+pub use signal::{SignalRows, StimFocus};
 
 /// Whose a setting is: this computer's app alone.
 pub const THIS_APP: &str = "this app";
@@ -132,7 +131,8 @@ impl Page {
                      {pair} pair · N name (the mic, the pair or an output) · S stimulus output · \
                      D detects the loopback · P opens the driver's settings (ASIO panel, Audio \
                      MIDI Setup) · Delete on a remote input removes it (twice) · on the \
-                     stimulus signal: ←→ change, type the sine's frequency, Enter · on the max \
+                     stimulus signal: ←→ change, type the sine's frequency, Enter · on Stop \
+                     transfers with the stimulus: ←→ · on the stimulus level and the max \
                      level: type dBFS, Enter · Enter opens the session (on Add an input from \
                      another rig…: picks one) · Esc closes"
                 );
@@ -475,9 +475,7 @@ impl Settings {
     pub fn typing(&self) -> bool {
         match self.page {
             Page::AudioIo if self.on_ceiling => true,
-            Page::AudioIo if self.signal.focus.is_some() => {
-                self.signal.focus == Some(SignalRow::Frequency)
-            }
+            Page::AudioIo if self.signal.at().is_some() => self.signal.typed(),
             Page::AudioIo => self.session.text_focus(),
             Page::Calibration => self.cal.typing(),
             Page::Leq => self.leq.is_some(),
@@ -520,27 +518,27 @@ impl Settings {
         }
     }
 
-    /// ↑/↓ on the Audio I/O page: the device rows, the channel rows, the stimulus signal
-    /// rows (`sine`: the sine's own are shown), then the max level row, wrapping.
+    /// ↑/↓ on the Audio I/O page: the device rows, the channel rows, the stimulus rows
+    /// (`sine`: the sine's own are shown), then the max level row, wrapping.
     pub fn io_move(&mut self, d: i32, sine: bool) {
         let rows = self.session.rows();
-        let signal = SignalRow::shown(sine);
+        let stim = StimFocus::rows(sine);
         if self.on_ceiling {
             self.on_ceiling = false;
             self.ceiling.confirm = None;
             self.ceiling.error = None;
             match (d > 0, rows.first()) {
                 (true, Some(first)) => self.session.focus = *first,
-                (true, None) => self.signal.focus = signal.first().copied(),
-                (false, _) => self.signal.focus = signal.last().copied(),
+                (true, None) => self.signal.set(stim[0]),
+                (false, _) => self.signal.set(stim[stim.len() - 1]),
             }
             return;
         }
-        if let Some(now) = self.signal.focus {
-            let i = signal.iter().position(|r| *r == now).unwrap_or(0) as i32 + d;
+        if let Some(now) = self.signal.at() {
+            let i = stim.iter().position(|r| *r == now).unwrap_or(0) as i32 + d;
             self.signal.leave();
-            match usize::try_from(i).ok().and_then(|i| signal.get(i)) {
-                Some(r) => self.signal.focus = Some(*r),
+            match usize::try_from(i).ok().and_then(|i| stim.get(i)) {
+                Some(r) => self.signal.set(*r),
                 None if d > 0 => self.on_ceiling = true,
                 None => match rows.last() {
                     Some(last) => self.session.focus = *last,
@@ -558,7 +556,7 @@ impl Settings {
             self.session.finish_edit();
             self.session.detect_cancel();
             if d > 0 {
-                self.signal.focus = signal.first().copied();
+                self.signal.set(stim[0]);
             } else {
                 self.on_ceiling = true;
             }

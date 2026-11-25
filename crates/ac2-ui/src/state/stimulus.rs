@@ -17,7 +17,7 @@ impl AppState {
         if let Some(c) = self.ceiling()
             && v > c.0
         {
-            return Err(format!("above the daemon's ceiling {}", format::dbfs(c.0)));
+            return Err(ac2_scene::stim_rows::above_max(c));
         }
         self.rig.stimulus.level = Some(Dbfs(v));
         if self.rig.stimulus.phase == StimPhase::Idle {
@@ -125,7 +125,7 @@ impl AppState {
         let v = (v * 10.0).round() / 10.0;
         if v == l.0 {
             if db > 0.0 {
-                self.toast(format!("at the ceiling {}", format::dbfs(ceiling)));
+                self.toast(ac2_scene::stim_rows::at_max(ceiling));
             }
             return;
         }
@@ -284,7 +284,7 @@ impl AppState {
             && plan.config.level.0 > c.0
         {
             self.warn(format!(
-                "{}'s level {} is above the daemon's ceiling {}: edit it (palette: edit the \
+                "{}'s level {} is above the max level {}: edit it (palette: edit the \
                  selected measurement)",
                 plan.name,
                 format::dbfs(plan.config.level.0),
@@ -651,6 +651,7 @@ impl AppState {
             .is_some_and(|o| Some(o) == self.my_client_id());
         if mine {
             self.rig.stimulus.phase = StimPhase::Stopping;
+            self.rig.stimulus.stop_transfers = false;
             self.rig.sweep.releasing = true;
             out.push(Request::StimStop);
         }
@@ -686,6 +687,9 @@ impl AppState {
         self.rig.stimulus.arm_after_stop = false;
         self.rig.stimulus.phase = StimPhase::Stopping;
         self.rig.stimulus.stop_announced = true;
+        // The transfer that asked for this stop is the last one running: nothing is left
+        // for the stop to take with it, and it must not come back to stop transfers.
+        self.rig.stimulus.stop_transfers = false;
         out.push(Request::StimStop);
         true
     }

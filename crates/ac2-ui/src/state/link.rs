@@ -351,6 +351,8 @@ impl AppState {
                     s.cal.reply(&what, &result);
                 }
                 match result {
+                    // A reply whose news an earlier toast already gave.
+                    Ok(()) if what.is_empty() => {}
                     Ok(()) => self.toast(what),
                     Err(e) => self.fault(format!("{what}: {e}")),
                 }
@@ -492,6 +494,10 @@ impl AppState {
             StimEvent::Stopped => {
                 self.rig.stimulus.phase = StimPhase::Idle;
                 let announced = std::mem::take(&mut self.rig.stimulus.stop_announced);
+                let transfers = self.stop_loopback_transfers(out);
+                if !transfers.is_empty() {
+                    self.toast(ac2_scene::stim_rows::stopped_with(&transfers));
+                }
                 if std::mem::take(&mut self.rig.stimulus.arm_after_stop)
                     && !self.rig.sweep.arm_after_stop
                 {
@@ -504,8 +510,8 @@ impl AppState {
                     plan => {
                         self.rig.sweep.plan = plan;
                         self.end_sweep_mode();
-                        if !releasing && !announced {
-                            self.toast("stimulus stopped");
+                        if !releasing && !announced && transfers.is_empty() {
+                            self.toast(ac2_scene::stim_rows::stopped_with(&[]));
                         }
                     }
                 }
@@ -514,6 +520,7 @@ impl AppState {
                 self.rig.stimulus.phase = StimPhase::Idle;
                 self.rig.stimulus.arm_after_stop = false;
                 self.rig.stimulus.stop_announced = false;
+                self.rig.stimulus.stop_transfers = false;
                 self.rig.sweep.releasing = false;
                 self.rig.sweep.arm_after_stop = false;
                 self.end_sweep_mode();
@@ -523,6 +530,7 @@ impl AppState {
                 self.rig.sweep.releasing = false;
                 self.rig.stimulus.arm_after_stop = false;
                 self.rig.stimulus.stop_announced = false;
+                self.rig.stimulus.stop_transfers = false;
                 if std::mem::take(&mut self.rig.sweep.arm_after_stop) {
                     self.end_sweep_mode();
                 }
