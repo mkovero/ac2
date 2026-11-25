@@ -276,6 +276,19 @@ mod tests {
         let s = scene_in(&[l, s1], None, IrMode::Log).expect("drawn");
         // +6.02 dB and the 3 dB over it, up to the next 3 dB step.
         assert_eq!(s.y_axis.mapping.range.hi, 12.0);
+        // A range the operator chose stands, louder curve or not.
+        let chosen = IrAxes {
+            level_db: crate::axis::Range::new(-40.0, 0.0),
+            ..IrAxes::default()
+        };
+        let r = crate::ir::drawn_y_range(&live, [&loud], IrMode::Log, &chosen);
+        assert_eq!(r, crate::axis::Range::new(-40.0, 0.0));
+        let chosen = IrAxes {
+            amplitude: Some(crate::axis::Range::new(-0.1, 0.1)),
+            ..IrAxes::default()
+        };
+        let r = crate::ir::drawn_y_range(&live, [&loud], IrMode::Linear, &chosen);
+        assert_eq!(r, crate::axis::Range::new(-0.1, 0.1));
     }
 
     /// The cursor reads the selected curve; time zero and the tag are that curve's.

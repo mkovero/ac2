@@ -261,33 +261,10 @@ impl Control {
                 if let Some(rt) = &self.session {
                     rt.fanout.detach(h.fanout_id);
                 }
+                self.kept.framed(id);
                 if keep {
                     match h.stop_keeping() {
-                        // A job that sends no final frames leaves its last ones on view: if
-                        // those are of an older configuration than its result (stopped
-                        // right after a change, before its next frame), the views and a
-                        // capture would disagree, so neither stands.
-                        Some(s)
-                            if s.finals.is_empty()
-                                && s.last_rev
-                                    .is_some_and(|r| r != s.captured.frame.stamp.config_rev) =>
-                        {
-                            self.drop_kept(id);
-                        }
-                        Some(s) => match self.meas(id).ok().cloned() {
-                            Some(m) => {
-                                let at = self.at_stop(&m, &s.captured);
-                                self.kept.keep(
-                                    id,
-                                    super::kept::KeptResult {
-                                        captured: s.captured,
-                                        finals: s.finals,
-                                        at,
-                                    },
-                                );
-                            }
-                            None => self.kept.forget(id),
-                        },
+                        Some(s) => self.keep_stopped(id, s),
                         None => self.kept.forget(id),
                     }
                 } else {
@@ -297,6 +274,39 @@ impl Control {
             }
             // Stopped already: a second `meas.stop` keeps what the first kept.
             None if keep => {}
+            None => self.kept.forget(id),
+        }
+    }
+
+    /// What a job stopped by `meas.stop` left. A job that sends no final frames leaves
+    /// its last ones on view; one of a topic not sent since an in-place change (a delay,
+    /// smoothing or meter setting, nobody subscribed) is of an older configuration than
+    /// the result, which every view drops by its rev, so it goes from the slots too, and
+    /// what stays on view is of the kept result. A frame of a newer configuration than the
+    /// result would contradict it: then neither stands.
+    fn keep_stopped(&mut self, id: MeasId, s: crate::jobs::Stopped) {
+        let rev = s.captured.frame.stamp.config_rev;
+        if s.finals.is_empty() {
+            if s.last_revs.iter().any(|(_, r)| *r > rev) {
+                self.drop_kept(id);
+                return;
+            }
+            for (t, _) in s.last_revs.iter().filter(|(_, r)| *r != rev) {
+                self.s.outbox.clear(&t.to_bytes());
+            }
+        }
+        match self.meas(id).ok().cloned() {
+            Some(m) => {
+                let at = self.at_stop(&m, &s.captured);
+                self.kept.keep(
+                    id,
+                    super::kept::KeptResult {
+                        captured: s.captured,
+                        finals: s.finals,
+                        at,
+                    },
+                );
+            }
             None => self.kept.forget(id),
         }
     }
@@ -311,6 +321,7 @@ impl Control {
                 .outbox
                 .clear(&ac2_proto::Subscription::Meas(meas).prefix());
             self.s.outbox.clear(format!("bins/{}/", meas.0).as_bytes());
+            self.kept.unframed(meas);
         }
     }
 
@@ -348,23 +359,48 @@ impl Control {
             return;
         };
         let tf = jobs::tf_smooth::resmooth(raw, grid);
+        let mut frames = Vec::with_capacity(k.finals.len());
         for f in &k.finals {
             let mut f = f.clone();
             if let FrameData::Tf(t) = &mut f.data {
                 *t = tf.clone();
             }
             f.stamp.seq = self.seqs.next(f.data.topic());
-            match ac2_proto::CodedFrame::from_frame(&f) {
-                Ok(coded) => {
-                    if self.s.frames.send(coded) {
-                        self.s.outbox.wake();
-                    } else {
-                        tracing::warn!("measurement {meas}: a relabelled final frame dropped");
-                    }
+            frames.push(f);
+        }
+        // Every frame or none: one left out would leave the slots of two revs, and the
+        // views would draw part of the result.
+        for f in frames {
+            let sent = match ac2_proto::CodedFrame::from_frame(&f) {
+                Ok(coded) => self.send_retrying(coded),
+                Err(e) => {
+                    tracing::error!("measurement {meas}: kept frame not encodable: {e}");
+                    false
                 }
-                Err(e) => tracing::error!("measurement {meas}: kept frame not encodable: {e}"),
+            };
+            if !sent {
+                tracing::warn!(
+                    "measurement {meas}: a relabelled final frame could not be sent; its \
+                     kept result goes"
+                );
+                self.drop_kept(meas);
+                return;
             }
         }
+    }
+
+    /// Hands `coded` to the I/O thread as a job's final frame is: a full queue is woken
+    /// and tried again, [`jobs::FINAL_TRIES`] times.
+    fn send_retrying(&self, coded: ac2_proto::CodedFrame) -> bool {
+        for _ in 0..jobs::FINAL_TRIES {
+            if self.s.frames.send(coded.clone()) {
+                self.s.outbox.wake();
+                return true;
+            }
+            self.s.outbox.wake();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        false
     }
 
     pub(super) fn stop_all_jobs(&mut self) {
@@ -372,7 +408,18 @@ impl Control {
         for id in ids {
             self.stop_job(id);
         }
-        self.kept.clear();
+        // The kept results go, and the callers clear the slots: a stopped measurement that
+        // kept one or had frames on view gets a new config rev, so the views drop the
+        // frames they hold of it as a capture now refuses it.
+        for id in self.kept.clear() {
+            if let Ok(m) = self.meas(id)
+                && !m.running
+            {
+                let mut m = m.clone();
+                m.config_rev = Rev(self.store.rev().0 + 1);
+                self.commit(Change::Measurement(Patch::Set(m)));
+            }
+        }
         if let Some(h) = self.timing_job.take() {
             if let Some(rt) = &self.session {
                 rt.fanout.detach(h.fanout_id);

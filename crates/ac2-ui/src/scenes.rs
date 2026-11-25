@@ -719,7 +719,7 @@ pub fn ir(
 /// The stored traces the transfer pane `pane`'s magnitude view draws, in its legend's order
 /// (the lead's group first, then group by group in the tree's order; within a group by
 /// order), each with its IR as a frame when it was captured with one.
-fn stored_irs(
+pub(crate) fn stored_irs(
     st: &AppState,
     pane: PaneId,
 ) -> Vec<(

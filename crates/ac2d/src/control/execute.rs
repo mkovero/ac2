@@ -214,12 +214,13 @@ impl Control {
                     j.send(JobCmd::Reset);
                     return ack(self.store.rev());
                 }
-                if self.kept.get(meas).is_none() {
-                    // Stopped with no result kept: no frames of it to invalidate.
+                if self.kept.get(meas).is_none() && !self.kept.has_frames(meas) {
+                    // Stopped with nothing kept and no frame of it left: nothing to
+                    // invalidate.
                     return ack(self.store.rev());
                 }
-                // Stopped: its kept result goes, and a new config rev tells the views
-                // that the frames they hold are no longer its result.
+                // Stopped: its kept result and frames go, and a new config rev tells the
+                // views that the frames they hold are no longer its result.
                 self.drop_kept(meas);
                 let mut m = self.meas(meas)?.clone();
                 m.config_rev = Rev(self.store.rev().0 + 1);

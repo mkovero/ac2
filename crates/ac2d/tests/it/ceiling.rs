@@ -458,3 +458,32 @@ fn another_setting_saved_stores_the_level_in_force() {
     assert_eq!(c.state().generator.ceiling, Dbfs(-40.0));
     h.shutdown();
 }
+
+/// Lowering the level writes the previous copy first: when that write fails the file keeps
+/// its level and the lowering is refused, so no copy on disk ever holds more than the
+/// level in force.
+#[test]
+fn a_lowering_that_cannot_write_its_copy_changes_nothing() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("rig.json");
+    let start = || {
+        let mut cfg = config(manual_rig(), inproc("ceiling-prev-first"));
+        cfg.max_level_dbfs = -10.0;
+        cfg.rig_settings = Some(file.clone());
+        Daemon::start(cfg).unwrap()
+    };
+    let h = start();
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    ceiling(&mut c, -20.0, false).unwrap();
+    let before = std::fs::read(&file).unwrap();
+    // A directory where the copy goes: no file can be written there.
+    let prev = dir.path().join("rig.json.prev");
+    let _ = std::fs::remove_file(&prev);
+    std::fs::create_dir(&prev).unwrap();
+    assert!(ceiling(&mut c, -30.0, false).is_err());
+    assert_eq!(std::fs::read(&file).unwrap(), before, "the file as it was");
+    assert_eq!(c.state().generator.ceiling, Dbfs(-20.0));
+    h.shutdown();
+}

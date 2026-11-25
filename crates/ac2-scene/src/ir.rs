@@ -183,6 +183,47 @@ pub fn y_range(frame: &IrFrame, mode: IrMode, axes: &IrAxes) -> Range {
     }
 }
 
+/// The value axis's range in `mode` with `axes` when `others` are drawn over `frame`:
+/// what drawing and navigation both use. A range the operator chose stands. Otherwise
+/// the automatic amplitude fits every curve, and in dB re the lead's peak, where a louder
+/// curve would run off the top, the default range's top rises to fit it, by whole steps
+/// of the headroom that range keeps.
+pub fn drawn_y_range<'a>(
+    frame: &IrFrame,
+    others: impl IntoIterator<Item = &'a IrFrame>,
+    mode: IrMode,
+    axes: &IrAxes,
+) -> Range {
+    match mode {
+        IrMode::Linear => match axes.amplitude.filter(Range::is_valid) {
+            Some(r) => r,
+            None => others.into_iter().fold(auto_amplitude(frame), |r, f| {
+                let o = auto_amplitude(f);
+                Range::new(r.lo.min(o.lo), r.hi.max(o.hi))
+            }),
+        },
+        IrMode::Log | IrMode::Etc => {
+            let r = axes.level_db;
+            if r != IrAxes::DEFAULT_LEVEL_DB {
+                return r;
+            }
+            let re = peak_ref(frame, mode);
+            let loudest = finite_max(
+                others
+                    .into_iter()
+                    .filter_map(|f| ir_values_re(f, mode, re))
+                    .flatten(),
+            );
+            let step = IrAxes::DEFAULT_LEVEL_DB.hi;
+            if loudest.is_finite() && loudest + step > r.hi {
+                Range::new(r.lo, ((loudest + step) / step).ceil() * step)
+            } else {
+                r
+            }
+        }
+    }
+}
+
 /// The time axis's range with `axes`: the chosen one, else the whole IR.
 pub fn time_range(frame: &IrFrame, axes: &IrAxes) -> Range {
     axes.time_ms
@@ -358,36 +399,7 @@ fn draw(
     let trange = time_range(frame, axes);
     let x_axis = axis::linear_axis(trange, plot.x, plot.right(), "ms");
     let values = ir_values(frame, mode);
-    // The automatic amplitude fits every curve drawn, not only the lead's.
-    let yrange = match (mode, axes.amplitude.filter(Range::is_valid)) {
-        (IrMode::Linear, None) => extra
-            .lines
-            .iter()
-            .fold(auto_amplitude(frame), |r, (f, ..)| {
-                let o = auto_amplitude(f);
-                Range::new(r.lo.min(o.lo), r.hi.max(o.hi))
-            }),
-        // In dB re the lead's peak, a louder curve over it would run off the top: the top
-        // rises to fit it, by whole steps of the headroom the default range keeps.
-        (IrMode::Log | IrMode::Etc, _) => {
-            let r = y_range(frame, mode, axes);
-            let re = peak_ref(frame, mode);
-            let loudest = finite_max(
-                extra
-                    .lines
-                    .iter()
-                    .filter_map(|(f, ..)| ir_values_re(f, mode, re))
-                    .flatten(),
-            );
-            let step = IrAxes::DEFAULT_LEVEL_DB.hi;
-            if loudest.is_finite() && loudest + step > r.hi {
-                Range::new(r.lo, ((loudest + step) / step).ceil() * step)
-            } else {
-                r
-            }
-        }
-        _ => y_range(frame, mode, axes),
-    };
+    let yrange = drawn_y_range(frame, extra.lines.iter().map(|(f, ..)| *f), mode, axes);
     let title = title(mode).to_string();
     let y_unit = if mode == IrMode::Linear { "FS" } else { "dB" };
     let y_axis = axis::linear_axis(yrange, plot.bottom(), plot.y, y_unit);

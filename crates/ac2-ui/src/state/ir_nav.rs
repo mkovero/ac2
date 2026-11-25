@@ -105,12 +105,7 @@ impl AppState {
         match p {
             IrPane::Live => {
                 let shown = self.live_ir_meas();
-                let pane = if self.layout.focused().shows_ir() {
-                    Some(self.layout.focus)
-                } else {
-                    self.lead(PaneKind::Transfer)
-                };
-                if let Some(d) = self.stored_ir(pane) {
+                if let Some(d) = self.stored_ir(self.ir_pane()) {
                     return ac2_scene::ir::stored_frame(d).map(Cow::Owned);
                 }
                 let m = shown?;
@@ -142,15 +137,58 @@ impl AppState {
         }
     }
 
-    /// The time and value ranges picture `p` shows now, with its IR's extent.
+    /// The time and value ranges picture `p` shows now, with its IR's extent: the value
+    /// range as drawn, fitted over every curve the picture draws.
     fn ir_shown(&self, p: IrPane) -> Option<(IrExtent, Range, Range)> {
         let f = self.ir_frame_of(p)?;
         let axes = self.view.ir_axes(p);
+        let others = self.ir_drawn(p);
         Some((
             ac2_scene::ir::extent(&f),
             ac2_scene::ir::time_range(&f, axes),
-            ac2_scene::ir::y_range(&f, self.modes().ir(p), axes),
+            ac2_scene::ir::drawn_y_range(
+                &f,
+                others.iter().map(Cow::as_ref),
+                self.modes().ir(p),
+                axes,
+            ),
         ))
+    }
+
+    /// Every IR picture `p` draws: the live one and each stored trace's (the lead among
+    /// them, which fits itself).
+    fn ir_drawn(&self, p: IrPane) -> Vec<Cow<'_, IrFrame>> {
+        if p == IrPane::Sweep {
+            return Vec::new();
+        }
+        let Some(pane) = self.ir_pane() else {
+            return Vec::new();
+        };
+        let live = self
+            .pane_meas(pane)
+            .filter(|m| !self.meas_hidden(m))
+            .and_then(
+                |m| match &crate::scenes::frame(self, m.id, Stream::Ir)?.frame.data {
+                    FrameData::Ir(f) => Some(Cow::Borrowed(f)),
+                    _ => None,
+                },
+            );
+        live.into_iter()
+            .chain(
+                crate::scenes::stored_irs(self, pane)
+                    .into_iter()
+                    .filter_map(|(_, f)| f.map(Cow::Owned)),
+            )
+            .collect()
+    }
+
+    /// The pane whose IR view the live picture is.
+    fn ir_pane(&self) -> Option<crate::state::PaneId> {
+        if self.layout.focused().shows_ir() {
+            Some(self.layout.focus)
+        } else {
+            self.lead(PaneKind::Transfer)
+        }
     }
 
     fn ir_title(p: IrPane) -> &'static str {

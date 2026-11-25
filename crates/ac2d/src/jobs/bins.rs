@@ -65,7 +65,7 @@ struct Key {
 
 /// Attempts at handing a final frame to a full channel, a millisecond apart: a stopping
 /// job waits at most this long per frame, which bounds the join of a stop.
-const FINAL_TRIES: u32 = 20;
+pub(crate) const FINAL_TRIES: u32 = 20;
 
 fn corr_db(d: &DrawnBins, c: &Correction) -> Vec<f64> {
     d.range().map(|k| c.db(k as f64 * d.bin_hz)).collect()
@@ -285,10 +285,9 @@ impl Probe {
     }
 }
 
-/// Hands a final frame to the I/O thread, which a stop's frames may find full: tried
-/// [`FINAL_TRIES`] times, then dropped with a warning.
-/// Sends a final frame and keeps it in `kept` (its `seq` unset): the kept result goes out
-/// again from there when it is relabelled.
+/// Hands a final frame to the I/O thread and keeps it in `kept` (its `seq` unset), from
+/// where the kept result goes out again when it is relabelled. A stop's frames may find the
+/// I/O thread's queue full: tried [`FINAL_TRIES`] times, then dropped with a warning.
 pub(crate) fn send_final(e: &Emitter, stamp: StampArgs, data: FrameData, kept: &mut Vec<Frame>) {
     kept.push(e.frame(stamp, 0, data.clone()));
     let topic = data.topic();

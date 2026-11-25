@@ -705,3 +705,82 @@ fn a_reset_with_nothing_kept_changes_nothing() {
     assert_eq!(rev(&mut r.c), reset);
     r.h.shutdown();
 }
+
+/// A running spectrum on input 2, `d/2/spec` heard by a subscriber that then goes; the
+/// rig settled with it.
+fn spectrum_heard(r: &mut Rig) -> Measurement {
+    let spec = r.c.measurement(Command::MeasCreate {
+        config: MeasConfig {
+            scope: MeasScope::Session,
+            name: "spec".into(),
+            kind: MeasKind::Spectrum {
+                config: SpectrumConfig::on_input(1),
+            },
+        },
+    });
+    r.c.ok(Command::MeasStart { meas: spec.id });
+    let heard = Sub::connect(r.h.context(), r.h.data_endpoint(), &[b"d/2/spec"]);
+    settle(&mut r.d, &mut r.c, &r.sub, r.tok, 0);
+    heard
+        .frame(T, |f| matches!(f.data, FrameData::Spec(_)))
+        .expect("a spec frame");
+    spec
+}
+
+/// A job that sends no final frames leaves its last ones on view, and what is on view
+/// agrees with what it keeps: a topic last sent at the result's rev stays, and the
+/// result is kept.
+#[test]
+fn a_stopped_spectrum_keeps_its_frames_and_result_at_one_rev() {
+    let mut r = rig("stopped-spec-agree");
+    let spec = spectrum_heard(&mut r);
+    r.c.ok(Command::MeasStop { meas: spec.id });
+    let rev = r.c.state().measurements[1].config_rev;
+    let got = meas_frames(&r, spec.id);
+    assert!(got.iter().any(|f| matches!(f.data, FrameData::Spec(_))));
+    assert!(got.iter().all(|f| f.stamp.config_rev == rev), "{got:?}");
+    r.c.ok(Command::TraceCapture {
+        meas: spec.id,
+        name: "kept".into(),
+        slot: None,
+    });
+    r.h.shutdown();
+}
+
+/// A topic not sent since an in-place change (nobody subscribed when the smoothing moved)
+/// holds a frame of the older rev, which every view drops: it does not cost the result,
+/// and it goes from the slots, so nothing of another rev than the result stays.
+#[test]
+fn a_topic_not_sent_since_a_change_does_not_cost_the_result() {
+    let mut r = rig("stopped-spec-stale");
+    let spec = spectrum_heard(&mut r);
+    let mut cfg = spec.config.clone();
+    if let MeasKind::Spectrum { config } = &mut cfg.kind {
+        config.smoothing = Some(SmoothingFraction::Third);
+    }
+    r.c.update_ok(spec.id, cfg);
+    r.c.ok(Command::MeasStop { meas: spec.id });
+    let rev = r.c.state().measurements[1].config_rev;
+    let got = meas_frames(&r, spec.id);
+    assert!(got.iter().all(|f| f.stamp.config_rev == rev), "{got:?}");
+    r.c.ok(Command::TraceCapture {
+        meas: spec.id,
+        name: "kept".into(),
+        slot: None,
+    });
+    r.h.shutdown();
+}
+
+/// The audio closing ends every kept result: a stopped measurement that kept one gets a
+/// new config rev, so the views drop its frames as a capture now refuses it.
+#[test]
+fn a_session_close_ends_the_kept_result_on_view() {
+    let mut r = rig("stopped-close");
+    r.c.ok(Command::MeasStop { meas: MeasId(1) });
+    let rev = |c: &mut Client| c.state().measurements[0].config_rev;
+    let stopped = rev(&mut r.c);
+    r.c.ok(Command::SessionClose);
+    assert!(rev(&mut r.c) > stopped);
+    assert!(meas_frames(&r, MeasId(1)).is_empty());
+    r.h.shutdown();
+}

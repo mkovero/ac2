@@ -36,8 +36,14 @@ pub(super) struct KeptResult {
     pub(super) at: AtStop,
 }
 
+/// The results stopped measurements keep, and which measurements may still have frames in
+/// the daemon's latest slots: a job that ran leaves its last frames there until they are
+/// cleared, kept result or not.
 #[derive(Debug, Default)]
-pub(super) struct Kept(HashMap<MeasId, KeptResult>);
+pub(super) struct Kept {
+    results: HashMap<MeasId, KeptResult>,
+    framed: std::collections::HashSet<MeasId>,
+}
 
 /// What a math trace's frame says it combined.
 pub(super) fn math_state(d: &FrameData) -> Option<&MathState> {
@@ -86,19 +92,41 @@ impl Control {
 impl Kept {
     /// What `meas`'s job left as it stopped; `None` (no result yet) keeps nothing.
     pub(super) fn keep(&mut self, meas: MeasId, k: KeptResult) {
-        self.0.insert(meas, k);
+        self.results.insert(meas, k);
     }
 
     pub(super) fn get(&self, meas: MeasId) -> Option<&KeptResult> {
-        self.0.get(&meas)
+        self.results.get(&meas)
     }
 
     pub(super) fn forget(&mut self, meas: MeasId) {
-        self.0.remove(&meas);
+        self.results.remove(&meas);
     }
 
-    pub(super) fn clear(&mut self) {
-        self.0.clear();
+    /// Every result goes, and with the slots cleared no frame stays; returns the
+    /// measurements that kept a result or may have had frames.
+    pub(super) fn clear(&mut self) -> Vec<MeasId> {
+        let mut had: Vec<MeasId> = self.results.keys().chain(&self.framed).copied().collect();
+        had.sort_unstable();
+        had.dedup();
+        self.results.clear();
+        self.framed.clear();
+        had
+    }
+
+    /// `meas`'s job ran: its last frames may stand in the slots.
+    pub(super) fn framed(&mut self, meas: MeasId) {
+        self.framed.insert(meas);
+    }
+
+    /// `meas`'s slots were cleared.
+    pub(super) fn unframed(&mut self, meas: MeasId) {
+        self.framed.remove(&meas);
+    }
+
+    /// Whether `meas` may have frames in the slots.
+    pub(super) fn has_frames(&self, meas: MeasId) -> bool {
+        self.framed.contains(&meas)
     }
 
     /// A new display smoothing of a stopped measurement; whether a kept result took it.
@@ -108,7 +136,7 @@ impl Kept {
     /// the new rev. A spectrum's capture depends on its smoothing engine, which only a
     /// running job rebuilds, so its kept result goes.
     pub(super) fn smoothing(&mut self, meas: MeasId, change: &SmoothingChange, rev: Rev) -> bool {
-        let Some(c) = self.0.get_mut(&meas) else {
+        let Some(c) = self.results.get_mut(&meas) else {
             return false;
         };
         let KeptResult {

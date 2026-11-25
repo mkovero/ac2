@@ -496,3 +496,44 @@ fn the_transfer_ir_view_shows_the_selected_stored_ir() {
         21
     );
 }
+
+/// Navigation moves the dB axis from the range drawn: with a louder stored IR over the
+/// live one, the default range's top has risen to fit it, and a pan starts from there.
+#[test]
+fn ir_value_navigation_starts_from_the_drawn_range() {
+    let mut t = T::new();
+    t.conn(ir_event(1));
+    t.key("Alt+3");
+    let mut linear = vec![0.0f32; 64];
+    linear[40] = 1.0;
+    let ir = TransferIr {
+        sample_rate: Hz(48_000.0),
+        ir: TraceIr {
+            t0: Seconds(-32.0 / 48_000.0),
+            dt: Seconds(1.0 / 48_000.0),
+            linear,
+            etc_db: vec![-60.0; 64],
+        },
+    };
+    let (with, wd) = stored_tf(5, "Main L pre EQ", Some(ir));
+    t.conn(with_traces(vec![with]));
+    let grid = Arc::new(GridDef::Log {
+        ppo: 48,
+        k_min: -240,
+        k_max: 239,
+    });
+    t.conn(ConnEvent::Trace(wd, grid));
+    t.key("G");
+    t.key("Ctrl+Home");
+    assert_eq!(axes(&t, IrPane::Live).level_db, IrAxes::DEFAULT_LEVEL_DB);
+    let theme = Theme::dark();
+    let drawn = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now())
+        .y_axis
+        .mapping
+        .range;
+    // +6.02 dB over the live peak and 3 dB of headroom, on 3 dB steps.
+    assert_eq!(drawn.hi, 12.0);
+    nav(&mut t, IrPane::Live, IrNavMsg::ValuePan { by: -10.0 });
+    let r = axes(&t, IrPane::Live).level_db;
+    assert!(close(r, drawn.lo - 10.0, drawn.hi - 10.0), "{r:?}");
+}

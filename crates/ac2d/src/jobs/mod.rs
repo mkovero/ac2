@@ -34,6 +34,7 @@ pub(crate) use pace::REFRESH;
 pub(crate) use pace::{Due, Flush, Pace};
 
 mod bins;
+pub(crate) use bins::FINAL_TRIES;
 pub(crate) mod cross_rig;
 pub(crate) mod dynamics;
 pub(crate) mod finder;
@@ -107,8 +108,9 @@ pub(crate) struct Emitter {
     outbox: Outbox,
     env: JobEnv,
     asked: RefCell<Asked>,
-    /// The config rev of the last frame sent.
-    last_rev: std::cell::Cell<Option<Rev>>,
+    /// Each topic's config rev as of the last frame of it that reached the I/O thread:
+    /// what that topic's latest slot holds.
+    sent: RefCell<Vec<(Topic, Rev)>>,
 }
 
 /// Which of the topics this thread asks about have a subscriber, as of `generation` of the
@@ -133,7 +135,7 @@ impl Emitter {
             outbox,
             env,
             asked: RefCell::default(),
-            last_rev: std::cell::Cell::default(),
+            sent: RefCell::default(),
         }
     }
 
@@ -177,12 +179,16 @@ impl Emitter {
     pub(crate) fn send(&self, s: StampArgs, data: FrameData) -> bool {
         let topic = data.topic();
         let frame = self.frame(s, self.env.seqs.next(topic), data);
-        self.last_rev.set(Some(s.config_rev));
         match ac2_proto::CodedFrame::from_frame(&frame) {
             Ok(coded) => {
                 let sent = self.env.frames.send(coded);
                 if sent {
                     self.outbox.wake();
+                    let mut v = self.sent.borrow_mut();
+                    match v.iter_mut().find(|(k, _)| *k == topic) {
+                        Some(e) => e.1 = s.config_rev,
+                        None => v.push((topic, s.config_rev)),
+                    }
                 }
                 sent
             }
@@ -349,8 +355,8 @@ pub(crate) struct Captured {
 pub(crate) struct Stopped {
     pub(crate) captured: Captured,
     pub(crate) finals: Vec<Frame>,
-    /// The config rev of the last frame it sent before the stop.
-    pub(crate) last_rev: Option<Rev>,
+    /// Each topic it sent, with the config rev of the last frame of it before the stop.
+    pub(crate) last_revs: Vec<(Topic, Rev)>,
 }
 
 /// A running job thread.
@@ -618,12 +624,12 @@ fn run(
                     // Only a `meas.stop` leaves a result: a job ended for a delete, a
                     // restart or the audio closing leaves nothing for the views to draw.
                     if let Some(reply) = keep {
-                        let last_rev = em.last_rev.get();
+                        let last_revs = em.sent.borrow().clone();
                         let finals = a.final_frames(em);
                         let _ = reply.send(captured(a, em).map(|captured| Stopped {
                             captured,
                             finals,
-                            last_rev,
+                            last_revs,
                         }));
                     }
                     return;

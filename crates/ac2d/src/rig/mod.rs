@@ -249,8 +249,8 @@ impl RigStore {
         }
     }
 
-    /// Writes `s` atomically. Nothing is written (and the caller changes nothing) when the
-    /// store is read-only or the write fails.
+    /// Writes `s` atomically. `Err` (the store read-only, or a write failed) leaves the file
+    /// as it was, and the caller changes nothing.
     pub(crate) fn persist(&self, s: &RigSettings) -> Result<(), ProtoError> {
         self.check()?;
         let Some(path) = &self.path else {
@@ -261,19 +261,28 @@ impl RigStore {
         let failed = |e: std::io::Error| {
             internal(format!("cannot write rig settings {}: {e}", path.display()))
         };
-        crate::damage::write_with_prev(path, &text).map_err(failed)?;
         // The previous copy is what a start reads when this file is torn: it must never
         // hold a higher max level than the one now in force, or a torn write would raise
-        // it. A lowered level is written there too.
+        // it. A copy that may (an old file or copy above the new level, holding none, or
+        // unreadable as settings) is replaced by the new text first, and only then the file
+        // itself: a failure or crash at either step leaves the file as it was and the copy
+        // no higher. A copy holding no level counts as higher, as a start without one
+        // comes up at the bound.
+        let above = |bytes: Option<Vec<u8>>| {
+            bytes.is_some_and(|b| {
+                match (read_whole(&b).ok().map(|p| p.ceiling_dbfs), s.ceiling_dbfs) {
+                    (Some(Some(was)), Some(now)) => was > now,
+                    (_, None) => false,
+                    _ => true,
+                }
+            })
+        };
         let prev = crate::damage::prev_path(path);
-        let higher = std::fs::read(&prev)
-            .ok()
-            .and_then(|b| read_whole(&b).ok())
-            .and_then(|p| p.ceiling_dbfs)
-            .zip(s.ceiling_dbfs)
-            .is_some_and(|(was, now)| was > now);
-        if higher {
+        if above(std::fs::read(path).ok()) || above(std::fs::read(&prev).ok()) {
             ac2_paths::write_private_atomic(&prev, &text).map_err(failed)?;
+            ac2_paths::write_private_atomic(path, &text).map_err(failed)?;
+        } else {
+            crate::damage::write_with_prev(path, &text).map_err(failed)?;
         }
         self.stored.set(s.ceiling_dbfs);
         Ok(())

@@ -48,6 +48,7 @@ mod remote_stimulus;
 mod rig_file;
 mod rig_meas;
 mod server;
+mod session_crafted;
 mod sessions;
 mod sim;
 mod spawn;

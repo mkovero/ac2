@@ -1366,7 +1366,9 @@ display edits and are never applied to the stored data.
   it), is deleted, or the session closes. A second `meas.stop` keeps it. When a stopped
   measurement's kept result goes, its frames (`d/<meas>/…`, `bins/<meas>/…`) are cleared
   from the daemon's latest slots, and a reset of a stopped measurement that kept a result
-  gives it a new `config_rev`: a client drops each frame it holds of a stopped measurement
+  or still has frames there, or the audio closing while it kept one, gives it a new
+  `config_rev`; a job that sends no final frames leaves its last ones, except a topic
+  last sent at an older `config_rev` than its result, which goes from the slots: a client drops each frame it holds of a stopped measurement
   whose own `config_rev` is older than the measurement's (frame by frame, so the order a
   frame and the state change arrive in does not matter). A capture of a
   kept result is described as at the stop: `created_at` is the stop's time, and `cal`,

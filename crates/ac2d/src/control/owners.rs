@@ -343,6 +343,7 @@ impl Control {
             .clear(&ac2_proto::Subscription::Meas(id).prefix());
         // A transfer's stage bins stand beside its streams, under `bins/<meas>/`.
         self.s.outbox.clear(format!("bins/{}/", id.0).as_bytes());
+        self.kept.unframed(id);
         self.drop_spl_log(id);
         self.commit(Change::Measurement(Patch::Deleted(id)))
     }
