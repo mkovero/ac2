@@ -351,6 +351,13 @@ restarts it: [Watchdogs](#watchdogs-under-systemd)). A daemon under systemd (`sy
 `RUST_LOG=debug` for everything); `AC2_LOG_DIR` moves the files. The app's notifications are
 not in the file; *Notifications…* (Shift+E) lists them ([Notifications](#notifications)).
 
+**Audit log.** `ac2d-audit.log`, in the same directory, records who changed who may connect
+(clients authorized, demoted or revoked, rigs admitted), who raised or lowered the system
+maximum level, turned the network on or off, and who acted on the generator or started a
+sweep, a dynamics run or a loopback-detection burst, by client name. It is the daemon's own file, written under systemd as well, appended across
+restarts and moved to `ac2d-audit.log.1` at 4 MiB: whatever a client makes the daemon write
+to `ac2d.log`, it cannot push these lines out. `RUST_LOG` does not change what it records.
+
 **Latency log.** `ac2-ui --latency-log FILE` (off by default) writes a CSV row per pane per
 presented frame: for the newest data frame each spectrum pane shows, when it was captured
 (the daemon's `capture_wall_ns`), read by the link, applied, drawn and submitted to the GPU,

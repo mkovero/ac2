@@ -62,7 +62,8 @@ fields first:
   answered as id 0.
 
 The first request on a connection is `hello` {`client`: string, the client software's
-name}; its reply `welcome` carries `server` (`ac2d <version> (build <id>)`), `client_id`
+name: the daemon keeps at most 64 characters of it, an ellipsis last when cut, control and
+bidirectional-format characters read as `?`}; its reply `welcome` carries `server` (`ac2d <version> (build <id>)`), `client_id`
 (`ClientId`, a string: the identity the daemon bound to the connection: the ZAP User-Id under CURVE, otherwise a
 daemon-assigned id), `daemon_incarnation`, `stream_epoch`, `rev`, `rig_id`, `name` and `role` (`ClientRole`,
 §3.5: what this connection may send; `operator` for a local client).
@@ -444,7 +445,7 @@ level, dB SPL, as a trailing float)}; `OscArg` = {`type`: `int` \| `float` \| `s
 i32 \| f32 \| str}.
 
 **Server (`server.*`).** `server.info` → `ServerInfo` {`local`, `network`, `interfaces`,
-`toggle`, `recording_dir`}. `local`: `LocalServer` (tagged by `type`) \| nil: `embedded` (in its
+`toggle`, `recordings`}. `local`: `LocalServer` (tagged by `type`) \| nil: `embedded` (in its
 client's process; only test daemons, the app spawns `ac2d`) \| `local` {`ctrl`, `data`} (the
 pair served for the daemon's whole life, this machine only; the OS user is the trust
 boundary); nil to a network client, which has no use for this host's local endpoints.
@@ -459,7 +460,8 @@ network client; `NetStatus`: `off` \| `listening` {`ctrl`, `data`} \| `waiting` 
 {`detail`}; `PeerNetStatus` is the same with `reason` a plain `NetReasonKind` string, `other`
 without its `detail`: the OS's words about the host stay on it), `server_key` (Z85) \| nil (made
 at the first turn-on), `fingerprint` \| nil, `advertised_as`: string \| nil (the mDNS name),
-`authorized`: [`AuthorizedClient` {`name`, `key`, `fingerprint`, `role`: `ClientRole`}],
+`authorized`: [`AuthorizedClient` {`name`, `key`, `fingerprint`, `role`: `ClientRole`}]
+(to a viewer: its own entry only),
 `refused`: [`RefusedKey` {`key`: string \| nil (nil: not CURVE), `fingerprint`: string \|
 nil, `address`, `count`, `last_at`: WallNs}] \| nil, newest first, at most 32; nil to a
 network client, which gets the authorized names and public keys (pairing shows them) but
@@ -480,8 +482,9 @@ by `type`: `all` (every IPv4 interface) \| `interface` {`name`} (resolved at eac
 first IPv4 address, else its first global IPv6 one) \| `addr` {`addr`: the address as
 text}. `interfaces`: [`NetInterface` {`name`, `addrs`: [address as text], `up`}], the
 host's interfaces read at each `server.info`, loopback left out; empty to a network
-client. `recording_dir`: string \| nil (where `rec.start`
-records on the daemon host). `auth.authorize` adds `key` under `name` with `role` to the
+client. `recordings` (`Recordings`, tagged by `type`): `off` (this daemon does not
+record) \| `dir` {`dir`: where `rec.start` records on the daemon host} \| `kept` (it
+records; where is not told to a viewer). `auth.authorize` adds `key` under `name` with `role` to the
 authorized-clients file (atomic write) and to the running handshake check; `auth.revoke`
 removes `name`. `ClientRole` is tagged by `type`: `operator` \| `viewer` \| `rig`
 {`rig_id`} (§3.5); `auth.authorize` takes `operator` or `viewer` (`invalid` for `rig`:
@@ -490,7 +493,8 @@ it first). The same key given again with another role changes the role: the key'
 connections are dropped by the revoke rule below and come back with the new role, and an
 operator made a viewer loses a generator lease it holds then (output fading out, its sweep
 or dynamics run aborted, as on lease expiry). Making the requesting client's own key a
-viewer is `refused`, as revoking it is. A revoked or replaced key's requests are `refused`, its data connection is
+viewer is `refused`, as revoking it is; so is any `auth.authorize` that changes the
+requesting client's own name's key or role (a name it does not hold may be changed). A revoked or replaced key's requests are `refused`, its data connection is
 dropped at once (its subscriptions and audio end) and it cannot connect again. A connection
 is bound to the key it authenticated with, so authorizing a different key under a revoked
 name does not let a connection made with the old key act again: the rule above holds for
@@ -528,8 +532,8 @@ inputs over a link of its own: it connects to the other rig's ctrl and data endp
 CURVE with its own server key pair as the client key. The other rig must first admit that
 key with `auth.admit_rig` {`key`, `rig_id`, `name`}: an authorized-clients entry with the
 role `rig` {`rig_id`: the admitted rig's id}.
-Admitting a name already present replaces its entry, and admitting the rig's own id is
-`invalid`; a replaced or `auth.revoke`d key follows the revoke rule above (requests
+Admitting a name already present replaces its entry, admitting the rig's own id is
+`invalid`, and so is admitting onto an app's name (`auth.revoke` it first); a replaced or `auth.revoke`d key follows the revoke rule above (requests
 `refused`, data connection and audio dropped at once, no reconnect). `auth.revoke_rig` {`rig_id`} removes
 every entry admitted as that rig, and only those: an operator's client authorized under the
 same name stays (`not_found` when no entry is that rig's). An
@@ -1855,8 +1859,11 @@ with the autosave (§7.3).
   `gen.stop` and other clients are answered while it waits on the disk, and its reply
   follows when it is done. One such operation at a time: while one is under way, another
   `file.save` / `file.load` / `file.new` / `file.recover` / `file.salvage` / `file.import` /
-  `file.download_begin` is `refused` (nothing changed; ask again once it is answered);
-  `file.list` is never refused for it. A save writes the content as it was when it began
+  `file.download_begin` is `refused` (nothing changed; ask again once it is answered),
+  except that an operator's command cuts a viewer's `file.download_begin` under way: the
+  viewer is `refused` (ask again) and the operator's command runs. `file.list` is never
+  refused for it: one reading of the directory at a time, and a `file.list` sent while one
+  reads is answered from it. A save writes the content as it was when it began
   (edits made meanwhile stay unsaved). A load, new or recover whose working state changed
   (content or saved standing) while it read is refused with `conflict`, nothing changed.
   A salvage imports onto the working state as it is when its read is done.
@@ -1876,8 +1883,13 @@ with the autosave (§7.3).
   download (no `saved_as`).
   Unpacking accepts regular files at `session.json`,
   `session.prev.json`, `traces/<file>`, `spl/<file>` only, at most 512 MiB and 20 000
-  entries. At most 4 transfers per daemon; one idle for 2 min is dropped (`not_found`
-  after). A transfer belongs to the client that began it.
+  entries. At most 4 transfers per daemon; one idle for 2 min, or 15 min after it began
+  however busy (64 MiB fits at about 600 kbit/s), is dropped (`not_found` after). A
+  transfer belongs to the client that began it.
+- To a network client every host path in a reply or event is its last component: a
+  session's origin, `file.list`'s `path`, a recording's or replay's `path`, a damaged
+  file's `path` and `set_aside_as`, a calibration store error's `path`. The local pair reads
+  them whole.
 - The daemon also keeps an autosave of the same content (§7.3); its status is the
   `autosave` entity.
 
@@ -2233,13 +2245,25 @@ the key's data connections (§5.8 `rejoin`), so the client says `hello` again an
   `dynamics.envelope`, `cal.list`, `spl.log_get`, `spl.history_get`, `spl.band_log_get`,
   `file.list`, `rec.list`, `plan.list`, `server.info`, `gen.stop`,
   `file.download_chunk`, `file.download_begin` with a nil `session` (the working state),
-  `file.download_end` with a nil `saved_as`. A viewer holds one transfer at a time
-  (`refused` for a second `trace.export` or `file.download_begin` while one is open).
+  `file.download_end` with a nil `saved_as`. A viewer holds one transfer at a time, a
+  download still being packed counted (`refused` for a second `trace.export` or
+  `file.download_begin` while one is open), viewers together at most 2 of the 4, and a
+  viewer key begins a `file.download_begin` at most once per 5 s (`refused`, with the
+  seconds left). An operator's file operation cuts a viewer's download being packed.
   Everything else is `refused` with detail `view_only` before it runs, so it stores and
   changes nothing: no lease (`gen.acquire`, `gen.refresh`), no level, no output, no upload,
   no delete, no `auth.*`. A viewer's data subscriptions are an operator's (`ka`,
   measurement frames, `stream/` meters); `audio/<channel>` and `source/levels` stay a rig's.
 - **rig** {`rig_id`}: `hello` and `source.state` only (§3.2 remote inputs).
+
+A demotion or revoke cuts what the key began as an operator: a file operation still running
+is answered `refused` when it ends, nothing committed or handed out; a loopback-detection
+burst fades out. `gen.stop` with nothing armed, firing or running is an `ack` that changes
+nothing (no rev, no `last_action`, no audit line). An authorized-clients file that is not a
+regular file of the daemon's user, or that its group or others may write, is not read: no
+network client is admitted, and `damaged_files` says why. Refused keys, wrong versions and
+undecodable messages are logged once per key and reason; audit lines (who authorized,
+revoked, raised a level, stopped the output) go to their own file (user guide, *Logs*).
 
 The classification is one exhaustive match over the commands in `ac2-proto`
 (`Command::allowed`), so a new command is placed when it is added.
@@ -2889,7 +2913,8 @@ Credit:
 
 A connection is dropped (its subscriptions and chains with it) when a send to it fails
 because its connection is gone, or when it holds unacknowledged messages and has sent
-nothing for 60 s; one heard from again after that is sent `rejoin`. `rejoin` comes only
+nothing for 60 s, or when it holds more than 4096 subscriptions; one heard from again after
+that is sent `rejoin`. `rejoin` comes only
 after the connection sends something, so a client watches for the completed handshake
 (ZMQ socket monitor) and sends `window` and its subscriptions on every reconnect, and also
 after 3 s with nothing read on its data connection (every connection is sent at least a
