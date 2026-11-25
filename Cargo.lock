@@ -212,6 +212,7 @@ dependencies = [
 name = "ac2-traces"
 version = "0.1.0"
 dependencies = [
+ "ac2-archive",
  "ac2-core",
  "ac2-proto",
  "num-complex",

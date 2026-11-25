@@ -12,6 +12,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+ac2-archive = { path = "../ac2-archive" }
 ac2-core = { path = "../ac2-core" }
 ac2-proto = { path = "../ac2-proto" }
 num-complex = { workspace = true }

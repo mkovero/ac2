@@ -292,30 +292,12 @@ pub fn validate_name(name: &str) -> Result<(), SessionError> {
         && name
             .chars()
             .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
-        && !windows_device(name);
+        && !ac2_archive::windows_device(name);
     if ok {
         Ok(())
     } else {
         Err(SessionError::BadName(name.to_owned()))
     }
-}
-
-/// Whether `name` is a Windows device name, which no file there may take whatever its
-/// extension (`nul.csv` too).
-fn windows_device(name: &str) -> bool {
-    let stem = name.split('.').next().unwrap_or(name).trim_end();
-    let upper = stem.to_ascii_uppercase();
-    matches!(
-        upper.as_str(),
-        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
-    ) || ["COM", "LPT"].iter().any(|p| {
-        upper.strip_prefix(p).is_some_and(|d| {
-            matches!(
-                d,
-                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
-            )
-        })
-    })
 }
 
 /// Writes `bytes` to `path` atomically: a temporary file in the same directory, synced,

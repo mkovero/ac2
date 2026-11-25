@@ -185,9 +185,33 @@ pub fn is_archive_name(path: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case(EXTENSION))
 }
 
-/// A file name allowed inside a session directory: plain, not hidden.
+/// A file name allowed inside a session directory: plain, not hidden, and one every OS a
+/// daemon runs on can create as itself. Windows drops a trailing dot or space (two names,
+/// one file), reads `name:x` as a stream of `name`, and keeps device names for devices.
 fn plain_name(s: &str) -> bool {
-    !s.is_empty() && !s.starts_with('.') && !s.contains(['/', '\\', '\0'])
+    !s.is_empty()
+        && !s.starts_with('.')
+        && !s.ends_with(['.', ' '])
+        && !s.contains(['/', '\\', '\0', ':'])
+        && !windows_device(s)
+}
+
+/// Whether `name` is a Windows device name, which no file there may take whatever its
+/// extension (`nul.csv` too).
+pub fn windows_device(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim_end();
+    let upper = stem.to_ascii_uppercase();
+    matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"].iter().any(|p| {
+        upper.strip_prefix(p).is_some_and(|d| {
+            matches!(
+                d,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    })
 }
 
 /// The session files of `dir` as (archive path, file path), in name order.
@@ -533,6 +557,8 @@ mod tests {
         );
     }
 
+    /// Names Windows cannot create as given (a device, a stream, a trailing dot or space)
+    /// are foreign as well: an archive made on another OS unpacks the same everywhere.
     #[test]
     fn nothing_escapes_the_target_directory() {
         let tmp = tempfile::tempdir().expect("tmp");
@@ -544,6 +570,11 @@ mod tests {
             ("other/x.csv", tar::EntryType::Regular),
             ("traces/.hidden", tar::EntryType::Regular),
             ("traces/sub/x", tar::EntryType::Regular),
+            ("traces/nul.csv", tar::EntryType::Regular),
+            ("traces/COM1", tar::EntryType::Regular),
+            ("traces/a.csv:stream", tar::EntryType::Regular),
+            ("traces/a.csv.", tar::EntryType::Regular),
+            ("traces/a.csv ", tar::EntryType::Regular),
         ]
         .into_iter()
         .enumerate()
