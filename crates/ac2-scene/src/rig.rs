@@ -371,7 +371,7 @@ mod tests {
             server_lines(&ac2_proto::samples::server_info_fixed()),
             vec![
                 "Server key fingerprint: SHA256:3f1c 9a2e 77b0 51d4",
-                "Recordings: this daemon does not record",
+                "Recordings: on the rig's host",
             ]
         );
         let off = ac2_proto::samples::server_info_off();

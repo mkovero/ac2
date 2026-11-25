@@ -456,7 +456,8 @@ fn an_early_stdin_eof_is_logged_as_an_error() {
 }
 
 /// `--ephemeral` keeps nothing: after an edit, a wait past the autosave's debounce and an
-/// orderly stop, the only file in the whole home is its log, `ac2d-sim.log`.
+/// orderly stop, the only files in the whole home are its logs, `ac2d-sim.log` and the audit
+/// trail `ac2d-sim-audit.log`.
 #[test]
 fn ephemeral_writes_nothing_but_its_log() {
     let home = Home::new();
@@ -477,7 +478,13 @@ fn ephemeral_writes_nothing_but_its_log() {
     std::thread::sleep(DEBOUNCE + Duration::from_millis(500));
     drop(stdin);
     assert!(d.wait(T).success());
-    assert_eq!(home.files(), vec![PathBuf::from("logs/ac2d-sim.log")]);
+    assert_eq!(
+        home.files(),
+        vec![
+            PathBuf::from("logs/ac2d-sim-audit.log"),
+            PathBuf::from("logs/ac2d-sim.log")
+        ]
+    );
 }
 
 /// A hard kill at instants around the debounced write (traces first, then the manifest
