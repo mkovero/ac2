@@ -293,6 +293,8 @@ impl Control {
             | Command::FileSalvage { .. }
             | Command::FileList
             | Command::FileImport { .. }
+            | Command::FileDelete { .. }
+            | Command::FileRename { .. }
             | Command::FileDownloadBegin { .. }) => {
                 match self.start_file_job(route, &client, req.id, cmd, role) {
                     Ok(()) => return,

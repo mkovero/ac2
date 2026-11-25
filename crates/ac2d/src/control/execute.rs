@@ -391,6 +391,8 @@ impl Control {
             | Command::FileSalvage { .. }
             | Command::FileList
             | Command::FileImport { .. }
+            | Command::FileDelete { .. }
+            | Command::FileRename { .. }
             | Command::FileDownloadBegin { .. } => {
                 Err(internal("session file work is answered asynchronously"))
             }
@@ -404,6 +406,7 @@ impl Control {
                 offset,
                 data,
             } => self.file_upload_chunk(peer, transfer, offset, &data),
+            Command::FileUploadAbort { transfer } => self.file_upload_abort(peer, transfer),
             Command::FileDownloadChunk { transfer, offset } => {
                 self.file_download_chunk(peer, transfer, offset)
             }
@@ -413,6 +416,7 @@ impl Control {
             Command::RecStart { request } => self.rec_start(peer, request),
             Command::RecStop => self.rec_stop(),
             Command::RecList => self.rec_list(),
+            Command::RecDelete { recording } => self.rec_delete(peer, &recording),
             Command::StreamReplay { recording, pace } => self.stream_replay(peer, &recording, pace),
             Command::PlanSave { plan } => self.plan_save(plan),
             Command::PlanList => Ok(ReplyBody::Plans(self.store.state().plans.clone())),

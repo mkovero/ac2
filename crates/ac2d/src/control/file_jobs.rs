@@ -1,5 +1,6 @@
 //! Session file work off the control thread: `file.save`, `file.load`, `file.new`,
-//! `file.recover`, `file.salvage`, `file.import`, `file.download_begin` and `file.list`.
+//! `file.recover`, `file.salvage`, `file.import`, `file.download_begin`, `file.delete`,
+//! `file.rename` and `file.list`.
 //! (The small writes of the working state's session — `working.json`, the recovery copy
 //! put in place — run on the autosave's write thread: [`super::working`].)
 //!
@@ -13,7 +14,8 @@
 //!
 //! While one of these is pending, state may change; the policy:
 //! - One file operation at a time. Another `file.save` / `file.load` / `file.new` /
-//!   `file.recover` / `file.salvage` / `file.import` / `file.download_begin` is refused
+//!   `file.recover` / `file.salvage` / `file.import` / `file.download_begin` /
+//!   `file.delete` / `file.rename` is refused
 //!   (`refused`, nothing changed) until it is answered — except that an operator's never
 //!   waits on a viewer's download: the viewer's is cut (answered `refused`, its worker left
 //!   to remove its staging) and the operator's begins. A viewer begins a download at most
@@ -47,6 +49,7 @@ use ac2_traces::session::{Manifest, Session as SessionData};
 use ac2_zmq::PublicKey;
 
 use super::files::SalvageRead;
+use super::transfer::Packed;
 use super::working::Staged;
 use super::{Control, ControlMsg, PendingReply};
 use crate::route::{Peer, Route};
@@ -128,6 +131,32 @@ pub(super) enum Pending {
         /// A working-state download: the content hash and time it was packed at.
         working: Option<(u64, WallNs)>,
     },
+    Delete {
+        client: Peer,
+        name: String,
+    },
+    Rename {
+        client: Peer,
+        name: String,
+        to: String,
+    },
+}
+
+impl Pending {
+    /// The upload the job reads, kept until it answers.
+    fn upload(&self) -> Option<TransferId> {
+        match self {
+            Self::Replace {
+                from: ReplaceFrom::Upload { transfer, .. },
+                ..
+            }
+            | Self::Import { transfer, .. }
+            | Self::Salvage {
+                transfer: Some(transfer),
+            } => Some(*transfer),
+            _ => None,
+        }
+    }
 }
 
 /// Where a replace's new working state comes from.
@@ -165,7 +194,9 @@ pub(crate) enum FileDone {
     Replace(ReplaceRead),
     Salvage(Result<SalvageRead, ProtoError>),
     Import(Result<Manifest, ProtoError>),
-    Download(Result<Vec<u8>, ProtoError>),
+    Download(Result<Packed, ProtoError>),
+    Delete(Result<(), ProtoError>),
+    Rename(Result<Manifest, ProtoError>),
 }
 
 /// The disk part of a file operation, run on its worker thread.
@@ -331,6 +362,8 @@ impl Control {
             Command::FileDownloadBegin { session } => {
                 self.begin_download(client, session.as_ref())?
             }
+            Command::FileDelete { name } => self.begin_delete(client, name)?,
+            Command::FileRename { name, to } => self.begin_rename(client, name, to)?,
             other => {
                 return Err(internal(format!(
                     "{} is not a file operation",
@@ -379,6 +412,9 @@ impl Control {
         let Some(job) = self.file_jobs.jobs.remove(&token) else {
             return;
         };
+        if let Some(t) = job.pending.upload() {
+            self.transfers.release(t);
+        }
         if let (Pending::List, FileDone::List(r)) = (&job.pending, &done) {
             let now = Instant::now();
             for w in std::iter::once(job.reply).chain(job.attached) {
@@ -447,6 +483,12 @@ impl Control {
                 },
                 FileDone::Download(r),
             ) => self.finish_download(&client, &stem, working, r),
+            (Pending::Delete { client, name }, FileDone::Delete(r)) => {
+                self.finish_delete(&client, &name, r)
+            }
+            (Pending::Rename { client, name, to }, FileDone::Rename(r)) => {
+                self.finish_rename(&client, &name, &to, r)
+            }
             (_, done) => {
                 if let FileDone::Replace(ReplaceRead { kept: Some(k), .. }) = done {
                     k.discard();

@@ -85,6 +85,9 @@ impl Command {
             Self::FileRecover => "file.recover",
             Self::FileSalvage { .. } => "file.salvage",
             Self::FileUploadBegin { .. } => "file.upload_begin",
+            Self::FileUploadAbort { .. } => "file.upload_abort",
+            Self::FileDelete { .. } => "file.delete",
+            Self::FileRename { .. } => "file.rename",
             Self::FileUploadChunk { .. } => "file.upload_chunk",
             Self::FileImport { .. } => "file.import",
             Self::FileDownloadBegin { .. } => "file.download_begin",
@@ -93,6 +96,7 @@ impl Command {
             Self::RecStart { .. } => "rec.start",
             Self::RecStop => "rec.stop",
             Self::RecList => "rec.list",
+            Self::RecDelete { .. } => "rec.delete",
             Self::StreamReplay { .. } => "stream.replay",
             Self::ServerInfo => "server.info",
             Self::ServerNetwork { .. } => "server.network",
@@ -209,12 +213,16 @@ impl Command {
             | Self::FileRecover
             | Self::FileSalvage { .. }
             | Self::FileUploadBegin { .. }
+            | Self::FileUploadAbort { .. }
+            | Self::FileDelete { .. }
+            | Self::FileRename { .. }
             | Self::FileUploadChunk { .. }
             | Self::FileImport { .. }
             | Self::FileDownloadBegin { .. }
             | Self::FileDownloadEnd { .. }
             | Self::RecStart { .. }
             | Self::RecStop
+            | Self::RecDelete { .. }
             | Self::StreamReplay { .. }
             | Self::ServerNetwork { .. }
             | Self::AuthAuthorize { .. }

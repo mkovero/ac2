@@ -1077,5 +1077,49 @@
     "rig_id": 1886744693
    }
   }
+ },
+ {
+  "v": 105,
+  "id": 110,
+  "cmd": {
+   "op": "file.upload_abort",
+   "args": {
+    "transfer": 3
+   }
+  }
+ },
+ {
+  "v": 105,
+  "id": 111,
+  "cmd": {
+   "op": "file.delete",
+   "args": {
+    "name": "thursday soundcheck"
+   }
+  }
+ },
+ {
+  "v": 105,
+  "id": 112,
+  "cmd": {
+   "op": "file.rename",
+   "args": {
+    "name": "friday show",
+    "to": "friday show final"
+   }
+  }
+ },
+ {
+  "v": 105,
+  "id": 113,
+  "cmd": {
+   "op": "rec.delete",
+   "args": {
+    "recording": {
+     "type": "name",
+     "name": "rec-2026-11-25T20-14-03Z"
+    }
+   }
+  }
  }
 ]

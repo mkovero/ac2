@@ -104,7 +104,7 @@ use control::{Control, ControlMsg, Setup};
 use io::{Interest, IoSockets};
 use outbox::Outbox;
 
-pub use control::TRANSFER_LIFETIME;
+pub use control::{FreeSpace, TransferLimits};
 
 /// The tracing target of the audit trail: who raised the ceiling, authorized, demoted or
 /// revoked a client, made sound or stopped it. `ac2d` writes its events to a file of their
@@ -505,7 +505,7 @@ impl Daemon {
             rig_logs: config.rig_logs.clone(),
             server,
             lease_expiry: config.lease_expiry,
-            transfer_lifetime: config.transfer_lifetime,
+            transfers: config.transfers.clone(),
             keepalive: config.keepalive,
             replay: config.replay,
             dedup: config.dedup,

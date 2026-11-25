@@ -469,6 +469,7 @@ impl Control {
         let Some(dir) = self.s.recording_dir.clone() else {
             return;
         };
+        super::file_ops::finish_deletes(&dir);
         let mut newest: Option<RecordingRun> = None;
         for (name, r) in raw::recover(&dir, wall_ns(), RECOVER_QUIET) {
             match r {
@@ -510,7 +511,7 @@ impl Control {
 
     /// The directory and name a reference names. Paths are for clients on the local pair
     /// only.
-    fn recording_path(
+    pub(super) fn recording_path(
         &self,
         client: &Peer,
         r: &RecordingRef,

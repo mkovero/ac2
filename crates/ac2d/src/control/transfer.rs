@@ -1,51 +1,69 @@
-//! Session archives in transit (`file.upload_*`, `file.download_*`, `file.import`): a
-//! session crosses machines as one `.ac2session` file (`ac2_archive`), in chunks that fit a
-//! ctrl message.
+//! Files in transit (`file.upload_*`, `file.download_*`, `file.import`, `trace.export`): a
+//! session crosses machines as one `.ac2session` file (`ac2_archive`), a trace file as
+//! itself, in chunks that fit a ctrl message.
 //!
-//! Transfers are held in memory (at most [`MAX_TRANSFERS`] × 64 MiB) and belong to the
-//! client that began them; viewers together hold at most half of them, so an operator
-//! always has room, and every transfer ends [`IDLE`] after its last chunk or at its
-//! lifetime ([`DEFAULT_LIFETIME`]), whichever comes first, however often it is touched. An archive is unpacked into a staging directory under the
-//! session directory (`.incoming/`, never listed: names starting with `.` are not session
-//! names) — on the same file system as the sessions, so `file.import` is a rename, and not
-//! in a RAM-backed temporary directory a big session could fill.
+//! Every transfer is spooled to disk ([`spool`]) in the staging directory under the session
+//! directory (`.incoming/`, never listed: names starting with `.` are not session names): an
+//! upload as `up-<transfer>.part`, hashed as it arrives, a download as
+//! `down-<transfer>.part`, packed before it is offered. On the same file system as the
+//! sessions, so `file.import` is a rename, and not in a RAM-backed temporary directory a
+//! big session could fill. Nothing is held in memory but a snapshot ([`snapshot`]), which
+//! is held apart from these and outside their quota.
 //!
-//! A snapshot too large for a ctrl reply goes as a download too ([`snapshot`]), held apart
-//! from these and outside their quota.
+//! A peer (a key and its name, or a local connection: what the dedup window keys on) holds
+//! at most [`MAX_PEER_TRANSFERS`], the daemon [`MAX_TRANSFERS`]; viewers together hold at most
+//! half of them, so an operator always has room. A transfer ends [`IDLE`] after its last
+//! chunk — the daemon has no signal for a ctrl connection's end, so this is what frees a
+//! vanished client's slots — or at its lifetime ([`TransferLimits::lifetime`]), whichever
+//! comes first, however often it is touched; on `file.upload_abort` or `file.download_end`;
+//! when its peer's role is taken down; or when it is used up. Its spool file goes with it,
+//! and what a previous run left in the staging directory is cleared at start.
+//!
+//! An upload leaves [`TransferLimits::reserve`] free on the session directory's file system
+//! (counting what the uploads under way still have to write), and so does unpacking one; a
+//! download leaves [`TransferLimits::pack_reserve`].
 
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use ac2_archive::{ArchiveError, MAX_ARCHIVE_BYTES};
+use ac2_archive::{ArchiveError, Hasher, MAX_ARCHIVE_BYTES};
 use ac2_proto::model::{SessionOrigin, SessionRef, Transfer};
 use ac2_proto::units::{Blob, TransferId, WallNs};
-use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
+use ac2_proto::{ProtoError, ReplyBody};
 use ac2_traces::session::{self, Manifest};
 
 use super::Control;
 use super::file_jobs::{Cancel, FileDone, Pending, Work};
 use super::files::{info, session_err};
 use crate::route::Peer;
-use crate::util::{internal, invalid, missing, perr, perr_detail, refused};
+use crate::util::{internal, invalid, missing, refused};
 
+mod limits;
 mod snapshot;
+mod spool;
+mod unpack;
+
+pub(crate) use limits::Disk;
+pub use limits::{FreeSpace, TransferLimits};
+pub(crate) use spool::Spool;
+pub(crate) use unpack::{
+    Packed, UploadSource, exists, import_upload, pack_session, prepare_stage, remove_dir,
+};
 
 /// Largest chunk, bytes: well inside a 4 MiB ctrl message with its framing.
 pub(crate) const CHUNK_BYTES: u32 = 1 << 20;
-/// Transfers held at once (each up to 64 MiB in memory).
-pub(crate) const MAX_TRANSFERS: usize = 4;
+/// Transfers held at once by the daemon.
+pub(crate) const MAX_TRANSFERS: usize = 8;
+/// Transfers one peer holds at once.
+pub(crate) const MAX_PEER_TRANSFERS: usize = 2;
 /// A transfer nobody touched for this long is dropped.
-pub(crate) const IDLE: Duration = Duration::from_secs(120);
+pub(crate) const IDLE: std::time::Duration = std::time::Duration::from_secs(120);
 /// Transfers viewers may hold together: the rest stay an operator's.
 pub(crate) const MAX_VIEWER_TRANSFERS: usize = MAX_TRANSFERS / 2;
-/// A transfer is dropped this long after it began, touched or not: a client that fetches
-/// one chunk now and then must not hold a slot and its 64 MiB for ever. 64 MiB in 15 min
-/// is about 600 kbit/s, slower than any link a session is sent over.
-pub const DEFAULT_LIFETIME: Duration = Duration::from_secs(15 * 60);
 /// Staging directory under the session directory.
-const STAGING: &str = ".incoming";
+pub(crate) const STAGING: &str = ".incoming";
 
 #[derive(Debug)]
 enum Kind {
@@ -55,10 +73,14 @@ enum Kind {
         file: String,
         bytes: u64,
         sha256: String,
-        data: Vec<u8>,
+        spool: Spool,
+        /// Until the last byte arrived and matched `sha256`.
+        hasher: Option<Hasher>,
+        /// A file job reads it: kept past its idle time until the job answers.
+        busy: bool,
     },
     Download {
-        data: Vec<u8>,
+        spool: Spool,
         /// A working-state download: the content hash and time it was packed at.
         working: Option<(u64, WallNs)>,
     },
@@ -75,42 +97,41 @@ struct Xfer {
     kind: Kind,
 }
 
+impl Xfer {
+    fn busy(&self) -> bool {
+        matches!(self.kind, Kind::Upload { busy: true, .. })
+    }
+}
+
 /// The transfers under way.
 #[derive(Debug)]
 pub(crate) struct Transfers {
     next: u32,
     map: HashMap<TransferId, Xfer>,
     staged: u32,
-    lifetime: Duration,
+    pub(crate) limits: TransferLimits,
     snapshots: snapshot::Snapshots,
 }
 
 impl Default for Transfers {
     fn default() -> Self {
-        Self::new(DEFAULT_LIFETIME)
-    }
-}
-
-fn archive_err(e: ArchiveError) -> ProtoError {
-    let msg = e.to_string();
-    match e {
-        ArchiveError::Io { .. } => internal(msg),
-        _ => invalid(msg),
+        Self::new(TransferLimits::default())
     }
 }
 
 fn gone(t: TransferId) -> ProtoError {
     missing(format!(
-        "no transfer {t} (finished, or dropped after 2 min without a chunk or at its \
-         lifetime)"
+        "no transfer {t} (finished, aborted, or dropped after 2 min without a chunk or at \
+         its lifetime)"
     ))
 }
 
-pub(crate) fn remove_dir(p: &Path) {
-    if let Err(e) = fs::remove_dir_all(p)
-        && e.kind() != std::io::ErrorKind::NotFound
-    {
-        tracing::warn!("{}: not removed: {e}", p.display());
+/// A refusal for a full disk, or an internal error: either way the transfer is gone.
+fn disk_err(what: &str, e: &std::io::Error) -> ProtoError {
+    if e.kind() == std::io::ErrorKind::StorageFull {
+        refused(format!("{what}: the daemon's disk is full"))
+    } else {
+        internal(format!("{what}: {e}"))
     }
 }
 
@@ -131,13 +152,12 @@ pub(crate) fn client_file(path: &str) -> String {
 }
 
 impl Transfers {
-    /// Transfers that live at most `lifetime` each.
-    pub(crate) fn new(lifetime: Duration) -> Self {
+    pub(crate) fn new(limits: TransferLimits) -> Self {
         Self {
             next: 0,
             map: HashMap::new(),
             staged: 0,
-            lifetime,
+            limits,
             snapshots: snapshot::Snapshots::default(),
         }
     }
@@ -150,8 +170,11 @@ impl Transfers {
     }
 
     fn prune(&mut self, now: Instant) {
-        let lifetime = self.lifetime;
+        let lifetime = self.limits.lifetime;
         self.map.retain(|id, x| {
+            if x.busy() {
+                return true;
+            }
             let idle = now.duration_since(x.last) >= IDLE;
             let old = now.duration_since(x.born) >= lifetime;
             if idle || old {
@@ -164,15 +187,28 @@ impl Transfers {
         });
     }
 
-    fn add(&mut self, client: &Peer, viewer: bool, kind: Kind) -> Result<TransferId, ProtoError> {
-        let now = Instant::now();
-        self.prune(now);
+    /// A new transfer's id, when `client` and the daemon have a slot for it.
+    fn admit(&mut self, client: &Peer) -> Result<TransferId, ProtoError> {
+        self.prune(Instant::now());
         if self.map.len() >= MAX_TRANSFERS {
             return Err(refused(format!(
-                "{MAX_TRANSFERS} transfers are under way; try again when one is done"
+                "{} transfers are under way, all this daemon holds; try again when one is \
+                 done",
+                self.map.len()
             )));
         }
-        let id = self.next_id();
+        let own = self.map.values().filter(|x| x.client == *client).count();
+        if own >= MAX_PEER_TRANSFERS {
+            return Err(refused(format!(
+                "this client holds {own} transfers, all one client may hold; finish or \
+                 abort one first"
+            )));
+        }
+        Ok(self.next_id())
+    }
+
+    fn insert(&mut self, id: TransferId, client: &Peer, viewer: bool, kind: Kind) {
+        let now = Instant::now();
         self.map.insert(
             id,
             Xfer {
@@ -183,7 +219,6 @@ impl Transfers {
                 kind,
             },
         );
-        Ok(id)
     }
 
     fn get(&mut self, client: &Peer, id: TransferId) -> Result<&mut Xfer, ProtoError> {
@@ -197,35 +232,78 @@ impl Transfers {
         }
     }
 
-    /// A complete upload's file name and bytes.
-    pub(crate) fn upload(
-        &mut self,
-        client: &Peer,
-        id: TransferId,
-    ) -> Result<(String, &[u8]), ProtoError> {
-        match &self.get(client, id)?.kind {
-            Kind::Upload {
-                file, bytes, data, ..
-            } if data.len() as u64 == *bytes => Ok((file.clone(), data.as_slice())),
-            Kind::Upload { bytes, data, .. } => Err(invalid(format!(
+    /// A complete upload's file name and spool file.
+    fn complete(&mut self, client: &Peer, id: TransferId) -> Result<&mut Xfer, ProtoError> {
+        let x = self.get(client, id)?;
+        match &x.kind {
+            Kind::Upload { bytes, spool, .. } if spool.len() == *bytes => Ok(x),
+            Kind::Upload { bytes, spool, .. } => Err(invalid(format!(
                 "upload {id} is incomplete: {} of {bytes} bytes received",
-                data.len()
+                spool.len()
             ))),
             Kind::Download { .. } => Err(invalid(format!("transfer {id} is a download"))),
         }
     }
 
-    /// A complete upload's client path and bytes, taken: the transfer ends here.
-    pub(crate) fn take_upload(
+    /// A complete upload's file name and spool file, kept for a file job to read until
+    /// [`Self::release`]: not dropped as idle meanwhile, and no `file.upload_abort` removes
+    /// it under the job.
+    pub(crate) fn claim(
+        &mut self,
+        client: &Peer,
+        id: TransferId,
+    ) -> Result<(String, PathBuf), ProtoError> {
+        match &mut self.complete(client, id)?.kind {
+            Kind::Upload {
+                file, spool, busy, ..
+            } => {
+                *busy = true;
+                Ok((file.clone(), spool.path().to_owned()))
+            }
+            Kind::Download { .. } => Err(internal("a download")),
+        }
+    }
+
+    /// The job reading upload `id` answered: it idles from now.
+    pub(crate) fn release(&mut self, id: TransferId) {
+        if let Some(x) = self.map.get_mut(&id) {
+            x.last = Instant::now();
+            if let Kind::Upload { busy, .. } = &mut x.kind {
+                *busy = false;
+            }
+        }
+    }
+
+    /// A complete upload's file name and whole content: for a trace file, whose readers
+    /// take it whole.
+    pub(crate) fn upload_bytes(
         &mut self,
         client: &Peer,
         id: TransferId,
     ) -> Result<(String, Vec<u8>), ProtoError> {
-        self.upload(client, id)?;
-        match self.map.remove(&id).map(|x| x.kind) {
-            Some(Kind::Upload { file, data, .. }) => Ok((file, data)),
-            _ => Err(gone(id)),
+        match &mut self.complete(client, id)?.kind {
+            Kind::Upload {
+                file, spool, bytes, ..
+            } => {
+                let usize_bytes = usize::try_from(*bytes).unwrap_or(usize::MAX);
+                let data = spool
+                    .read_at(0, usize_bytes)
+                    .map_err(|e| internal(format!("upload {id}: {e}")))?;
+                Ok((file.clone(), data))
+            }
+            Kind::Download { .. } => Err(internal("a download")),
         }
+    }
+
+    /// Bytes the uploads under way have still to write.
+    fn outstanding(&self) -> u64 {
+        self.map
+            .values()
+            .map(|x| match &x.kind {
+                Kind::Upload { bytes, spool, .. } => bytes.saturating_sub(spool.len()),
+                Kind::Download { .. } => 0,
+            })
+            .sum()
     }
 
     /// How many transfers viewers hold; viewer `key` alone when given.
@@ -252,20 +330,49 @@ impl Transfers {
 }
 
 impl Control {
-    /// A fresh staging directory path; nothing on disk changes ([`prepare_stage`] makes
-    /// room for it).
+    /// The staging directory.
+    pub(super) fn staging(&self) -> PathBuf {
+        self.s.session_dir.join(STAGING)
+    }
+
+    /// A fresh staging path; nothing on disk changes ([`prepare_stage`] makes room for
+    /// it).
     pub(super) fn stage_path(&mut self, tag: &str) -> PathBuf {
         self.transfers.staged = self.transfers.staged.wrapping_add(1);
-        self.s.session_dir.join(STAGING).join(format!(
+        self.staging().join(format!(
             "{tag}-{}-{}",
             std::process::id(),
             self.transfers.staged
         ))
     }
 
-    /// Removes what an earlier run left in the staging directory.
+    /// Removes what an earlier run left in the staging directory: spool files, unpacked
+    /// uploads, sessions half deleted.
     pub(super) fn clear_staging(&self) {
-        remove_dir(&self.s.session_dir.join(STAGING));
+        remove_dir(&self.staging());
+    }
+
+    /// What unpacking an upload must leave free.
+    pub(super) fn unpack_disk(&self) -> Disk {
+        Disk {
+            free_space: self.transfers.limits.free_space.clone(),
+            keep: self.transfers.limits.reserve,
+        }
+    }
+
+    /// What packing a download must leave free.
+    pub(super) fn pack_disk(&self) -> Disk {
+        Disk {
+            free_space: self.transfers.limits.free_space.clone(),
+            keep: self.transfers.limits.pack_reserve,
+        }
+    }
+
+    /// The staging directory, made.
+    fn made_staging(&self) -> Result<PathBuf, ProtoError> {
+        let dir = self.staging();
+        fs::create_dir_all(&dir).map_err(|e| internal(format!("{STAGING}: {e}")))?;
+        Ok(dir)
     }
 
     pub(super) fn file_upload_begin(
@@ -288,21 +395,44 @@ impl Control {
             return Err(invalid("sha256 must be 64 hex digits"));
         }
         let file_name = client_file(&file);
-        let transfer = self.transfers.add(
+        let transfer = self.transfers.admit(client)?;
+        let dir = self.made_staging()?;
+        let free = self
+            .transfers
+            .limits
+            .free_space
+            .of(&dir)
+            .map_err(|e| internal(format!("free space of {STAGING}: {e}")))?;
+        let reserve = self.transfers.limits.reserve;
+        let room = free.saturating_sub(self.transfers.outstanding());
+        if room < bytes.saturating_add(reserve) {
+            return Err(refused(format!(
+                "no room for {bytes} bytes: the daemon's disk has {free} bytes free, \
+                 uploads under way take {} of them, and {reserve} must stay free",
+                free - room
+            )));
+        }
+        let spool = Spool::create(dir.join(format!("up-{transfer}.part")))
+            .map_err(|e| disk_err("upload", &e))?;
+        let sha256 = sha256.to_ascii_lowercase();
+        self.transfers.insert(
+            transfer,
             client,
             false,
             Kind::Upload {
                 file: file_name.clone(),
                 bytes,
-                sha256: sha256.to_ascii_lowercase(),
-                data: Vec::with_capacity(usize::try_from(bytes).unwrap_or(0)),
+                sha256: sha256.clone(),
+                spool,
+                hasher: Some(Hasher::default()),
+                busy: false,
             },
-        )?;
+        );
         Ok(ReplyBody::Transfer(Transfer {
             transfer,
             file_name,
             bytes,
-            sha256: sha256.to_ascii_lowercase(),
+            sha256,
             chunk_bytes: CHUNK_BYTES,
         }))
     }
@@ -315,33 +445,44 @@ impl Control {
         data: &Blob,
     ) -> Result<ReplyBody, ProtoError> {
         let rev = self.store.rev();
+        let free_space = self.transfers.limits.free_space.clone();
+        let floor = self.transfers.limits.pack_reserve;
         let x = self.transfers.get(client, id)?;
-        let Kind::Upload {
-            bytes,
-            sha256,
-            data: got,
-            ..
-        } = &mut x.kind
-        else {
-            return Err(invalid(format!("transfer {id} is a download")));
-        };
-        if offset != got.len() as u64 {
-            return Err(invalid(format!(
-                "upload {id}: chunk at {offset}, expected at {} (chunks go in order)",
-                got.len()
-            )));
+        match append_chunk(&mut x.kind, id, offset, &data.0, &free_space, floor) {
+            Ok(()) => Ok(ReplyBody::Ack { rev }),
+            Err(Chunk::Refused(e)) => Err(e),
+            Err(Chunk::Dropped(e)) => {
+                self.transfers.remove(id);
+                Err(e)
+            }
         }
-        if data.0.len() > CHUNK_BYTES as usize || offset + data.0.len() as u64 > *bytes {
-            return Err(invalid(format!(
-                "upload {id}: the chunk goes past the size announced ({bytes} bytes)"
-            )));
+    }
+
+    /// `file.upload_abort`: the upload and its spool file go now.
+    pub(super) fn file_upload_abort(
+        &mut self,
+        client: &Peer,
+        id: TransferId,
+    ) -> Result<ReplyBody, ProtoError> {
+        let x = self.transfers.get(client, id)?;
+        match &x.kind {
+            Kind::Download { .. } => {
+                return Err(invalid(format!(
+                    "transfer {id} is a download: end it with file.download_end"
+                )));
+            }
+            Kind::Upload { busy: true, .. } => {
+                return Err(refused(format!(
+                    "upload {id} is being read by a file operation; it ends with it"
+                )));
+            }
+            Kind::Upload { .. } => {}
         }
-        got.extend_from_slice(&data.0);
-        if got.len() as u64 == *bytes && ac2_archive::verify(got, sha256).is_err() {
-            self.transfers.remove(id);
-            return Err(invalid(ArchiveError::Checksum.to_string()));
-        }
-        Ok(ReplyBody::Ack { rev })
+        self.transfers.remove(id);
+        tracing::info!("upload {id} aborted by {}", client.id().0);
+        Ok(ReplyBody::Ack {
+            rev: self.store.rev(),
+        })
     }
 
     /// `file.import`: stores a complete upload as a named session without opening it. The
@@ -355,14 +496,18 @@ impl Control {
     ) -> Result<(Pending, Work), ProtoError> {
         session::validate_name(&name).map_err(session_err)?;
         let target = self.s.session_dir.join(&name);
-        let bytes = self.transfers.upload(client, id)?.1.to_vec();
-        let staged = self.stage_path("upload");
+        let archive = self.transfers.claim(client, id)?.1;
+        let src = UploadSource {
+            archive,
+            stage: self.stage_path("upload"),
+            disk: self.unpack_disk(),
+        };
         let aside = self.stage_path("replaced");
         let root = self.s.session_dir.clone();
         let (n, t) = (name.clone(), target.clone());
         let work: Work = Box::new(move |cancel: &Cancel| {
             FileDone::Import(import_upload(
-                &bytes, &n, &t, &root, &staged, &aside, overwrite, cancel,
+                &src, &n, &t, &root, &aside, overwrite, cancel,
             ))
         });
         Ok((
@@ -389,15 +534,17 @@ impl Control {
     }
 
     /// `file.download_begin`: the working state's content as of now (or a stored
-    /// session), packed by a worker.
+    /// session), packed to the staging directory by a worker.
     pub(super) fn begin_download(
         &mut self,
         client: &Peer,
         r: Option<&SessionRef>,
     ) -> Result<(Pending, Work), ProtoError> {
+        let disk = self.pack_disk();
         let (stem, work, working): (String, Work, _) = match r {
             None => {
                 let dir = self.stage_path("download");
+                let to = self.stage_path("pack");
                 let data = self.session_data(true)?;
                 let at = data.saved_at;
                 let hash = self.content_hash();
@@ -413,11 +560,9 @@ impl Control {
                     let packed = cancel
                         .check()
                         .and_then(|()| prepare_stage(&dir))
-                        .and_then(|()| {
-                            session::save(&dir, &data)
-                                .map_err(session_err)
-                                .and_then(|_| ac2_archive::pack_dir(&dir).map_err(archive_err))
-                        });
+                        .and_then(|()| session::save(&dir, &data).map_err(session_err))
+                        .and_then(|_| cancel.check())
+                        .and_then(|()| pack_session(&dir, &to, &disk));
                     remove_dir(&dir);
                     FileDone::Download(packed)
                 });
@@ -428,12 +573,13 @@ impl Control {
             }
             Some(r) => {
                 let (name, dir) = self.session_path(client, r)?;
+                let to = self.stage_path("pack");
                 let work: Work = Box::new(move |cancel: &Cancel| {
                     FileDone::Download(
                         cancel
                             .check()
                             .and_then(|()| session::read_manifest(&dir).map_err(session_err))
-                            .and_then(|_| ac2_archive::pack_dir(&dir).map_err(archive_err)),
+                            .and_then(|_| pack_session(&dir, &to, &disk)),
                     )
                 });
                 (name, work, None)
@@ -454,36 +600,66 @@ impl Control {
         client: &Peer,
         stem: &str,
         working: Option<(u64, WallNs)>,
-        packed: Result<Vec<u8>, ProtoError>,
+        packed: Result<Packed, ProtoError>,
     ) -> Result<ReplyBody, ProtoError> {
-        let data = packed?;
-        self.offer_download(
-            client,
-            format!("{stem}.{}", ac2_archive::EXTENSION),
-            data,
-            working,
+        let p = packed?;
+        let file_name = format!("{stem}.{}", ac2_archive::EXTENSION);
+        let viewer = self.peer_role(client) == Some(ac2_proto::model::ClientRole::Viewer);
+        let transfer = self.transfers.admit(client)?;
+        let spool = Spool::adopt(
+            &p.path,
+            self.staging().join(format!("down-{transfer}.part")),
         )
+        .map_err(|e| disk_err("download", &e))?;
+        self.transfers
+            .insert(transfer, client, viewer, Kind::Download { spool, working });
+        Ok(ReplyBody::Transfer(Transfer {
+            transfer,
+            file_name,
+            bytes: p.bytes,
+            sha256: p.sha256.clone(),
+            chunk_bytes: CHUNK_BYTES,
+        }))
     }
 
-    /// Holds `data` for `client` to fetch in chunks (`file.download_chunk`), as `file_name`.
+    /// Spools `data` for `client` to fetch in chunks (`file.download_chunk`), as
+    /// `file_name`.
     pub(super) fn offer_download(
         &mut self,
         client: &Peer,
         file_name: String,
-        data: Vec<u8>,
-        working: Option<(u64, WallNs)>,
+        data: &[u8],
     ) -> Result<ReplyBody, ProtoError> {
         let bytes = data.len() as u64;
-        let sha256 = ac2_archive::sha256_hex(&data);
         let viewer = self.peer_role(client) == Some(ac2_proto::model::ClientRole::Viewer);
-        let transfer = self
-            .transfers
-            .add(client, viewer, Kind::Download { data, working })?;
+        let transfer = self.transfers.admit(client)?;
+        let dir = self.made_staging()?;
+        let room = self
+            .pack_disk()
+            .room(&dir)
+            .map_err(|e| internal(format!("free space of {STAGING}: {e}")))?;
+        if room < bytes {
+            return Err(refused(format!(
+                "no room for {bytes} bytes: the daemon's disk is nearly full"
+            )));
+        }
+        let mut spool = Spool::create(dir.join(format!("down-{transfer}.part")))
+            .map_err(|e| disk_err("download", &e))?;
+        spool.append(data).map_err(|e| disk_err("download", &e))?;
+        self.transfers.insert(
+            transfer,
+            client,
+            viewer,
+            Kind::Download {
+                spool,
+                working: None,
+            },
+        );
         Ok(ReplyBody::Transfer(Transfer {
             transfer,
             file_name,
             bytes,
-            sha256,
+            sha256: ac2_archive::sha256_hex(data),
             chunk_bytes: CHUNK_BYTES,
         }))
     }
@@ -498,18 +674,19 @@ impl Control {
             return r;
         }
         let x = self.transfers.get(client, id)?;
-        let Kind::Download { data, .. } = &x.kind else {
+        let Kind::Download { spool, .. } = &mut x.kind else {
             return Err(invalid(format!("transfer {id} is an upload")));
         };
-        let start = usize::try_from(offset).unwrap_or(usize::MAX);
-        if start > data.len() {
+        if offset > spool.len() {
             return Err(invalid(format!(
                 "download {id} is {} bytes; offset {offset}",
-                data.len()
+                spool.len()
             )));
         }
-        let end = (start + CHUNK_BYTES as usize).min(data.len());
-        Ok(ReplyBody::Chunk(Blob(data[start..end].to_vec())))
+        spool
+            .read_at(offset, CHUNK_BYTES as usize)
+            .map(|b| ReplyBody::Chunk(Blob(b)))
+            .map_err(|e| internal(format!("download {id}: {e}")))
     }
 
     pub(super) fn file_download_end(
@@ -550,165 +727,79 @@ impl Control {
     }
 }
 
-/// Makes room for staging directory `p`: its parent made, anything left at `p` removed.
-pub(super) fn prepare_stage(p: &Path) -> Result<(), ProtoError> {
-    if let Some(root) = p.parent() {
-        fs::create_dir_all(root).map_err(|e| internal(format!("{}: {e}", root.display())))?;
+/// Why a chunk was not taken: the upload stays (`Refused`) or is gone (`Dropped`).
+enum Chunk {
+    Refused(ProtoError),
+    Dropped(ProtoError),
+}
+
+/// Writes chunk `data` at `offset` of upload `kind`, the last one checked against its
+/// SHA-256.
+fn append_chunk(
+    kind: &mut Kind,
+    id: TransferId,
+    offset: u64,
+    data: &[u8],
+    free_space: &FreeSpace,
+    floor: u64,
+) -> Result<(), Chunk> {
+    let Kind::Upload {
+        bytes,
+        sha256,
+        spool,
+        hasher,
+        ..
+    } = kind
+    else {
+        return Err(Chunk::Refused(invalid(format!(
+            "transfer {id} is a download"
+        ))));
+    };
+    let len = data.len() as u64;
+    // A chunk sent again after its reply was lost, past the dedup window: the bytes are
+    // there already.
+    if len > 0 && offset + len == spool.len() {
+        return match spool.holds(offset, data) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(Chunk::Refused(invalid(format!(
+                "upload {id}: a chunk at {offset} that differs from the bytes received there"
+            )))),
+            Err(e) => Err(Chunk::Refused(internal(format!("upload {id}: {e}")))),
+        };
     }
-    remove_dir(p);
+    if offset != spool.len() {
+        return Err(Chunk::Refused(invalid(format!(
+            "upload {id}: chunk at {offset}, expected at {} (chunks go in order)",
+            spool.len()
+        ))));
+    }
+    if data.len() > CHUNK_BYTES as usize || offset + len > *bytes {
+        return Err(Chunk::Refused(invalid(format!(
+            "upload {id}: the chunk goes past the size announced ({bytes} bytes)"
+        ))));
+    }
+    // Whatever else writes to the disk meanwhile (another upload, the logs), the last of it
+    // is never taken by this one.
+    match free_space.of(spool.path()) {
+        Ok(free) if free < len.saturating_add(floor) => {
+            return Err(Chunk::Dropped(refused(format!(
+                "upload {id} dropped: the daemon's disk is nearly full"
+            ))));
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!("free space of {STAGING}: {e}"),
+    }
+    spool
+        .append(data)
+        .map_err(|e| Chunk::Dropped(disk_err(&format!("upload {id} dropped"), &e)))?;
+    if let Some(h) = hasher.as_mut() {
+        h.update(data);
+    }
+    if spool.len() == *bytes && hasher.take().map(Hasher::hex).as_deref() != Some(sha256.as_str()) {
+        return Err(Chunk::Dropped(invalid(ArchiveError::Checksum.to_string())));
+    }
     Ok(())
 }
 
-/// Unpacks archive `bytes` into staging directory `dir`; nothing is left there on an
-/// error.
-pub(super) fn unpack_into(bytes: &[u8], dir: &Path) -> Result<(), ProtoError> {
-    prepare_stage(dir)?;
-    ac2_archive::unpack(bytes, dir).map_err(|e| {
-        remove_dir(dir);
-        archive_err(e)
-    })
-}
-
-/// `file.import`'s disk work: unpacks into `staged`, then renames it to `target` (an
-/// existing session moved to `aside` first, and back if the rename fails).
-#[allow(clippy::too_many_arguments)]
-fn import_upload(
-    bytes: &[u8],
-    name: &str,
-    target: &Path,
-    root: &Path,
-    staged: &Path,
-    aside: &Path,
-    overwrite: bool,
-    cancel: &Cancel,
-) -> Result<Manifest, ProtoError> {
-    if !overwrite && let Some(p) = session::peek(target) {
-        return Err(exists(name, p.saved_at.unwrap_or_default()));
-    }
-    if !overwrite && target.exists() {
-        return Err(perr(
-            ErrorCode::Conflict,
-            format!(
-                "{} exists and is not a session of this version",
-                target.display()
-            ),
-        ));
-    }
-    unpack_into(bytes, staged)?;
-    // Only a session this build reads is stored by name: one of another version would
-    // not list. Its traces can be salvaged instead.
-    let m = match session::read_manifest(staged) {
-        Ok(m) => m,
-        Err(e) => {
-            remove_dir(staged);
-            return Err(session_err(e));
-        }
-    };
-    // The last moment before the session directory changes: a requester whose role was
-    // taken down meanwhile imports nothing.
-    if let Err(e) = cancel.check() {
-        remove_dir(staged);
-        return Err(e);
-    }
-    let old = if target.exists() {
-        if let Err(e) = prepare_stage(aside) {
-            remove_dir(staged);
-            return Err(e);
-        }
-        if let Err(e) = fs::rename(target, aside) {
-            remove_dir(staged);
-            return Err(internal(format!("{}: {e}", target.display())));
-        }
-        Some(aside)
-    } else {
-        None
-    };
-    if let Err(e) = fs::create_dir_all(root).and_then(|()| fs::rename(staged, target)) {
-        if let Some(old) = old {
-            let _ = fs::rename(old, target);
-        }
-        remove_dir(staged);
-        return Err(internal(format!("{}: {e}", target.display())));
-    }
-    if let Some(old) = old {
-        remove_dir(old);
-    }
-    Ok(m)
-}
-
-/// `conflict` / `session_exists`.
-pub(crate) fn exists(name: &str, saved_at: WallNs) -> ProtoError {
-    perr_detail(
-        ErrorCode::Conflict,
-        format!("a session named {name:?} exists; overwrite it to replace it"),
-        ErrorDetail::SessionExists {
-            name: name.to_owned(),
-            saved_at,
-        },
-    )
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn file_part_takes_the_last_component() {
-        assert_eq!(
-            file_part("/run/media/foh/STICK/show.ac2session"),
-            "show.ac2session"
-        );
-        assert_eq!(file_part("C:\\shows\\fri\\"), "fri");
-        assert_eq!(file_part("show"), "show");
-    }
-
-    #[test]
-    fn transfers_are_bounded_and_per_client() {
-        let mut t = Transfers::default();
-        let a = Peer::local(b"a");
-        let kind = || Kind::Download {
-            data: vec![1, 2, 3],
-            working: None,
-        };
-        let ids: Vec<_> = (0..MAX_TRANSFERS)
-            .map(|_| t.add(&a, false, kind()).expect("room"))
-            .collect();
-        assert_eq!(
-            t.add(&a, false, kind()).map_err(|e| e.code),
-            Err(ErrorCode::Refused)
-        );
-        let b = Peer::local(b"b");
-        assert_eq!(
-            t.get(&b, ids[0]).map(|_| ()).map_err(|e| e.code),
-            Err(ErrorCode::NotFound)
-        );
-        if let Some(old) = Instant::now().checked_sub(IDLE) {
-            t.map.get_mut(&ids[0]).expect("x").last = old;
-            t.prune(Instant::now());
-            assert!(t.get(&a, ids[0]).is_err());
-            assert!(t.add(&a, false, kind()).is_ok());
-        }
-    }
-
-    /// Touched again and again, a transfer still ends at its lifetime.
-    #[test]
-    fn a_touched_transfer_ends_at_its_lifetime() {
-        let mut t = Transfers::default();
-        let a = Peer::local(b"a");
-        let id = t
-            .add(
-                &a,
-                false,
-                Kind::Download {
-                    data: vec![1],
-                    working: None,
-                },
-            )
-            .expect("room");
-        assert!(t.get(&a, id).is_ok(), "fresh, and touched now");
-        if let Some(born) = Instant::now().checked_sub(DEFAULT_LIFETIME) {
-            t.map.get_mut(&id).expect("x").born = born;
-            assert!(t.get(&a, id).is_err(), "at its lifetime though touched");
-        }
-    }
-}
+mod tests;

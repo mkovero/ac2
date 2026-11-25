@@ -54,6 +54,7 @@ mod dynamics;
 mod eq;
 mod execute;
 mod file_jobs;
+mod file_ops;
 mod files;
 mod generator;
 mod ids;
@@ -91,7 +92,7 @@ mod working;
 pub(crate) use artnet::check_addr as check_artnet_addr;
 pub(crate) use osc::{Judged, has_cue};
 pub(crate) use remote::check_peers;
-pub use transfer::DEFAULT_LIFETIME as TRANSFER_LIFETIME;
+pub use transfer::{FreeSpace, TransferLimits};
 pub(crate) use validate::validate_meas;
 use validate::{
     MAX_CAL_UNSETTLED_DB, MAX_DELAY_S, check_delay, check_find, delay_samples, gen_err,
@@ -275,7 +276,7 @@ pub(crate) struct Setup {
     /// How the daemon serves clients (`server.*`).
     pub(crate) server: rig::Server,
     pub(crate) lease_expiry: Duration,
-    pub(crate) transfer_lifetime: Duration,
+    pub(crate) transfers: TransferLimits,
     pub(crate) keepalive: Duration,
     pub(crate) replay: ReplayLimits,
     pub(crate) dedup: DedupLimits,

@@ -133,9 +133,13 @@ impl Command {
             | Self::FileSalvage { .. }
             | Self::FileUploadBegin { .. }
             | Self::FileUploadChunk { .. }
+            | Self::FileUploadAbort { .. }
             | Self::FileImport { .. }
+            | Self::FileDelete { .. }
+            | Self::FileRename { .. }
             | Self::RecStart { .. }
             | Self::RecStop
+            | Self::RecDelete { .. }
             | Self::StreamReplay { .. }
             | Self::ServerNetwork { .. }
             | Self::AuthAuthorize { .. }
