@@ -590,7 +590,9 @@ meter from showing a stuck value after a cut. Peak judgement on restart takes th
 utc_offset_s: i32}`, read from the OS only: the IANA name when the host has one, nil when the
 OS gives only an offset (a POSIX `TZ` rule), and the offset in force now. The daemon reads it
 at start and once a minute, and commits `rig` when either part changed (a DST change, a host
-reconfigured). Both CSV headers gain `# zone: <name or ±hh:mm>`; band log rows gain
+reconfigured). Both CSV headers gain `# zone: <name or ±hh:mm>`, the offset the one in force
+when the log started (a name reads every row right; an offset only the rows before the next
+change); band log rows gain
 `utc_offset_s`, so a logged `period` can be checked afterwards. Re-stamping a row to
 `derived` does not re-judge its `period` or change its `utc_offset_s`.
 
@@ -941,6 +943,31 @@ or it boots without its meter and refuses every network client.
 8. **File names inside a session archive** follow the rule session names follow: no Windows
    device name, no `:`, no trailing dot or space (`ac2_archive::windows_device` is the one
    device-name rule).
+9. **The converter runs as the daemon's user.** It refuses any file another user owns
+   (nothing written, no backup made), rather than rewriting it as itself: the rewritten file
+   would be the runner's, and the daemon admits no network client while the
+   authorized-clients file is another user's. Modes are kept, except that the
+   authorized-clients file and its backup are always 600. Its check
+   (`tools/proto-next/test_convert.py`, run by CI's protocol job) converts a file of every
+   format it converts as the 105 daemon wrote them (`samples/old`) and compares with
+   `samples/new`, which the 106 daemon loads whole (`ac2d` test `converted`).
+10. **A band log's file name** is its SPL log's stem with `.bands.csv`, in the autosave as in
+   a saved session, so `file.salvage` pairs them without the manifest; a band log without its
+   SPL log is listed among the refused files.
+11. **A viewer sees who did what.** §3 limits what a viewer may send and reads host paths as
+   base names, but sets no rule on client names or peer endpoints in state: the generator
+   owner, `last_action.client`, an edit's owner and `rig.peers` stay visible to a viewer, who
+   is trusted to watch the rig. What §3 bounds per key, a key's data connections join: at
+   most 8 at once (an app, a CLI command, reconnects whose old connection has not stalled
+   out); a ninth drops the key's connection heard from longest ago, so a reconnecting client
+   always gets in.
+12. **A rejoin's `hello`** that fails is asked again every 500 ms until a welcome comes: the
+   role the client shows is the welcome's, and a stale one must not stay.
+13. **Stale socket files.** The daemon holding the instance lock removes the files at its own
+   endpoints before it binds; the app removes a simulated rig's files once it killed the rig
+   or saw it end, and at start removes those of every app (`sim-<pid>-…`) no longer running.
+14. **A `TZ` name with digits** (`EST5EDT`) is a zone name when the zone database has a file
+   of that name, as the C library reads `TZ`; else it is a rule and the header gives the offset.
 
 ## Finding map
 
