@@ -23,9 +23,9 @@ audio path has so far run only on a virtual device (BlackHole) in CI.
   hanging.
 - **Audio MIDI Setup on P.** On a Core Audio device, **P** in Settings › Audio I/O brings
   up macOS's Audio MIDI Setup, where the device's rate, format and clock source are set. A
-  change there reopens the session at the new settings by itself.
+  change there reopens the stream at the new settings by itself.
 - **Only the inputs in use are read.** On an interface with several input streams (analog
-  and ADAT, say), only the streams the session's inputs are on are switched on.
+  and ADAT, say), only the device's streams that carry the open inputs are switched on.
 - **BlackHole.** If BlackHole is installed it is listed like any device. It is what CI tests
   on; it reports no latency and cannot be unplugged, so it answers none of Test 6. Use the
   real interface for every test here.
@@ -73,12 +73,12 @@ string `ac2 --version` prints; the `ac2d <version> up` line in `ac2d.log` names 
 **The app alone, or the app and the command line together.** By default the app starts
 the daemon (`ac2d`, inside the app bundle) when none is running and stops it when it quits.
 The app-only tests use it as is. A test that uses
-`ac2` against the app's running session says so, and uses a daemon started in Terminal:
+`ac2` against the app's running stream says so, and uses a daemon started in Terminal:
 
 1. Quit the app. In Terminal: `ac2 daemon start` (it starts the `ac2d` copied beside `ac2`
    in step 5).
 2. Start the app: it finds the daemon and connects to it, starting none of its own. The
-   app and `ac2` now share one session: `ac2 session status`
+   app and `ac2` now share one stream: `ac2 stream status`
    and `ac2 devices` read it.
 3. Afterwards quit the app, then `ac2 daemon stop`. The next start of the app starts
    its own daemon again. The daemon's log is `~/Library/Logs/ac2/ac2d.log`.
@@ -106,7 +106,7 @@ interface out 2 ── cable 2 ──► in 2   (measurement: here a wire, so th
 
 ## 3. Test 1: the interface opens and its inputs meter
 
-Pass: the interface is listed, its inputs show live levels, and a session opens without
+Pass: the interface is listed, its inputs show live levels, and a stream opens without
 errors.
 
 1. Start ac2. **Shift+O** (or **⌘K → Open audio I/O…**) opens Settings
@@ -118,14 +118,14 @@ errors.
    input: its row's meter must move. Check every input you have.
 4. Roles: **↑/↓** to a row, then **R** on input 1 (the loopback), **M** on input 2
    (cable 2; **N** names it, e.g. "cable"), **S** on output 1, and make sure output 2 is in
-   the session too (**Space** on its row). Optional: **D** (*Detect loopback…*) at −40 dBFS
+   the stream too (**Space** on its row). Optional: **D** (*Detect loopback…*) at −40 dBFS
    should mark input 1 as the Reference by itself.
-5. **Enter** opens the session. Accept the offered transfer measurement with **Enter**.
+5. **Enter** opens the stream. Accept the offered transfer measurement with **Enter**.
 6. Check the top bar: rate and buffer are shown (`local (STIM OFF) · 48 kHz · 1024
    frames · …`); hovering over them shows the device and the stated latency. The **Inputs** list on the left
    keeps a meter per input.
 
-Also worth a try: close the session (**⌘K → Close audio I/O**), reopen it at
+Also worth a try: close the stream (**⌘K → Close audio I/O**), reopen it at
 96 kHz if the interface supports it (type the rate on the rate row), and a short buffer
 such as 256 frames (the buffer row).
 
@@ -254,30 +254,30 @@ latency of its own, cannot be unplugged, has no clock to change and has one stre
    Note the remainder; a negative one (measured below stated) is worth a line of its own.
    Repeat at a second buffer size (1024 frames): the stated latency changes with the
    buffer, and the remainder should not.
-   Then check that a session states the same, with the daemon (section 1, *the app and
-   the command line together*): `ac2 daemon start`, start the app, open a session at 48 kHz
-   with a 256-frame buffer (Test 1), and run `ac2 session status`: its `stated latency: …`
+   Then check that a stream states the same, with the daemon (section 1, *the app and
+   the command line together*): `ac2 daemon start`, start the app, open a stream at 48 kHz
+   with a 256-frame buffer (Test 1), and run `ac2 stream status`: its `stated latency: …`
    line (the same as the top bar's hover) should match the self-test's. Quit the app and
    `ac2 daemon stop` before the next self-test.
-2. **Rate change while running.** Open a session with the transfer measurement running
+2. **Rate change while running.** Open a stream with the transfer measurement running
    (Test 2). In Settings › Audio I/O, on the device rows, **P** brings up **Audio MIDI
    Setup**. There, change the interface's format to another rate (e.g. 44.1 kHz). Pass:
    within a few seconds ac2 reopens by itself at the new rate, and the top bar says so in
    the warning colour (`… · 44.1 kHz · … frames · driver changed from 48 kHz`; the hover
    has the details). Change it back afterwards.
-3. **Unplug and replug.** With a session open, unplug the interface, wait 10 s, plug it
+3. **Unplug and replug.** With a stream open, unplug the interface, wait 10 s, plug it
    back. Pass: the top bar says the audio stopped and that ac2 is reopening, then the
-   session comes back by itself within 30 s of the replug. Do it **twice**, then run
+   stream comes back by itself within 30 s of the replug. Do it **twice**, then run
    `grep 'audio device probe' ~/Library/Logs/ac2/ac2-ui.log` and paste the lines: each
    `Present { generation: … }` is the interface's object id after a replug, and whether it
    changes between the two replugs is the open question.
 4. **Several input streams** (only if the interface has more inputs than its analog ones,
    e.g. ADAT or S/PDIF inputs beside 8 analog: these usually arrive as a second stream).
-   Open a session with only input 1 and an input from the second group (e.g. input 9, the
+   Open a stream with only input 1 and an input from the second group (e.g. input 9, the
    first ADAT input) in it, and feed each something you can tell apart (the loopback on
    input 1, a tap or a source on the other). Pass: each input's meter moves only with its
-   own signal, and the inputs left out of the session cost nothing visible. Note ac2's CPU %
-   in Activity Monitor with only inputs 1–2 in the session, then with every input in it.
+   own signal, and the inputs left out of the stream cost nothing visible. Note ac2's CPU %
+   in Activity Monitor with only inputs 1–2 in the stream, then with every input in it.
    With the command line instead: `ac2 selftest duplex --backend coreaudio --device
    "<interface>" --in 1,9 --duration 30s` (silent) against the same without `--in`.
 
@@ -285,12 +285,12 @@ latency of its own, cannot be unplugged, has no clock to change and has one stre
 
 Checks the file writes and the replay path on macOS.
 
-1. With the session open and pink noise playing, **⌘K**, type `rec`, **Enter** on
+1. With the stream open and pink noise playing, **⌘K**, type `rec`, **Enter** on
    *Record: raw audio of every input on / off*. The top bar shows `REC 0:12 · … MB`. After
    a minute, the same command again stops it; the top bar names the recording
    (`recorded rec-… · 1:00 · … MB`).
-2. **Shift+Esc** stops the stimulus. **⌘K → Replay a recording as the session (name or
-   path)…**, type that name, **Enter**. The measurements should show the same curves as
+2. **Shift+Esc** stops the stimulus. **⌘K → Replay recording…**, type that
+   name, **Enter**. The measurements should show the same curves as
    live. Note what the app shows when the recording ends.
 3. The files are in `~/Library/Application Support/ac2/recordings/`. Note their size.
 
@@ -308,7 +308,7 @@ useful.
 | ac2 version (connect dialog foot or Settings › Connection, or `ac2 --version`) | |
 | Install: right-click → Open or Open Anyway needed? Microphone prompt shown, and when? | |
 | Buffer sizes tried (app and self-test), and any that failed | |
-| Test 1: interface listed, channel names or numbers, input meters move, session opens (rate / buffer shown) | |
+| Test 1: interface listed, channel names or numbers, input meters move, stream opens (rate / buffer shown) | |
 | Test 2: cables read 0 dB / 0° / coherence 1; delay finder result (ms, PSR) | |
 | Test 2 sweep: flat response, distortion level, arrival; finished cleanly? | |
 | Test 3: spectrum, RTA and SPL meter live; calibration if tried | |
@@ -320,7 +320,7 @@ useful.
 | Test 6.4: several input streams: right signal on each input? CPU % with 2 inputs and with all | |
 | Record and replay (optional): file written, replay matches live? | |
 | Do the input meters and the SPL number move smoothly, or noticeably steppy? | |
-| ac2 CPU % in Activity Monitor with a session open and nothing playing | |
+| ac2 CPU % in Activity Monitor with a stream open and nothing playing | |
 | Any banner, freeze, crash or odd behaviour | |
 
 Attach `~/Library/Logs/ac2/ac2-ui.log` and `ac2d.log` (and their `.log.1` if the run in question was the

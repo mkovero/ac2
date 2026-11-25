@@ -14,7 +14,7 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   A session format change on deploy is restored with `ac2 session salvage`.
 - Programme metering on the console feed, stages 1–5 landed: input kinds mic / line /
   digital, stereo pairs (mic pairs too: true peak and correlation, no loudness), line
-  calibration in dBu (`cal.line`, `session.inputs`); PPM ballistics, true peak, overs, gated
+  calibration in dBu (`cal.line`, `stream.inputs`); PPM ballistics, true peak, overs, gated
   correlation, ember goniometer (decay 0.1–2 s), `levels.set` / `levels.reset`; BS.1770-5 /
   R128 loudness per line/digital source (EBU Tech 3341/3342 vectors) and `ac2 levels`; LUFS
   bars and the loudness plate. A Programme pane shows **Meters** (true-peak block, LUFS block,
@@ -71,7 +71,7 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   and a top-bar chip per background rig whose stimulus is armed or playing
   (`▶ kettu −24 dBFS`). Stage 3 landed (PROTO 88, session format 43, rig file 11;
   `docs/design/remote-inputs.md`, timing study `timing-study.md`): a session takes another
-  rig's input (`auth admit-rig` on the giving rig, `auth peer-add` and `session open
+  rig's input (`auth admit-rig` on the giving rig, `auth peer-add` and `stream open
   --remote-in RIG:IN` on the taking one, or *Add an input from another rig…* in the app),
   streamed raw per device block and joined at a fixed link offset; per remote rig a clock
   relation (*clocks agree within 2 ppm*, *measuring clocks…*, *CLOCKS NOT LOCKED*, *CLOCKS:

@@ -8,7 +8,7 @@ interface's own ASIO driver, or FlexASIO for a device without one (§2). The MSI
 and the simulated rig were confirmed in a Windows 11 VM on 2026-10-03. CI (all-OS and
 release runs) opens ASIO through FlexASIO on a virtual cable, VB-CABLE
 (`tools/release/windows-asio.ps1`), and the app comes up on it. A dispatch can also run
-that session for an hour (`soak_minutes`). In a Windows 11 VM, RME's own driver for a
+that stream for an hour (`soak_minutes`). In a Windows 11 VM, RME's own driver for a
 Babyface Pro passed the one-hour run and loopback timing (2026-10-13). None of this
 substitutes for a tester's own interface on a real PC.
 
@@ -92,13 +92,13 @@ interface out 2 ── cable 2 ──► in 2   (measurement: here a wire, so th
 
 ASIO is ac2's only Windows audio path: one driver serves the interface's inputs and outputs
 from one callback, on one clock, with the channel names the driver gives (*Analog 1*,
-*ADAT 3*). The session dialog and `ac2 devices` list the backend **ASIO**, one device per
+*ADAT 3*). The stream dialog and `ac2 devices` list the backend **ASIO**, one device per
 installed driver.
 
 #### The driver
 
 Install your interface maker's ASIO driver. With no ASIO driver installed at all, the
-session dialog and `ac2 devices` show the backend as unavailable with *No ASIO driver
+stream dialog and `ac2 devices` show the backend as unavailable with *No ASIO driver
 found*, naming FlexASIO.
 
 #### FlexASIO: devices without their own ASIO driver
@@ -123,7 +123,7 @@ ASIO driver of its own. It works through [FlexASIO](https://github.com/dechamps/
    using the device names as **Sound** settings (`mmsys.cpl`) show them. Input and output
    may be different devices (a USB mic in, the interface out); ac2 then still sees one ASIO
    device, but the two may run on different clocks, so keep the loopback reference.
-   FlexASIO reads the file whenever the driver loads: close the session (or quit the app)
+   FlexASIO reads the file whenever the driver loads: close the stream (or quit the app)
    after editing it.
 3. Allow microphone access for desktop apps (§1 step 3): FlexASIO opens the input through
    WASAPI, which applies Windows' microphone privacy switch.
@@ -133,24 +133,24 @@ driver you used.
 
 #### Using ASIO
 
-- **In the app.** The session dialog's backend row shows **ASIO**; each installed ASIO
+- **In the app.** The stream dialog's backend row shows **ASIO**; each installed ASIO
   driver is one device, with inputs and outputs together.
 - **From the command line.** `ac2 devices` lists the drivers under `asio`, with channel
-  names. `ac2 session open --backend asio --device "<driver>" --in 1-2` opens one;
+  names. `ac2 stream open --backend asio --device "<driver>" --in 1-2` opens one;
   `ac2 selftest duplex --backend asio --device "<driver>" --duration 60s` is Test 5 on it
   (close the app first: a driver runs in one program at a time).
 - **Rate and buffer.** With none chosen, ac2 opens at the driver's current rate and its
   preferred buffer size. Many drivers set the buffer only in their own control panel.
 - **Driver control panel.** In Settings › Audio I/O, with an ASIO device chosen, the
   **Driver control panel… (P)** button (or **P**) opens the driver's own settings window;
-  `ac2 session panel` does the same from the command line (on the PC running ac2d). A rate
-  or buffer change there resets the driver: the session reopens by itself **at the
+  `ac2 stream panel` does the same from the command line (on the PC running ac2d). A rate
+  or buffer change there resets the driver: the stream reopens by itself **at the
   driver's new settings**, its measurements restart, and the top bar shows the new rate in
   the warning colour (`… · 44.1 kHz · 512 frames · driver changed from 48 kHz`; hover for
-  details) until you open the session again. `ac2 session status` shows it as a `NOTE`.
+  details) until you open the stream again. `ac2 stream status` shows it as a `NOTE`.
 - **Clock source.** Settings lists the driver's clock sources under the device (`Clock
   source: Internal (in use) · Word Clock …`), `ac2 devices` after the table, and `ac2
-  session status` the one in use (`clock  Internal`). It is read-only: choose it in the
+  stream status` the one in use (`clock  Internal`). It is read-only: choose it in the
   driver's panel.
 - **Clock.** Input and output come from the same driver callback, so Settings shows one
   clock; there is no *separate endpoints* note.
@@ -159,14 +159,14 @@ driver you used.
   other audio program using it)`; with the interface unplugged or off, `<driver> is
   installed but its interface is not present (connect it and switch it on)`, plus the
   driver's own words when it gives any. Both keep retrying: close the other program or plug
-  the interface back in, and the session comes up within 30 s.
+  the interface back in, and the stream comes up within 30 s.
 - **One driver at a time.** ASIO allows one driver per program. While ac2 has a driver
   open, the other drivers are listed by name only; ac2 cannot pair one driver's inputs with
   another's outputs.
 
 ## 3. Test 1: the interface opens and its inputs meter
 
-Pass: the interface is listed, its inputs show live levels, and a session opens without
+Pass: the interface is listed, its inputs show live levels, and a stream opens without
 errors.
 
 1. In the app, **Shift+O** (or **Ctrl+K → Open audio I/O…**) opens Settings on its
@@ -180,9 +180,9 @@ errors.
    are the driver's outputs.
 4. Roles: **↑/↓** to a row, then **R** on input 1 (the loopback), **M** on input 2
    (cable 2; **N** names it, e.g. "cable"). **S** on output 1, and make sure output 2 is in
-   the session too (**Space** on its row); optional: **D** (*Detect loopback…*) at −40 dBFS
+   the stream too (**Space** on its row); optional: **D** (*Detect loopback…*) at −40 dBFS
    plays on the driver's outputs and should mark input 1 as the Reference by itself.
-5. **Enter** opens the session. Accept the offered transfer measurement with **Enter**.
+5. **Enter** opens the stream. Accept the offered transfer measurement with **Enter**.
 6. Check the top bar: rate and buffer are shown (the device is in their hover). The **Inputs** list on the left
    keeps a meter per input.
 
@@ -190,19 +190,19 @@ errors.
 written in Test 2). If no output rows are listed, the driver has no outputs (with FlexASIO,
 check the `[output]` device in `FlexASIO.toml`): go back to step 2.
 
-From the CLI the same session is `ac2 session open --backend asio --device "<driver>" --in
+From the CLI the same stream is `ac2 stream open --backend asio --device "<driver>" --in
 1-2` (the name as `ac2 devices` lists it).
 
-Also worth a try: close the session (**Ctrl+K → Close audio I/O**), set the interface to
+Also worth a try: close the stream (**Ctrl+K → Close audio I/O**), set the interface to
 96000 Hz in its driver's control panel (with FlexASIO, both devices in `mmsys.cpl`), reopen,
 and check the top bar shows 96 kHz. Unplug and replug
-the interface while a session is open (ac2 should say so and recover, not crash). If the
+the interface while a stream is open (ac2 should say so and recover, not crash). If the
 interface does not open at all, copy the exact message from the app and the last lines of
 `ac2-ui.log` and `ac2d.log`, and say which entry from step 2 you picked.
 
 If it opens but no meter ever moves and nothing plays:
 - **External clock.** When the interface follows an external clock (ADAT, S/PDIF, word
-  clock), the session rate has to match that clock's rate: an RME Babyface on ADAT at
+  clock), the stream rate has to match that clock's rate: an RME Babyface on ADAT at
   48 kHz delivers nothing with its driver set to 96 kHz. Pick the clock's rate, or switch
   the clock to internal in the driver's panel.
 - **Windows in a virtual machine.** Pass the interface through as a USB host device, not by
@@ -329,7 +329,7 @@ say so). Paste each report into what you send back
 
 Checks the file writes and the replay path on Windows.
 
-1. With the session open and pink noise playing, **Ctrl+K**, type `rec`, **Enter** on
+1. With the stream open and pink noise playing, **Ctrl+K**, type `rec`, **Enter** on
    *Record: raw audio of every input on / off*. The top bar shows `REC 0:12 · … MB`. After
    a minute, the same command again stops it; the top bar names the recording
    (`recorded rec-… · 1:00 · … MB`).
@@ -342,8 +342,8 @@ Checks the file writes and the replay path on Windows.
 
 Not run under emulation with a real driver yet; each tells us what your driver really does.
 
-1. **Panel.** Session open at 48 kHz. Press **P** in Settings › Audio I/O (or `ac2
-   session panel`). Does the driver's window appear? Is it in front? Does the app stay
+1. **Panel.** Stream open at 48 kHz. Press **P** in Settings › Audio I/O (or `ac2
+   stream panel`). Does the driver's window appear? Is it in front? Does the app stay
    responsive while it is open? Change the rate to 44.1 kHz (or the buffer size) and close
    it. Note: how long until audio is back, the top bar text, and the rate the measurements
    show. Change it back.
@@ -353,11 +353,11 @@ Not run under emulation with a real driver yet; each tells us what your driver r
    plug it in again? Some drivers (RME's Babyface) move to their own clock without telling
    the program; then the top bar says nothing and audio runs on. Note which it was.
 3. **Busy.** Open a DAW (or another ASIO program) on the same driver first, then open the
-   session in ac2. Copy the error text. Close the DAW: does ac2 come up by itself?
-4. **Unplug.** With a session running, unplug the interface's USB cable. Note the top bar
+   stream in ac2. Copy the error text. Close the DAW: does ac2 come up by itself?
+4. **Unplug.** With a stream running, unplug the interface's USB cable. Note the top bar
    text and the error under it after a few attempts (copy it). Plug it back in: how long
    until audio is back?
-5. **Sparse inputs.** `ac2 session open --backend asio --device "<driver>" --in 3,7`
+5. **Sparse inputs.** `ac2 stream open --backend asio --device "<driver>" --in 3,7`
    (any two non-adjacent inputs): does it open, and does each meter follow its own input?
 
 ## 9. What to send back
@@ -370,7 +370,7 @@ useful.
 | PC model, CPU, GPU, VM or not; Windows version and build (`winver`) | |
 | Interface model; ASIO driver (maker's or FlexASIO) and version; with FlexASIO, its `FlexASIO.toml` | |
 | `ac2 --version` output (and the daemon's version in the hover of the top bar's *local*) | |
-| Test 1: device list entries for the interface; input meters move; output rows listed; clock note; session opens (rate / buffer shown) | |
+| Test 1: device list entries for the interface; input meters move; output rows listed; clock note; stream opens (rate / buffer shown) | |
 | Detect loopback found input 1? | |
 | Test 2: cables read 0 dB / 0° / coherence 1; delay finder result (ms, confidence); banners | |
 | Test 2 sweep (if ac2 plays): flat response, distortion level, arrival; finished cleanly? | |
@@ -380,7 +380,7 @@ useful.
 | Record and replay (optional): file written, replay matches live? | |
 | 8a ASIO: panel shows? time to reopen after a rate change, top bar text; clock sources listed; busy and unplug texts; replug time; inputs 3,7 | |
 | Do the input meters and the SPL number move smoothly, or noticeably steppy? | |
-| CPU % of ac2-ui.exe with a session open and nothing playing | |
+| CPU % of ac2-ui.exe with a stream open and nothing playing | |
 | Any banner, freeze, crash, firewall prompt or odd behaviour | |
 
 Attach `%LOCALAPPDATA%\ac2\logs\ac2-ui.log` and `ac2d.log` (and their `.log.1` if the run in question was

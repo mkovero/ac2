@@ -9,17 +9,17 @@ what ac2 learned on it.
 - **Audio:** RME Fireface 400, JACK 96 kHz / 256 frames / 3 periods, `-S`.
 - **Services (systemd user units of mui, lingering):** `jack-ac.service` (jackd; counts as
   started once `jack_wait` sees the server), `ac2d.service` (`Wants=` and `After=jack-ac`, not
-  `BindsTo=`: ac2d keeps its session through a JACK restart and reopens it),
+  `BindsTo=`: ac2d keeps its stream through a JACK restart and reopens it),
   `snd-fireface-ctl.service` (FF400 mixer control). Restart on failure; logs in the user journal
   (`journalctl --user -u ac2d -u jack-ac`). The old system `jack-ac.service` is disabled.
-  `systemctl --user restart jack-ac` leaves ac2d running and the session reopens by itself
+  `systemctl --user restart jack-ac` leaves ac2d running and the stream reopens by itself
   (about 1 s without audio). A restarted ac2d brings back its measurements but not the audio
-  session: reopen it (step 5 below).
+  stream: reopen it (step 5 below).
   JACK port order can move (ADAT block before/after analog): check silently before emitting —
   captures 9–14 read exact digital zero when analog is first.
 - **Wiring (2026-10-28):** out 2 (AN2) → Genelec 1083 (two-way: woofer and tweeter; on out 1 until
   2026-10-28, older notes say out 1); outs 5/6 →
-  cables → ins 7/8 (reference loopbacks; out 5 → in 7 is the session's); in 1 = measurement mic,
+  cables → ins 7/8 (reference loopbacks; out 5 → in 7 is the stream's); in 1 = measurement mic,
   beyerdynamic MM1 (449350, s/n 34804), **mounted at 90° (pointing up)** → use
   `~/src/ac/beyer/449350_34804_90Grad.txt`; in 2 = Behringer measurement mic "Vilppu behringer #3"
   (acoustic calibrator). Both mic preamps 20 dB with phantom: the SPL calibrations hold only
@@ -59,7 +59,7 @@ binaries in `~/ac2-test/bin`, the previous set in `~/ac2-test/bin.prev`. Wrap ev
    directory swap, keeps `ac2-jack-dut` in pupu's `bin/` for `tools/crosscheck`).
 4. Start the daemon on pupu: `systemctl --user start ac2d` (flags in
    `~/.config/systemd/user/ac2d.service`: `--listen tcp://0.0.0.0 --name pupu --max-level -20`).
-   Check `journalctl --user -u ac2d -n 30`: "autosave restored … no audio session opened" is
+   Check `journalctl --user -u ac2d -n 30`: "autosave restored … no audio I/O opened" is
    normal.
    `--max-level -20` is the **hard bound**: the system max level in force can be lowered (or
    raised again up to −20) from any client — Settings › Audio I/O, or
@@ -72,7 +72,7 @@ binaries in `~/ac2-test/bin`, the previous set in `~/ac2-test/bin.prev`. Wrap ev
    `rig.json`, so raising the bound never raises the level by itself; only a `rig.json` that
    no start of this daemon has written yet (holding no level) comes up at the bound.
 5. Reopen audio (from ketunkolo):
-   `bin/ac2 --remote 192.168.9.27 session open --backend jack --in 1-8 --outputs 6 --loopback-out 5 --loopback-in 7 --mic "1=MM1 34804" --mic "2=Vilppu behringer #3"`.
+   `bin/ac2 --remote 192.168.9.27 stream open --backend jack --in 1-8 --outputs 6 --loopback-out 5 --loopback-in 7 --mic "1=MM1 34804" --mic "2=Vilppu behringer #3"`.
    Use the inputs and outputs the operator had (lately `--in 1-10`; the old autosave's
    `session.json` records them). Restored measurements resume; check `meas list`.
 6. App on ketunkolo:
@@ -352,8 +352,8 @@ Rewired 2026-10-28: outs 5/6 loop straight to ins 7/8 (JACK's numbering was foun
 wrong for the outputs: on 2026-11-20 the operator's DMM found JACK playback 5 on the rear jack
 labelled "out 5". The input labels are not checked yet.; ins 5/6
 read their floor, no Xone signal. In 1 is the MM1, in 2 the Behringer "Vilppu behringer #3" (both
-phantom, mic gain 20, written by `ff400-recover` after a reset); ins 3–6 are empty. Session:
-`session open --backend jack --in 1-8 --outputs 6 --loopback-out 5 --loopback-in 7 --mic "1=MM1 34804" --mic "2=Vilppu behringer #3"`.
+phantom, mic gain 20, written by `ff400-recover` after a reset); ins 3–6 are empty. Stream:
+`stream open --backend jack --in 1-8 --outputs 6 --loopback-out 5 --loopback-in 7 --mic "1=MM1 34804" --mic "2=Vilppu behringer #3"`.
 
 **FF400 line levels (measured 2026-11-15).** The driver's `line-input-level` labels are swapped:
 item 0 "Low" is the real +4 dBu (0 dBFS = +13 dBu), item 1 "-10dBV" is +4.2 dBu, item 2 "+4dBu" is
@@ -367,9 +367,9 @@ noise is ≈ −100.5 dBu. Captures and scripts: pupu `~/ac2-test/ff400-loop-202
 **An FF400 reset or unplug recovers by itself** (verified 2026-10-17: a quick and a ~22 s
 unplug, audio back 22 s / 37 s after the cut). ac2's part (`docs/design/audio-recovery.md`):
 within a second of the last block the app shows AUDIO STOPPED, ac2d closes its JACK client and
-keeps reopening the same session (backoff 1 s … 30 s, at once when the device probe sees it
-back), so the session, its measurements and the SPL log (with the outage as a gap) come back
-without `session open`; the generator comes back disarmed. The host's part lives in the sys
+keeps reopening the same stream (backoff 1 s … 30 s, at once when the device probe sees it
+back), so the stream, its measurements and the SPL log (with the outage as a gap) come back
+without `stream open`; the generator comes back disarmed. The host's part lives in the sys
 repo (`~/src/sys/pupu/`, installed on pupu):
 1. The card's removal (`80-ac2-ff400.rules`) stops `jack-ac`. jackd never exits on SIGTERM
    with the device gone ("Cannot stop driver"): `TimeoutStopSec=3` kills it, which frees the

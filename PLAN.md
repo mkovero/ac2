@@ -50,7 +50,7 @@ expected results independently. Nothing is copied file-for-file.
 | CWT-based RTA | RTA must be IEC filterbank or plain FFT, honestly labelled |
 | Full-rate Welch H1 with phase-rotation-only delay compensation (`transfer.rs:94,174`: both channels windowed at the same offset) | biased for large delays — MTW + time-domain alignment only |
 | REQ/REP + `"topic json"` PUB strings, base64 snapshots over ctrl, `serde_json::Value` dispatch, hand-maintained field whitelists | replaced by typed protocol (§6) |
-| Per-command worker engines + busy-guard groups | replaced by one duplex audio session with jobs (§4.3) |
+| Per-command worker engines + busy-guard groups | replaced by one duplex audio stream with jobs (§4.3) |
 | `AudioEngine` trait with no-op defaults and a reference-clone fallback (`audio/mod.rs:158`; latent — streaming transfer now refuses non-routing backends, `plan.rs:172`) | replaced by small trait + explicit capabilities |
 | Per-request config re-read from disk | daemon owns state |
 | Python leftovers: `sounddevice` alias, `src_mtime` restart, Python-shaped types/config, pytest suite, "for both Python and Rust" protocol doc | legacy |
@@ -194,7 +194,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
                       │  ZeroMQ: ROUTER/DEALER (ctrl) + ROUTER/DEALER (data, events; credit)
                       │  ipc:// / tcp:// / inproc://  ·  CURVE over network
               ┌───────┴────────┐
-              │     ac2d       │  session, jobs, state, logging, discovery
+              │     ac2d       │  stream, jobs, state, logging, discovery
               │  ac2-audio     │  JACK / CoreAudio / ASIO, rtrb rings
               │  ac2-core      │  pure DSP + acoustics math
               └────────────────┘
@@ -225,7 +225,7 @@ fixtures from `tools/protocol`.
 | Config | TOML | |
 
 ### 4.3 Daemon model
-One **audio session** owns the duplex stream. Analyses run as **jobs** (transfer pair,
+One duplex **audio stream** serves the whole rig. Analyses run as **jobs** (transfer pair,
 RTA, SPL meter/log, IR capture) attached to it. Replaces `ac`'s one-engine-per-command model.
 
 ```
@@ -406,7 +406,7 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an in-proces
 - Ctrl: msgpack `{v, id, cmd}` where `cmd` is a tagged enum with `deny_unknown_fields`.
   Reply `{v, id, result | error{code, msg}}`. Request ids are deduplicated per client
   for a retry window, so a retried command never executes twice.
-- Command groups: `session`, `gen` (lease, full-state `set`, stop, ceiling), `meas` (math
+- Command groups: `stream`, `gen` (lease, full-state `set`, stop, ceiling), `meas` (math
   traces and sweeps are measurement kinds), `delay`, `trace`, `cal`, `spl`, `sweep`, `rec`,
   `state`, `grid`, `file`, `server`. `docs/protocol.md` is the normative list.
 - Mutations take an optional `expect_rev` precondition; stale → `conflict` error.
@@ -414,18 +414,18 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an in-proces
 - **State sync:** client subscribes to `evt` first, buffers, then requests a snapshot
   (`rev = R`), applies buffered events with rev > R. Daemon keeps a bounded replay buffer;
   `state.since(rev)` fills gaps or answers `resync_required` when the gap has expired, and
-  the client re-snapshots. Keepalive carries `{daemon_incarnation, session_epoch, rev, seq}`,
-  so a missed final patch, a session reopen or a daemon restart is always detected.
-  Frames carry `session_epoch` and the `config_rev` actually applied by DSP, with the
+  the client re-snapshots. Keepalive carries `{daemon_incarnation, stream_epoch, rev, seq}`,
+  so a missed final patch, a stream reopen or a daemon restart is always detected.
+  Frames carry `stream_epoch` and the `config_rev` actually applied by DSP, with the
   sample at which it took effect. Detail: Q5.
 - Grids are immutable, identified by `grid_id`, fetchable any time via `grid.get`;
   frames reference them. Late subscribers fetch on first unknown id.
 
 ### 6.3 Data frames (normative schema in `docs/protocol.md`)
 - Topics `d/<meas>/<kind>` (`tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`),
-  `session/levels`, `session/preview`, `timing`, `evt`, `ka`.
+  `stream/levels`, `stream/preview`, `timing`, `evt`, `ka`.
 - Multipart `[topic][msgpack header][payload arrays…]`. Header fields: `seq`,
-  `audio_sample` (index in the session's sample clock, origin = session open),
+  `audio_sample` (index in the stream's sample clock, origin = stream open),
   `daemon_incarnation`, `config_rev`, `grid_id`, `n`, `kind`, `units` per array,
   `protection` flags, `eff_avg` (effective averages).
 - Arrays: little-endian f32, column order = grid order; invalid values = NaN with a
@@ -559,7 +559,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 0 | Foundations + spikes | workspace, CI (linux/mac/win), lint/fmt, refgen; spikes: cpal multichannel duplex + output→input timing on mac/win, libzmq+CURVE vendored build on 3 OS, wgpu software-adapter test | CI: green on 3 OS; golden-vector harness runs. HW: duplex check (`ac2 selftest duplex`) on a real interface per OS |
 | 1 | Audio | backend trait + capabilities, sample-indexed blocks, JACK, cpal, fake (explicit), xrun/discontinuity telemetry, duplex timing validation | CI: forced overflow yields a discontinuity marker, never a channel shift. HW: 8 in / 2 out @ 48 kHz, 128-frame buffer, 4 TF jobs, 1 h, zero self-caused xruns, per OS |
 | 2 | Core DSP | MTW ladder + alignment, averaging (reset), smoothing, protection, delay finder (target, bands, confidence, candidates) + tracking, spectrum, RTA, weighting, generator | CI: §5.6 loopback suites pass against refgen; finder meets §5.2 acceptance numbers on scenario fixtures |
-| 3 | Daemon + protocol + CLI | session + jobs, ROUTER/XPUB, typed proto, state sync with replay/resync, bounded-freshness publishing, stimulus lease, CURVE + pairing, client, CLI `--watch` | CI: two clients stay in sync through dropped events, expired replay, session reopen and daemon restart; stalled subscriber recovers to fresh frames; unauthorized connect refused on both sockets; lease expiry stops output. HW: CLI drives a live TF remotely over CURVE |
+| 3 | Daemon + protocol + CLI | session + jobs, ROUTER/XPUB, typed proto, state sync with replay/resync, bounded-freshness publishing, stimulus lease, CURVE + pairing, client, CLI `--watch` | CI: two clients stay in sync through dropped events, expired replay, stream reopen and daemon restart; stalled subscriber recovers to fresh frames; unauthorized connect refused on both sockets; lease expiry stops output. HW: CLI drives a live TF remotely over CURVE |
 | 4 | Scene + UI | scene layer, wgpu plot, panes, keys, palette, banners, meters, live TF/RTA/IR, traces + metadata + slots + compare cursor, embedded daemon | HW: tune a real speaker end-to-end keyboard-only on Linux, macOS and Windows |
 | 5 | Calibration, SPL, sessions | cal store (sensitivity, mic curve, device/channel/mic binding), SPL meter, trace averaging/math/targets, import/export, sessions | HW: **replaces `ac` for PA work** — mains + sub + delay alignment, cal'd SPL, saved/compared traces, session reload disarmed, on all 3 OS |
 | 6 | Release 1.0 | packaging + signing, install docs, protocol docs, mDNS polish | HW: clean machine install → first measurement < 2 min per OS; FOH↔stage over WiFi |
@@ -589,7 +589,7 @@ unsigned workflow artifacts of `release.yml`. Open items: `docs/design/backlog.m
 *Performance and platforms*.
 
 Performance pass for the real targets (`docs/design/flow-control.md` for what is left): idle
-wakeups cut (≈1340 → 250/s with a session open), work only for subscribed and new results,
+wakeups cut (≈1340 → 250/s with a stream open), work only for subscribed and new results,
 display-sized spectrum frames (≈8–12 MB/s → ≈22 kB/s per client), append-only SPL log
 (SD-card safe), cheaper SPL/RTA/delay-tracking DSP, UI repaints only on visible change with
 per-pane rebuilds and a low-power GPU request. Measured on the fake rig: daemon 10.5 % →

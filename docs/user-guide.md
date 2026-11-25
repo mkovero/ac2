@@ -8,7 +8,7 @@ Scripting: [protocol.md](protocol.md), the normative description of what the dae
 
 | I want to… | Go to |
 |---|---|
-| connect the audio interface and open a session | [Audio I/O](#audio--io) |
+| connect the audio interface and open a stream | [Audio I/O](#audio--io) |
 | wire the loopback so transfer functions work | [Reference wiring and loopback](#reference-wiring-and-loopback) |
 | play pink noise safely, and stop it | [Stimulus](#stimulus) |
 | see magnitude, phase and coherence of a speaker | [Transfer measurement](#transfer-measurement) |
@@ -50,7 +50,7 @@ connect dialog opens saying why and where its log is; one that stops while the a
 says so with its exit code and log, and the app keeps trying to reconnect rather than start
 another.
 
-A **session** is the open audio stream: one device, a sample rate, a buffer size and the
+A **stream** is the open audio I/O: one device, a sample rate, a buffer size and the
 inputs to capture. **Measurements** run on it: transfer functions (`tf`), spectrum, RTA,
 SPL meters and sweeps. In the app, every setting lives in **Settings** (**Ctrl+P**, the ⚙ in
 the top bar); **Shift+O** opens its Audio I/O page; **Ctrl+M** (*New measurement…*, also
@@ -68,10 +68,10 @@ selected measurement after asking. Until there is a session or a measurement, th
 pane says which comes next. The CLI does the same with the same defaults:
 
 ```sh
-ac2 session open --backend jack --in 1-4                     # Linux: the JACK server
-ac2 session open --backend coreaudio --device "<name>" --in 1-4 --rate 48khz   # macOS
-ac2 session open --backend asio --device "<driver>" --in 1-4              # Windows
-ac2 session open --backend coreaudio --device "<mic>" --out-device "<speakers>" --in 1   # two devices
+ac2 stream open --backend jack --in 1-4                     # Linux: the JACK server
+ac2 stream open --backend coreaudio --device "<name>" --in 1-4 --rate 48khz   # macOS
+ac2 stream open --backend asio --device "<driver>" --in 1-4              # Windows
+ac2 stream open --backend coreaudio --device "<mic>" --out-device "<speakers>" --in 1   # two devices
 ac2 meas new tf --ref 1 --meas 2 --name main-l
 ac2 meas new tf --ref 1 --meas 3 --name sub
 ac2 meas new rta --input 2 --name rta
@@ -137,8 +137,8 @@ not paired with is not in the list: it is in the drop-down, and has nothing to d
 rig shown. Two rigs are paired when one takes an input of the other
 ([Inputs from another rig](#inputs-from-another-rig)); either one shown lists the other.
 
-A heading says the rig's name, and under it, smaller and greyer, its session's sample rate
-and its clock tag, `48 kHz FREE` (*no session* or *no audio I/O* when it has none, as the
+A heading says the rig's name, and under it, smaller and greyer, its stream's sample rate
+and its clock tag, `48 kHz FREE` (*no stream* or *no audio I/O* when it has none, as the
 top bar says). Two rigs at different rates read so on their two headings; a remote input
 needs both at one rate, and the heading's tooltip says *cm4 runs 48 kHz, this rig 96 kHz*.
 After the rate and tag a paired rig's second line says what else the rig shown reports of
@@ -178,20 +178,20 @@ measurements again, found by name. Settings › Connection names the rig shown.
 
 ### Inputs from another rig
 
-A session can take an input another rig captures (pupu's mic, on the FOH rig's session)
+A stream can take an input another rig captures (pupu's mic, on the FOH rig's stream)
 when both rigs run `ac2d` in network mode and the app holds both. On Settings › Audio I/O,
 *Add an input from another rig…* (**Enter** on that row, or *Input from another rig…* in the
-palette) lists every rig the app holds with the inputs its session captures, in that rig's
+palette) lists every rig the app holds with the inputs its stream captures, in that rig's
 own row text (`pupu · in 2 · mic MM1 34804`). **↑/↓** and **Enter** take one; **Esc**
 closes the list. Taking one:
 
 1. asks the other rig to admit this rig (it shows on its Connection page under *Rigs
    admitted to this rig*, named `rig-` and this rig's name);
 2. pairs this rig with the other one;
-3. reopens this rig's session with the input added, everything else as it was.
+3. reopens this rig's stream with the input added, everything else as it was.
 
 A rig that cannot give its inputs says why instead: *serves only this computer* (its
-`ac2d` is local), *has no session*, *is replaying a recording*, or *already authorizes an
+`ac2d` is local), *has no stream*, *is replaying a recording*, or *already authorizes an
 app named …*.
 
 The input is listed under *Inputs from other rigs*, under its rig's name, with that rig's
@@ -227,7 +227,7 @@ moves the delay by exactly the slip (said a minute); a gap restarts the averages
 the delay. *delay drifting 0.09 ms/min* means the delay moved more than 0.05 ms a minute
 over two minutes: a path or the clocks are moving. *link offset too small* means the
 remote audio keeps arriving after the link offset (lost packets do not count): raise it on Settings › Connection
-(*Wait for remote inputs*, below) or with `ac2 session link-offset 30ms` (`default` for
+(*Wait for remote inputs*, below) or with `ac2 stream link-offset 30ms` (`default` for
 the least that works, at most 500 ms; the remote inputs anchor again and every average on
 them restarts). Two channels on two different remote rigs are refused. `ac2 status` prints
 each cross-rig transfer function under *MEASUREMENTS*: whether it averages, from which rig,
@@ -253,7 +253,7 @@ is never only a colour):
   streaming*, *LINK OFFSET TOO SMALL · paired · streaming*.
   A paired rig needs no remote input for its tag: paired daemons time-stamp the levels
   they always send each other, and the rig shown's daemon judges the clocks from those
-  (`ac2 status`, *RIGS*). About a minute after both sessions are open the tag reads
+  (`ac2 status`, *RIGS*). About a minute after both streams are open the tag reads
   `AGREE`, or `UNKNOWN` when it can't tell; a not-locked verdict from levels needs ten
   minutes beyond 2 ppm, and until then the tag reads `TIMING` and its tooltip says
   *measuring clocks…* with the figure, how
@@ -265,8 +265,8 @@ is never only a colour):
   *from the rigs' level frames*: no audio is streamed for that verdict. Where a remote input from the rig is in use, its stream's verdict is
   the tag, as it is what a cross-rig measurement rests on; if the levels would tag the rig
   otherwise, the tooltip adds their line. A paired rig this app does not read takes its
-  rate from its levels too (*48 kHz TIMING · paired · not connected*, *no session* when its
-  session is closed); while the link between the daemons is down the line says whose link
+  rate from its levels too (*48 kHz TIMING · paired · not connected*, *no stream* when its
+  stream is closed); while the link between the daemons is down the line says whose link
   and how (*link from pupu: unreachable · not connected*) and the tooltip the sentence. What
   a rig's daemon reports of its levels shows only while this app is connected to that rig;
   the marks' age shows once the app knows that daemon's clock. A
@@ -292,12 +292,12 @@ is never only a colour):
   candidates to pick from.
 
 Settings › Connection has a *Between rigs* block per rig the
-session takes inputs from (*Between rigs* in the palette, or a click on where the daemon runs in the top bar): the clock
+stream takes inputs from (*Between rigs* in the palette, or a click on where the daemon runs in the top bar): the clock
 relation and why, the last change, the link and its bit rate, the link offset, late frames,
 slips and the arrival margin; `ac2 status -v` prints the same under the rig in *RIGS*. Its last line, *Wait for remote
 inputs (link offset): default (10 ms)*, sets the link offset: **Enter** on it, type a time
-(`30ms`, or `30`: a bare number is ms) or `default`, **Enter** reopens the session with it,
-as `ac2 session link-offset` does. A time below the least that works is raised to it, and
+(`30ms`, or `30`: a bare number is ms) or `default`, **Enter** reopens the stream with it,
+as `ac2 stream link-offset` does. A time below the least that works is raised to it, and
 the line says both (*1 ms set · 17 ms in force, the least that works*). On the rig that gives its inputs, the rigs admitted to
 it are listed there and removed with **Delete** twice.
 
@@ -317,7 +317,7 @@ running below 1.8 ppm once a minute went beyond, while *CLOCKS NOT LOCKED: ketun
 +3.1 ppm against this rig over 60 s* waits for ten measured minutes running beyond it, all one way; a gap in the timing of a
 few seconds drops only the minute it fell in, one of over a minute starts the count again.
 After the link or the timing drops out, *clocks agree* waits for a whole minute after it.
-*marks for* counts from the start of the sessions or the last gap of over a minute in the
+*marks for* counts from the start of the streams or the last gap of over a minute in the
 timing. Ten minutes that do not agree among
 themselves read *CLOCKS: CAN'T TELL (figure not steady: +0.4 … +3.1 ppm)*; when the
 figure between the rigs stayed within and only a rig's own interface wandered against its
@@ -326,13 +326,13 @@ ppm)*. A figure that keeps going beyond 2 ppm and back, three times in half an h
 *figure not steady* in place of *clocks agree* until half an hour passes without. Gaps in
 the timing that keep any minute from closing for five minutes read *ketunkolo's timing
 keeps breaking off before a minute is in*. Other reasons:
-*no timing in ketunkolo's levels*, *ketunkolo has no audio session*, *no link to
+*no timing in ketunkolo's levels*, *ketunkolo has no audio stream*, *no link to
 ketunkolo*, *ketunkolo's levels arrive 250 ms late: the network, or its system clock
 behind*.
 
 ### Log files
 
-The app and a daemon started by hand log sessions opened, devices lost, capture
+The app and a daemon started by hand log streams opened, devices lost, capture
 discontinuities, *audio arrives in bursts* and errors to their terminal and to a file —
 attach it to a bug report:
 
@@ -365,7 +365,7 @@ The backend is always named. Each platform has one real backend:
 | Platform | Backend | Notes |
 |---|---|---|
 | Linux | `jack` | a JACK2 server, or PipeWire through pipewire-jack; there is no ALSA backend. Rate and buffer are the server's. |
-| macOS | `coreaudio` | Core Audio, the HAL directly: one callback per device serves its inputs and outputs on one exact sample index, and the session states the device's latency. Two devices (a USB mic beside the built-in output) run one callback each, on two clocks; an aggregate device made in Audio MIDI Setup is one device. With no `--rate`, the device's current rate (a rate is set only when asked for, since other apps share it); with no `--buffer`, a short buffer of about 20 ms (1024 frames at 48 kHz, within what the device allows). Only the input streams a session's channels are on are read. |
+| macOS | `coreaudio` | Core Audio, the HAL directly: one callback per device serves its inputs and outputs on one exact sample index, and the stream states the device's latency. Two devices (a USB mic beside the built-in output) run one callback each, on two clocks; an aggregate device made in Audio MIDI Setup is one device. With no `--rate`, the device's current rate (a rate is set only when asked for, since other apps share it); with no `--buffer`, a short buffer of about 20 ms (1024 frames at 48 kHz, within what the device allows). Only the input streams a session's channels are on are read. |
 | Windows | `asio` | ASIO drivers, one device per installed driver, inputs and outputs on one clock. With no `--rate` / `--buffer`, the driver's current rate and preferred buffer. A device without its own ASIO driver goes through [FlexASIO](https://github.com/dechamps/FlexASIO); with no ASIO driver installed, the backend is listed as unavailable with that pointer. |
 | any | `fake` | a simulated rig for trying things out (*Simulated rig* in the app's connect dialog, `ac2-ui --backend fake`); never chosen for you |
 
@@ -382,7 +382,7 @@ arrives in bursts on …*) with the device and buffer to change.
 
 In the app's connect dialog, *Simulated rig (no audio)* starts ready to measure (audio I/O
 open, a transfer measurement "demo" running) and stops with the app; *This computer* reaches
-this computer's `ac2d` as it is (one the app starts has no session).
+this computer's `ac2d` as it is (one the app starts has no stream).
 Whenever the app connects to a daemon with no audio I/O open, the **Sessions** dialog
 (**Alt+S**) opens once; a daemon with audio open (a rig, the Pi kiosk) opens nothing. Its
 *New session* opens Settings on the Audio I/O page, headed *New session — Audio I/O*, with the
@@ -585,11 +585,11 @@ measurement tree beside the rig shown.
 
 - *Pair with rig…* (**Enter**) lists the rigs the app holds besides the one shown, by name,
   except those already paired both ways; **↑/↓** and **Enter** pick one, **Esc** closes the
-  list. Picking one pairs both ways in one act, without a session and without adding an
+  list. Picking one pairs both ways in one act, without a stream and without adding an
   input: each rig admits the other (it shows under *Rigs admitted to this rig* there) and
   lists the other. Only the halves not in place are sent, and each toast says what its rig
   did (*pupu lists ketunkolo as paired*, *ketunkolo admitted pupu: it may take ketunkolo's
-  inputs*). A session running on either rig carries on: its remote inputs keep streaming,
+  inputs*). A stream running on either rig carries on: its remote inputs keep streaming,
 since only a change to a rig they come from starts them over. Both rigs must be in network
 mode on an address the other reaches; a rig that
   cannot be paired says why in the list instead, and nothing is sent (*serves only its own
@@ -604,11 +604,11 @@ the same name cannot both be paired with one rig: unpair the one there first. Wi
   The admission is revoked by the rig's identity, so an app authorized under the same name
   keeps its key. When the app does not hold that rig, or is not connected to it now, only
   this rig's side is done, and the first **Delete** says so: the app cannot tell whether
-  that rig's session takes this rig's inputs, and if it does they stop. Afterwards the page
+  that rig's stream takes this rig's inputs, and if it does they stop. Afterwards the page
   says what remains: connect to that rig, show it and unpair this rig there to finish. When
   either rig's admissions cannot be seen (its network off, or it did not answer), that
   admission is not revoked: the first **Delete** promises no more than is sent, and the
-  page says an admission, if any, stays. While a session the app sees takes inputs from the other rig, unpairing is
+  page says an admission, if any, stays. While a stream the app sees takes inputs from the other rig, unpairing is
   refused, naming them: remove those inputs first (Settings › Audio I/O). With the app not
   connected to the rig shown, unpairing is refused.
 
@@ -634,15 +634,15 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   drift while a stimulus plays. The choice is remembered with the input device's roles.
 - **Channels**: one row per input and output, named by the backend where it can (JACK port
   names, the channel names a Core Audio or ASIO device gives; without them *Input 3*); inputs have a **live meter** (RMS bar, peak
-  tick, *CLIP* held 1 s). The meters run before the session opens (the daemon opens the
+  tick, *CLIP* held 1 s). The meters run before the stream opens (the daemon opens the
   device capture-only, no output stream), so you can find a mic by tapping it.
 - **Spare inputs** (**←/→**, JACK only): extra inputs tied to no physical input, numbered
   after the device's own (a Fireface 400's 18 capture ports make the first spare input 19).
-  Each adds an input row, in the session, named *spare 1* until the session opens and then
+  Each adds an input row, in the stream, named *spare 1* until the stream opens and then
   by its port (`ac2:in_19`). Nothing is connected to them: you connect any JACK source to
   them yourself (see *Metering other JACK sources*). Once open they are ordinary inputs:
   kind, pair, name and every meter. Other backends have no such row.
-- **Kinds**: every input in the session is one of three kinds, and the row says which.
+- **Kinds**: every input in the stream is one of three kinds, and the row says which.
   **M** *mic*, a measurement mic (any number; **N** names one — the name is the mic's
   identity for calibrations; a named mic's row says its curve and calibration, and **←/→**
   choose the curve: off, 0°, 90° …); **L** *line*, an analogue line input (a console
@@ -653,10 +653,10 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   input always reads dBFS of its full scale.
 - **Roles**: **R** *reference* (the loopback return, one input; a line or digital input, so
   **R** on a mic row drops the mic name); **S** *stimulus* (the outputs the stimulus plays
-  on; this app's choice, remembered per rig and device; applied at once when the open session has
-  the output). **Space** puts a row in or out of the session.
+  on; this app's choice, remembered per rig and device; applied at once when the open stream has
+  the output). **Space** puts a row in or out of the stream.
 - **Pairs**: *pair* (or **Shift+P**) on one input picks it, *pair* on a second input makes
-  the pair: the lower input is left, the higher right, and both go in the session. *pair*
+  the pair: the lower input is left, the higher right, and both go in the stream. *pair*
   on the picked row again drops the pick; *pair* on either row of a pair
   unpairs it. **N** on a paired row names the pair (`Main`, `AES 1`). A pair is two inputs
   of one kind (two mics, two line or two digital inputs) and the kind keys apply to both
@@ -696,11 +696,11 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   driver; the open audio I/O reopens at the driver's new rate and buffer by itself, its
   measurements restart at them, and the top bar says what changed in the warning colour
   (`… · 44.1 kHz · 512 frames · driver changed from 48 kHz`, the hover has the
-  details) until the session is next opened. The clock sources the driver offers are listed
+  details) until the stream is next opened. The clock sources the driver offers are listed
   under the device, the one in use marked; choose among them in the driver's panel (Audio
   MIDI Setup on macOS).
 - The top bar reads left to right: the rig shown (the rigs drop-down); where its daemon
-  runs and how it is doing; the session; and, fixed at the right, the stop while anything
+  runs and how it is doing; the stream; and, fixed at the right, the stop while anything
   is armed or playing, the key hints and the Settings gear:
   `pupu ▾ | remote: ac2pi-0ab1c6 (STIM OFF) · 96 kHz · 256 frames · CPU 43 % · DSP
   0 % · 0 xruns · 85 fps | untitled · unsaved changes`.
@@ -720,14 +720,14 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   - **The audio I/O:** rate and period, *no audio I/O* with the key that opens it, or
     *audio stopped · reopening (attempt 3, next in 8 s)*; the device's name is in the
     hover.
-  - After the session come an autosave, a recording or a replay under way, and what the
+  - After the stream come an autosave, a recording or a replay under way, and what the
     stimulus keys do next.
 - How the rig holds up, in that line:
   `CPU 23 % · app CPU 41 % · DSP 14 % · 0 xruns · 14 Mbit/s · 30 fps`. **CPU** is the
   whole daemon host's use (every process, every core); with the daemon on another computer
   **app CPU** is this computer's, and with the daemon on this computer there is the single
   `CPU 23 %`; **DSP** is the share of each buffer period ac2d's own
-  audio callback takes (not the whole JACK graph's load); **xruns** count since the session
+  audio callback takes (not the whole JACK graph's load); **xruns** count since the stream
   opened; the data rate is what this window receives from the daemon; **fps** is shown while live data arrives — at most 60 on a GPU and
   30 on a software renderer, since the app paces its own frames rather than wait for the
   display, which keeps it responsive with the screen off or unplugged. CPU past 85 %, DSP past
@@ -751,7 +751,7 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   a transfer's reference is picked in its form from the captured inputs, so an external
   generator's or console's feed declared as an input serves too. Roles, kinds, pairs and mic names are remembered per rig and device
   (`ui.toml`).
-  On a daemon with no measurements yet, the session opening brings up the **New
+  On a daemon with no measurements yet, the stream opening brings up the **New
   measurement** chooser (as **Ctrl+M** does): **Enter** on a kind opens its settings — the
   *Programme meter* row too, a form of what to meter (see [Programme pane](#programme-pane))
   — and **Esc** leaves the empty panes, which say how to come back to it.
@@ -763,8 +763,8 @@ The measurement dialogs pick inputs the same way: by name, with meters, **←/�
 To meter something else in the JACK graph (a player, a console's network feed, a bus of
 another application) alongside the interface's inputs:
 
-1. On the Audio I/O page set **Spare inputs** to how many you need (`ac2 session open
-   --backend jack --in 1-2 --spare-inputs 2` from the CLI) and open. `ac2 session status`
+1. On the Audio I/O page set **Spare inputs** to how many you need (`ac2 stream open
+   --backend jack --in 1-2 --spare-inputs 2` from the CLI) and open. `ac2 stream status`
    lists each spare with its port: `spare  in 19 · ac2:in_19`.
 2. Connect the source to that port with your own JACK tools — qjackctl's graph,
    `jack_connect mpv:out_0 ac2:in_19`, a patchbay, WirePlumber rules. Disconnect nothing:
@@ -780,7 +780,7 @@ must come back by themselves.
 
 ### Input meters
 
-While a session is open, the top of the left-hand list shows **Inputs**, one meter per
+While a stream is open, the top of the left-hand list shows **Inputs**, one meter per
 captured input. Each bar reads what the [Programme pane](#programme-pane)'s bar of that
 input reads in the rig's ballistic, the number beside it is that reading with its unit, and
 the tick is its flying peak; the bar is green, yellow within 6 dB of full scale, red while
@@ -844,7 +844,7 @@ hardware meter; **W** gives either the window. A pane without a pair has its met
 laid out and keyed like the measurement forms (**↑/↓** field, **←/→** choose, **Enter**,
 **Esc** closes and changes nothing):
 
-- **What to meter** — *Meter*: one of the session's pairs, or *inputs side by side*; then
+- **What to meter** — *Meter*: one of the stream's pairs, or *inputs side by side*; then
   *Input 1* … *Input 8*, each an input by name with its meter (a pair shows both sides'
   meters). An input is named once; **←** past the first input leaves a row *none*, and an
   empty row after the last waits for the next input. Mics are offered too: they show
@@ -863,15 +863,15 @@ laid out and keyed like the measurement forms (**↑/↓** field, **←/→** ch
 **Enter** opens the meters beside the focused one (never in place of it), and for a pair
 its goniometer pane on their left; the meters take the focus, and one **Ctrl+Z** takes
 both away. With room for one pane only, the meters open alone and a toast says *no room for
-the goniometer pane: G turns this pane to it*. A session with no inputs lists the row with
-*no inputs in the session to meter*. Palette *Edit measurement…* on a focused Programme pane says *a Programme
+the goniometer pane: G turns this pane to it*. A stream with no inputs lists the row with
+*no inputs in the stream to meter*. Palette *Edit measurement…* on a focused Programme pane says *a Programme
 pane meters the Inputs row dropped on it: drag an input or a pair here*.
 
 The quicker route: drag a row of the Inputs list onto a pane. In the middle it turns that
 pane into meters of the row (a pair: its goniometer; an input: its meters); on an edge it
 splits the pane and the new half meters it. The layout keeps each pane, its view and
-what it meters; a session without those inputs shows it empty with *inputs 3+4 not in this
-session*. A Programme pane with nothing to meter reads *nothing picked — drag an input or a
+what it meters; a stream without those inputs shows it empty with *inputs 3+4 not in this
+stream*. A Programme pane with nothing to meter reads *nothing picked — drag an input or a
 pair of the Inputs list here*. A layout the app kept before the views opens a pair's pane
 as its meters: **G** brings the goniometer.
 
@@ -916,7 +916,7 @@ shifts as the value changes.
   the scale's foot leaves the bar empty, so a small triangle at its foot and a row *below
   −41* (the foot in LUFS) say so; the row's place is kept on every LUFS bar. An input
   without a source — a mic (a LUFS figure on a mic would follow its preamp gain), a pair
-  side whose partner the session does not capture, any input at a rate other than 44.1 …
+  side whose partner the stream does not capture, any input at a rate other than 44.1 …
   192 kHz in multiples of 100 Hz — has its true-peak bar only and says why on its last
   row: *true peak shown · no loudness on a mic input*, *true peak shown · loudness: Main R
   (input 4) not captured*, *true peak shown · loudness needs a rate of 44.1 to 192 kHz, a
@@ -1003,7 +1003,7 @@ Without signal on the reference the transfer pane shows **NO REFERENCE**, with a
 | stimulus playing (this app's or another client's), or an arm or stop on its way, or one under this app's name it did not arm | `reference silent: check the loopback cable` |
 
 With a loopback that also returns the generator's own output (the **R** and **S** roles,
-`session open --loopback-out 1 --loopback-in 1` from the CLI), the daemon continuously
+`stream open --loopback-out 1 --loopback-in 1` from the CLI), the daemon continuously
 checks output → input timing and warns about dropped or repeated output samples.
 
 Any signal works, not only ac2's generator: programme material fed to the reference input
@@ -1449,10 +1449,10 @@ whose measurement has since been deleted comes back empty, of its kind.
 
 The frequency axis is shared by the panes: **I** / **O** zoom, **←** / **→** pan, **Home**
 resets to its **home range**; the wheel zooms about the pointer, a drag pans. The home
-range is 20 Hz – 20 kHz, and with a session above 48 kHz it runs up to half the sample
-rate: 48 kHz at 96 kHz, 96 kHz at 192 kHz (a 44.1 or 48 kHz session ends in its converter's
+range is 20 Hz – 20 kHz, and with a stream above 48 kHz it runs up to half the sample
+rate: 48 kHz at 96 kHz, 96 kHz at 192 kHz (a 44.1 or 48 kHz stream ends in its converter's
 filter just above 20 kHz). A view still on the home range moves to the new one when a
-session opens at another rate; a range you zoomed or panned to stays. The axis zooms
+stream opens at another rate; a range you zoomed or panned to stays. The axis zooms
 out to 1 Hz – 256 kHz: what a measurement has below 20 Hz (a sub's bottom octave) is there
 once you zoom out or pan to it.
 
@@ -1896,7 +1896,7 @@ spectrum FIFO holds at most 511 frames at 65 536 points; an RTA's at most 65 536
   list does not offer shows as it is.
 - A spectrum's dialogs also pick *FFT length* (64 … 65 536 points, or multi-resolution
   1/12 … 1/96 oct) and *Window* (Hann, Blackman-Harris, flat-top, rectangular); the hint
-  says what it gives at the session's rate (`0.73 Hz bins · 1365 ms window · 5.7 updates/s`;
+  says what it gives at the stream's rate (`0.73 Hz bins · 1365 ms window · 5.7 updates/s`;
   `0.68 s window at LF … 21 ms at HF`). A new resolution or window restarts a running
   spectrum. A spectrum named in a math trace keeps its resolution (operands share one bin
   grid); its window changes freely.
@@ -2064,7 +2064,7 @@ shows where: a faint grey shade with dashed edges, and the cursor says it
 (`52.0 Hz · 1 Hz bins` on a live transfer curve, `coarser than 1/48 oct (interpolated)`
 on a sweep).
 
-- **Transfer**: the curve runs from 7.8 Hz to the top of the band the session's rate
+- **Transfer**: the curve runs from 7.8 Hz to the top of the band the stream's rate
   measures (0.45 of the rate: 21.6 kHz at 48 kHz, 86 kHz at 192 kHz). The FFT ladder's
   longest window is about 1 s. At 96 kHz: 1/48 is marked below about 68 Hz; 1/96 below about
   135 Hz, about 200–410 Hz and 1.6–3.3 kHz (at 48 kHz the last is 810 Hz–1.6 kHz); 1/24
@@ -2292,7 +2292,7 @@ Transfer functions combine as complex values (magnitude and phase):
 - **A × B** — the cascade: a response through a filter.
 - **A + B** — the summation prediction (e.g. main + sub before both play). Relative arrival
   matters, so both must share a time base: live measurements and captures of the same audio
-  session. The phase is referred to A's delay (or the one you pick).
+  stream. The phase is referred to A's delay (or the one you pick).
 - **A − B** — the complex difference.
 
 Spectra and RTA bands are levels: **A − B** is the dB difference, **A + B** the power sum,
@@ -2311,7 +2311,7 @@ sum of both, tagged `phase: own alignments` (the file has its own time base).
 |---|---|
 | `Main L ÷ Sub` | the expression |
 | `Main L + Sub · no coherence` | a sum has no coherence of its own |
-| `phase: own alignments` | an operand shares no time base with the other (an import, a capture from an earlier session): their relative arrival is unknown |
+| `phase: own alignments` | an operand shares no time base with the other (an import, a capture from an earlier stream): their relative arrival is unknown |
 | `magnitude only` | against a target |
 | `Main L ÷ Sub · arrival Δ +3.7 µs · +1.3 mm @ 20 °C` | ÷, − and + of two transfer functions on one time base: how far apart the operands arrive (to 0.1 µs) |
 
@@ -2612,7 +2612,7 @@ Shapes: peaking, low and high shelf (first order, or second order by S, Q or oct
 frequency the midpoint or `--corner`), high- and low-pass (Butterworth, Linkwitz-Riley,
 Bessel of order 1–8, or second order of a Q), notch, band-pass, all-pass, gain, polarity,
 delay, a raw biquad, and a stored transfer trace as a measured response. A set is digital
-at a rate (default the session's) or analog. A peaking Q is read as half-gain (APO / REW),
+at a rate (default the stream's) or analog. A peaking Q is read as half-gain (APO / REW),
 −3 dB from the peak (analog consoles) or band-pass Q, per set or per section.
 
 **Double counting.** Once the console has the EQ, the live curve already contains it: a
@@ -2775,7 +2775,7 @@ Beside the panes, one tree lists every measurement with what it owns
 
 - The rig shown is the first root of the tree, even when it is the only one, then each rig
   its daemon is paired with ([Many rigs](#many-rigs-in-one-window)): its heading, the rig's
-  name over its session's rate and clock tag (`96 kHz FREE`; a paired rig's line adds what
+  name over its stream's rate and clock tag (`96 kHz FREE`; a paired rig's line adds what
   else the pairing reports) and under it everything that lives on that rig (its Rig
   monitor meters, its Session measurements, its Imported group). A rig the app holds that
   the rig shown is not paired with has no root: the top bar's drop-down lists it. The arrow before the
@@ -3097,7 +3097,7 @@ dialog:
 
 | Field | Choices |
 |---|---|
-| reference | the session's loopback input; without a loopback mapping it reads "choose the reference" and nothing is made until one is picked |
+| reference | the stream's loopback input; without a loopback mapping it reads "choose the reference" and nothing is made until one is picked |
 | measurement | by name: the first mic |
 | output | by name: the **stimulus outputs** of *Inputs & outputs* (the **S** rows), one row each; with no stimulus output, the first other output and the loopback's. The loopback's output is always among them while the reference is its input, and a sweep without it is refused in words |
 | output 2, 3 … | further outputs the same play drives: after the last an empty row (*none*) adds the next; **←/→** to *none* drops one |
@@ -3292,7 +3292,7 @@ ac2 trace export "Run 1" --csv vca.csv
 - A burst lasts at least 3 carrier periods (3 ms at 1 kHz, 0.375 ms at 8 kHz, 30 ms at
   100 Hz): a shorter one has no steady part to find its edges or time anything in. A shorter
   `--durations` entry is refused, naming the shortest at that carrier, at `meas new` and
-  again at every run (the carrier snaps to the session's rate). Without `--durations`, the
+  again at every run (the carrier snaps to the stream's rate). Without `--durations`, the
   defaults are those of 1, 3, 10, 30, 100, 300 ms, 1, 3, 10 s at least 3 periods long.
 - A burst louder than the max level (`ac2 gen ceiling`) is kept in the measurement, as a
   sweep's level is; the run refuses it until the max level is raised.
@@ -3387,11 +3387,11 @@ Backspace goes up a folder; Esc goes back or closes.
 
 | CLI | Does |
 |---|---|
-| `ac2 session status` | the audio I/O and the working state: name, *unsaved changes*, when saved, what could be recovered |
+| `ac2 session status` | the working state: name, *unsaved changes*, when saved, what could be recovered; the autosave and any log not saved |
 | `ac2 session new [--discard]` | new, empty measurements and traces |
 | `ac2 session save` | saves to the session it belongs to; one loaded from or exported to a file on a client's machine needs `save-as <file>` (the daemon knows that file by name only) |
 | `ac2 session save-as <session> [--force]` | saves as another session; `--force` replaces an existing one |
-| `ac2 session load <session> [--discard]` | opens one, disarmed (`load`, because `session open` opens the audio I/O) |
+| `ac2 session load <session> [--discard]` | opens one, disarmed (`load`, because `stream open` opens the audio I/O) |
 | `ac2 session recover` | brings back what the last `new` or `load` replaced |
 | `ac2 session salvage <session>` | brings a session of another format version into the current working state (below) |
 | `ac2 session export <file> [--session <name>]` | writes an `.ac2session` file here: the working state or a saved session |
@@ -3436,7 +3436,7 @@ refuses one that is damaged, larger than 64 MiB, or unpacks to more than 512 MiB
 The daemon (`ac2d`, whether the app, `ac2 daemon start` or the user service started it) **autosaves** the same
 content 1.5 s after the last edit of a burst (at most 10 s after the first) and once more
 when it stops. On the next start it loads it as `session load` does — disarmed, no audio
-session (restored measurements wait for one), same session name and *unsaved changes* — and
+stream (restored measurements wait for one), same session name and *unsaved changes* — and
 logs what was restored. A simulated rig does not.
 
 The top bar shows the state (`ac2 status` and `ac2 session status` print it too):
@@ -3518,7 +3518,7 @@ Windows) none of this does anything. Design: `docs/design/watchdogs.md`.
 
 ## Recording and replay
 
-A **recording** keeps exactly what the converter delivered on the session's inputs, with
+A **recording** keeps exactly what the converter delivered on the stream's inputs, with
 what the operator was doing, so measurements can be re-run later (another machine, build or
 settings) and a rig problem examined after the show. It is not a programme recorder: no
 compression, no outputs ([raw-capture.md](design/raw-capture.md)).
@@ -3533,7 +3533,7 @@ compression, no outputs ([raw-capture.md](design/raw-capture.md)).
   required), `ac2 rec stop`, `ac2 rec status`, `ac2 rec list`.
 
 One recording at a time. It ends and is kept on stop, at its time or size limit, on a write
-error (disk full: everything before is kept), when the session closes or reopens, and when
+error (disk full: everything before is kept), when the stream closes or reopens, and when
 the daemon stops. Gaps (an xrun, a slow disk) are never filled: the sidecar says where
 samples do not follow each other.
 
@@ -3554,11 +3554,11 @@ Files go to `recordings/` in the ac2 data directory on the daemon's machine (`ac
 
 ### Replay
 
-**Replay** opens a session on a recording instead of a device: the running measurements
+**Replay** opens a stream on a recording instead of a device: the running measurements
 analyse it with the recorded device's calibrations and mic curves, no outputs.
 
 - **App:** palette *Replay recording…* (a name or a path).
-- **CLI:** `ac2 session replay <name|path> [--fast]` (a name from `ac2 rec list`, or a
+- **CLI:** `ac2 stream replay <name|path> [--fast]` (a name from `ac2 rec list`, or a
   `.wav` / `.ac2rec.json` path). Real time by default; `--fast` goes as fast as the
   measurements allow, never dropping audio.
 
@@ -3567,20 +3567,20 @@ spectrum, SPL) match the live run to rounding; anything paced by wall time (RTA 
 the per-second SPL log) matches closely only in real time.
 
 **A recorder's WAV:** `ac2 rec import ZOOM0001.WAV [--name flat4] [--dir DIR]` turns a 16-,
-24- or 32-bit PCM or float WAV into a recording `session replay` plays; it runs locally, no
+24- or 32-bit PCM or float WAV into a recording `stream replay` plays; it runs locally, no
 daemon needed. Used for the [band transfer](#4-a-recorder-at-the-place).
 
 ## Calibration and SPL
 
 Every input is declared **mic**, **line** or **digital** (**M** / **L** / **A** on the input
-in Settings › Audio I/O; `ac2 session inputs --kind 3=line`): a backend cannot tell an AES
+in Settings › Audio I/O; `ac2 stream inputs --kind 3=line`): a backend cannot tell an AES
 feed from an analogue one, so nothing is inferred. A mic reads dB SPL through its
 calibration; a line input reads dBFS, and dBu once it has a line calibration; a digital
 feed reads dBFS and is never calibrated (0 dBFS is its full scale). Two inputs of one kind
-(two mics, two line or two digital inputs) can be a **stereo pair** (`ac2 session inputs --pair 3,4=Main`, repeatable; the pairs
+(two mics, two line or two digital inputs) can be a **stereo pair** (`ac2 stream inputs --pair 3,4=Main`, repeatable; the pairs
 given replace the current ones, `--no-pairs` clears them); a mic pair gets bars and a correlation but no loudness. A mic
-input carries a **mic name** (**N**, `ac2 session open … --mic 3=M30`, `ac2 session inputs
---mic 3=M30`); `ac2 session inputs` alone lists the setup, one line per input in the app's
+input carries a **mic name** (**N**, `ac2 stream open … --mic 3=M30`, `ac2 stream inputs
+--mic 3=M30`); `ac2 stream inputs` alone lists the setup, one line per input in the app's
 words (`in 1 · mic MM1 · 90° · verified …`, `in 3+4 · line · pair Main · dBFS`). The
 daemon's machine stores, in its calibration store:
 
@@ -3627,8 +3627,8 @@ A measurement mic often comes with one file per incidence angle (0° pointing at
 
 Chosen per input, explicitly:
 
-- **CLI:** `ac2 cal use 3 90°` (or `off`); `ac2 session inputs --mic 3=M30 --curve 3=90°`
-  sets several inputs at once; `ac2 session inputs` alone lists them.
+- **CLI:** `ac2 cal use 3 90°` (or `off`); `ac2 stream inputs --mic 3=M30 --curve 3=90°`
+  sets several inputs at once; `ac2 stream inputs` alone lists them.
 - **App:** **←/→** on the input's row in Settings › Audio I/O or the Calibrations view,
   palette *Set input mic curve…* (*3=90°*) or *Next mic curve* (the selected
   measurement's input).
@@ -3876,10 +3876,10 @@ kept with the daemon's rig settings (`rig.json`), never in a session file, and i
 own directory (`ac2d --rig-logs`, default `rig-logs` in the ac2 data directory). Traces stay
 the session's: a trace captured under a rig meter is saved with the session as an import.
 
-With **monitor at start** on, the daemon remembers the device of the last session opened while
+With **monitor at start** on, the daemon remembers the device of the last stream opened while
 rig meters exist, and opens it again by itself when it starts, capture only (no outputs, so
 nothing can be played), so the rig meters meter with no app or terminal connected. Closing
-the session, or opening another device, while rig meters run is allowed; the reply warns
+the stream, or opening another device, while rig meters run is allowed; the reply warns
 (the CLI prints it, the app shows it as a toast even with warning toasts off, the daemon
 logs it) that the rig meters stop metering, or meter the new device's inputs.
 
@@ -3890,15 +3890,15 @@ ac2 meas new spl --input 1 --name Stage
 ac2 meas scope Stage rig          # the rig's from now on (`session` makes it the session's again)
 ac2 rig monitor-at-start on       # a restarted daemon reopens the device for it
 ac2 rig status                    # OSC target, counters, monitor at start, rig meters and cues
-ac2 session close
-ac2: warning: rig SPL meter(s) Stage (1) stop metering until a session opens again; their OSC cues report fault
+ac2 stream close
+ac2: warning: rig SPL meter(s) Stage (1) stop metering until a stream opens again; their cues report fault
 ```
 
 ### Leq windows and limits
 
 Every SPL meter also keeps **rolling Leq windows** (by default LAeq over 1, 5, 10, 30 and
 60 min) and a **per-second log** (LAeq, LCeq, LZeq of every second, the last 48 hours). Both
-run whether or not anyone watches, and carry on across stop/start, window changes, session
+run whether or not anyone watches, and carry on across stop/start, window changes, stream
 reopen and daemon restart (the log is in the autosave and sessions). How it is computed:
 [leq.md](design/leq.md).
 
@@ -4268,7 +4268,7 @@ ac2 spl bands transfer --foh "FOH SPL@21:00:00..21:02:00" \
 
    ```
    ac2 rec import ZOOM0001.WAV --name flat4        # writes flat4.wav + flat4.ac2rec.json
-   ac2 session replay /path/to/flat4.ac2rec.json
+   ac2 stream replay /path/to/flat4.ac2rec.json
    ```
 
    File second *t* is the replay's start + *t* on the meter's clock.
@@ -4302,7 +4302,7 @@ levels ([Art-Net cues](#art-net-cues)), or both:
 | `ok` | under the limit, or no limit set |
 | `near` | within the warn margin below the limit |
 | `over` | over the limit |
-| `fault` | the rig cannot judge: no session open, the device lost, the meter stopped, or the limit set on an uncalibrated input |
+| `fault` | the rig cannot judge: no stream open, the device lost, the meter stopped, or the limit set on an uncalibrated input |
 
 The messages go over UDP to the rig's OSC target, an IP address and port (no host names: a
 name lookup could stall the meter). The daemon keeps the target in its rig settings, so it
@@ -4586,7 +4586,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+Home` | Clear offset | `offset_clear` |
 | `Alt+S` | Sessions… | `sessions` |
 | `Ctrl+S` | Save session | `session_save` |
-| `Shift+O` | Open audio I/O… | `session_open` |
+| `Shift+O` | Open audio I/O… | `stream_open` |
 | `Ctrl+M` | New measurement… | `meas_new` |
 | `Shift+M` | New math… | `meas_new_math` |
 | `Alt+M` | New alignment… | `meas_new_alignment` |
@@ -4773,7 +4773,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Save session as… | `session_save_as` |
 | Export session… | `session_export` |
 | Reconnect | `reconnect` |
-| Close audio I/O | `session_close` |
+| Close audio I/O | `stream_close` |
 | Record | `record` |
 | Replay recording… | `replay_recording` |
 | New transfer… | `meas_new_transfer` |
@@ -4879,10 +4879,10 @@ documents each command.
 | command | what it does |
 |---|---|
 | `ac2 devices`, `ac2 status [-v]`, `ac2 daemon start / stop / status [-v]` | the daemon and its audio devices; `status` reads at a glance ([below](#ac2-status)) |
-| `ac2 session open / close / status / inputs / replay` | the audio I/O (`open --out-device` plays on another device than the capture one), each input's mic and active curve; replaying a recording as the audio input |
-| `ac2 session inputs [--kind IN=mic\|line\|digital] [--mic IN=NAME] [--curve IN=LABEL\|off] [--pair L,R[=NAME]] [--no-pairs]` | what each input carries, its mic and curve, the stereo pairs; alone, lists them |
-| `ac2 session panel [--backend B] [--device D]` | opens the device's driver settings on the daemon's host (an ASIO driver's control panel, Audio MIDI Setup for Core Audio) |
-| `ac2 session new / save / save-as / load / recover / salvage / export / import / list` | the working state and saved sessions ([Sessions](#sessions)) |
+| `ac2 stream open / close / status / inputs / replay` | the audio I/O (`open --out-device` plays on another device than the capture one), each input's mic and active curve; replaying a recording as the audio input |
+| `ac2 stream inputs [--kind IN=mic\|line\|digital] [--mic IN=NAME] [--curve IN=LABEL\|off] [--pair L,R[=NAME]] [--no-pairs]` | what each input carries, its mic and curve, the stereo pairs; alone, lists them |
+| `ac2 stream panel [--backend B] [--device D]` | opens the device's driver settings on the daemon's host (an ASIO driver's control panel, Audio MIDI Setup for Core Audio) |
+| `ac2 session new / save / save-as / load / recover / salvage / export / import / list / status` | the working state and saved sessions ([Sessions](#sessions)) |
 | `ac2 meas new / list / set / start / stop / rm`, `ac2 meas layout clear` | transfer (`tf`), `spectrum`, `rta`, `spl` and `sweep` measurements (math traces are listed too); `rm` of one that owns traces needs `--keep-traces` (moved to Imported) or `--delete-traces`; `layout clear` removes a measurement's own panes |
 | `ac2 math new / set` | math traces: `"A / B"`, `--op div\|mul\|add\|sub --a A --b B`, `--op avg --of A,B,C` |
 | `ac2 gen pink / white / periodic-pink / sine`, `ac2 gen stop` | the generator in the foreground (Enter fires, Esc stops); `stop` from any client; `sine --lock MEAS` moves the frequency to the nearest FFT bin of that spectrum measurement and prints it |
@@ -4893,7 +4893,7 @@ documents each command.
 | `ac2 rec start / stop / status / list / import` | raw recording of the inputs |
 | `ac2 trace capture / list / show / rename / display / slot / move / rm / average / import / export / smooth / mic / delay-diff` | stored traces; `list` says what each is filed under; `move <traces> --to MEAS` (or `--imported`) files them elsewhere |
 | `ac2 cal spl / electrical / line / curve import / curve rename / curve rm / use / list / rm` | sensitivity and line calibrations and the mic library; `rm --line` deletes a line calibration |
-| `ac2 levels`, `ac2 levels set [--ballistic true-peak\|type1\|type2\|vu\|momentary\|short-term] [--window 0.3s\|1s] [--over-threshold -1dbtp] [--gate -60dbfs] [--loudness-target -23lufs]`, `ac2 levels reset [--input N …]` | one frame of the programme meters of the open session (per input: kind, ppm in the chosen ballistic, true peak in dBTP, max hold, overs, CLIP; under `momentary` or `short-term` the bars read each source's loudness, so every input's own columns read its *true peak* in dBTP, in the table and in `--json`'s `"ballistic"`; per pair: correlation or which side is quiet, the window; per loudness source — each line or digital pair, `1+2`, and each unpaired line or digital input, `3 mono`; none on a mic — Mom, Short, Int, LRA, max Mom, max Short in LUFS / LU, TP max in dBTP and since when, *— (waiting for programme)* before the gate passes, *(settling)* on an LRA under 60 s; the column the bars read is headed `Mom (bars)` or `Short (bars)`); `--json` writes −∞ as `"-inf"` and *not yet* as `null`; the settings (kept by the rig, shown after; the loudness target, −36 … −5 LUFS, −23 by default, is the level the loudness bars are drawn around); the max holds, over counts and loudness cleared, of the inputs given (a pair restarts when either input is given) or of all |
+| `ac2 levels`, `ac2 levels set [--ballistic true-peak\|type1\|type2\|vu\|momentary\|short-term] [--window 0.3s\|1s] [--over-threshold -1dbtp] [--gate -60dbfs] [--loudness-target -23lufs]`, `ac2 levels reset [--input N …]` | one frame of the programme meters of the open stream (per input: kind, ppm in the chosen ballistic, true peak in dBTP, max hold, overs, CLIP; under `momentary` or `short-term` the bars read each source's loudness, so every input's own columns read its *true peak* in dBTP, in the table and in `--json`'s `"ballistic"`; per pair: correlation or which side is quiet, the window; per loudness source — each line or digital pair, `1+2`, and each unpaired line or digital input, `3 mono`; none on a mic — Mom, Short, Int, LRA, max Mom, max Short in LUFS / LU, TP max in dBTP and since when, *— (waiting for programme)* before the gate passes, *(settling)* on an LRA under 60 s; the column the bars read is headed `Mom (bars)` or `Short (bars)`); `--json` writes −∞ as `"-inf"` and *not yet* as `null`; the settings (kept by the rig, shown after; the loudness target, −36 … −5 LUFS, −23 by default, is the level the loudness bars are drawn around); the max holds, over counts and loudness cleared, of the inputs given (a pair restarts when either input is given) or of all |
 | `ac2 spl watch / set / cal`, `ac2 spl leq watch / set / export / new` | SPL readout, the meter's weightings, acoustic calibration (as `cal spl`), Leq windows and presets, the per-second log and a new log |
 | `ac2 spl bands watch / set / transfer / log / estimate` | the band meter and its transfer ([Band Leq](#band-leq-band-limits-at-a-neighbours)) |
 | `ac2 timing --watch` | the loopback timing monitor |
@@ -4901,10 +4901,10 @@ documents each command.
 | `ac2 selftest duplex --backend jack\|coreaudio\|asio\|fake` | an interface checked without a daemon (stop one that holds it); the backend has no default, `--device` / `--out-device`, `--in`, `--outputs`, `--rate`, `--buffer` choose the stream. Runs it for `--duration` (default 30 s) and prints pass or fail with named reasons (xruns, gaps, clock rate, …) and the latency the backend states (each way and the round trip, where it states one); silent unless `--emit <level> --loopback-out N --loopback-in N` plays pink noise (at most −20 dBFS) on a loopback cable to time output→input and drift |
 | `ac2 selftest stamps --backend … --minutes N --out <dir>` | capture-only timestamp log for the clock study (no outputs opened; on JACK it runs beside the daemon): every block's index and stamps, the stamp clock paired with the host clocks once a second, and the stream's metadata, written into `<dir>`; `--keep <channel>` also keeps that input as an f32 WAV. Same `--device`, `--in`, `--rate`, `--buffer` as `duplex`; analysis in `tools/experiments/timing/` |
 | `ac2 selftest net --listen <addr:port> \| --connect <host:port> --server-key <key> --role send\|receive --minutes N --out <dir>` | network timing between two hosts for the clock study, no audio: block-sized messages of zeros at `--rate`/`--frames`/`--channels` (default 96000/256/1) over the data wire's transport (CURVE, byte credit). The listener prints its key and writes `<dir>/server.key`; listening and sending are independent. The receiver logs every arrival to `<dir>/arrivals.bin` and ends with the one-way spread, interval jitter, missing/reordered blocks and a suggested link offset; the sender records credit stalls and late sends. Analysis in `tools/experiments/timing/` |
-| `ac2 selftest frames --meas <name\|id> [--seconds N] [--remote HOST]` | how one measurement's live frames reach this client, read-only (no sound, no state change; only hello, subscribe, unsubscribe): subscribes to its stream (`spec`, `rta`, `tf`, `spl`) as the app does and records every frame for `--seconds` (default 30, Ctrl-C ends early). Reports the arrival interval (mean, p50, p95, p99, max, gaps over twice the median), the age at arrival (this host's wall clock − the frame's `capture_wall_ns`: it includes the two hosts' clock offset, about ±1 ms with NTP) and its drift, seq gaps, the hop (`audio_sample` step at the session rate) beside the interval, and bytes per frame and Mbit/s. Text: a line every 5 s and a summary; `--json`: one line per frame and a closing summary object |
+| `ac2 selftest frames --meas <name\|id> [--seconds N] [--remote HOST]` | how one measurement's live frames reach this client, read-only (no sound, no state change; only hello, subscribe, unsubscribe): subscribes to its stream (`spec`, `rta`, `tf`, `spl`) as the app does and records every frame for `--seconds` (default 30, Ctrl-C ends early). Reports the arrival interval (mean, p50, p95, p99, max, gaps over twice the median), the age at arrival (this host's wall clock − the frame's `capture_wall_ns`: it includes the two hosts' clock offset, about ±1 ms with NTP) and its drift, seq gaps, the hop (`audio_sample` step at the stream rate) beside the interval, and bytes per frame and Mbit/s. Text: a line every 5 s and a summary; `--json`: one line per frame and a closing summary object |
 | `ac2 discover`, `ac2 auth pair / show` | find network daemons, pair with one |
 | `ac2 server info`, `ac2 server network [on [--interface NAME \| --addr IP \| --all] [--port N] \| off]`, `ac2 server authorize NAME --refused FINGERPRINT \| --key KEY` | on the rig's own host: how the daemon serves clients (local endpoints, the network's setting, status and why it waits or failed, server key, authorized and lately refused keys, interfaces); the network switched on or off live, session and local clients running on, and kept across restarts (`on` alone keeps the last interface and port; first time every interface, port 47820); a refused client authorized by the fingerprint `server info` lists, at once. Refused from a remote client, while `ac2d --listen` fixes the network, and by a daemon with no network to serve |
-| `ac2 auth admit-rig NAME --key KEY --rig-id ID`, `ac2 auth peer-add NAME --rig-id ID --at HOST[:PORT] --key KEY`, `ac2 auth peer-remove NAME`, `ac2 session open … --remote-in RIG:IN [--link-offset TIME]`, `ac2 session link-offset TIME\|default` | remote inputs (network mode on both rigs): the rig whose input is taken admits the other rig's server key, which may then read its inputs and nothing else; the taking rig pairs with it and opens a session with that input beside its own (`--remote-in` names the paired rig and its input, 1-based). `ac2 status` names each remote rig once under *RIGS* (clock relation, link, a line per remote input), the link offset under *AUDIO*, and each transfer function across rigs under *MEASUREMENTS* (its clock gate, relock, slip, drift and late cues, delay); `link-offset` reopens the audio I/O with that offset, the remote inputs anchoring again |
+| `ac2 auth admit-rig NAME --key KEY --rig-id ID`, `ac2 auth peer-add NAME --rig-id ID --at HOST[:PORT] --key KEY`, `ac2 auth peer-remove NAME`, `ac2 stream open … --remote-in RIG:IN [--link-offset TIME]`, `ac2 stream link-offset TIME\|default` | remote inputs (network mode on both rigs): the rig whose input is taken admits the other rig's server key, which may then read its inputs and nothing else; the taking rig pairs with it and opens a session with that input beside its own (`--remote-in` names the paired rig and its input, 1-based). `ac2 status` names each remote rig once under *RIGS* (clock relation, link, a line per remote input), the link offset under *AUDIO*, and each transfer function across rigs under *MEASUREMENTS* (its clock gate, relock, slip, drift and late cues, delay); `link-offset` reopens the audio I/O with that offset, the remote inputs anchoring again |
 
 ### `ac2 status`
 
@@ -4955,7 +4955,7 @@ after the link offset in the last hour (marked `!`, as the app colours it); *+1 
 system clock* is the interface's rate against the system clock over the last minute, and
 *synced ±2.5 ms* the OS's stated bound on that clock.
 
-`-v` adds the identifiers (rig id, client id, incarnation, session epoch, rev) and the long
+`-v` adds the identifiers (rig id, client id, incarnation, stream epoch, rev) and the long
 words, the rigs' and measurements' facts one a line (the rig under whose row a line sits is
 said as *it*), wider than 100 columns where a sentence needs it: why the
 clocks are not locked and what to do, each rig's link window and arrival margin, the

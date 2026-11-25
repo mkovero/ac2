@@ -38,7 +38,7 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
   bands you keep, moved from a named receiving place to the FOH mic by a measured band
   transfer, with the predicted LAeq there.
 - **Raw recording and replay**: record every input to f32 WAV / RF64, replay a recording
-  (or a recorder's WAV) as a capture-only session and measure it again.
+  (or a recorder's WAV) as a capture-only stream and measure it again.
 - **Calibration**: per input against an acoustic calibrator, or **electrically** without
   one (a voltmeter across the mic's pins 2–3 and its data-sheet sensitivity, ±1 dB); a **mic
   library** with labelled curves per mic (0°, 90° …) and an explicitly chosen curve per
