@@ -450,6 +450,95 @@ fn an_old_session_refuses_to_load_and_salvages_its_traces() {
     h.shutdown();
 }
 
+/// An autosave of another format version is set aside whole; salvaged from there, a band
+/// meter's log comes back with its band log, as the autosave's write thread named the two
+/// files, and a band log without its SPL log is listed as refused.
+#[test]
+fn a_set_aside_autosave_salvages_its_band_logs() {
+    let dir = tempfile::tempdir().unwrap();
+    let auto = dir.path().join("autosave");
+    {
+        init_log();
+        let backend = manual_rig();
+        let mut cfg = config(backend.clone(), inproc(&unique("salvage-bands")));
+        cfg.session_dir = Some(dir.path().join("sessions"));
+        cfg.autosave = Some(AutosaveConfig {
+            dir: auto.clone(),
+            restore: true,
+        });
+        let h = Daemon::start(cfg).unwrap();
+        let (mut c, _sub) = connect(&h, &[]);
+        c.ok(Command::StreamOpen {
+            config: stream(false),
+        });
+        let mut m = spl("bands", 1);
+        if let MeasKind::Spl { config } = &mut m.kind {
+            config.bands = Some(Box::new(BandLeqPreset::Finland545Lf.apply(None)));
+        }
+        c.ok(Command::MeasCreate { config: m });
+        let id = c.state().measurements[0].id;
+        c.ok(Command::MeasStart { meas: id });
+        run(&mut driver(&backend), 2.5);
+        drop(c);
+        h.shutdown();
+    }
+    let m = std::fs::read_to_string(auto.join("session.json")).unwrap();
+    let old = m.replace(
+        &format!("\"version\": {}", ac2_traces::session::VERSION),
+        "\"version\": 19",
+    );
+    assert_ne!(m, old);
+    std::fs::write(auto.join("session.json"), old).unwrap();
+
+    let h = start("salvage-bands-2", dir.path(), true);
+    let (mut c, _sub) = connect(&h, &[]);
+    let c = &mut c;
+    let aside = dir.path().join("autosave.v19");
+    // The restore has run once the state is served.
+    assert!(c.state().measurements.is_empty());
+    assert!(aside.join("session.json").is_file(), "set aside whole");
+    std::fs::write(
+        aside.join("spl/9-1.bands.csv"),
+        ac2_traces::band_log::export_csv(
+            &ac2_proto::spl_log::SplLogInfo {
+                meas: MeasId(9),
+                name: "lost".into(),
+                input: 1,
+                mic: None,
+                zone: "UTC".into(),
+                started: WallNs(1_790_000_000_000_000_000),
+            },
+            &[],
+        ),
+    )
+    .unwrap();
+    let s = c.salvage(Command::FileSalvage {
+        session: SessionRef::Path {
+            path: aside.to_string_lossy().into_owned(),
+        },
+    });
+    assert_eq!(s.spl_logs.len(), 1, "{s:?}");
+    let refused: Vec<&str> = s.refused.iter().map(|r| r.file.as_str()).collect();
+    assert_eq!(refused, ["spl/9-1.bands.csv"], "{s:?}");
+    assert!(s.refused[0].reason.contains("without its SPL log"), "{s:?}");
+
+    let saved = dir.path().join("saved");
+    c.ok(Command::FileSave {
+        session: SessionRef::Path {
+            path: saved.to_string_lossy().into_owned(),
+        },
+        overwrite: false,
+    });
+    let back = ac2_traces::session::load(&saved).unwrap();
+    assert_eq!(back.spl_logs.len(), 1);
+    assert!(!back.spl_logs[0].rows.is_empty());
+    assert!(
+        !back.spl_logs[0].bands.is_empty(),
+        "the band log came back with its SPL log"
+    );
+    h.shutdown();
+}
+
 /// Writes a current-version SPL log with its band log, and one of version 2, into the
 /// session at `sdir`; the current log's row count.
 fn salvage_logs(sdir: &Path) -> u64 {

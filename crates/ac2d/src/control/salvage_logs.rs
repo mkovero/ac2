@@ -35,22 +35,34 @@ pub(super) fn read_logs(dir: &Path) -> Vec<SalvagedLog> {
             .flatten()
             .filter(|e| e.path().is_file())
             .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| n.ends_with(".csv") && !n.ends_with(".bands.csv"))
+            .filter(|n| n.ends_with(".csv"))
             .collect(),
         Err(_) => Vec::new(),
     };
     names.sort();
-    names
-        .into_iter()
-        .map(|name| {
-            let p = spl.join(&name);
-            SalvagedLog {
-                file: format!("{SPL_DIR}/{name}"),
-                log: read_log(&p),
-            }
-        })
-        .collect()
+    let logs: Vec<&String> = names.iter().filter(|n| !n.ends_with(BANDS)).collect();
+    // A band log is read with the log of its stem; one without it is listed, never
+    // dropped silently.
+    let orphans = names.iter().filter(|n| {
+        n.strip_suffix(BANDS)
+            .is_some_and(|stem| !logs.iter().any(|l| l.strip_suffix(".csv") == Some(stem)))
+    });
+    let read = logs.iter().map(|name| SalvagedLog {
+        file: format!("{SPL_DIR}/{name}"),
+        log: read_log(&spl.join(name)),
+    });
+    let orphaned = orphans.map(|name| SalvagedLog {
+        file: format!("{SPL_DIR}/{name}"),
+        log: Err(format!(
+            "a band log without its SPL log ({}.csv beside it)",
+            name.strip_suffix(BANDS).unwrap_or(name)
+        )),
+    });
+    read.chain(orphaned).collect()
 }
+
+/// A band log's file name ends so; the rest is its SPL log's stem.
+const BANDS: &str = ".bands.csv";
 
 fn read_log(p: &Path) -> Result<SavedSplLog, String> {
     let bytes = std::fs::read(p).map_err(|e| e.to_string())?;

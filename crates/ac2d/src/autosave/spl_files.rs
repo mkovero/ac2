@@ -9,7 +9,8 @@
 //! last whole line ([`ac2_proto::spl_log::import_csv`]).
 //!
 //! Each meter has two files: its A/C/Z log ([`ac2_proto::spl_log`]) and its band meter's
-//! log beside it ([`ac2_traces::band_log`]), kept the same way from the same shared log.
+//! log beside it ([`ac2_traces::band_log`]) under the A/C/Z file's stem, kept the same way
+//! from the same shared log.
 //!
 //! Beside each A/C/Z log the thread keeps its high-water mark ([`ac2_traces::log_mark`]),
 //! written when the meter's job asks for one (a run's start, the next reservation) and
@@ -92,6 +93,12 @@ pub(crate) struct LogSpec {
     pub(crate) resume: Option<Resume>,
     /// Where its band log's file stands, when restored with one.
     pub(crate) resume_bands: Option<Resume>,
+}
+
+/// The band file beside A/C/Z file `spl` (`<stem>.bands.csv`).
+fn bands_of(spl: &str) -> String {
+    let stem = spl.strip_suffix(".csv").unwrap_or(spl);
+    format!("{stem}.{}", Kind::Bands.suffix())
 }
 
 /// Which of a meter's two logs a file holds.
@@ -366,18 +373,37 @@ impl SplFiles {
             f.rows_in_file = 0;
             return;
         }
-        let rel = self.new_name(meas, f.kind);
+        let rel = match f.kind {
+            Kind::Spl => self.new_name(meas),
+            // A reader without the manifest (`file.salvage` of another version's session)
+            // pairs the two logs by file name, so the band file takes the A/C/Z file's
+            // stem; until that file exists the band rows wait in the shared log.
+            Kind::Bands => match self
+                .files
+                .get(&(meas, Kind::Spl))
+                .and_then(|s| s.rel.as_deref())
+            {
+                Some(spl) => bands_of(spl),
+                None => {
+                    f.written = 0;
+                    f.rows_in_file = 0;
+                    return;
+                }
+            },
+        };
         self.rewrite(f, rel);
     }
 
-    /// `spl/<meas>-<wall ns>.csv` (`.bands.csv`), not taken.
-    fn new_name(&self, meas: MeasId, kind: Kind) -> String {
+    /// `spl/<meas>-<wall ns>.csv`, neither it nor its band file's name taken.
+    fn new_name(&self, meas: MeasId) -> String {
         let mut t = crate::util::wall_ns();
         loop {
-            let rel = format!("{SPL_DIR}/{}-{t}.{}", meas.0, kind.suffix());
-            if !self.dir.join(&rel).exists()
-                && self.files.values().all(|f| f.rel.as_ref() != Some(&rel))
-            {
+            let rel = format!("{SPL_DIR}/{}-{t}.{}", meas.0, Kind::Spl.suffix());
+            let taken = |r: &str| {
+                self.dir.join(r).exists()
+                    || self.files.values().any(|f| f.rel.as_deref() == Some(r))
+            };
+            if !taken(&rel) && !taken(&bands_of(&rel)) {
                 return rel;
             }
             t += 1;
