@@ -17,8 +17,10 @@
 //!   `file.recover` / `file.salvage` / `file.import` / `file.download_begin` /
 //!   `file.delete` / `file.rename` is refused
 //!   (`refused`, nothing changed) until it is answered — except that an operator's never
-//!   waits on a viewer's download: the viewer's is cut (answered `refused`, its worker left
-//!   to remove its staging) and the operator's begins. A viewer begins a download at most
+//!   waits on a viewer's download, and a client's never waits on its own download (a
+//!   client that waits keeps resending the same id, so a new request means it stopped
+//!   waiting): that download is cut (answered `refused`, its worker stops packing and
+//!   removes its staging) and the new command begins. A viewer begins a download at most
 //!   once per [`VIEWER_DOWNLOAD_EVERY`] per key, so it cannot keep the slot taken.
 //! - `file.list` only reads and runs beside anything; one at a time, and a request that
 //!   comes while it runs is answered with its result.
@@ -253,9 +255,15 @@ impl FileJobs {
 }
 
 impl Control {
-    /// Takes the file slot for `command` from `role` (module docs): free, or held by a
-    /// viewer's download an operator cuts; refused otherwise.
-    fn take_file_slot(&mut self, command: &str, role: ClientRole) -> Result<(), ProtoError> {
+    /// Takes the file slot for `command` from `client` as `role` (module docs): free, held
+    /// by a viewer's download an operator cuts, or held by a download of `client`'s own,
+    /// which it cuts; refused otherwise.
+    fn take_file_slot(
+        &mut self,
+        command: &str,
+        client: &Peer,
+        role: ClientRole,
+    ) -> Result<(), ProtoError> {
         let Some((&token, j)) = self
             .file_jobs
             .jobs
@@ -264,7 +272,13 @@ impl Control {
         else {
             return Ok(());
         };
-        if role != ClientRole::Operator || j.role != Some(ClientRole::Viewer) {
+        // A client waiting for its download resends the same id, which never reaches
+        // here; a new request from it means it stopped waiting (an interrupted export
+        // asked again), and packing on for nobody would hold the slot that long.
+        let own = matches!(j.pending, Pending::Download { .. }) && j.reply.client == *client;
+        let operator_over_viewer =
+            role == ClientRole::Operator && j.role == Some(ClientRole::Viewer);
+        if !own && !operator_over_viewer {
             return Err(refused(format!(
                 "{} is under way; {command} waits until it is answered",
                 j.command
@@ -274,15 +288,20 @@ impl Control {
             return Ok(());
         };
         cut.cancel.set();
+        let by = if own {
+            "the same client's"
+        } else {
+            "an operator's"
+        };
         tracing::info!(
-            "{} of {} cut for an operator's {command}",
+            "{} of {} cut for {by} {command}",
             cut.command,
             cut.reply.client.id().0
         );
         self.file_jobs.cut.push(cut.ended);
         let r = cut.reply;
         let e = refused(format!(
-            "an operator's {command} came first; ask for {} again",
+            "{by} {command} came after it; ask for {} again",
             cut.command
         ));
         self.answer(&r.route, &r.client, r.id, Err(e), Instant::now());
@@ -342,7 +361,7 @@ impl Control {
                 if viewer_download {
                     self.viewer_download_rate(client, now)?;
                 }
-                self.take_file_slot(command, role)?;
+                self.take_file_slot(command, client, role)?;
             }
         }
         let (pending, work) = match cmd {

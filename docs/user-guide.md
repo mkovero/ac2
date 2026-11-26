@@ -3437,6 +3437,13 @@ in checked chunks). `new` and `load` with unsaved changes are refused (exit code
 --force` cut short by a power cut, after the old session was moved aside and before the new
 one was in place, leaves the old one: the daemon puts it back as it starts.
 
+Saving, loading, importing and exporting wait for the daemon's disk however long it takes
+(a 100 MB session packs for about a minute on a Pi): the CLI says once on stderr that the
+daemon is still at it, and the app's Sessions dialog shows how long it has waited. The wait
+lasts while the daemon is alive; one that falls silent for 10 s, or restarts, ends it with an
+error. Ctrl-C stops waiting; an export asked again from the same client then stops the pack
+the first one left running and begins anew.
+
 **Salvaging an older session.** After an update that changes the session format, the daemon
 sets its old autosave aside as `autosave.vN` and starts empty. `ac2 session salvage <folder
 or .ac2session file>`, where that path is readable, rebuilds it on top of what is there:
@@ -4956,7 +4963,8 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 
 Every command takes `--json` for machine-readable output. Commands that talk to the daemon
 take `--remote <host[:port]>` for a network daemon, `--timeout` (the reply deadline per
-try, default `1.5s`) and `--key-dir` (the client key pair and pinned daemon keys). Live views (`--watch`) redraw in the terminal. Units are written with
+try, default `1.5s`; session saves, loads, imports and exports wait as long as the daemon
+is alive and working instead) and `--key-dir` (the client key pair and pinned daemon keys). Live views (`--watch`) redraw in the terminal. Units are written with
 suffixes: `-20dbfs`, `48khz`, `12.5ms`, `600samples`, `4.3m`, `94db`. `ac2 <command> --help`
 documents each command.
 

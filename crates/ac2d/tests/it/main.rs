@@ -28,6 +28,7 @@ mod edit_token;
 mod eq;
 mod file_jobs;
 mod file_ops;
+mod file_wait;
 mod harmonics;
 mod inputs;
 mod jack;

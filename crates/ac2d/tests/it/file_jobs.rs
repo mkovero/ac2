@@ -229,10 +229,9 @@ fn a_retry_of_a_pending_file_operation_runs_once() {
     let r = reply(&a, id, Duration::from_secs(10)).expect("answered");
     writer.join().unwrap();
     assert!(r.result.is_ok(), "{:?}", r.result);
-    // Each copy gets the one save's reply; no second save follows it.
-    let again = reply(&a, id, Duration::from_secs(1)).expect("the retry answered");
-    assert_eq!(again.result, r.result);
-    assert!(a.recv(Duration::from_millis(200)).is_none());
+    // Both copies came on one connection: it gets the one save's reply once, and no second
+    // save follows it.
+    assert!(a.recv(Duration::from_millis(500)).is_none());
     h.shutdown();
 }
 

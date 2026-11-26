@@ -341,7 +341,10 @@ fn an_operators_save_cuts_a_viewers_download() {
         overwrite: false,
     });
     let e = refused(reply(&phone, pending));
-    assert!(e.msg.contains("file.save came first"), "{e:?}");
+    assert!(
+        e.msg.contains("operator's file.save came after it"),
+        "{e:?}"
+    );
     let e = refused(phone.call(working_download()));
     assert!(e.msg.contains("try again in"), "{e:?}");
     rig.h.shutdown();

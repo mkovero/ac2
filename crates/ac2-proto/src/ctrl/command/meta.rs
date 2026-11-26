@@ -1,4 +1,5 @@
-//! A command's wire name, whether it only reads, and its lease token.
+//! A command's wire name, whether it only reads, whether a file worker answers it, and its
+//! lease token.
 
 use super::Command;
 
@@ -246,6 +247,26 @@ impl Command {
             | Self::SimMap { .. }
             | Self::SimCancel => false,
         }
+    }
+
+    /// Whether the daemon answers this only after a worker has done its disk or archive work
+    /// (`docs/protocol.md`, *Session files*): packing or unpacking a large session takes
+    /// as long as the disk needs, so a client waits for it while the daemon is alive
+    /// instead of giving up after the usual reply deadline.
+    pub fn is_file_operation(&self) -> bool {
+        matches!(
+            self,
+            Self::FileSave { .. }
+                | Self::FileLoad { .. }
+                | Self::FileNew { .. }
+                | Self::FileRecover
+                | Self::FileSalvage { .. }
+                | Self::FileList
+                | Self::FileImport { .. }
+                | Self::FileDelete { .. }
+                | Self::FileRename { .. }
+                | Self::FileDownloadBegin { .. }
+        )
     }
 
     /// The lease token, for commands that require the stimulus lease.

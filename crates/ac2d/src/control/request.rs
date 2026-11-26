@@ -289,16 +289,7 @@ impl Control {
                 Err(e) => Err(e),
             },
             // Session file work runs on a worker; the reply follows its result.
-            cmd @ (Command::FileSave { .. }
-            | Command::FileLoad { .. }
-            | Command::FileNew { .. }
-            | Command::FileRecover
-            | Command::FileSalvage { .. }
-            | Command::FileList
-            | Command::FileImport { .. }
-            | Command::FileDelete { .. }
-            | Command::FileRename { .. }
-            | Command::FileDownloadBegin { .. }) => {
+            cmd if cmd.is_file_operation() => {
                 match self.start_file_job(route, &client, req.id, cmd, role) {
                     Ok(()) => return,
                     Err(e) => Err(e),

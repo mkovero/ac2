@@ -6,6 +6,9 @@
 //!   a deadline and resends the *same* id on timeout (the daemon deduplicates ids, so a
 //!   retry of an acting command never executes twice; a read's runs again). An edit names
 //!   the entity's token it was made on in the command itself (`base`).
+//!   A file operation (`file.save`, `file.download_begin`, …), which the daemon answers
+//!   when its disk work is done, is waited for as long as the daemon is alive instead
+//!   ([`Client::call_waiting`]).
 //! - The mirror ([`Client::view`], [`Client::watch`]) follows the Q5 sync procedure: see
 //!   [`mirror`].
 //! - [`Client::subscribe`] / [`Client::latest`] give the newest frame per topic by draining the

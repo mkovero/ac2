@@ -831,8 +831,8 @@ fn a_retried_delay_find_runs_once() {
     c.send(&req);
     c.send(&req);
     let first = c.recv_raw(T).unwrap();
-    let second = c.recv_raw(T).unwrap();
-    assert_eq!(first, second);
+    // Both copies came on one connection, which gets the one reply once.
+    assert!(c.recv_raw(Duration::from_millis(300)).is_none());
     let reply = ac2_proto::decode_reply(&first).unwrap();
     assert!(
         matches!(reply.result, Ok(ReplyBody::DelayFinding(_))),

@@ -18,6 +18,27 @@ pub enum ClientError {
         /// Sends of the same request id.
         attempts: u32,
     },
+    /// A file operation was waited for while the daemon was alive, and it fell silent.
+    #[error(
+        "the daemon fell silent ({} s without a keepalive) before it answered `{op}`",
+        .silent.as_secs()
+    )]
+    Silent {
+        /// Command name.
+        op: &'static str,
+        /// How long nothing had come from the daemon.
+        silent: std::time::Duration,
+    },
+    /// The daemon restarted while a file operation was waited for: the work it was doing
+    /// went with it.
+    #[error(
+        "the daemon restarted before it answered `{op}`: look whether it was done, then ask \
+         again"
+    )]
+    Restarted {
+        /// Command name.
+        op: &'static str,
+    },
     /// The daemon speaks another protocol version. There is no fallback.
     #[error(
         "protocol version mismatch: daemon speaks {daemon}, this program speaks {client} \

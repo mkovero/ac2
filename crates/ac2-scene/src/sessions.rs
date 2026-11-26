@@ -325,6 +325,16 @@ pub fn exported_toast(path: &str, bytes: u64) -> String {
     format!("exported to {path} ({})", size(bytes))
 }
 
+/// `the daemon is packing friday.ac2session (12 s)`: a file operation the daemon is still
+/// working on, waited for while it is alive.
+pub fn daemon_working(doing: &str, file: &str, waited: std::time::Duration) -> String {
+    format!(
+        "the daemon is {doing} {} ({} s)",
+        file_part(file),
+        waited.as_secs()
+    )
+}
+
 /// `uploading friday.ac2session: 1.2 of 3.4 MB`.
 pub fn transfer_progress(verb: &str, file: &str, done: u64, total: u64) -> String {
     format!(
@@ -578,6 +588,14 @@ mod tests {
         assert_eq!(
             transfer_progress("uploading", "/m/S/fri.ac2session", 1_200_000, 3_400_000),
             "uploading fri.ac2session: 1.2 of 3.4 MB"
+        );
+        assert_eq!(
+            daemon_working(
+                "packing",
+                "/m/S/fri.ac2session",
+                std::time::Duration::from_millis(12_700)
+            ),
+            "the daemon is packing fri.ac2session (12 s)"
         );
         assert_eq!(file_part("C:\\shows\\fri\\"), "fri");
         assert_eq!(

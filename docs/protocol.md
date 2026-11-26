@@ -126,8 +126,11 @@ Warning { type: "<name>", … }
   name, key) on the network pair and by connection on the local pair, so a local retry
   across a reconnect executes again. A client starts its ids at a random 63-bit value,
   since processes sharing one key share one window. A copy of an id sent while the request
-  still runs (a panel, the delay finder, loopback detection) runs nothing: when the request
-  completes, the reply goes to every copy, on whichever connection each arrived. Every
+  still runs (a panel, the delay finder, loopback detection, a file job) runs nothing: when
+  the request completes, the reply goes to every connection a copy arrived on, once to
+  each. A client waits for a file job (below) while the daemon's keepalives come, resending
+  its id once per try; a daemon silent for its liveness limit, or a new incarnation, ends
+  the wait. Every
   command but a pure read (§3.2 **read**) executes once per id, whichever command it
   carries, a refusal included: its reply is stored, the last 256 stored replies each kept
   30 s, and a copy sent after the reply gets the stored reply. A pure read is not stored: a
@@ -1964,8 +1967,10 @@ with the autosave (§7.3).
   follows when it is done. One such operation at a time: while one is under way, another
   `file.save` / `file.load` / `file.new` / `file.recover` / `file.salvage` / `file.import` /
   `file.download_begin` / `file.delete` / `file.rename` is `refused` (nothing changed; ask again once it is answered),
-  except that an operator's command cuts a viewer's `file.download_begin` under way: the
-  viewer is `refused` (ask again) and the operator's command runs. `file.list` is never
+  except that an operator's command cuts a viewer's `file.download_begin` under way, and a
+  client's command cuts its own `file.download_begin` under way (a client waiting for it
+  resends the same id, so a new request means it stopped waiting): the cut request is
+  `refused` (ask again), its pack stops, and the new command runs. `file.list` is never
   refused for it: one reading of the directory at a time, and a `file.list` sent while one
   reads is answered from it. A save writes the content as it was when it began
   (edits made meanwhile stay unsaved). A load, new or recover whose working state changed

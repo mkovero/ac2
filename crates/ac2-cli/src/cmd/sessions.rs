@@ -5,6 +5,7 @@
 //! chunks.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use ac2_client::sessions::{self, LocalSession};
 use ac2_client::{Client, ClientError, expect_body};
@@ -140,8 +141,31 @@ fn emit_file(out: &mut Out<'_>, f: &SessionFile, toast: String) -> Result<(), Cl
     Ok(())
 }
 
+/// Tells the operator once that the daemon is still `doing` a file operation, which the
+/// CLI waits for while the daemon is alive: a large session takes a minute to pack, and
+/// without a word that looks hung.
+fn still_working(doing: &'static str) -> impl FnMut(Duration) + Send {
+    let mut told = false;
+    move |_| {
+        if !told {
+            told = true;
+            eprintln!("the daemon is {doing}; waiting while it works (Ctrl-C stops waiting)");
+        }
+    }
+}
+
+/// [`still_working`] for a download.
+fn packing() -> impl FnMut(sessions::Progress) + Send {
+    let mut tell = still_working("packing the session");
+    move |p| {
+        if let sessions::Progress::Packing(w) = p {
+            tell(w);
+        }
+    }
+}
+
 async fn export_working(c: &Client, path: &Path, out: &mut Out<'_>) -> Result<(), CliError> {
-    let (p, bytes) = sessions::export(c, None, path, |_, _| {}).await?;
+    let (p, bytes) = sessions::export(c, None, path, packing()).await?;
     let p = p.to_string_lossy().into_owned();
     out.emit(&json!({ "path": p, "bytes": bytes }), || {
         text::exported_toast(&p, bytes)
@@ -249,10 +273,13 @@ pub(crate) async fn session(
                 Target::Daemon(r) => r,
             };
             let (r, warnings) = c
-                .call_warned(Command::FileLoad {
-                    session: r,
-                    discard: *discard,
-                })
+                .call_waiting(
+                    Command::FileLoad {
+                        session: r,
+                        discard: *discard,
+                    },
+                    still_working("reading the session"),
+                )
                 .await
                 .map_err(unsaved)?;
             super::osc::note_warnings(c, &warnings, out).await;
@@ -281,7 +308,12 @@ pub(crate) async fn session(
                 },
                 Target::Daemon(r) => r,
             };
-            let r = c.call(Command::FileSalvage { session: r }).await?;
+            let (r, _) = c
+                .call_waiting(
+                    Command::FileSalvage { session: r },
+                    still_working("reading the session"),
+                )
+                .await?;
             let s = expect_body!("file.salvage", r, ReplyBody::Salvage(s) => s)?;
             let name = text::file_part(session).to_owned();
             out.emit(&s, || {
@@ -296,7 +328,7 @@ pub(crate) async fn session(
             None => export_working(c, file, out).await?,
             Some(s) => {
                 let r = session_ref(s, here)?;
-                let (p, bytes) = sessions::export(c, Some(r), file, |_, _| {}).await?;
+                let (p, bytes) = sessions::export(c, Some(r), file, packing()).await?;
                 let p = p.to_string_lossy().into_owned();
                 out.emit(&json!({ "path": p, "bytes": bytes }), || {
                     text::exported_toast(&p, bytes)
@@ -309,12 +341,15 @@ pub(crate) async fn session(
                 None => import_name(file),
             };
             let transfer = upload(c, file).await?;
-            let r = c
-                .call(Command::FileImport {
-                    transfer,
-                    name,
-                    overwrite: *force,
-                })
+            let (r, _) = c
+                .call_waiting(
+                    Command::FileImport {
+                        transfer,
+                        name,
+                        overwrite: *force,
+                    },
+                    still_working("storing the session"),
+                )
                 .await
                 .map_err(unsaved)?;
             let f = expect_body!("file.import", r, ReplyBody::SessionFile(f) => f)?;
@@ -361,8 +396,11 @@ async fn save(
     overwrite: bool,
     out: &mut Out<'_>,
 ) -> Result<(), CliError> {
-    let r = c
-        .call(Command::FileSave { session, overwrite })
+    let (r, _) = c
+        .call_waiting(
+            Command::FileSave { session, overwrite },
+            still_working("saving the session"),
+        )
         .await
         .map_err(unsaved)?;
     let f = expect_body!("file.save", r, ReplyBody::SessionFile(f) => f)?;

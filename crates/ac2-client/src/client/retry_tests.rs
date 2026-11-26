@@ -27,6 +27,7 @@ pub(super) fn core(retry: Retry) -> (CallCore, Socket, Context) {
         next_id: AtomicU64::new(7),
         retry,
         key: None,
+        liveness: std::sync::OnceLock::new(),
     };
     (core, router, ctx)
 }

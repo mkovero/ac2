@@ -542,7 +542,7 @@ async fn a_viewer_exports_a_copy_of_the_working_state() {
     c.wait_synced(T).await.unwrap();
     assert_eq!(c.role(), ClientRole::Viewer);
     let to = dir.path().join("copy.ac2session");
-    let (p, bytes) = ac2_client::sessions::export(&c, None, &to, |_, _| {})
+    let (p, bytes) = ac2_client::sessions::export(&c, None, &to, |_| {})
         .await
         .unwrap();
     assert_eq!(p, to);

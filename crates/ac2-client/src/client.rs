@@ -185,6 +185,8 @@ pub(crate) struct CallCore {
     retry: Retry,
     /// This client's CURVE key, named when the daemon refuses it.
     key: Option<ac2_zmq::PublicKey>,
+    /// What a file operation's wait watches; set once the connection is up.
+    liveness: std::sync::OnceLock<patience::Liveness>,
 }
 
 impl CallCore {
@@ -211,7 +213,24 @@ impl CallCore {
         cmd: Command,
         retry: Retry,
     ) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
+        self.call_waiting(cmd, retry, &mut |_| {}).await
+    }
+
+    /// [`Self::call_warned`]; `waiting` hears how long a file operation has waited each time
+    /// a try passes unanswered while the daemon is alive.
+    pub(crate) async fn call_waiting(
+        &self,
+        cmd: Command,
+        retry: Retry,
+        waiting: &mut (dyn FnMut(Duration) + Send),
+    ) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
+        let file_op = cmd.is_file_operation();
         let (op, id, bytes, mut rx) = self.start(cmd)?;
+        let call = Call {
+            op,
+            bytes: &bytes,
+            file_op,
+        };
         // Removes the waiter however this future ends (reply, timeout or cancellation).
         struct Guard<'a>(&'a CallCore, u64);
         impl Drop for Guard<'_> {
@@ -220,7 +239,7 @@ impl CallCore {
             }
         }
         let _guard = Guard(self, id);
-        self.finish(op, &bytes, &mut rx, retry).await
+        self.finish(call, &mut rx, retry, waiting).await
     }
 
     /// [`Self::start`], the reply to be awaited apart ([`SentCall::reply`]).
@@ -229,10 +248,12 @@ impl CallCore {
         cmd: Command,
         retry: Retry,
     ) -> Result<SentCall, ClientError> {
+        let file_op = cmd.is_file_operation();
         let (op, id, bytes, rx) = self.start(cmd)?;
         Ok(SentCall {
             core: self.clone(),
             op,
+            file_op,
             id,
             bytes,
             rx,
@@ -273,47 +294,63 @@ impl CallCore {
     }
 
     /// The reply to a request [`Self::start`] sent, resent after each timeout the retry
-    /// policy allows.
+    /// policy allows; a file operation's is awaited while the daemon is alive instead
+    /// ([`patience`]).
     async fn finish(
         &self,
-        op: &'static str,
-        bytes: &[u8],
+        call: Call<'_>,
         rx: &mut oneshot::Receiver<Result<Reply, ClientError>>,
         retry: Retry,
+        waiting: &mut (dyn FnMut(Duration) + Send),
     ) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
+        let Call { op, bytes, file_op } = call;
+        if file_op && let Some(live) = self.liveness.get() {
+            return self
+                .finish_while_alive(op, bytes, rx, retry, live, waiting)
+                .await;
+        }
         let attempts = retry.retries.saturating_add(1);
         for attempt in 0..attempts {
             if attempt > 0 {
                 self.io.send(bytes)?;
             }
-            // In slices: a refused key is known within a handshake, long before the
-            // attempt's timeout.
             let until = tokio::time::Instant::now() + retry.timeout;
-            loop {
-                let left = until.saturating_duration_since(tokio::time::Instant::now());
-                if left.is_zero() {
-                    break;
-                }
-                match tokio::time::timeout(left.min(REFUSAL_POLL), &mut *rx).await {
-                    Ok(Ok(reply)) => {
-                        let reply = reply?;
-                        return match reply.result {
-                            Ok(body) => Ok((body, reply.warnings)),
-                            Err(e) => Err(ClientError::Daemon(e)),
-                        };
-                    }
-                    Ok(Err(_)) => return Err(ClientError::Closed),
-                    Err(_) => {
-                        if let Some(e) = self.refusal() {
-                            return Err(e);
-                        }
-                    }
-                }
+            if let Some(r) = self.reply_by(rx, until).await {
+                return r;
             }
         }
         Err(self
             .refusal()
             .unwrap_or(ClientError::Timeout { op, attempts }))
+    }
+
+    /// The reply if it comes by `until`. In slices: a refused key is known within a
+    /// handshake, long before the attempt's timeout.
+    async fn reply_by(
+        &self,
+        rx: &mut oneshot::Receiver<Result<Reply, ClientError>>,
+        until: tokio::time::Instant,
+    ) -> Option<Result<(ReplyBody, Vec<Warning>), ClientError>> {
+        loop {
+            let left = until.saturating_duration_since(tokio::time::Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            match tokio::time::timeout(left.min(REFUSAL_POLL), &mut *rx).await {
+                Ok(Ok(reply)) => {
+                    return Some(reply.and_then(|reply| match reply.result {
+                        Ok(body) => Ok((body, reply.warnings)),
+                        Err(e) => Err(ClientError::Daemon(e)),
+                    }));
+                }
+                Ok(Err(_)) => return Some(Err(ClientError::Closed)),
+                Err(_) => {
+                    if let Some(e) = self.refusal() {
+                        return Some(Err(e));
+                    }
+                }
+            }
+        }
     }
 
     /// Sends without waiting for the reply (used from `Drop`).
@@ -323,6 +360,15 @@ impl CallCore {
             let _ = self.io.send(&bytes);
         }
     }
+}
+
+/// A request sent: its name, its encoding (resent as it is) and whether a file worker
+/// answers it.
+#[derive(Clone, Copy)]
+struct Call<'a> {
+    op: &'static str,
+    bytes: &'a [u8],
+    file_op: bool,
 }
 
 type Started = (
@@ -337,6 +383,7 @@ type Started = (
 pub struct SentCall {
     core: Arc<CallCore>,
     op: &'static str,
+    file_op: bool,
     id: u64,
     bytes: Vec<u8>,
     rx: oneshot::Receiver<Result<Reply, ClientError>>,
@@ -347,7 +394,12 @@ impl SentCall {
     /// The reply, with its warnings; resent after a timeout as [`Client::call`] does.
     pub async fn reply(mut self) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
         let core = self.core.clone();
-        core.finish(self.op, &self.bytes, &mut self.rx, self.retry)
+        let call = Call {
+            op: self.op,
+            bytes: &self.bytes,
+            file_op: self.file_op,
+        };
+        core.finish(call, &mut self.rx, self.retry, &mut |_| {})
             .await
     }
 }
@@ -495,6 +547,7 @@ impl Client {
             next_id: AtomicU64::new(random_u64() >> 1),
             retry: cfg.retry,
             key: curve.map(|c| c.keys.public),
+            liveness: std::sync::OnceLock::new(),
         });
         let welcome = hello(&core, &cfg.name).await?;
         for ep in &absent {
@@ -502,6 +555,10 @@ impl Client {
         }
         let mirror = Mirror::new(cfg.mirror);
         let (view_tx, view_rx) = watch::channel(Arc::new(view_of(&mirror, &welcome)));
+        let _ = core.liveness.set(patience::Liveness {
+            view: view_rx.clone(),
+            dead_after: cfg.dead_after,
+        });
         let welcome = Arc::new(Mutex::new(welcome));
         let sync_task = tokio::spawn(sync::run_sync(
             core.clone(),
@@ -576,6 +633,20 @@ impl Client {
         view_only_gate(self.role(), &cmd)?;
         let r = self.inner.core.retry;
         self.inner.core.call_warned(cmd, r).await
+    }
+
+    /// [`Self::call_warned`] for a file operation ([`Command::is_file_operation`]), which
+    /// the daemon answers when its disk or archive work is done: the call waits as long as
+    /// the daemon is alive, and `waiting` hears how long it has waited each time a try
+    /// passes unanswered, so the operator can be told the rig is still at it.
+    pub async fn call_waiting(
+        &self,
+        cmd: Command,
+        mut waiting: impl FnMut(Duration) + Send,
+    ) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
+        view_only_gate(self.role(), &cmd)?;
+        let core = &self.inner.core;
+        core.call_waiting(cmd, core.retry, &mut waiting).await
     }
 
     /// Sends `cmd` now, with the default retry policy; the reply is awaited apart. Calls
@@ -892,4 +963,10 @@ async fn hello(core: &CallCore, name: &str) -> Result<Welcome, ClientError> {
 #[allow(clippy::unwrap_used)]
 mod retry_tests;
 
+mod patience;
+/// Waiting for a file operation against a ROUTER the test answers by hand and a view the
+/// test drives: keepalives that come, stop, or come from a restarted daemon.
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod patience_tests;
 mod sync;

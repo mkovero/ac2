@@ -101,7 +101,11 @@ impl Dedup {
         match w.slots.get_mut(&id) {
             Some(Slot::Done(reply)) => Admit::Stored(reply.clone()),
             Some(Slot::Pending(waiters, _)) => {
-                waiters.push(route.clone());
+                // A client waiting out a long job resends its id every try on the same
+                // connection: one reply per connection is all it can use.
+                if !waiters.contains(route) {
+                    waiters.push(route.clone());
+                }
                 Admit::Attached
             }
             None => {
@@ -331,7 +335,7 @@ mod tests {
         );
         assert_eq!(
             d.complete(&c, RequestId(1), &r(b"new"), &[2], t0),
-            vec![r(b"new"), r(b"new")]
+            vec![r(b"new")]
         );
         assert_eq!(
             d.admit(&c, RequestId(1), &r(b"new"), t0, Retry::Stored),

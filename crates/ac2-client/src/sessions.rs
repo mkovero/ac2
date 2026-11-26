@@ -132,16 +132,39 @@ pub async fn upload_file(
     Ok(t.transfer)
 }
 
+/// How a download goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Progress {
+    /// The daemon is still packing the session; waited this long so far.
+    Packing(std::time::Duration),
+    /// Bytes fetched of the total.
+    Fetched {
+        /// Bytes so far.
+        done: u64,
+        /// Size of the archive.
+        total: u64,
+    },
+}
+
 /// Downloads `session` (`None`: the working state) and checks it; the transfer stays open
-/// for [`finish_download`].
+/// for [`finish_download`]. The daemon packs the session before it answers, which takes
+/// as long as its disk needs: the call waits while the daemon is alive
+/// ([`Client::call_waiting`]).
 pub async fn download(
     c: &Client,
     session: Option<SessionRef>,
-    mut progress: impl FnMut(u64, u64),
+    mut progress: impl FnMut(Progress) + Send,
 ) -> Result<(Transfer, Vec<u8>), ClientError> {
-    let t = c.call(Command::FileDownloadBegin { session }).await?;
+    let (t, _) = c
+        .call_waiting(Command::FileDownloadBegin { session }, |w| {
+            progress(Progress::Packing(w))
+        })
+        .await?;
     let t = expect_body!("file.download_begin", t, ReplyBody::Transfer(t) => t)?;
-    let data = pull(c, &t, &mut progress).await?;
+    let data = pull(c, &t, &mut |done, total| {
+        progress(Progress::Fetched { done, total })
+    })
+    .await?;
     ac2_archive::verify(&data, &t.sha256).map_err(ClientError::Archive)?;
     Ok((t, data))
 }
@@ -339,7 +362,7 @@ pub async fn export(
     c: &Client,
     session: Option<SessionRef>,
     path: &Path,
-    progress: impl FnMut(u64, u64),
+    progress: impl FnMut(Progress) + Send,
 ) -> Result<(PathBuf, u64), ClientError> {
     let working = session.is_none() && export_names_working(c.role());
     let (t, data) = download(c, session, progress).await?;

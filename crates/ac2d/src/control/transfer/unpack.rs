@@ -3,7 +3,7 @@
 //! for a download. Each streams: neither holds an archive in memory.
 
 use std::fs;
-use std::io::BufReader;
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 
 use ac2_archive::ArchiveError;
@@ -22,6 +22,26 @@ fn archive_err(e: ArchiveError) -> ProtoError {
         ArchiveError::Io { .. } => internal(msg),
         ArchiveError::NoRoom { .. } => refused(msg),
         _ => invalid(msg),
+    }
+}
+
+/// Ends a pack whose job was cut: a large session packs for as long as the disk needs, and
+/// a cut job must not keep the disk busy (and its staging growing) for nobody meanwhile.
+struct Stoppable<'a, W> {
+    inner: W,
+    cancel: &'a Cancel,
+}
+
+impl<W: Write> Write for Stoppable<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.cancel
+            .check()
+            .map_err(|e| std::io::Error::other(e.msg))?;
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
     }
 }
 
@@ -88,7 +108,12 @@ impl Drop for Packed {
 /// Packs session directory `dir` into the file `to`, after checking that the disk can take
 /// it ([`ac2_archive::session_bytes`], an upper bound) and keep what `disk` keeps; nothing
 /// is left at `to` on an error.
-pub(crate) fn pack_session(dir: &Path, to: &Path, disk: &Disk) -> Result<Packed, ProtoError> {
+pub(crate) fn pack_session(
+    dir: &Path,
+    to: &Path,
+    disk: &Disk,
+    cancel: &Cancel,
+) -> Result<Packed, ProtoError> {
     let parent = to.parent().unwrap_or(to);
     fs::create_dir_all(parent).map_err(|e| internal(format!("{STAGING}: {e}")))?;
     let need = ac2_archive::session_bytes(dir).map_err(archive_err)?;
@@ -104,7 +129,14 @@ pub(crate) fn pack_session(dir: &Path, to: &Path, disk: &Disk) -> Result<Packed,
         .map_err(|e| internal(format!("{STAGING}: {e}")))
         .and_then(|f| {
             let mut w = std::io::BufWriter::new(f);
-            let p = ac2_archive::pack_dir_to(dir, &mut w).map_err(archive_err)?;
+            let p = ac2_archive::pack_dir_to(
+                dir,
+                Stoppable {
+                    inner: &mut w,
+                    cancel,
+                },
+            )
+            .map_err(archive_err)?;
             w.into_inner()
                 .map_err(|e| internal(format!("{STAGING}: {}", e.error())))?;
             Ok(p)

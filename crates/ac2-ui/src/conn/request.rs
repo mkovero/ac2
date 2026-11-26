@@ -624,6 +624,20 @@ pub(super) async fn session_source(
     }
 }
 
+/// Tells the Sessions dialog the daemon is still `doing` `file`: a file operation is waited
+/// for while the daemon is alive, which for a large session is a minute.
+fn working<'a>(
+    o: &'a Out,
+    doing: &'a str,
+    file: &'a str,
+) -> impl FnMut(std::time::Duration) + Send + 'a {
+    move |w| {
+        o.send(ConnEvent::SessionProgress(
+            ac2_scene::sessions::daemon_working(doing, file, w),
+        ))
+    }
+}
+
 pub(super) async fn session_step(
     c: &Client,
     o: &Out,
@@ -632,23 +646,30 @@ pub(super) async fn session_step(
     use crate::sessions::{SessionDone as D, SessionStep as S, Source};
     Ok(match step {
         S::Save { session, overwrite } => {
-            let r = c
-                .call(Command::FileSave {
-                    session: session.clone(),
-                    overwrite: *overwrite,
-                })
+            let (r, _) = c
+                .call_waiting(
+                    Command::FileSave {
+                        session: session.clone(),
+                        overwrite: *overwrite,
+                    },
+                    working(o, "saving", &Source::Daemon(session.clone()).name()),
+                )
                 .await?;
             D::Saved(expect_body!("file.save", r, ReplyBody::SessionFile(f) => f)?)
         }
         S::Export { session, path } => {
             let file = path.to_string_lossy().into_owned();
-            let (path, bytes) =
-                ac2_client::sessions::export(c, session.clone(), path, |done, total| {
-                    o.send(ConnEvent::SessionProgress(
-                        ac2_scene::sessions::transfer_progress("exporting", &file, done, total),
-                    ));
-                })
-                .await?;
+            let (path, bytes) = ac2_client::sessions::export(c, session.clone(), path, |p| {
+                o.send(ConnEvent::SessionProgress(match p {
+                    ac2_client::sessions::Progress::Packing(w) => {
+                        ac2_scene::sessions::daemon_working("packing", &file, w)
+                    }
+                    ac2_client::sessions::Progress::Fetched { done, total } => {
+                        ac2_scene::sessions::transfer_progress("exporting", &file, done, total)
+                    }
+                }));
+            })
+            .await?;
             D::Exported {
                 path,
                 bytes,
@@ -665,10 +686,13 @@ pub(super) async fn session_step(
         S::Open { from, discard } => {
             let session = session_source(c, o, from).await?;
             let (r, warnings) = c
-                .call_warned(Command::FileLoad {
-                    session,
-                    discard: *discard,
-                })
+                .call_waiting(
+                    Command::FileLoad {
+                        session,
+                        discard: *discard,
+                    },
+                    working(o, "reading", &from.name()),
+                )
                 .await?;
             send_warnings(o, warnings);
             let file = expect_body!("file.load", r, ReplyBody::SessionFile(f) => f)?;
@@ -687,7 +711,12 @@ pub(super) async fn session_step(
         }
         S::Salvage { from } => {
             let session = session_source(c, o, from).await?;
-            let r = c.call(Command::FileSalvage { session }).await?;
+            let (r, _) = c
+                .call_waiting(
+                    Command::FileSalvage { session },
+                    working(o, "reading", &from.name()),
+                )
+                .await?;
             D::Salvaged {
                 name: from.name(),
                 salvage: expect_body!("file.salvage", r, ReplyBody::Salvage(s) => s)?,

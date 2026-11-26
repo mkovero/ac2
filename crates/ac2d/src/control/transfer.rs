@@ -576,7 +576,7 @@ impl Control {
                         .and_then(|()| prepare_stage(&dir))
                         .and_then(|()| session::save(&dir, &data).map_err(session_err))
                         .and_then(|_| cancel.check())
-                        .and_then(|()| pack_session(&dir, &to, &disk));
+                        .and_then(|()| pack_session(&dir, &to, &disk, cancel));
                     remove_dir(&dir);
                     FileDone::Download(packed)
                 });
@@ -593,7 +593,7 @@ impl Control {
                         cancel
                             .check()
                             .and_then(|()| session::read_manifest(&dir).map_err(session_err))
-                            .and_then(|_| pack_session(&dir, &to, &disk)),
+                            .and_then(|_| pack_session(&dir, &to, &disk, cancel)),
                     )
                 });
                 (name, work, None)

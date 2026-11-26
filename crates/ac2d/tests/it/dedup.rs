@@ -96,8 +96,11 @@ fn a_retry_of_a_running_panel_request_attaches_to_it() {
 
     close.send(()).unwrap();
     let first = c.recv_raw(T).unwrap();
-    let second = c.recv_raw(T).unwrap();
-    assert_eq!(first, second, "both copies get the one reply");
+    // Both copies came on one connection, which gets the one reply once.
+    assert!(
+        c.recv_raw(Duration::from_millis(300)).is_none(),
+        "one reply per connection"
+    );
     let reply = ac2_proto::decode_reply(&first).unwrap();
     assert_eq!(reply.id, req.id);
     assert!(
@@ -133,6 +136,8 @@ fn ids_are_per_connection_for_local_clients() {
     let req = Request::new(a.next_id(), panel());
     a.send(&req);
     barrier(&mut a);
+    // The same id from b's own count, so its barrier takes the next one.
+    assert_eq!(b.next_id(), req.id);
     b.send(&req);
     barrier(&mut b);
     // The panel thread is busy with the first; the second connection's own request queues
