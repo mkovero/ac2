@@ -881,13 +881,14 @@ Every serde writer of the workspace was walked; stored formats that change shape
 
 CLI `--json` output and selftest reports follow the wire types and are not read back.
 
-At deploy every host stops the old daemon, then: saves or exports any session it wants to
-keep; runs `tools/proto-next/convert.py` once, which rewrites `rig.json`, the calibration
-store, the authorized-clients file and the plan files into their new shapes and is deleted
-after the deploy (no reader of old shapes enters the daemon); checks the runtime directory's
-unit setting; installs daemon, CLI and apps together, since no client speaks an older PROTO
-and 106 both. A standalone meter's files must be converted before its first start under 106,
-or it boots without its meter and refuses every network client.
+At deploy every host stops and disables the old daemon, saves or exports what it wants to
+keep, runs `tools/proto-next/convert.py` once as the daemon's user (it rewrites `rig.json`,
+the calibration store, the authorized-clients file and the plan files, keeping each original
+as `<name>.pre106`, and is deleted after the deploy: no reader of old shapes enters the
+daemon), checks the unit's runtime directory (§8), then installs daemon, CLI and apps together, since no client speaks an older PROTO
+and 106 both. A standalone meter's files are converted and synced before its new binary is in
+place. The steps per host kind, verification, recovery and rollback are in
+`docs/rigs/pupu.md`, *Deploying PROTO 106*.
 
 ## Open questions
 

@@ -85,10 +85,10 @@ protocol check. If the cross build fails on types the checkout no longer has, it
 crates: `find crates -name '*.rs' -exec touch {} +` and rebuild.
 
 **When the session format changes**, the daemon sets the old autosave aside as
-`~/.local/share/ac2/autosave.vN` and starts empty. After step 5 (audio reopened with the
+`~/.local/share/ac2/autosave.v<N>-<unix time>` (N the old format) and starts empty. After step 5 (audio reopened with the
 operator's inputs, so the running measurements can start), bring it back from ketunkolo;
 the CLI reads the folder, so copy it over first (pupu's daemon listens on the network only):
-`cd ~/ac2-test && scp -rq mui@192.168.9.27:.local/share/ac2/autosave.vN /tmp/ && bin/ac2 --remote 192.168.9.27 session salvage /tmp/autosave.vN`.
+`cd ~/ac2-test && scp -rq mui@192.168.9.27:.local/share/ac2/autosave.v<N>-<time> /tmp/ && bin/ac2 --remote 192.168.9.27 session salvage /tmp/autosave.v<N>-<time>`.
 (ketunkolo may lack pupu's SSH host key; then copy by way of the build host, `scp -3`.)
 It makes each measurement again with its settings, colour, layout, delay and tracking (a
 pane layout of an older shape is not mapped: that measurement opens with the default layout,
@@ -101,12 +101,128 @@ per-second Leq history (their windows start again; before the deploy, `spl leq e
 once: a second run adds copies.
 The rig settings (`~/.config/ac2/rig.json`: system max level, output labels, rig meters,
 cue targets, paired rigs) and the calibration store (`~/.config/ac2/calibrations.json`)
-survive unless their own format changes. Then the old file is set aside as `rig.json.vN` /
-`calibrations.json.vN` (never deleted) and nothing is read from it: set the max level,
-labels, meters and cues again from the old file, and redo the electrical calibration with
-the operator.
+survive unless their own format changes. Then the old file is set aside as
+`rig.json.v<N>-<unix time>` / `calibrations.json.v<N>-<unix time>` (N the old format; never
+deleted) and nothing is read from it. When a converter for that change exists (PROTO 106:
+*Deploying PROTO 106* below), stop the daemon, convert the set-aside file, put it back under
+its own name and start again; without one, set the max level, labels, meters and cues again
+from the old file and redo the electrical calibration with the operator.
 When an enum in the app's `ui.toml` loses a value, the app drops the whole section holding it
 (no compatibility shims): edit the value on ketunkolo and the Pi with the app stopped.
+
+### Deploying PROTO 106 (one time)
+
+PROTO 106 changes the shape of `rig.json`, the calibration store, the authorized-clients file
+and the plan files (table in `docs/design/protocol-next.md`, *Versions and deploy*). The
+106 daemon has no reader of the old shapes: `tools/proto-next/convert.py` rewrites them once,
+with the old daemon stopped, before the first 106 start. No 105 client talks to a 106 daemon
+or the other way round, so every host and client moves in the same window. The converter
+keeps each original beside it as `<name>.pre106` (`.pre106.1`, … on a second run) and leaves a
+file already in the new shape alone.
+
+Files per host (defaults; a unit or launcher that passes `--settings`, `--cal-store`,
+`--plans` or `--authorized` names others: convert those):
+
+- `~/.config/ac2/rig.json` → `--rig`
+- `~/.config/ac2/calibrations.json` → `--cal`
+- `~/.local/share/ac2/plans` → `--plans` (skip when it does not exist)
+- `~/.config/ac2/authorized_clients` → `--auth` (exists only where the network was ever on)
+
+What does not carry over: the autosave (session format 49) is set aside at the first start
+as `autosave.v49-<time>`, and comes back only by `session salvage` (above); the SPL meters'
+Leq/SPL logs start again (the old CSV files stay on disk, the 106 daemon does not read them);
+raw captures recorded under 105 are not replayed (keep the WAV).
+
+**Every host, before the stop**
+
+1. Nothing armed, firing or recording (sweep, dynamics, walk, recording); generator off.
+2. Export what must be kept: `ac2 session save <name>` (or `session export`) for a session,
+   `ac2 spl leq export --meas <name> -o <file>` for every SPL meter's history. A meter's
+   history is written on its own host with that host's CLI, then copied off.
+3. Note the binaries' revision to roll back to (`bin.prev-<rev>` below).
+4. Check the daemon unit's runtime directory: 106 serves the local pair on ipc sockets in
+   `$AC2_RUNTIME_DIR`, else `$XDG_RUNTIME_DIR/ac2`, else `<temp>/ac2-<user>`. It must be the
+   daemon user's own, mode 700, and short (a socket path over 107 bytes is refused). A CLI or
+   kiosk on the same host finds the daemon only with the same setting (a system unit without
+   `XDG_RUNTIME_DIR` and a login shell with it look in different places).
+
+**pupu (rig daemon with network clients)**
+
+1. Stop every client first (ketunkolo's app, both Pis' kiosks, any CLI, ac2-remote): from
+   the stop until all are updated, a client is refused at the protocol check.
+2. `systemctl --user stop ac2d && systemctl --user disable ac2d` (disabled: a reboot or a
+   restart on failure in the window would start an old daemon on new files, or the reverse).
+3. Ship the 106 binaries to `~/ac2-test/bin.new-<rev>`; keep `bin` as `bin.prev-<rev>`.
+4. Copy `tools/proto-next/convert.py` to pupu and run it as mui (the daemon's user; a file
+   owned by another user is refused):
+   `python3 convert.py --rig ~/.config/ac2/rig.json --cal ~/.config/ac2/calibrations.json --plans ~/.local/share/ac2/plans --auth ~/.config/ac2/authorized_clients`.
+   Keep its output in the deploy log. Check `ls -l ~/.config/ac2/*.pre106*`.
+5. `cp -f bin.new-<rev>/* bin/`, then `systemctl --user enable --now ac2d`.
+6. Verify (*Every host, after the start*), then reopen audio (step 5 of *Deploying a build*) and
+   salvage the autosave (above).
+
+**ketunkolo (app host with its own ac2d)**
+
+1. Stop the app (`pkill -x ac2-ui`) and its own ac2d (an ac2d the app started stops with it;
+   one run by a unit is stopped and disabled as on pupu). Check none is left
+   (`pgrep -x ac2d`).
+2. Ship the binaries as on pupu.
+3. Convert as on pupu, as mui, on ketunkolo's own files (it holds its own `rig.json`,
+   calibration store and authorized clients, and the client keys in `~/.config/ac2/keys`,
+   which do not change).
+4. `cp -f bin.new-<rev>/* bin/`, start the app as usual (`start-ui.sh`). Verify against both
+   daemons (its own, and `--remote 192.168.9.27`).
+
+**Standalone meters (the CM4 at 192.168.9.33, the netbooted Pi 4)**
+
+Unattended, with nightly power cuts: a start in the window must find either the old binary on
+old files or the new binary on new files, never a mix. So the files are converted and synced
+before the new binary is in place, and the unit stays disabled between the two.
+
+1. Export the meter's Leq history on the meter with its own CLI (*every host*, step 2).
+2. Make the root writable the way that host's setup does (the CM4: card root rw; the Pi 4:
+   its nfsroot from the server). Steps per image are in the sys repo (`ac2pi/`).
+3. Stop and disable the daemon unit and the kiosk unit.
+4. Convert as the daemon's user. Where the image has no `python3`, copy the four files off
+   (keeping each file's owner and mode: `cp -p`, or `scp -p` / `tar` as root), convert them on
+   a host that has it, copy them back the same way, and check owner and mode
+   (`ls -l`): the daemon must be able to rewrite them.
+   Keep the `.pre106` copies beside them on the meter.
+5. `sync`. Only then install the 106 binaries, `sync` again, enable and start the units,
+   and set the root read-only again.
+6. From pupu: `ac2 --remote <meter> status` shows the meter running and no damaged file.
+   After the next power cut, check again from pupu: the meter came back by itself, metering,
+   with its calibration.
+
+**Every host, after the start**
+
+1. Verify on the daemon's host (or `--remote` from pupu / ketunkolo):
+   - `ac2 status`: no `damaged` row (`ac2 --json status`: `damaged_files` empty). A damaged
+     row names the file and where it was set aside.
+   - `ac2 auth list`: every key there, each with the role it should have (the converter made
+     every app key an `operator`; make a viewer one with `ac2 auth role <name> viewer`); the
+     paired and admitted rigs as before.
+   - `ac2 rig status`: the rig SPL meters back, with their cues; `ac2 cal list`: the
+     calibrations back, sensitivities as before (compare with the deploy log).
+   - every client connects: ketunkolo's app, both kiosks, the CLIs on rantu and the Pi 4,
+     ac2-remote after its update.
+
+**A 106 daemon started on unconverted files**
+
+It starts without them and says so in `status` (`damaged` rows): an old `rig.json` or
+calibration store is set aside as `rig.json.v11-<unix time>` / `calibrations.json.v4-<unix
+time>`, an authorized-clients file without roles as `authorized_clients.damaged-<unix time>`.
+Stop and disable the unit, run the converter on the set-aside file, move it back under its own
+name (owner and mode kept), `sync`, enable and start. The first start has already written a
+fresh `rig.json`: the converted file replaces it.
+
+**Rollback to 105**
+
+1. Stop and disable the unit (and the clients, which must go back too).
+2. Put each `<name>.pre106` back under its own name (the newest `.pre106.N` is the latest
+   run's original). A 106 start rewrites `rig.json`, so the 105 one exists only in the
+   backup. `session save`s made under 106 do not open in 105.
+3. `cp -f bin.prev-<rev>/* bin/`, `sync` on a meter, enable and start; verify as above.
 
 **Reading thread costs:** `ac2d-control` at one wake per audio period (≈375/s at 96 kHz/256) is
 JACK's process thread (libjack threads take the name of the thread that opened the client), not
