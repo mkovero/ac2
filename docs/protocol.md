@@ -346,8 +346,10 @@ daemon start (`ac2d --max-level`); `gen.ceiling` above it, above 0 dBFS or not f
 - Each change is a `generator` event whose `last_action` is `ceiling_lowered` or
   `ceiling_raised` naming the client, and a line in the daemon's audit log. The daemon keeps
   the value in its rig settings file (atomic write) and starts with it; a value above a
-  later, lower `--max-level` comes up at that bound. A change that cannot be written is
-  `internal` and leaves the maximum as it was.
+  later, lower `--max-level` comes up at that bound. With no value read (no file, one set
+  aside, or the field absent) the daemon starts at −50 dBFS, or at the bound when that is
+  lower, and stores that. A change that cannot be written is `internal` and leaves the
+  maximum as it was.
 
 **Output labels (`stream.outputs`).** `OutputSetup` = {`channel`: u16 (zero-based), `label`: string |
 nil}. Labels name the rig's outputs (`Main L`, `Sub`) for every client; they are kept with

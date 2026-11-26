@@ -71,9 +71,9 @@ async fn gen_ceiling_shows_lowers_and_raises_only_with_yes() -> R {
     let r = ac2(&f, &["gen", "ceiling"]).await?;
     assert_eq!(r.code, 0);
     assert!(
-        r.stdout
-            .contains("system max level \u{2212}30.0 dBFS · bound \u{2212}10.0 dBFS")
-            && r.stdout.contains("(raised by "),
+        r.stdout.contains(
+            "system max level \u{2212}30.0 dBFS · below the rig's bound \u{2212}10.0 dBFS"
+        ) && r.stdout.contains("(raised by "),
         "{}",
         r.stdout
     );

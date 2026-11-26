@@ -93,8 +93,12 @@ pub fn test_sessions() -> std::path::PathBuf {
         .join(format!("sessions-{}", std::process::id()))
 }
 
+/// A daemon on `backend` whose rig was set up before: the max level stored at the bound
+/// (−10 dBFS), so a test plays at its own levels without raising it first. A test of the
+/// start itself gives the rig a file (`rig_settings`), which this level never enters.
 pub fn config(backend: FakeBackend, listen: Listen) -> DaemonConfig {
     let mut cfg = DaemonConfig::new(Arc::new(backend), listen, -10.0);
+    cfg.memory_max_level = Some(-10.0);
     cfg.session_dir = Some(test_sessions());
     cfg
 }

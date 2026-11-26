@@ -35,8 +35,14 @@ pub struct DaemonConfig {
     /// enforces the matching sample peak.
     pub max_level_dbfs: f64,
     /// Rig settings file (system max level, output labels); `None` keeps them in memory
-    /// only, and the system max level starts at `max_level_dbfs`.
+    /// only, and the system max level starts at `memory_max_level`.
     pub rig_settings: Option<PathBuf>,
+    /// The system max level of a rig that keeps its settings in memory only
+    /// (`rig_settings: None`), dBFS RMS, taken as a stored level is (never above
+    /// `max_level_dbfs`): for a caller that holds the rig's level itself, such as a test
+    /// harness standing in for a rig already set up. `None`: none stored, so the rig starts
+    /// quiet. A rig file holds its own level, and this is not read with one.
+    pub memory_max_level: Option<f64>,
     /// Where the rig's SPL meters keep their logs (in the session directory format, apart
     /// from the autosave so that no load, new session or set-aside autosave ends them);
     /// `None` keeps them in memory only.
@@ -210,6 +216,7 @@ impl fmt::Debug for DaemonConfig {
             .field("net_retry", &self.net_retry)
             .field("max_level_dbfs", &self.max_level_dbfs)
             .field("rig_settings", &self.rig_settings)
+            .field("memory_max_level", &self.memory_max_level)
             .field("rig_logs", &self.rig_logs)
             .field("lease_expiry", &self.lease_expiry)
             .field("transfers", &self.transfers)
@@ -249,6 +256,7 @@ impl DaemonConfig {
             net_retry: crate::network::Backoff::default(),
             max_level_dbfs,
             rig_settings: None,
+            memory_max_level: None,
             rig_logs: None,
             lease_expiry: Duration::from_millis(1500),
             transfers: crate::TransferLimits::default(),

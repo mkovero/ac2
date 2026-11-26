@@ -69,8 +69,10 @@ binaries in `~/ac2-test/bin`, the previous set in `~/ac2-test/bin.prev`. Wrap ev
    (`gen ceiling -50dbfs --yes`). The daemon log's `ac2d::audit` lines say who changed it.
    Since 2026-11-25 the bound is −20 dBFS while the system max level stays −50 dBFS (kept in
    `rig.json`) until raised in Settings › Audio I/O. Every start stores the level in force in
-   `rig.json`, so raising the bound never raises the level by itself; only a `rig.json` that
-   no start of this daemon has written yet (holding no level) comes up at the bound.
+   `rig.json`, so raising the bound never raises the level by itself. A start that reads no
+   level (no `rig.json`, one set aside as damaged with no readable previous copy, or one
+   holding no level) comes up at −50 dBFS, under the bound, and stores that: raise it in
+   Settings › Audio I/O or with `gen ceiling -20dbfs --yes`.
 5. Reopen audio (from ketunkolo):
    `bin/ac2 --remote 192.168.9.27 stream open --backend jack --in 1-8 --outputs 6 --loopback-out 5 --loopback-in 7 --mic "1=MM1 34804" --mic "2=Vilppu behringer #3"`.
    Use the inputs and outputs the operator had (lately `--in 1-10`; the old autosave's

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use ac2_proto::Command;
 use ac2_proto::model::*;
-use ac2_proto::units::MeasId;
+use ac2_proto::units::{Dbfs, MeasId};
 use ac2d::{AutosaveConfig, Daemon, Handle, NetworkSecurity};
 use common::*;
 
@@ -555,6 +555,11 @@ fn a_damaged_trace_costs_only_itself() {
     {
         let (h, backend) = start("power-cut-trace-seed", &seeded);
         let (mut c, _sub) = connect(&h, &[b"evt"]);
+        // A fresh rig starts quiet; the capture plays above that.
+        c.ok(Command::GenCeiling {
+            ceiling: Dbfs(-10.0),
+            confirm_raise: true,
+        });
         super::autosave::capture(&h, &backend, &mut c);
         drop(c);
         h.shutdown();

@@ -115,7 +115,7 @@ impl Sections {
     }
 
     /// The settings: each section not read as if it had never been set. An unread
-    /// `ceiling_dbfs` is `None`, which starts the generator at the `--max-level` bound
+    /// `ceiling_dbfs` is `None`, which starts the generator quiet
     /// ([`super::start_ceiling`]): the same as a missing or damaged file, and never above
     /// what the operator allowed at start.
     pub(super) fn settings(self) -> RigSettings {

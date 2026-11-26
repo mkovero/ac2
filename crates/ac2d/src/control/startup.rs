@@ -46,7 +46,10 @@ impl Control {
             Some(p) => crate::rig::RigStore::open(p),
             None => (
                 crate::rig::RigStore::memory(),
-                crate::rig::RigSettings::default(),
+                crate::rig::RigSettings {
+                    ceiling_dbfs: s.memory_max_level,
+                    ..crate::rig::RigSettings::default()
+                },
             ),
         };
         let mut s = s;
@@ -68,7 +71,15 @@ impl Control {
             // Unreachable for a checked file; the bound stays in force.
             Err(e) => tracing::error!("system max level {ceiling} dBFS: {e}"),
         }
-        if s.ceiling_dbfs < s.ceiling_bound {
+        if saved.ceiling_dbfs.is_none() {
+            tracing::info!(
+                target: crate::AUDIT_TARGET,
+                "system max level {:.1} dBFS: none stored, so the start is quiet (bound {:.1} \
+                 dBFS, --max-level); raise it with gen.ceiling",
+                s.ceiling_dbfs,
+                s.ceiling_bound
+            );
+        } else if s.ceiling_dbfs < s.ceiling_bound {
             tracing::info!(
                 target: crate::AUDIT_TARGET,
                 "system max level {:.1} dBFS (bound {:.1} dBFS, --max-level)",

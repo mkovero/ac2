@@ -1,7 +1,8 @@
 //! The system max level at run time (`gen.ceiling`) on the fake rig: lowering applies at
 //! once and stops a stimulus above it (silence observed on the loopback), raising needs a
 //! confirmation and a silent generator, the `--max-level` bound is never exceeded, every
-//! client sees the change, and the level and the output labels survive a restart.
+//! client sees the change, the level and the output labels survive a restart, and a rig
+//! with no level stored starts quiet.
 #![allow(clippy::unwrap_used)]
 
 use crate::common;
@@ -214,7 +215,7 @@ fn level_and_output_labels_survive_a_restart_under_the_bound() {
     let h = start(-10.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
-    ceiling(&mut c, -32.0, false).unwrap();
+    ceiling(&mut c, -32.0, true).unwrap();
     let o = c.outputs(Command::StreamOutputs {
         outputs: vec![label(0, "Main L"), label(1, "Sub")],
     });
@@ -282,7 +283,8 @@ fn a_restart_with_a_higher_bound_never_raises_the_level_by_itself() {
             .clone()
     };
 
-    // No file: the bound is the level in force, and it is stored right away.
+    // No file: the quiet start (here the bound too) is the level in force, and it is
+    // stored right away.
     let h = start(-50.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
     assert_eq!(c.state().generator.ceiling, Dbfs(-50.0));
@@ -295,21 +297,20 @@ fn a_restart_with_a_higher_bound_never_raises_the_level_by_itself() {
     assert_eq!((g.ceiling, g.ceiling_bound), (Dbfs(-50.0), Dbfs(-20.0)));
     h.shutdown();
 
-    // A file with no level (as written before a level was stored): setting the level in
-    // force stores it.
+    // A file with no level: the quiet start again, under a bound lower still, and stored.
     let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
     v["ceiling_dbfs"] = serde_json::Value::Null;
     std::fs::write(&file, serde_json::to_vec(&v).unwrap()).unwrap();
-    let h = start(-30.0);
+    let h = start(-60.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
-    assert_eq!(c.state().generator.ceiling, Dbfs(-30.0));
+    assert_eq!(c.state().generator.ceiling, Dbfs(-60.0));
     h.shutdown();
-    assert_eq!(stored(), serde_json::json!(-30.0));
+    assert_eq!(stored(), serde_json::json!(-60.0));
 }
 
 /// A torn rig settings file is set aside and its previous copy read: the start writes the
 /// file again with the level in force and the labels, so the next start finds them there,
-/// never a missing file that would take a higher bound.
+/// never a missing file that would start quiet.
 #[test]
 fn a_recovered_file_is_written_back_at_start() {
     init_log();
@@ -324,7 +325,7 @@ fn a_recovered_file_is_written_back_at_start() {
     let h = start(-10.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
-    ceiling(&mut c, -36.0, false).unwrap();
+    ceiling(&mut c, -36.0, true).unwrap();
     c.outputs(Command::StreamOutputs {
         outputs: vec![OutputSetup {
             channel: 0,
@@ -369,6 +370,9 @@ fn a_level_not_stored_at_start_is_stored_when_set() {
         Daemon::start(cfg).unwrap()
     };
     let h = start(-20.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    ceiling(&mut c, -20.0, true).unwrap();
     h.shutdown();
     let mode =
         |m: u32| std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(m)).unwrap();
@@ -407,6 +411,7 @@ fn a_lowered_level_survives_a_torn_file() {
     let h = start(-10.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
+    ceiling(&mut c, -10.0, true).unwrap();
     ceiling(&mut c, -40.0, false).unwrap();
     h.shutdown();
     std::fs::write(&file, b"{\"ceil").unwrap();
@@ -433,6 +438,9 @@ fn another_setting_saved_stores_the_level_in_force() {
         Daemon::start(cfg).unwrap()
     };
     let h = start(-20.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    ceiling(&mut c, -20.0, true).unwrap();
     h.shutdown();
     let mode =
         |m: u32| std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(m)).unwrap();
@@ -476,7 +484,7 @@ fn a_lowering_that_cannot_write_its_copy_changes_nothing() {
     let h = start();
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
-    ceiling(&mut c, -20.0, false).unwrap();
+    ceiling(&mut c, -20.0, true).unwrap();
     let before = std::fs::read(&file).unwrap();
     // A directory where the copy goes: no file can be written there.
     let prev = dir.path().join("rig.json.prev");
@@ -486,4 +494,82 @@ fn a_lowering_that_cannot_write_its_copy_changes_nothing() {
     assert_eq!(std::fs::read(&file).unwrap(), before, "the file as it was");
     assert_eq!(c.state().generator.ceiling, Dbfs(-20.0));
     h.shutdown();
+}
+
+/// A rig with no level stored (no file, or one set aside as damaged) starts at
+/// −50 dBFS, or at its bound when that is lower; a stored level is taken back, under the
+/// bound; and a raise from the quiet start to the bound is stored and survives a restart.
+#[test]
+fn a_rig_with_no_level_stored_starts_quiet() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("rig.json");
+    let start = |bound: f64| {
+        let mut cfg = config(manual_rig(), inproc("ceiling-quiet-start"));
+        cfg.max_level_dbfs = bound;
+        cfg.rig_settings = Some(file.clone());
+        Daemon::start(cfg).unwrap()
+    };
+    let in_force = |bound: f64| {
+        let h = start(bound);
+        let (mut c, _) = connect(&h, &[b"evt"]);
+        let g = c.state().generator;
+        h.shutdown();
+        assert_eq!(g.ceiling_bound, Dbfs(bound));
+        g.ceiling.0
+    };
+    let fresh = || {
+        for e in std::fs::read_dir(dir.path()).unwrap().flatten() {
+            std::fs::remove_file(e.path()).unwrap();
+        }
+    };
+    let stored_at = |bound: f64, level: f64| {
+        fresh();
+        let h = start(bound);
+        let (mut c, _) = connect(&h, &[b"evt"]);
+        hello(&mut c);
+        ceiling(&mut c, level, true).unwrap();
+        h.shutdown();
+    };
+
+    // No file.
+    assert_eq!(in_force(-20.0), -50.0);
+    fresh();
+    assert_eq!(in_force(-60.0), -60.0);
+
+    // A damaged file with no previous copy: set aside as today, and the start is quiet.
+    fresh();
+    std::fs::write(&file, b"\xff\xfe not a rig file").unwrap();
+    let h = start(-20.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    let st = c.state();
+    h.shutdown();
+    assert_eq!(st.generator.ceiling, Dbfs(-50.0));
+    assert_eq!(st.rig.damaged_files.len(), 1, "{:?}", st.rig.damaged_files);
+    assert!(
+        std::fs::read_dir(dir.path()).unwrap().flatten().any(|e| e
+            .file_name()
+            .to_string_lossy()
+            .starts_with("rig.json.damaged-")),
+        "the damaged file set aside"
+    );
+
+    // A stored level comes back; one above the bound is capped to it.
+    stored_at(-10.0, -30.0);
+    assert_eq!(in_force(-20.0), -30.0);
+    stored_at(-10.0, -10.0);
+    assert_eq!(in_force(-20.0), -20.0);
+
+    // From the quiet start, one confirmed raise to the bound: stored, and kept.
+    fresh();
+    let h = start(-20.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    assert_eq!(c.state().generator.ceiling, Dbfs(-50.0));
+    assert_eq!(ceiling(&mut c, -20.0, false), Err(ErrorCode::Refused));
+    assert_eq!(ceiling(&mut c, -20.0, true).unwrap().ceiling, Dbfs(-20.0));
+    h.shutdown();
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(v["ceiling_dbfs"], serde_json::json!(-20.0));
+    assert_eq!(in_force(-20.0), -20.0);
 }

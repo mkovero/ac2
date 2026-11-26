@@ -195,6 +195,22 @@ fn lowering_the_max_level_goes_out_at_once_a_raise_needs_the_word() {
     assert_eq!(ceiling_call(&t.key("Enter")), Some((-35.0, false)));
 }
 
+/// A rig with no level stored starts at −50 dBFS: from there to the bound is one typed
+/// value and the typed word on the Settings row, sent live (no restart).
+#[test]
+fn a_quiet_start_is_raised_to_the_bound_from_the_row() {
+    let mut t = T::new();
+    t.conn(mirror(with_ceiling(-50.0, -10.0, false)));
+    t.st.apply(Msg::Command(CommandId::InputSetup), &t.keys);
+    t.st.apply(Msg::Settings(SettingsMsg::Ceiling), &t.keys);
+    t.type_key("Minus", "-");
+    t.text("10");
+    assert_eq!(ceiling_call(&t.key("Enter")), None);
+    assert!(settings(&t).ceiling.confirm.is_some());
+    t.text("raise");
+    assert_eq!(ceiling_call(&t.key("Enter")), Some((-10.0, true)));
+}
+
 #[test]
 fn an_output_is_named_for_every_client_on_enter() {
     let mut t = T::new();

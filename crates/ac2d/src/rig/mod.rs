@@ -356,12 +356,19 @@ fn set_aside(p: &Path, tag: &str) -> Option<PathBuf> {
     std::fs::rename(p, &to).ok().map(|()| to)
 }
 
+/// The system max level a rig starts with when none was stored, dBFS RMS (never above the
+/// `--max-level` bound). A rig nobody has set up yet, or one whose file was lost, may have
+/// any amplifier and speaker behind its outputs: it must not start able to play loud.
+/// −50 dBFS still reaches the speakers audibly enough to check the wiring, and the operator
+/// raises it, live, to what the system takes.
+pub(crate) const UNSTORED_START_DBFS: f64 = -50.0;
+
 /// The system max level the daemon starts with: the one last set, never above `bound`
-/// (a later, lower `--max-level` wins), else `bound`; the start stores what this returns.
-/// A ceiling the file holds but that cannot be read is `None` here, so the daemon starts
-/// at `bound`, as with no file.
+/// (a later, lower `--max-level` wins), else [`UNSTORED_START_DBFS`] under `bound`; the
+/// start stores what this returns. A level the file holds but that cannot be read is
+/// `None` here, so the daemon starts quiet, as with no file.
 pub(crate) fn start_ceiling(saved: Option<f64>, bound: f64) -> f64 {
-    saved.map_or(bound, |c| c.min(bound))
+    saved.unwrap_or(UNSTORED_START_DBFS).min(bound)
 }
 
 /// `current` with `rows` applied by channel (a `None` label removes the row), sorted.
@@ -412,7 +419,9 @@ mod tests {
         assert_eq!(start_ceiling(got.ceiling_dbfs, -10.0), -40.0);
         // A lower bound given at start wins over the value kept.
         assert_eq!(start_ceiling(got.ceiling_dbfs, -50.0), -50.0);
-        assert_eq!(start_ceiling(None, -10.0), -10.0);
+        // Nothing stored: quiet, and never above a bound lower still.
+        assert_eq!(start_ceiling(None, -10.0), UNSTORED_START_DBFS);
+        assert_eq!(start_ceiling(None, -60.0), -60.0);
     }
 
     fn rig_meter(id: u32, scope: MeasScope) -> RigMeter {
@@ -567,7 +576,7 @@ mod tests {
             }
         );
 
-        // No previous copy to take it from: no ceiling, so the start is at the bound.
+        // No previous copy to take it from: no level, so the start is quiet.
         std::fs::remove_file(crate::damage::prev_path(&p)).expect("remove prev");
         std::fs::write(&p, serde_json::to_vec(&v).expect("json")).expect("write");
         let (mut store, s) = RigStore::open(&p);
@@ -579,7 +588,7 @@ mod tests {
             d.reason
         );
         assert_eq!(s.ceiling_dbfs, None);
-        assert_eq!(start_ceiling(s.ceiling_dbfs, -10.0), -10.0);
+        assert_eq!(start_ceiling(s.ceiling_dbfs, -10.0), UNSTORED_START_DBFS);
         assert_eq!(s.outputs, vec![label(1, "Main R")]);
     }
 

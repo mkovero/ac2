@@ -15,8 +15,12 @@ use crate::time::{ClockOffset, age_s};
 /// so neither a stray key nor a repeated Enter can raise it.
 pub const RAISE_WORD: &str = "raise";
 
-/// The system max level with its bound: `−40.0 dBFS · bound −10.0 dBFS (ac2d --max-level)`;
-/// at the bound, `−10.0 dBFS · the rig's bound (ac2d --max-level)`.
+/// The system max level with its bound: at the bound, `−10.0 dBFS · the rig's bound (ac2d
+/// --max-level)`; below it, the bound and where to raise it, since a rig with no level
+/// stored starts well below its bound and the operator must find the way up:
+/// `−50.0 dBFS · below the rig's bound −10.0 dBFS (ac2d --max-level) · raise: Settings ›
+/// Audio I/O, or ac2 gen ceiling <dBFS> --yes`. Whether a level below the bound was set by
+/// an operator or is the quiet start is not in the state, so the line does not say.
 pub fn ceiling_line(g: &Generator) -> String {
     if g.ceiling.0 >= g.ceiling_bound.0 {
         format!(
@@ -25,12 +29,15 @@ pub fn ceiling_line(g: &Generator) -> String {
         )
     } else {
         format!(
-            "{} · bound {} (ac2d --max-level)",
+            "{} · below the rig's bound {} (ac2d --max-level) · raise: {RAISE_WHERE}",
             format::dbfs(g.ceiling.0),
             format::dbfs(g.ceiling_bound.0)
         )
     }
 }
+
+/// Where the system max level is raised, in the app and from the CLI.
+pub const RAISE_WHERE: &str = "Settings › Audio I/O, or ac2 gen ceiling <dBFS> --yes";
 
 /// Who changed the system max level last, if that is the generator's latest action:
 /// `lowered by laptop`, `raised by foh`.
@@ -264,8 +271,9 @@ mod tests {
     #[test]
     fn ceiling_texts() {
         assert_eq!(
-            ceiling_line(&generator(-40.0, -10.0, None)),
-            "\u{2212}40.0 dBFS · bound \u{2212}10.0 dBFS (ac2d --max-level)"
+            ceiling_line(&generator(-50.0, -10.0, None)),
+            "\u{2212}50.0 dBFS · below the rig's bound \u{2212}10.0 dBFS (ac2d --max-level) · \
+             raise: Settings › Audio I/O, or ac2 gen ceiling <dBFS> --yes"
         );
         assert_eq!(
             ceiling_line(&generator(-10.0, -10.0, None)),
