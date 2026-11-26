@@ -229,7 +229,7 @@ jobs:
       # built them.
       - name: Virtual audio cable (VB-CABLE)
         if: runner.os == 'Windows' && !cancelled()
-        uses: LABSN/sound-ci-helpers@e9d6ba52163a3283714a68412036ddf33f78d49c # main, 2026-06
+        uses: LABSN/sound-ci-helpers@9df0c7029878c4491796f328e463bb45a6e9979e # main, 2026-06
 
       - name: Windows Audio service
         if: runner.os == 'Windows' && !cancelled()

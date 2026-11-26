@@ -260,7 +260,7 @@ jobs:
       # loop (hosted runners have no audio interface), set up as ci.yml's Windows audio pass
       # does. A short stream; outputs stay silent.
       - name: Virtual audio cable (VB-CABLE)
-        uses: LABSN/sound-ci-helpers@e9d6ba52163a3283714a68412036ddf33f78d49c # main, 2026-06
+        uses: LABSN/sound-ci-helpers@9df0c7029878c4491796f328e463bb45a6e9979e # main, 2026-06
       - name: Windows Audio service
         shell: pwsh
         run: |
