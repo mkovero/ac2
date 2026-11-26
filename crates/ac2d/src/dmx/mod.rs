@@ -124,22 +124,26 @@ mod winsock {
         }
     }
 
-    /// Waits up to `timeout` for a datagram on `s`. The Art-Net socket is non-blocking for
-    /// its sends, and a duplicated Winsock handle may share that mode, so the listener's
-    /// read timeout alone would not make it wait.
-    pub(super) fn wait_readable(s: &impl AsRawSocket, timeout: Duration) {
+    /// Waits up to `timeout` for a datagram on `s`: whether one is ready (or the socket
+    /// reports an error a read will return). The Art-Net socket is non-blocking for its
+    /// sends, and a duplicated Winsock handle may share that mode, so the listener's read
+    /// timeout alone would not make it wait.
+    pub(super) fn wait_readable(s: &impl AsRawSocket, timeout: Duration) -> io::Result<bool> {
         let mut fd = WSAPOLLFD {
             fd: s.as_raw_socket() as SOCKET,
             events: POLLRDNORM,
             revents: 0,
         };
         let ms = i32::try_from(timeout.as_millis()).unwrap_or(i32::MAX);
-        // SAFETY: one valid WSAPOLLFD, and the count passed is 1. A failed wait only makes
-        // the caller read at once.
+        // SAFETY: one valid WSAPOLLFD, and the count passed is 1.
         #[allow(unsafe_code)]
-        unsafe {
-            WSAPoll(&mut fd, 1, ms);
+        let n = unsafe { WSAPoll(&mut fd, 1, ms) };
+        if n < 0 {
+            // SAFETY: reads the calling thread's last Winsock error; no arguments.
+            #[allow(unsafe_code)]
+            return Err(io::Error::from_raw_os_error(unsafe { WSAGetLastError() }));
         }
+        Ok(n > 0)
     }
 }
 

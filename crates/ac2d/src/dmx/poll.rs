@@ -6,11 +6,25 @@
 //! looks at the header only and drops everything that is not an ArtPoll: received DMX is
 //! never acted on. Replies are rate-limited per source and in total, so that a flood of
 //! ArtPoll (or spoofed ones) costs the daemon little and is not amplified onto the network.
+//!
+//! What that limit defends, and what not: a poll's source address is not proven, so only a
+//! host that can put forged datagrams onto the lighting network (or a router that forwards
+//! them there) can spoof one. Such a host can make the rig send at most
+//! [`REPLIES_PER_SECOND`] replies a second, about 2 kB/s, to an address of its choosing,
+//! never a broadcast or group: the limited broadcast, a multicast group and the directed
+//! broadcast of each of the host's own interfaces are refused as sources (a directed broadcast
+//! of a subnet the host is not on cannot be told from a host address and is not). It can
+//! also spend the reply budget with polls from many addresses, or poll as a console's own
+//! address, and so delay or stop a console's discovery of the rig. It cannot change what
+//! the rig sends or where its DMX goes: nothing received is acted on, and the DMX goes to
+//! the one target the operator set, not to pollers.
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac2_proto::model::PortAddress;
@@ -70,13 +84,22 @@ const RECV_BUF: usize = 2048;
 // ArtFirmwareMaster packet definition).
 const _: () = assert!(RECV_BUF > 42 + 2 * 512);
 
-/// Read errors in a row after which the thread pauses before reading again: an error that
-/// repeats at once must not spin a core, while a single one (an ICMP report of an earlier
-/// send, on Windows) costs no wait.
+/// Read errors in a row after which the thread pauses for [`WAKE`] before reading again:
+/// an error that repeats at once must not spin a core, while a single one (an ICMP report
+/// of an earlier send, on Windows) costs no wait.
 const ERRORS_BEFORE_PAUSE: u32 = 16;
 
 /// How long the thread waits for a datagram before it looks whether it should stop.
 const WAKE: Duration = Duration::from_millis(250);
+
+/// How long closing waits for the thread to let go of the socket: the thread is woken at
+/// once, so this is reached only when the wake datagram is lost, and then the thread's own
+/// [`WAKE`] ends its wait.
+const STOP_WAIT: Duration = Duration::from_millis(500);
+
+/// How old the list of the host's directed broadcast addresses may get: interfaces come
+/// and go rarely, and the list is read again on Art-Net's own retry period.
+const BROADCASTS_FOR: Duration = super::artnet::RETRY;
 
 /// An ArtPoll's request, as far as a reply depends on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,17 +276,23 @@ impl Limiter {
 }
 
 /// Whether a poll from `from` gets a reply at `now`, the rig sending `universe`: never to
-/// an address no reply can go to (a spoofed source such as 0.0.0.0, a broadcast or a
-/// group, which would also spend the budget), only for the rig's universe in targeted
-/// mode, and within the [`Limiter`]'s budget.
+/// an address no reply can go to (a spoofed source such as 0.0.0.0, a broadcast, one of the
+/// directed `broadcasts` of the host's interfaces, or a group, which would also spend the
+/// budget), only for the rig's universe in targeted mode, and within the [`Limiter`]'s
+/// budget.
 pub(super) fn answers(
     poll: Poll,
     from: Ipv4Addr,
     universe: Option<PortAddress>,
+    broadcasts: &[Ipv4Addr],
     limiter: &mut Limiter,
     now: Instant,
 ) -> bool {
-    if from.is_unspecified() || from.is_broadcast() || from.is_multicast() {
+    if from.is_unspecified()
+        || from.is_broadcast()
+        || from.is_multicast()
+        || broadcasts.contains(&from)
+    {
         return false;
     }
     if let Some((bottom, top)) = poll.targeted
@@ -274,31 +303,79 @@ pub(super) fn answers(
     limiter.allow(from, now)
 }
 
-/// The listener thread's handle: dropping it stops the thread within [`WAKE`].
+/// The listener thread's handle. Dropping it stops the thread and waits until the thread
+/// has dropped its handle of the socket (at most [`STOP_WAIT`]): a handle left open holds
+/// the port, and the target set again at once would find it taken by the rig itself.
 #[derive(Debug)]
 pub(super) struct Listener {
     stop: Arc<AtomicBool>,
     info: Arc<Mutex<ReplyInfo>>,
+    /// A handle of the socket that wakes the thread with an empty datagram to itself.
+    wake: UdpSocket,
+    /// Where that datagram goes: the socket's own address, on loopback when it is bound to
+    /// every interface.
+    wake_to: SocketAddr,
+    /// Signalled when the thread has dropped its socket (disconnected if it panicked).
+    done: Receiver<()>,
+    thread: Option<JoinHandle<()>>,
 }
 
 impl Drop for Listener {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = &self.thread {
+            t.thread().unpark();
+        }
+        // Read as no ArtPoll; it only ends the thread's wait for a datagram.
+        let _ = self.wake.send_to(&[], self.wake_to);
+        match self.done.recv_timeout(STOP_WAIT) {
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => {
+                if let Some(t) = self.thread.take() {
+                    let _ = t.join();
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => tracing::warn!(
+                "artnet: the ArtPoll listener did not stop within {STOP_WAIT:?}: {} stays \
+                 held until it does",
+                self.wake_to
+            ),
+        }
     }
 }
 
 impl Listener {
-    /// Starts answering ArtPoll arriving on `socket` (a handle of the Art-Net socket, in
-    /// blocking mode), replying to the poller's `reply_port`.
+    /// Starts answering ArtPoll arriving on `socket` (a handle of the Art-Net socket),
+    /// replying to the poller's `reply_port`. The read timeout makes a blocking handle
+    /// wait at most [`WAKE`]; on Windows the handle shares the socket's non-blocking mode,
+    /// and the thread waits in `WSAPoll` instead.
     pub(super) fn spawn(socket: UdpSocket, reply_port: u16, info: ReplyInfo) -> io::Result<Self> {
         socket.set_read_timeout(Some(WAKE))?;
+        let wake = socket.try_clone()?;
+        let wake_to = match socket.local_addr()? {
+            SocketAddr::V4(a) if a.ip().is_unspecified() => {
+                SocketAddr::from((Ipv4Addr::LOCALHOST, a.port()))
+            }
+            a => a,
+        };
         let stop = Arc::new(AtomicBool::new(false));
         let info = Arc::new(Mutex::new(info));
         let (s, i) = (stop.clone(), info.clone());
-        std::thread::Builder::new()
+        let (done_tx, done) = mpsc::channel();
+        let thread = std::thread::Builder::new()
             .name("ac2d-artpoll".into())
-            .spawn(move || listen(&socket, reply_port, &s, &i))?;
-        Ok(Self { stop, info })
+            .spawn(move || {
+                listen(&socket, reply_port, &s, &i);
+                drop(socket);
+                let _ = done_tx.send(());
+            })?;
+        Ok(Self {
+            stop,
+            info,
+            wake,
+            wake_to,
+            done,
+            thread: Some(thread),
+        })
     }
 
     /// The universe the replies name from now on.
@@ -315,9 +392,18 @@ fn listen(socket: &UdpSocket, reply_port: u16, stop: &AtomicBool, info: &Mutex<R
     let mut limiter = Limiter::default();
     let mut count: u16 = 0;
     let mut errors: u32 = 0;
+    let mut broadcasts = (local_broadcasts(), Instant::now());
     while !stop.load(Ordering::Relaxed) {
         #[cfg(windows)]
-        super::winsock::wait_readable(socket, WAKE);
+        match super::winsock::wait_readable(socket, WAKE) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(_) => {
+                // A wait that fails at once fails again: pausing keeps it off a core.
+                std::thread::park_timeout(WAKE);
+                continue;
+            }
+        }
         let (poll, from) = match socket.recv_from(&mut buf) {
             Ok((n, SocketAddr::V4(from))) => {
                 errors = 0;
@@ -327,11 +413,15 @@ fn listen(socket: &UdpSocket, reply_port: u16, stop: &AtomicBool, info: &Mutex<R
                 }
             }
             Ok(_) => continue,
+            // The read timeout. Not on Windows: there the wait said a datagram was ready,
+            // and a socket in an error state that a read does not clear says so at once
+            // every time, so it counts as an error below.
             Err(e)
-                if matches!(
-                    e.kind(),
-                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                ) =>
+                if !cfg!(windows)
+                    && matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
             {
                 continue;
             }
@@ -339,13 +429,24 @@ fn listen(socket: &UdpSocket, reply_port: u16, stop: &AtomicBool, info: &Mutex<R
                 errors += 1;
                 if errors >= ERRORS_BEFORE_PAUSE {
                     errors = 0;
-                    std::thread::sleep(Duration::from_millis(10));
+                    std::thread::park_timeout(WAKE);
                 }
                 continue;
             }
         };
+        let now = Instant::now();
+        if now.saturating_duration_since(broadcasts.1) >= BROADCASTS_FOR {
+            broadcasts = (local_broadcasts(), now);
+        }
         let i = *info.lock().unwrap_or_else(PoisonError::into_inner);
-        if !answers(poll, *from.ip(), i.universe, &mut limiter, Instant::now()) {
+        if !answers(
+            poll,
+            *from.ip(),
+            i.universe,
+            &broadcasts.0,
+            &mut limiter,
+            now,
+        ) {
             continue;
         }
         let Some(ip) = local_ip_toward(*from.ip()) else {
@@ -359,6 +460,22 @@ fn listen(socket: &UdpSocket, reply_port: u16, stop: &AtomicBool, info: &Mutex<R
             tracing::debug!("artnet: cannot answer ArtPoll from {from}: {e}");
         }
     }
+}
+
+/// The directed broadcast address of each of the host's IPv4 interfaces (none for a /31 or
+/// /32, which has no broadcast address); empty when the system will not list them.
+fn local_broadcasts() -> Vec<Ipv4Addr> {
+    let Ok(all) = if_addrs::get_if_addrs() else {
+        return Vec::new();
+    };
+    all.into_iter()
+        .filter_map(|i| match i.addr {
+            if_addrs::IfAddr::V4(a) if a.prefixlen <= 30 => {
+                Some(Ipv4Addr::from(u32::from(a.ip) | !u32::from(a.netmask)))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// The rig's own address on the way to `peer`: the reply's IP field, which a console shows
@@ -565,11 +682,23 @@ mod tests {
             Ipv4Addr::new(224, 0, 0, 1),
         ] {
             for _ in 0..20 {
-                assert!(!answers(poll, from, None, &mut l, t0), "{from}");
+                assert!(!answers(poll, from, None, &[], &mut l, t0), "{from}");
             }
         }
+        // The directed broadcast of one of the host's interfaces, as the source.
+        let directed = [Ipv4Addr::new(192, 168, 1, 255)];
+        for _ in 0..20 {
+            assert!(!answers(poll, directed[0], None, &directed, &mut l, t0));
+        }
         assert!(l.sources.iter().all(Option::is_none));
-        assert!(answers(poll, Ipv4Addr::new(10, 0, 0, 1), None, &mut l, t0));
+        assert!(answers(
+            poll,
+            Ipv4Addr::new(10, 0, 0, 1),
+            None,
+            &directed,
+            &mut l,
+            t0
+        ));
         // Targeted: only for the rig's universe.
         let u = PortAddress::new(0x20).expect("test value");
         let narrow = Poll {
@@ -582,17 +711,43 @@ mod tests {
             narrow,
             Ipv4Addr::new(10, 0, 0, 2),
             Some(u),
+            &[],
             &mut l,
             t0
         ));
-        assert!(!answers(wide, Ipv4Addr::new(10, 0, 0, 2), None, &mut l, t0));
+        assert!(!answers(
+            wide,
+            Ipv4Addr::new(10, 0, 0, 2),
+            None,
+            &[],
+            &mut l,
+            t0
+        ));
         assert!(answers(
             wide,
             Ipv4Addr::new(10, 0, 0, 2),
             Some(u),
+            &[],
             &mut l,
             t0
         ));
+    }
+
+    #[test]
+    fn the_hosts_directed_broadcasts_are_listed() {
+        // Loopback is a /8 on every system that lists it: its directed broadcast is
+        // 127.255.255.255, never one of the host's own addresses.
+        let b = local_broadcasts();
+        assert!(!b.contains(&Ipv4Addr::LOCALHOST), "{b:?}");
+        let all = if_addrs::get_if_addrs().expect("interfaces");
+        for i in all {
+            if let if_addrs::IfAddr::V4(a) = i.addr
+                && a.prefixlen <= 30
+            {
+                let want = Ipv4Addr::from(u32::from(a.ip) | (u32::MAX >> a.prefixlen));
+                assert!(b.contains(&want), "{}: {want} not in {b:?}", i.name);
+            }
+        }
     }
 
     #[test]
