@@ -72,9 +72,15 @@ fn check_dest(d: SacnDest) -> Result<(), String> {
         SacnDest::Unicast { addr } if addr.is_unspecified() || addr.is_broadcast() => {
             Err(format!("{addr} is no receiver: type a receiver's address"))
         }
-        SacnDest::Multicast { interface } if interface.is_unspecified() => Err(format!(
-            "{interface} is no interface: type this host's address on the lighting network"
-        )),
+        SacnDest::Multicast { interface }
+            if interface.is_unspecified()
+                || interface.is_multicast()
+                || interface.is_broadcast() =>
+        {
+            Err(format!(
+                "{interface} is no interface: type this host's address on the lighting network"
+            ))
+        }
         _ => Ok(()),
     }
 }
@@ -217,10 +223,14 @@ mod tests {
             parse_target("255.255.255.255", "1", ""),
             Err("255.255.255.255 is no receiver: type a receiver's address".into())
         );
-        assert_eq!(
-            parse_target("multicast via 0.0.0.0", "1", ""),
-            Err("0.0.0.0 is no interface: type this host's address on the lighting network".into())
-        );
+        for bad in ["0.0.0.0", "239.255.0.1", "255.255.255.255"] {
+            assert_eq!(
+                parse_target(&format!("multicast via {bad}"), "1", ""),
+                Err(format!(
+                    "{bad} is no interface: type this host's address on the lighting network"
+                ))
+            );
+        }
         assert_eq!(
             parse_target("10.0.0.1", " ", ""),
             Err("type the sACN universe too, a number 1–63999".into())

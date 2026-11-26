@@ -8,10 +8,11 @@
 //!
 //! The source's CID is derived from the rig's id, so a receiver sees the same source
 //! across restarts and does not hold a stale one beside it. The sequence number counts up
-//! per packet of the universe. When a target is turned off, moved to another universe or
-//! receiver, or the daemon stops in order, the stream ends with three packets marked
-//! Stream_Terminated, so receivers let go of the source at once instead of after the
-//! network data loss timeout (2.5 s). A new priority alone is the same stream: receivers
+//! per packet sent, one count that carries on across a change of universe or receiver (a
+//! receiver of the new stream takes any first number). When a target is turned off, moved
+//! to another universe or receiver, or the daemon stops in order, the stream ends with
+//! three packets marked Stream_Terminated, so receivers let go of the source at once
+//! instead of after the network data loss timeout (2.5 s). A new priority alone is the same stream: receivers
 //! keep the source and take its new priority from the next packet.
 
 use std::io;
@@ -157,8 +158,20 @@ impl SacnSender {
         Ok(())
     }
 
-    /// Whether a socket can be set up for `dest`, without touching the one in use.
+    /// Whether a socket can be set up for `dest` and send there, without touching the one
+    /// in use. A receiver's address that is the directed broadcast of a network the host
+    /// is on is refused: the socket does not set SO_BROADCAST (a stream to one receiver
+    /// must not reach every host on the subnet), so the system would refuse every send.
+    /// One of a network the host is not on cannot be told from a host's address.
     pub(crate) fn check_dest(&self, dest: SacnDest) -> Result<(), String> {
+        if let SacnDest::Unicast { addr } = dest
+            && super::local_broadcasts().is_ok_and(|b| b.contains(&addr))
+        {
+            return Err(format!(
+                "{addr} is the broadcast address of a network this host is on, not a \
+                 receiver's address: give its IPv4 unicast address, or send multicast"
+            ));
+        }
         socket(self.ports.sacn_bind, dest)
             .map(drop)
             .map_err(|e| open_error(dest, &e))
@@ -451,6 +464,25 @@ mod tests {
         assert!(e.contains("192.0.2.77"), "{e}");
         assert!(s.socket.is_some());
         assert!(s.open(away).is_err());
+    }
+
+    #[test]
+    fn a_broadcast_of_the_hosts_own_networks_is_no_receiver() {
+        // Only checked: nothing is sent.
+        let s = SacnSender::new(DmxPorts::LOOPBACK, RigId(1), "rig");
+        let own = super::super::local_broadcasts().expect("interfaces");
+        // Loopback's 127.255.255.255 at least.
+        assert!(!own.is_empty());
+        for b in own {
+            let e = s
+                .check_dest(SacnDest::Unicast { addr: b })
+                .expect_err("a broadcast");
+            assert!(e.contains("broadcast address"), "{e}");
+        }
+        s.check_dest(SacnDest::Unicast {
+            addr: Ipv4Addr::LOCALHOST,
+        })
+        .expect("a host");
     }
 
     #[test]
