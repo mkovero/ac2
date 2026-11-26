@@ -318,14 +318,12 @@ impl RigStore {
         // unreadable as settings) is replaced by the new text first, and only then the file
         // itself: a failure or crash at either step leaves the file as it was and the copy
         // no higher. A copy holding no level counts as higher, as a start without one
-        // may come up at the bound (a daemon whose outputs reach nothing).
+        // may come up at the bound (a daemon whose outputs reach nothing); one holding a
+        // level counts as higher than a write of none (a simulated daemon's, keeping the
+        // file's own none), whose start is quiet.
         let above = |bytes: Option<Vec<u8>>| {
             bytes.is_some_and(|b| {
-                match (read_whole(&b).ok().map(|p| p.ceiling_dbfs), s.ceiling_dbfs) {
-                    (Some(Some(was)), Some(now)) => was > now,
-                    (_, None) => false,
-                    _ => true,
-                }
+                copy_above(read_whole(&b).ok().map(|p| p.ceiling_dbfs), s.ceiling_dbfs)
             })
         };
         let prev = crate::damage::prev_path(path);
@@ -373,6 +371,18 @@ fn read_whole(text: &[u8]) -> Result<RigSettings, String> {
     match file::read(text)? {
         Read::File { sections, .. } => Ok((*sections).settings()),
         Read::OtherVersion(v) => Err(format!("format version {v} (this ac2d reads {VERSION})")),
+    }
+}
+
+/// Whether a copy on disk whose max level reads `was` (`None`: unreadable as settings;
+/// `Some(None)`: no level) may let a torn write start louder than `now`, the level being
+/// written: then the copy is replaced first.
+fn copy_above(was: Option<Option<f64>>, now: Option<f64>) -> bool {
+    match (was, now) {
+        (Some(Some(was)), Some(now)) => was > now,
+        (Some(Some(_)), None) => true,
+        (_, None) => false,
+        _ => true,
     }
 }
 
@@ -632,7 +642,7 @@ mod tests {
     }
 
     /// Values a command would refuse cost their section only. The ceiling is taken from
-    /// the previous copy where it reads there, else none: the `--max-level` bound.
+    /// the previous copy where it reads there, else none: the start then is as with none stored.
     #[test]
     fn a_refused_value_costs_its_section() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -691,6 +701,40 @@ mod tests {
             UNSTORED_START_DBFS
         );
         assert_eq!(s.outputs, vec![label(1, "Main R")]);
+    }
+
+    /// A copy holding a level is above a write of none: a simulated daemon writing the
+    /// file's own none replaces the copy too, so a torn file cannot bring a level back.
+    #[test]
+    fn a_copy_with_a_level_is_above_a_write_of_none() {
+        assert!(copy_above(Some(Some(-30.0)), None));
+        assert!(!copy_above(Some(None), None));
+        assert!(!copy_above(None, None));
+        assert!(copy_above(Some(Some(-30.0)), Some(-40.0)));
+        assert!(!copy_above(Some(Some(-50.0)), Some(-40.0)));
+        assert!(copy_above(Some(None), Some(-40.0)));
+        assert!(copy_above(None, Some(-40.0)));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let p = dir.path().join("rig.json");
+        let (store, _) = RigStore::open(&p);
+        let loud = RigSettings {
+            ceiling_dbfs: Some(-30.0),
+            ..RigSettings::default()
+        };
+        store.persist(&loud).expect("write");
+        let prev = crate::damage::prev_path(&p);
+        std::fs::copy(&p, &prev).expect("copy");
+        let level = |p: &Path| {
+            read_whole(&std::fs::read(p).expect("read"))
+                .expect("whole")
+                .ceiling_dbfs
+        };
+        assert_eq!(level(&prev), Some(-30.0));
+        let (mut store, _) = RigStore::open(&p);
+        store.for_outputs(OutputsReach::Nothing, None);
+        store.persist(&loud).expect("write");
+        assert_eq!((level(&p), level(&prev)), (None, None));
     }
 
     #[test]

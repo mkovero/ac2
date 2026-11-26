@@ -179,7 +179,7 @@ pub struct Generator {
     /// System maximum level, dBFS RMS: every emission above it is refused, and the output
     /// path limits samples to the matching peak. Any client may lower it; raising it needs
     /// an explicit confirmation and nothing armed or playing (`gen.ceiling`). Kept by the
-    /// daemon across restarts.
+    /// daemon across restarts when its outputs reach hardware.
     pub ceiling: Dbfs,
     /// The hard upper bound of `ceiling`, fixed when the daemon started (`ac2d
     /// --max-level`): `ceiling` never exceeds it.

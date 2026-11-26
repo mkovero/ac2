@@ -306,6 +306,16 @@ fn a_restart_with_a_higher_bound_never_raises_the_level_by_itself() {
     assert_eq!(c.state().generator.ceiling, Dbfs(-60.0));
     h.shutdown();
     assert_eq!(stored(), serde_json::json!(-60.0));
+
+    // A file with no level under a bound above the quiet start: −50 dBFS, stored.
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    v["ceiling_dbfs"] = serde_json::Value::Null;
+    std::fs::write(&file, serde_json::to_vec(&v).unwrap()).unwrap();
+    let h = start(-20.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    assert_eq!(c.state().generator.ceiling, Dbfs(-50.0));
+    h.shutdown();
+    assert_eq!(stored(), serde_json::json!(-50.0));
 }
 
 /// A torn rig settings file is set aside and its previous copy read: the start writes the
@@ -670,6 +680,7 @@ fn a_simulated_rig_never_stores_its_level() {
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
     assert_eq!(c.state().generator.ceiling, Dbfs(-50.0));
+    assert_eq!(ceiling(&mut c, -10.0, false), Err(ErrorCode::Refused));
     assert_eq!(ceiling(&mut c, -10.0, true).unwrap().ceiling, Dbfs(-10.0));
     h.shutdown();
     assert_eq!(real_rig(), -50.0);
@@ -696,4 +707,52 @@ fn a_simulated_rig_never_stores_its_level() {
     let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
     assert_eq!(v["ceiling_dbfs"], serde_json::json!(-30.0));
     assert_eq!(real_rig(), -30.0);
+}
+
+/// A simulated start that recovers a torn rig settings file from its previous copy writes
+/// the recovered settings back, its level as read: a real rig's level and labels survive.
+#[test]
+fn a_simulated_start_writes_back_a_recovered_file() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("rig.json");
+    let start = |hardware: bool| {
+        let name = inproc("ceiling-simulated-recovers");
+        let mut cfg = if hardware {
+            hardware_config(manual_rig(), name)
+        } else {
+            config(manual_rig(), name)
+        };
+        cfg.rig_settings = Some(file.clone());
+        Daemon::start(cfg).unwrap()
+    };
+    let label = OutputSetup {
+        channel: 0,
+        label: Some("Main L".into()),
+    };
+    let h = start(true);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    ceiling(&mut c, -30.0, true).unwrap();
+    c.outputs(Command::StreamOutputs {
+        outputs: vec![label.clone()],
+    });
+    h.shutdown();
+    // The previous copy holds what is in force; the file itself is torn.
+    std::fs::copy(&file, dir.path().join("rig.json.prev")).unwrap();
+    std::fs::write(&file, b"{\"ceil").unwrap();
+
+    let h = start(false);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    assert_eq!(c.state().generator.ceiling, Dbfs(-30.0));
+    h.shutdown();
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(v["ceiling_dbfs"], serde_json::json!(-30.0));
+
+    let h = start(true);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    let s = c.state();
+    h.shutdown();
+    assert_eq!(s.generator.ceiling, Dbfs(-30.0));
+    assert!(s.outputs.contains(&label), "{:?}", s.outputs);
 }

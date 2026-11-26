@@ -249,10 +249,13 @@ No hardware at hand? Use the built-in simulated rig (output 1 → input 1 loopba
 → input 2 through a speaker-and-room model; it never touches real audio). In the app, choose
 *Simulated rig (no audio)* in the connect dialog (`ac2-ui --connect`): its stream is already open (inputs 1–2, output 1,
 loopback 1 → 1) and the transfer measurement "demo" (reference 1, measurement 2) is running,
-so steps 1–4 above work at once. From a terminal:
+so steps 1–4 above work at once. From a terminal (the simulated daemon uses a max level a
+real rig stored on this machine, so after the section above it may start at −50 dBFS; the
+raise lifts it to the default bound, −10 dBFS):
 
 ```sh
 ac2d --backend fake &
+ac2 gen ceiling -10dbfs --yes      # not stored on a simulated rig
 ac2 stream open --backend fake --in 1-2
 ac2 meas new tf --ref 1 --meas 2 --name demo && ac2 meas start demo
 ac2-ui

@@ -158,8 +158,8 @@ pub enum Command {
     GenStop,
     /// Set the system maximum level (`generator.ceiling`). Any client may lower it: a
     /// stimulus armed or playing above the new maximum is stopped and disarmed. Raising it
-    /// needs `confirm_raise` and is refused while anything is armed or playing. Never above
-    /// `generator.ceiling_bound`. Audited, and kept by the daemon across restarts.
+    /// needs `confirm_raise`, refused while anything is armed or playing; never above
+    /// `generator.ceiling_bound`. Audited; kept across restarts when outputs reach hardware.
     #[serde(rename = "gen.ceiling")]
     GenCeiling {
         /// New maximum, dBFS RMS.

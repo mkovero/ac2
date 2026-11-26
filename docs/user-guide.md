@@ -459,8 +459,9 @@ transfers](#stopping-the-stimulus-stops-its-transfers).
 
 The daemon keeps the level in its rig settings file across restarts: a restart with a
 higher `--max-level` keeps the stored level (only a typed raise goes above it), and a restart
-with a lower bound caps the level there and stores the capped level, so raising the bound
-again later does not bring the older, higher level back. A start that reads no stored level
+with a lower bound caps the level there and stores the capped level (the simulated rig
+stores no level), so raising the bound again later does not bring the older, higher level
+back. A start that reads no stored level
 starts at −50 dBFS, or at the bound when that is lower (the simulated rig: at the bound):
 the first start, a settings file of another format version (set aside), and a damaged file
 with no readable previous copy. A damaged file whose previous copy reads

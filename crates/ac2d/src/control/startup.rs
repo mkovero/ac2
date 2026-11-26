@@ -203,10 +203,12 @@ impl Control {
     fn store_start_ceiling(&mut self, stored: Option<f64>) {
         let now = self.s.ceiling_dbfs;
         // A file read whole that holds the level in force needs nothing. Anything else
-        // (no file, one set aside or recovered from its previous copy) is written now where
-        // the outputs may reach loudspeakers: after the start the file holds what is in
-        // force, so a later start with a higher bound cannot find it missing. Where they
-        // reach nothing the level is never stored (`RigStore::store_level`).
+        // (no file, one set aside or recovered from its previous copy) is written now: after
+        // the start the file holds the rest of the settings whole, and, where the outputs
+        // may reach loudspeakers, the level in force, so a later start with a higher bound
+        // cannot find it missing. Where they reach nothing the write keeps the level as read
+        // (`RigStore::persist`): the settings a recovery brought back are still written,
+        // never a level set where nothing listens.
         if self.rig.settings.stored_ceiling() == Some(now) {
             return;
         }
@@ -218,7 +220,7 @@ impl Control {
             ceiling_dbfs: Some(now),
             ..self.rig_settings_now()
         };
-        match self.rig.settings.store_level(&s) {
+        match self.rig.settings.persist(&s) {
             Ok(()) => {}
             Err(e) => {
                 let then = match stored {
