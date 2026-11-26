@@ -94,8 +94,13 @@ pub struct CaptureItem {
 /// What the UI asks for.
 #[derive(Clone, Debug)]
 pub enum Request {
-    /// A command whose reply only matters as success / failure.
+    /// A command whose reply only matters as success / failure. A measurement edit
+    /// ([`meas_edit_target`]) is answered with [`ConnEvent::MeasEdited`] instead.
     Call { cmd: Command, what: String },
+    /// The app's chain of measurement edits moved to this link generation (the link went
+    /// down or another daemon answers): the edits sent from here on are answered with it,
+    /// so an answer to one sent before is told apart, in whatever order the answers come.
+    EditLink(u64),
     /// As [`Request::Call`], with words for each outcome: `done` once it is done (`None`:
     /// an earlier toast already said it, so success says nothing), `failed` (then the
     /// daemon's words) when refused, so a refusal never reads as done.
@@ -530,6 +535,8 @@ struct Wants {
     meters: bool,
     topics: HashSet<Topic>,
     period: Duration,
+    /// [`Request::EditLink`]'s generation, carried by every measurement edit's answer.
+    edit_link: u64,
 }
 
 use ac2_scene::chrome::RigDown;
@@ -539,6 +546,7 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
         meters: false,
         topics: HashSet::new(),
         period: DISPLAY_PERIOD,
+        edit_link: 0,
     };
     // The rig turned its network off and has not answered since: every failed attempt
     // reads as that, not as a fault, until it answers again.
@@ -694,8 +702,9 @@ async fn wait_retry(
                     what: failed,
                     result: Err("not connected".into()),
                 }),
+                Some(Ctl::Req(Request::EditLink(n))) => wants.edit_link = n,
                 Some(Ctl::Req(Request::Call { cmd, what })) if let Some(meas) = meas_edit_target(&cmd) => {
-                    out.send(meas_edit::not_connected(meas, what));
+                    out.send(meas_edit::not_connected(meas, what, wants.edit_link));
                 }
                 Some(Ctl::Req(r)) => out.send(ConnEvent::Reply {
                     what: request_name(&r),
@@ -762,10 +771,11 @@ async fn session(
                     clock.poll_now(tokio::time::Instant::now());
                 }
                 Some(Ctl::Req(Request::DisplayPeriod(p))) => wants.period = p,
+                Some(Ctl::Req(Request::EditLink(n))) => wants.edit_link = n,
                 Some(Ctl::Req(r @ (Request::Preview { .. } | Request::PreviewStop))) => {
                     let _ = preview_tx.send(r);
                 }
-                Some(Ctl::Req(r)) => handle(&client, r, &stim_tx, out),
+                Some(Ctl::Req(r)) => handle(&client, r, wants.edit_link, &stim_tx, out),
             },
             silent = client.await_dead() => {
                 if client.network_turned_off() {

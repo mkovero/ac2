@@ -33,11 +33,12 @@ pub enum ConnEvent {
         what: String,
         result: Result<(), String>,
     },
-    /// An edit of measurement `meas` (a [`Request::Call`] of a command
-    /// [`meas_edit_target`] names) finished, with the measurement as committed.
+    /// An edit of measurement `meas` (a [`Request::MeasEdit`]) finished, with the
+    /// measurement as committed; `link` is the request's.
     MeasEdited {
         meas: MeasId,
         what: String,
+        link: u64,
         result: Edited,
     },
     /// A command was refused as made on a configuration (or the rig settings) another

@@ -140,6 +140,7 @@ fn an_answered_stop_tags_the_result_before_the_mirror_says_so() {
     };
     t.conn(ConnEvent::MeasEdited {
         meas: MeasId(1),
+        link: 0,
         what,
         result: Ok(Some(Box::new(stopped))),
     });

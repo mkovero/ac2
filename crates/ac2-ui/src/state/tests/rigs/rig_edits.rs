@@ -63,6 +63,7 @@ fn a_drag_pending_at_a_switch_stays_with_its_rig() {
         PUPU,
         ConnEvent::MeasEdited {
             meas: MeasId(1),
+            link: 0,
             what: pupu_what,
             result: Ok(None),
         },
@@ -86,6 +87,7 @@ fn a_drag_pending_at_a_switch_stays_with_its_rig() {
         RIG,
         ConnEvent::MeasEdited {
             meas: MeasId(1),
+            link: 0,
             what,
             result: Ok(None),
         },

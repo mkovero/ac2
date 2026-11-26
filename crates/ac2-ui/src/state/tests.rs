@@ -177,11 +177,13 @@ const RIG: RigId = RigId(0x7e57);
 impl AppState {
     /// [`AppState::update`] in an app of one rig: every request it makes is for that rig.
     fn apply(&mut self, msg: Msg, keys: &Keymap) -> Vec<Request> {
+        let before = self.active();
+        let out = self.update(msg, keys);
+        // A hello renames the rig: its requests go on its link either way.
         let active = self.active();
-        self.update(msg, keys)
-            .into_iter()
+        out.into_iter()
             .map(|(rig, r)| {
-                assert_eq!(rig, active, "{r:?} for another rig");
+                assert!(rig == active || rig == before, "{r:?} for another rig");
                 r
             })
             .collect()
@@ -492,6 +494,7 @@ impl T {
                 Some(meas) => ConnEvent::MeasEdited {
                     meas,
                     what,
+                    link: self.st.rig.meas_edits.link(),
                     result: Ok(self.st.meas(meas).cloned().map(Box::new)),
                 },
                 None => ConnEvent::Reply {
@@ -518,6 +521,7 @@ impl T {
                 self.conn(ConnEvent::MeasEdited {
                     meas,
                     what: what.to_owned(),
+                    link: self.st.rig.meas_edits.link(),
                     result: Ok(None),
                 });
             }

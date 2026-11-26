@@ -32,6 +32,7 @@ impl Request {
             | Self::DynamicsEnvelope { .. }
             | Self::Topics(_)
             | Self::DisplayPeriod(_)
+            | Self::EditLink(_)
             | Self::Reconnect
             | Self::ServerInfo
             | Self::SessionList => true,

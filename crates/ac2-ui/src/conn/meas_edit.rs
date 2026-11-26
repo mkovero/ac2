@@ -48,12 +48,24 @@ impl MeasRefusal {
 
 /// Sends `cmd`, an edit of `meas`, now and answers with [`ConnEvent::MeasEdited`]: sent
 /// before its reply is awaited, as the next edit of the chain is made on this one.
-pub(super) fn send(client: &Client, meas: MeasId, cmd: Command, what: String, out: &Out) {
+pub(super) fn send(
+    client: &Client,
+    meas: MeasId,
+    cmd: Command,
+    what: String,
+    link: u64,
+    out: &Out,
+) {
     let sent = match client.send_warned(cmd) {
         Ok(sent) => sent,
         Err(e) => {
             let result = Err(MeasRefusal::of(&e));
-            out.send(ConnEvent::MeasEdited { meas, what, result });
+            out.send(ConnEvent::MeasEdited {
+                meas,
+                what,
+                link,
+                result,
+            });
             return;
         }
     };
@@ -71,15 +83,21 @@ pub(super) fn send(client: &Client, meas: MeasId, cmd: Command, what: String, ou
             }
             Err(e) => Err(MeasRefusal::of(&e)),
         };
-        o.send(ConnEvent::MeasEdited { meas, what, result });
+        o.send(ConnEvent::MeasEdited {
+            meas,
+            what,
+            link,
+            result,
+        });
     });
 }
 
 /// The answer to an edit that could not be sent.
-pub(super) fn not_connected(meas: MeasId, what: String) -> ConnEvent {
+pub(super) fn not_connected(meas: MeasId, what: String, link: u64) -> ConnEvent {
     ConnEvent::MeasEdited {
         meas,
         what,
+        link,
         result: Err(MeasRefusal::Failed("not connected".into())),
     }
 }

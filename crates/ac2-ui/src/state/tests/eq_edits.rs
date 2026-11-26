@@ -48,6 +48,7 @@ fn puts(r: &[Request]) -> Vec<EqBody> {
 fn answered(t: &mut T, result: Result<(), String>) -> Vec<Request> {
     t.conn(ConnEvent::MeasEdited {
         meas: MeasId(1),
+        link: 0,
         what: "EQ edit".into(),
         result: result
             .map(|()| None)

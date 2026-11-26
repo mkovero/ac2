@@ -34,15 +34,18 @@ use crate::conn::{ConnEvent, Edited, MeasRefusal, Request, meas_edit_target};
 #[derive(Debug, Default)]
 pub struct MeasEdits {
     chains: HashMap<MeasId, Chain>,
+    /// Moved when the link goes down or another daemon answers while edits are in flight
+    /// (the connection is told, [`Request::EditLink`]): every edit is answered with the
+    /// generation it was sent on, so an answer to an edit sent before is told apart from
+    /// one to an edit sent since, in whatever order they arrive.
+    link: u64,
 }
 
 #[derive(Debug, Default)]
 struct Chain {
-    /// Edits sent and not answered, oldest first: the configuration of each `meas.update`.
+    /// Edits sent on the current link and not answered, oldest first: the configuration of
+    /// each `meas.update`.
     sent: VecDeque<Option<MeasConfig>>,
-    /// Answers still to come to edits sent before the link was lost or the daemon changed:
-    /// they say nothing about the measurement as the daemon now holds it.
-    strays: usize,
     /// The measurement as the last answered edit committed it, while the mirror is behind.
     known: Option<Measurement>,
     queued: VecDeque<Queued>,
@@ -80,6 +83,12 @@ impl Unsent {
 }
 
 impl MeasEdits {
+    /// The link generation edits are sent on now.
+    #[cfg(test)]
+    pub(super) fn link(&self) -> u64 {
+        self.link
+    }
+
     /// Measurement `id` as the next edit of it is made on, when that is not the mirror's.
     pub(super) fn view(&self, id: MeasId) -> Option<&Measurement> {
         self.chains.get(&id)?.view.as_ref()
@@ -192,25 +201,27 @@ impl AppState {
                 c.known = None;
             }
             c.refresh(mirror);
-            !c.sent.is_empty() || c.strays > 0 || c.known.is_some() || !c.queued.is_empty()
+            !c.sent.is_empty() || c.known.is_some() || !c.queued.is_empty()
         });
         self.rig.meas_edits.chains = chains;
     }
 
-    /// The answer to an edit of `meas`: the chain moves on, then the answer is handled as
-    /// the reply (or the `conflict`) of any other call.
+    /// The answer to an edit of `meas` sent on link generation `link`: the chain moves on,
+    /// then the answer is handled as the reply (or the `conflict`) of any other call. One
+    /// to an edit sent before the link went down says nothing about the measurement as the
+    /// daemon now holds it, and moves no chain.
     pub(super) fn meas_edited(
         &mut self,
         meas: MeasId,
         what: String,
+        link: u64,
         result: Edited,
         out: &mut Vec<Request>,
     ) {
+        let current = link == self.rig.meas_edits.link;
         let chain = self.rig.meas_edits.chains.entry(meas).or_default();
         let mut dropped = Vec::new();
-        if chain.strays > 0 {
-            chain.strays -= 1;
-        } else {
+        if current {
             chain.sent.pop_front();
             match &result {
                 Ok(Some(m)) => {
@@ -270,8 +281,13 @@ impl AppState {
     /// move nothing. Says how many were not sent.
     pub(super) fn drop_meas_edits(&mut self, out: &mut Vec<Request>) {
         let mut dropped = Vec::new();
+        // Only an edit in flight can be answered late.
+        let edits = &mut self.rig.meas_edits;
+        if edits.chains.values().any(|c| !c.sent.is_empty()) {
+            edits.link += 1;
+            out.push(Request::EditLink(edits.link));
+        }
         for c in self.rig.meas_edits.chains.values_mut() {
-            c.strays += c.sent.len();
             c.sent.clear();
             c.known = None;
             dropped.extend(c.queued.drain(..));

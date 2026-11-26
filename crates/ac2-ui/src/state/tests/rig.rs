@@ -182,6 +182,7 @@ fn a_conflict_on_apply_keeps_the_leq_page_and_its_edits() {
     assert!(t.st.overlay.leq().is_none(), "applied: the page closes");
     t.conn(ConnEvent::MeasEdited {
         meas: MeasId(4),
+        link: 0,
         what: what.clone(),
         result: Err(crate::conn::MeasRefusal::Stale(
             "conflict: stale base".into(),

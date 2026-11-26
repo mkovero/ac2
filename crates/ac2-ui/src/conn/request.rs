@@ -45,6 +45,7 @@ pub(super) fn request_name(r: &Request) -> String {
         Request::BandTransfer { .. } => "band transfer".into(),
         Request::Topics(_) => "subscribe".into(),
         Request::DisplayPeriod(_) => "display rate".into(),
+        Request::EditLink(_) => "edit link".into(),
         Request::Reconnect => "reconnect".into(),
         Request::ServerInfo => "server info".into(),
         Request::ServerCall { what, .. } => what.clone(),
@@ -60,10 +61,16 @@ fn send_warnings(o: &Out, warnings: Vec<ac2_proto::Warning>) {
     }
 }
 
-pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out: &Out) {
+pub(super) fn handle(
+    client: &Client,
+    r: Request,
+    edit_link: u64,
+    stim: &mpsc::UnboundedSender<StimOp>,
+    out: &Out,
+) {
     match r {
         Request::Call { cmd, what } if let Some(meas) = super::meas_edit_target(&cmd) => {
-            super::meas_edit::send(client, meas, cmd, what, out);
+            super::meas_edit::send(client, meas, cmd, what, edit_link, out);
         }
         Request::Call { cmd, what } => {
             // Sent here, in the order the app made its requests; only the reply is awaited
@@ -516,7 +523,10 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
             });
         }
         // Applied by the session loop.
-        Request::Topics(_) | Request::DisplayPeriod(_) | Request::Reconnect => {}
+        Request::Topics(_)
+        | Request::DisplayPeriod(_)
+        | Request::EditLink(_)
+        | Request::Reconnect => {}
     }
 }
 

@@ -39,6 +39,7 @@ fn a_second_update_is_made_on_the_first_ones_reply() {
     };
     let r = t.conn(ConnEvent::MeasEdited {
         meas: MeasId(1),
+        link: 0,
         what: "Main L: smoothing 1/48 oct".into(),
         result: Ok(Some(Box::new(committed.clone()))),
     });
@@ -63,6 +64,7 @@ fn a_stale_refusal_drops_the_waiting_edits_and_says_so() {
     assert!(update(&t.key("Alt+K")).is_none());
     let r = t.conn(ConnEvent::MeasEdited {
         meas: MeasId(1),
+        link: 0,
         what: "Main L: smoothing 1/48 oct".into(),
         result: Err(MeasRefusal::Stale("conflict: stale measurement".into())),
     });
@@ -110,6 +112,7 @@ fn commit(t: &mut T, r: &[Request]) -> Vec<Request> {
     let (meas, what) = (*meas, what.to_owned());
     t.conn(ConnEvent::MeasEdited {
         meas,
+        link: 0,
         what,
         result: Ok(Some(Box::new(m))),
     })
@@ -126,6 +129,7 @@ fn update_what(r: &[Request]) -> String {
 fn stale(t: &mut T, what: &str) -> Vec<Request> {
     t.conn(ConnEvent::MeasEdited {
         meas: MeasId(1),
+        link: 0,
         what: what.into(),
         result: Err(MeasRefusal::Stale("conflict: stale measurement".into())),
     })
@@ -226,6 +230,7 @@ fn an_update_made_while_a_layout_is_in_flight_goes_on_its_token() {
     let mut r = mirrored(&mut t, &laid_out);
     r.extend(t.conn(ConnEvent::MeasEdited {
         meas: MeasId(1),
+        link: 0,
         what,
         result: Ok(Some(Box::new(laid_out))),
     }));
@@ -251,6 +256,7 @@ fn a_waiting_update_takes_the_token_the_mirror_shows_before_the_reply() {
     let mut r = mirrored(&mut t, &committed);
     r.extend(t.conn(ConnEvent::MeasEdited {
         meas: MeasId(1),
+        link: 0,
         what,
         result: Ok(Some(Box::new(committed.clone()))),
     }));
@@ -332,6 +338,7 @@ fn a_lost_link_drops_the_waiting_edits() {
     // The edit in flight ends with the old link.
     out.extend(t.conn(ConnEvent::MeasEdited {
         meas: MeasId(1),
+        link: 0,
         what: update_what(&first),
         result: Err(MeasRefusal::Failed("closed".into())),
     }));
@@ -343,6 +350,50 @@ fn a_lost_link_drops_the_waiting_edits() {
     );
     let mirror_rev = t.st.meas(MeasId(1)).expect("Main L").edit_rev;
     assert_eq!(update(&t.key("K")).map(|u| u.0), Some(mirror_rev));
+}
+
+/// Answers to edits sent before the link was lost are told from answers to edits sent
+/// since by the link they went on, not by their count: a new edit's answer that comes
+/// first moves the chain, and the late answer to the old one moves nothing.
+#[test]
+fn a_late_answer_from_the_lost_link_moves_no_chain() {
+    let mut t = T::new();
+    let state = t.st.daemon().expect("mirrored").clone();
+    let old = t.key("K");
+    assert!(update(&old).is_some());
+    let mut out = t.conn(ConnEvent::Failed {
+        down: ac2_scene::chrome::RigDown::Unreachable,
+        target: "local daemon".into(),
+        error: "lost".into(),
+        retry_in: std::time::Duration::from_secs(1),
+    });
+    t.connect(state.clone());
+    out.extend(t.conn(mirror_of(state, 2, Some("c1"))));
+    assert!(
+        out.iter().any(|r| matches!(r, Request::EditLink(1))),
+        "{out:?}"
+    );
+
+    let new = t.key("K");
+    assert!(update(&new).is_some(), "nothing in flight on the new link");
+    t.conn(ConnEvent::MeasEdited {
+        meas: MeasId(1),
+        link: 1,
+        what: update_what(&new),
+        result: Ok(None),
+    });
+    let third = t.key("Alt+K");
+    assert!(update(&third).is_some(), "the new edit was answered");
+    t.conn(ConnEvent::MeasEdited {
+        meas: MeasId(1),
+        link: 0,
+        what: update_what(&old),
+        result: Err(MeasRefusal::Failed("closed".into())),
+    });
+    assert!(
+        update(&t.key("Alt+K")).is_none(),
+        "the third is still in flight"
+    );
 }
 
 /// The SPL / Leq page applied on the rev it was opened on, which another client has moved
@@ -368,6 +419,7 @@ fn a_leq_apply_on_an_older_rev_goes_as_made() {
     let m = s.measurements[2].clone();
     let r = t.conn(ConnEvent::MeasEdited {
         meas: MeasId(4),
+        link: 0,
         what: calls(&colour)[0].1.to_owned(),
         result: Ok(Some(Box::new(m))),
     });
