@@ -18,8 +18,8 @@ use tokio::task::JoinHandle;
 use crate::data::DataState;
 use crate::endpoint::Endpoints;
 use crate::error::ClientError;
-use crate::io::{Io, SyncIn, wall_ns};
-use crate::mirror::{Mirror, MirrorView, Need};
+use crate::io::{Io, wall_ns};
+use crate::mirror::{Mirror, MirrorView};
 
 /// How a request is retried.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -503,7 +503,7 @@ impl Client {
         let mirror = Mirror::new(cfg.mirror);
         let (view_tx, view_rx) = watch::channel(Arc::new(view_of(&mirror, &welcome)));
         let welcome = Arc::new(Mutex::new(welcome));
-        let sync_task = tokio::spawn(run_sync(
+        let sync_task = tokio::spawn(sync::run_sync(
             core.clone(),
             sync_rx,
             view_tx,
@@ -885,114 +885,11 @@ async fn hello(core: &CallCore, name: &str) -> Result<Welcome, ClientError> {
     expect_body!(op, r, ReplyBody::Welcome(w) => w)
 }
 
-async fn run_sync(
-    core: Arc<CallCore>,
-    mut rx: mpsc::UnboundedReceiver<SyncIn>,
-    view_tx: watch::Sender<Arc<MirrorView>>,
-    mut mirror: Mirror,
-    name: String,
-    welcome: Arc<Mutex<Welcome>>,
-) {
-    let mut tick = tokio::time::interval(Duration::from_millis(100));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    // When the welcome a rejoin asked for is (next) due: until one arrives, the role shown
-    // may be the one the key no longer has.
-    let mut rejoin: Option<Instant> = None;
-    loop {
-        // Ticks only while the mirror or a rejoin has something to retry or check; otherwise
-        // the task sleeps until the next keepalive or event.
-        let ticking = mirror.needs_tick() || rejoin.is_some();
-        let now = Instant::now();
-        let (mut need, mut received) = tokio::select! {
-            msg = rx.recv() => match msg {
-                None => return,
-                Some(SyncIn::Event(e)) => (mirror.on_event(*e, now), true),
-                Some(SyncIn::Ka { stamp, meta, at, local_wall_ns }) => {
-                    (mirror.on_ka(&stamp, *meta, at, local_wall_ns), true)
-                }
-                Some(SyncIn::Resync) => (mirror.on_resync_required(now), true),
-                // Only the welcome: the state itself is unchanged by a role.
-                Some(SyncIn::Rejoined) => {
-                    rejoin = Some(now);
-                    (None, true)
-                }
-            },
-            _ = tick.tick(), if ticking => (mirror.on_tick(Instant::now()), false),
-        };
-        if rejoin.is_some_and(|at| Instant::now() >= at) {
-            match hello(&core, &name).await {
-                Ok(w) => {
-                    if let Ok(mut slot) = welcome.lock() {
-                        *slot = w;
-                    }
-                    rejoin = None;
-                    received = true;
-                }
-                Err(_) => rejoin = Some(Instant::now() + crate::mirror::RETRY_INTERVAL),
-            }
-        }
-        if !received && need.is_none() {
-            continue;
-        }
-        while let Some(n) = need.take() {
-            need = match n {
-                Need::Rehello => match hello(&core, &name).await {
-                    Ok(w) => {
-                        if let Ok(mut slot) = welcome.lock() {
-                            *slot = w;
-                        }
-                        Some(Need::Snapshot)
-                    }
-                    Err(_) => {
-                        mirror.on_request_failed(Instant::now());
-                        None
-                    }
-                },
-                Need::Snapshot => match crate::snapshot::take(&core, core.retry, &mut || {
-                    mirror.on_answer(Instant::now());
-                    publish(&view_tx, &mirror, &welcome);
-                })
-                .await
-                {
-                    Ok(s) => mirror.on_snapshot(s, Instant::now()),
-                    Err(_) => {
-                        mirror.on_request_failed(Instant::now());
-                        None
-                    }
-                },
-                Need::Since(rev) => {
-                    match core.call(Command::StateSince { rev }, core.retry).await {
-                        Ok(ReplyBody::Events(evs)) => mirror.on_since(evs, Instant::now()),
-                        Err(e) if e.code() == Some(ErrorCode::ResyncRequired) => {
-                            mirror.on_resync_required(Instant::now())
-                        }
-                        _ => {
-                            mirror.on_request_failed(Instant::now());
-                            None
-                        }
-                    }
-                }
-            };
-        }
-        // Every message changes something visible (liveness, clock, rev); publishing on
-        // each keeps watchers simple. Keepalives come at 4 Hz, events at commit rate.
-        // Liveness itself is derived by watchers from `last_ka`, so idle ticks publish
-        // nothing.
-        publish(&view_tx, &mirror, &welcome);
-    }
-}
-
-fn publish(view_tx: &watch::Sender<Arc<MirrorView>>, mirror: &Mirror, welcome: &Mutex<Welcome>) {
-    let v = match welcome.lock() {
-        Ok(w) => view_of(mirror, &w),
-        Err(_) => mirror.view(),
-    };
-    view_tx.send_replace(Arc::new(v));
-}
-
 /// The request half against a ROUTER the test answers by hand: a reply the daemon sent but
 /// the network lost, and a daemon that never answers. A working daemon does neither on
 /// demand; that it executes a resent id once is the daemon's own test (`ac2d` `dedup`).
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod retry_tests;
+
+mod sync;

@@ -968,8 +968,12 @@ or it boots without its meter and refuses every network client.
    reconnect gets in once its old connection fell quiet; while all 8 are live the ninth is
    refused (left unknown, sent nothing, warned once per key) rather than evicting a live one
    that would come back and evict another.
-12. **A rejoin's `hello`** that fails is asked again every 500 ms until a welcome comes: the
-   role the client shows is the welcome's, and a stale one must not stay.
+12. **A rejoin's `hello`** lost on the way (no reply, a transport error) is asked again
+   500 ms after each failure until a welcome comes: the role the client shows is the
+   welcome's, and a stale one must not stay. The first failure is logged. One the daemon
+   answers with an error (a revoked key, a refusal) is not asked again: the client shows
+   what it shows for a daemon that refuses it. The `hello` runs beside the sync task, which
+   goes on applying events and keepalives while it waits.
 13. **Stale socket files.** The daemon holding the instance lock removes the files at its own
    endpoints before it binds; the app removes a simulated rig's files once it killed the rig
    or saw it end, and at start removes those of every app (`sim-<pid>-…`) no longer running.

@@ -4,7 +4,7 @@ use ac2_proto::{Reply, Request, decode_request, encode_reply};
 
 /// A [`CallCore`] whose ctrl DEALER is connected to a ROUTER handed back, and a context
 /// both live on.
-fn core(retry: Retry) -> (CallCore, Socket, Context) {
+pub(super) fn core(retry: Retry) -> (CallCore, Socket, Context) {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let ep = format!(
         "inproc://ac2-client-retry/{}",
@@ -256,70 +256,4 @@ async fn a_whole_snapshot_stands_when_its_download_end_fails() {
     assert_eq!(got.rev, Rev(41));
     assert_eq!(got.state, snap.state);
     daemon.join().unwrap();
-}
-
-/// A rejoin whose `hello` fails asks again until a welcome comes: the key's new role is
-/// shown, not the one it had.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_rejoin_asks_for_the_welcome_until_one_comes() {
-    use ac2_proto::model::ClientRole;
-    use ac2_proto::{ErrorCode, ProtoError};
-    let retry = Retry {
-        timeout: Duration::from_millis(300),
-        retries: 1,
-    };
-    let (core, router, _ctx) = core(retry);
-    let welcome = |role| match ac2_proto::samples::replies().swap_remove(1) {
-        Ok(ReplyBody::Welcome(w)) => Welcome { role, ..w },
-        r => panic!("{r:?}"),
-    };
-    let daemon = std::thread::spawn(move || {
-        let mut hellos = 0;
-        while hellos < 2 {
-            let Some(m) = router.recv_timeout(Duration::from_secs(5)).unwrap() else {
-                break;
-            };
-            let f = m.frames();
-            let req = decode_request(&f[f.len() - 1]).unwrap();
-            assert!(matches!(req.cmd, Command::Hello { .. }), "{req:?}");
-            hellos += 1;
-            let body = if hellos == 1 {
-                Err(ProtoError {
-                    code: ErrorCode::Internal,
-                    msg: "not now".into(),
-                    detail: None,
-                })
-            } else {
-                Ok(ReplyBody::Welcome(welcome(ClientRole::Viewer)))
-            };
-            router
-                .send(&[
-                    f[0].clone(),
-                    encode_reply(&Reply::new(req.id, body)).unwrap(),
-                ])
-                .unwrap();
-        }
-        hellos
-    });
-    let slot = Arc::new(Mutex::new(welcome(ClientRole::Operator)));
-    let mirror = Mirror::new(false);
-    let (view_tx, view_rx) = watch::channel(Arc::new(mirror.view()));
-    let (tx, rx) = mpsc::unbounded_channel();
-    let task = tokio::spawn(run_sync(
-        Arc::new(core),
-        rx,
-        view_tx,
-        mirror,
-        "rejoin test".into(),
-        slot.clone(),
-    ));
-    tx.send(SyncIn::Rejoined).unwrap();
-    let end = Instant::now() + Duration::from_secs(5);
-    while slot.lock().unwrap().role != ClientRole::Viewer {
-        assert!(Instant::now() < end, "the welcome never came again");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert_eq!(view_rx.borrow().role, Some(ClientRole::Viewer));
-    assert_eq!(daemon.join().unwrap(), 2);
-    task.abort();
 }
