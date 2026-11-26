@@ -341,6 +341,7 @@ in `commands.rs` before the frequency-axis arms), not by rebinding global keys:
 | PageUp / PageDown | tilt | `tilt_up` / `tilt_down` (new, this scope only) |
 | I / O | dolly in / out | `zoom_in` / `zoom_out` (intercepted) |
 | Home | reset camera | `reset_view` (intercepted) |
+| K / Shift+K | spikes looser / tighter | `spikes_looser` / `spikes_tighter` (this scope only) |
 
 PageUp/PageDown because ↑/↓ are the reserved stimulus level, Ctrl+↑/↓ and Ctrl+I/O the level
 range (still meaningful: it sets the heights), Alt+↑/↓ the offset; PageUp/Down are bound only
@@ -422,6 +423,12 @@ list already says which curves a pane draws.
   session manifest `VERSION` bumps since layouts and displays are in it.
 - **Quality** is this machine's, not the wire's: Settings › Display › *3D quality*: Auto
   (default) / Full / Lite / Bare, in `ui.toml`. A forced tier is named in the caption.
+- **Spike spacing**, also this machine's: Settings › Display › *3D spike spacing*,
+  Tightest / Tight / Normal (default) / Loose / Loosest, in `ui.toml` (`spike_spacing`);
+  `K` / `Shift+K` step it looser / tighter in the 3D view (the spectrum's smoothing
+  coarser / finer keys). It scales `grid(tier, spacing)` by 2, √2, 1, 1/√2, ½ a
+  side, so the cell keeps its shape and the tightest is bounded at 4× the tier's fill; the
+  skyline keys on it and rebuilds on a change.
 
 ## Performance
 

@@ -5,7 +5,7 @@ use super::rig_file::{DaemonFile, RigFile, RigsFile, parse_rig_id, parse_rig_key
 use super::roles_file::{RolesFile, ones, zeros};
 use super::*;
 use ac2_scene::plate::PlateBackground;
-use ac2_scene::spectrograph_3d::Quality;
+use ac2_scene::spectrograph_3d::{Quality, SpikeSpacing};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct File {
@@ -44,6 +44,9 @@ struct File {
     /// Written only when set (the default is by the GPU).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     quality_3d: Option<Quality3dFile>,
+    /// Written only when not normal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    spike_spacing: Option<SpikeSpacingFile>,
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     invert_drag_3d: Option<bool>,
@@ -158,6 +161,36 @@ enum Quality3dFile {
     Full,
     Lite,
     Bare,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SpikeSpacingFile {
+    Tightest,
+    Tight,
+    Loose,
+    Loosest,
+}
+
+impl SpikeSpacingFile {
+    fn spacing(self) -> SpikeSpacing {
+        match self {
+            Self::Tightest => SpikeSpacing::Tightest,
+            Self::Tight => SpikeSpacing::Tight,
+            Self::Loose => SpikeSpacing::Loose,
+            Self::Loosest => SpikeSpacing::Loosest,
+        }
+    }
+
+    fn of(s: SpikeSpacing) -> Option<Self> {
+        match s {
+            SpikeSpacing::Normal => None,
+            SpikeSpacing::Tightest => Some(Self::Tightest),
+            SpikeSpacing::Tight => Some(Self::Tight),
+            SpikeSpacing::Loose => Some(Self::Loose),
+            SpikeSpacing::Loosest => Some(Self::Loosest),
+        }
+    }
 }
 
 impl Quality3dFile {
@@ -770,6 +803,9 @@ impl UiPrefs {
             level_follow: f.level_follow.unwrap_or(true),
             spec_ease: f.spec_ease.unwrap_or(true),
             quality_3d: f.quality_3d.map_or(Quality::Auto, Quality3dFile::quality),
+            spike_spacing: f
+                .spike_spacing
+                .map_or(SpikeSpacing::Normal, SpikeSpacingFile::spacing),
             invert_drag_3d: f.invert_drag_3d.unwrap_or(true),
             // A value no step reaches (hand-edited) is kept when it can be stood out by;
             // anything else is the default.
@@ -841,6 +877,7 @@ impl UiPrefs {
             level_follow: (!self.level_follow).then_some(false),
             spec_ease: (!self.spec_ease).then_some(false),
             quality_3d: Quality3dFile::of(self.quality_3d),
+            spike_spacing: SpikeSpacingFile::of(self.spike_spacing),
             invert_drag_3d: (!self.invert_drag_3d).then_some(false),
             jump_prominence_db: (self.jump_prominence_db
                 != ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB)

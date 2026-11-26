@@ -428,7 +428,7 @@ once).
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
-| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars / scale, what the spectrum and sweep panes show, spectrum glide, 3D quality, invert vertical drag (3D), distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
+| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars / scale, what the spectrum and sweep panes show, spectrum glide, 3D quality, 3D spike spacing, invert vertical drag (3D), distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
 | Connection | the daemon, whether the app starts and stops this computer's `ac2d`, this client's id and key, reconnect, another daemon; the daemon's mode, mDNS name, authorized clients (each an *operator*, a *viewer* or a *rig*; **←/→** twice changes an app's role) and refused keys; *Paired rigs* and *Pair with rig…* (**Enter**), unpairing (**Delete** twice) | |
 | Rig monitor | where the rig's OSC cues and Art-Net universe go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
 
@@ -2074,6 +2074,12 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
   *Full*, *Lite* (fewer, coarser spikes at half resolution, for an integrated GPU such as
   Intel's) or *Bare* (Lite without the glow). A forced tier is named in the caption; an
   exported PNG is always Full.
+- **Settings › Display › 3D spike spacing** (**K** looser, **Shift+K** tighter in the 3D view, as
+  smoothing coarser / finer on the spectrum):
+  *Tightest* (4× the spikes), *Tight* (2×), *Normal*, *Loose* (½), *Loosest* (¼). Columns
+  and rows scale together, so the floor keeps its look: tighter is finer in frequency and
+  time at more GPU time; looser is fewer, wider-apart spikes. Both halves of a mirrored view
+  follow it, and so does an exported PNG.
 - **A Raspberry Pi (V3D GPU) has no 3D view**: it cannot fill the spikes in time even on
   *Bare*. **G** / **Shift+G** skip it, a layout that names it shows the 2D spectrograph with
   *3D needs a faster GPU* in its caption, and 3D quality reads *unavailable on this GPU*.
@@ -4848,6 +4854,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+B` | Spectrograph span | `spectrograph_span` |
 | `PageUp` | Tilt up | `tilt_up` |
 | `PageDown` | Tilt down | `tilt_down` |
+| `K` | Spikes looser | `spikes_looser` |
+| `Shift+K` | Spikes tighter | `spikes_tighter` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
 
@@ -4984,7 +4992,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Programme | `R` reset · `Shift+R` reset all · `G/Shift+G` view · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
 | Inputs list row | `R` reset · `Shift+R` reset all · `Tab` measurements · `Shift+Tab` back · `H` all keys |
 | Spatial walk | `Shift+W` walks · `Space` stimulus · `W` maximise · `Q` close pane · `H` all keys |
-| Spectrum / RTA: 3D spectrograph | `←/→` orbit · `PageUp/PageDown` tilt · `I/O` zoom · `Home` reset camera · `G/Shift+G` view · `S` start/stop · `P` peaks · `W` maximise · `H` all keys |
+| Spectrum / RTA: 3D spectrograph | `←/→` orbit · `PageUp/PageDown` tilt · `I/O` zoom · `Home` reset camera · `G/Shift+G` view · `S` start/stop · `P` peaks · `K/Shift+K` spacing · `H` all keys |
 | Dynamics | `G/Shift+G` view · `K` metric · `Z` level · `X` length · `Shift+B` curve B · `D` GR/THD · `W` maximise · `H` all keys |
 
 <!-- keymap:end -->

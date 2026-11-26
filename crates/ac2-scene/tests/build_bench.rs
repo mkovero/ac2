@@ -347,16 +347,31 @@ fn spectrograph_3d_view_with_a_full_history() {
     let mut sky = Skyline::default();
     let rebuild = time(20, || {
         sky = Skyline::default();
-        sky.update(&h, full, SkylineTier::Full);
+        sky.update(
+            &h,
+            full,
+            SkylineTier::Full,
+            ac2_scene::spectrograph_3d::SpikeSpacing::Normal,
+        );
     });
     let mut i = slots;
     let fold = time(20, || {
         push(&mut h, i);
-        sky.update(&h, full, SkylineTier::Full);
+        sky.update(
+            &h,
+            full,
+            SkylineTier::Full,
+            ac2_scene::spectrograph_3d::SpikeSpacing::Normal,
+        );
         i += 1;
     });
     let between = time(50, || {
-        sky.update(&h, full, SkylineTier::Full);
+        sky.update(
+            &h,
+            full,
+            SkylineTier::Full,
+            ac2_scene::spectrograph_3d::SpikeSpacing::Normal,
+        );
     });
     let theme = Theme::dark();
     let view = ViewState::default();

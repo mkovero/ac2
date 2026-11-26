@@ -10,6 +10,7 @@
 mod common;
 mod mirror;
 mod parity;
+mod spacing;
 
 use std::sync::Arc;
 
@@ -571,7 +572,7 @@ fn tonal(cols: u32, rows: u32) -> Vec<Option<HeatmapColumn>> {
 }
 
 fn sky_for(tier: SkylineTier, data: Ring) -> Sky {
-    let (cols, rows) = spectrograph_3d::grid(tier);
+    let (cols, rows) = spectrograph_3d::grid(tier, spectrograph_3d::SpikeSpacing::Normal);
     let (cols, rows) = (cols as u32, rows as u32 + 1);
     let mut s = Sky::new(cols, rows, data(cols, rows));
     s.tier = tier;
@@ -767,7 +768,7 @@ fn bench_frame_cost() {
             slot += 1;
         }
         let mut sky = Skyline::default();
-        sky.update(&hist, freq, tier);
+        sky.update(&hist, freq, tier, spectrograph_3d::SpikeSpacing::Normal);
         let mut r = Renderer::new(&gpu.device, &gpu.queue, &shared);
         let mut worst: Option<(String, f64, f64)> = None;
         for (name, cam) in &cams {
@@ -776,7 +777,7 @@ fn bench_frame_cost() {
                 let t0 = Instant::now();
                 push(&mut hist, slot);
                 slot += 1;
-                sky.update(&hist, freq, tier);
+                sky.update(&hist, freq, tier, spectrograph_3d::SpikeSpacing::Normal);
                 let input = Spectrograph3dInput {
                     key: ac2_scene::trace::TraceKey::Live(ac2_proto::units::MeasId(1)),
                     history: &hist,

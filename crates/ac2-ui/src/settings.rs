@@ -40,8 +40,8 @@ pub use display::{
     display_rows, ember_decay_steps, ember_decay_text, ember_glow_steps, ember_glow_text,
     invert_drag_3d_text, level_follow_text, plate_background_text, quality_3d_text,
     range_band_text, resolution_marker_text, shared_scale_text, sim_hints_text, spec_ease_text,
-    spectrum_view_name, step_ember_decay, step_ember_glow, step_hold, step_theme, sweep_view_name,
-    theme_name, warning_toasts_text,
+    spectrum_view_name, spike_spacing_text, step_ember_decay, step_ember_glow, step_hold,
+    step_theme, sweep_view_name, theme_name, warning_toasts_text,
 };
 pub use network::{IfacePick, NetPicks, Switch, read_only_row, switch};
 pub use pairing::{PairOffer, PairedRow, Pairing};

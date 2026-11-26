@@ -218,6 +218,30 @@ fn settings_now_the_measurements_are_dropped_and_the_rest_kept() {
 }
 
 #[test]
+fn spike_spacing_round_trip() {
+    use ac2_scene::spectrograph_3d::SpikeSpacing;
+    let mut p = UiPrefs::default();
+    assert_eq!(p.spike_spacing, SpikeSpacing::Normal);
+    assert!(!p.to_toml().contains("spike_spacing"));
+    for s in [
+        SpikeSpacing::Tightest,
+        SpikeSpacing::Tight,
+        SpikeSpacing::Loose,
+        SpikeSpacing::Loosest,
+    ] {
+        p.spike_spacing = s;
+        let text = p.to_toml();
+        assert!(
+            text.contains(&format!("spike_spacing = \"{}\"", s.name())),
+            "{text}"
+        );
+        assert_eq!(UiPrefs::from_toml(&text), Ok(p.clone()));
+    }
+    assert!(UiPrefs::from_toml("spike_spacing = \"normal\"\n").is_err());
+    assert!(UiPrefs::from_toml("spike_spacing = \"sparse\"\n").is_err());
+}
+
+#[test]
 fn spec_ease_round_trip() {
     let mut p = UiPrefs::default();
     assert!(p.spec_ease);

@@ -263,6 +263,9 @@ impl CommandId {
             | C::SpectrographGrey
             | C::SpectrographIce => &["spectrograph", "waterfall", "colormap", "color", "3d"],
             C::TiltUp | C::TiltDown => &["3d", "camera", "pitch", "angle", "spectrograph"],
+            C::SpikesTighter | C::SpikesLooser => {
+                &["3d", "spacing", "density", "grid", "spectrograph", "spikes"]
+            }
             C::NextView | C::PrevView => &[
                 "spectrograph",
                 "3d",

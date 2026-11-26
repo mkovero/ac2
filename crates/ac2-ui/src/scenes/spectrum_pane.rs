@@ -170,7 +170,8 @@ pub fn spectrograph_3d(
         .filter(|h| h.span_s() == display.spectrograph_span_s)
         .unwrap_or(&empty);
     let freq = ac2_scene::axis::Range::new(view.freq.lo, view.freq.hi);
-    skylines.own.update(history, freq, tier.0);
+    let spacing = st.prefs.spike_spacing;
+    skylines.own.update(history, freq, tier.0, spacing);
     // Another measurement's history is another skyline: a fold would keep the old one's
     // rows wherever the two agree on slots and revision.
     let lower = shown.and_then(|_| st.lake_mirror(pane));
@@ -181,7 +182,7 @@ pub fn spectrograph_3d(
                 skylines.mirror = Some((m.id, Skyline::default()));
             }
             if let Some((_, sk)) = skylines.mirror.as_mut() {
-                sk.update(h, freq, tier.0);
+                sk.update(h, freq, tier.0, spacing);
             }
         }
         None => skylines.mirror = None,

@@ -319,6 +319,10 @@ pub fn defaults() -> Vec<Binding> {
         (C::Offset, S::Spectrograph3d, k(K::J)),
         (C::TiltUp, S::Spectrograph3d, k(K::PageUp)),
         (C::TiltDown, S::Spectrograph3d, k(K::PageDown)),
+        // The spike spacing on the spectrum's smoothing keys: K coarser (looser), Shift+K
+        // finer (tighter), as K / Shift+K smooth coarser / finer one view over.
+        (C::SpikesLooser, S::Spectrograph3d, k(K::K)),
+        (C::SpikesTighter, S::Spectrograph3d, sh(K::K)),
     ];
     // The IR view shows the transfer pane's measurement: what acts on the measurement
     // there keeps its key here, so the two tables cannot drift apart.
@@ -466,7 +470,8 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::NextView, "view", 80),
                     hint(C::StartStop, "start/stop", 75),
                     hint(C::Peaks, "peaks", 65),
-                    hint(C::MaximisePane, "maximise", 40),
+                    // W maximise, as on every pane, gives way: eight tips fit a bar.
+                    hint(C::SpikesLooser, "spacing", 60),
                 ]
             }
         }

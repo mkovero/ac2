@@ -213,7 +213,7 @@ const DIGITS: [Key; 9] = [
 
 /// Opposite steps shown on one row (`↑/↓ Stimulus level ±1 dB`) when their keys fit the
 /// key column side by side.
-const PAIRS: [(CommandId, CommandId, &str); 19] = {
+const PAIRS: [(CommandId, CommandId, &str); 20] = {
     use CommandId as C;
     [
         (C::LevelUp, C::LevelDown, "Stimulus level ±1 dB"),
@@ -236,6 +236,7 @@ const PAIRS: [(CommandId, CommandId, &str); 19] = {
         (C::NextTrace, C::PrevTrace, "Next/previous trace"),
         (C::NextView, C::PrevView, "Next/previous view"),
         (C::TiltUp, C::TiltDown, "Tilt up/down"),
+        (C::SpikesLooser, C::SpikesTighter, "Spikes looser/tighter"),
         (C::SmoothCoarser, C::SmoothFiner, "Smoothing coarser/finer"),
         (
             C::ResolutionCoarser,

@@ -576,6 +576,13 @@ impl AppState {
             }
             // Tilt means something only in the 3D view; its scope alone binds it.
             C::TiltUp | C::TiltDown => {}
+            // The spike spacing steps from the 3D view, where its keys are bound; the setting
+            // row steps it from anywhere.
+            C::SpikesTighter | C::SpikesLooser => {
+                if self.cam3d_target().is_some() {
+                    self.step_spike_spacing(if c == C::SpikesTighter { -1 } else { 1 });
+                }
+            }
             // An IR picture navigates its time and value axes with the same keys.
             c if ir_nav::is_nav(c) && self.ir_target().is_some() => {
                 if let Some(p) = self.ir_target() {

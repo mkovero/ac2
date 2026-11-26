@@ -420,6 +420,9 @@ pub struct UiPrefs {
     pub invert_drag_3d: bool,
     /// How the 3D spectrograph is drawn on this machine: by the GPU (auto) or as set.
     pub quality_3d: ac2_scene::spectrograph_3d::Quality,
+    /// How close the 3D spectrograph's spikes stand on this machine (both halves of a
+    /// mirrored view alike).
+    pub spike_spacing: ac2_scene::spectrograph_3d::SpikeSpacing,
     /// How far a peak or notch must stand out for the cursor to jump to it, dB
     /// (`ac2_scene::cursor_jump`).
     pub jump_prominence_db: f64,
@@ -525,6 +528,7 @@ impl Default for UiPrefs {
             sim_hints: true,
             plate_background: ac2_scene::plate::PlateBackground::SeeThrough,
             quality_3d: ac2_scene::spectrograph_3d::Quality::Auto,
+            spike_spacing: ac2_scene::spectrograph_3d::SpikeSpacing::Normal,
             invert_drag_3d: true,
             bar_ease: true,
             shared_scale: true,

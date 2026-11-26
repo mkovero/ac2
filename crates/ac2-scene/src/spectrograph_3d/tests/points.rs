@@ -23,7 +23,7 @@ pub(super) fn flat_room() -> (SpectrographHistory, Skyline) {
         f.push_with(&mut h, slot, &l, None);
     }
     let mut s = Skyline::default();
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     (h, s)
 }
 

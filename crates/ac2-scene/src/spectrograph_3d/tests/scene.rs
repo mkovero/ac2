@@ -19,7 +19,7 @@ fn pink_room(span: u32, tier: SkylineTier) -> Built {
         f.push_with(&mut h, slot, &l, None);
     }
     let mut s = Skyline::default();
-    s.update(&h, full_range(), tier);
+    s.update(&h, full_range(), tier, SpikeSpacing::Normal);
     Built { h, s }
 }
 
@@ -375,7 +375,7 @@ fn caption_names_the_cell_and_a_forced_tier() {
 fn empty_and_missing_say_so() {
     let h = SpectrographHistory::new(30);
     let mut s = Skyline::default();
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     let b = Built { h, s };
     let sc = scene_3d(&b, &ViewState::default(), SpectrumCamera::DEFAULT, false);
     assert_eq!(sc.message.as_deref(), Some("Main L: no frames yet"));

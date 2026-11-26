@@ -136,7 +136,7 @@ fn forest() -> (SpectrographHistory, Skyline) {
         f.push_with(&mut h, slot, &l, None);
     }
     let mut s = Skyline::default();
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     (h, s)
 }
 
@@ -207,7 +207,7 @@ fn noisy(tier: SkylineTier) -> (SpectrographHistory, Skyline) {
         f.push_with(&mut h, slot, &l, None);
     }
     let mut s = Skyline::default();
-    s.update(&h, full_range(), tier);
+    s.update(&h, full_range(), tier, SpikeSpacing::Normal);
     (h, s)
 }
 
@@ -297,7 +297,7 @@ fn a_pick_reads_back_as_the_spike_under_the_pointer() {
 fn live_the_cursor_holds_its_frame_as_rows_move_back() {
     let mut h = SpectrographHistory::new(30);
     let mut f = Feed::new(&log_bins());
-    let k = bucket_slots(h.slots(), SkylineTier::Full) as u64;
+    let k = bucket_slots(h.slots(), SkylineTier::Full, SpikeSpacing::Normal) as u64;
     // Each row's own level, so the row the cursor reads is known by its level.
     let level = |slot: u64| -10.0 - (slot / k % 50) as f32;
     let mut slot = 0;
@@ -310,7 +310,7 @@ fn live_the_cursor_holds_its_frame_as_rows_move_back() {
     let n = h.slots() as u64;
     feed(&mut h, n + k / 2);
     let mut sk = Skyline::default();
-    sk.update(&h, full_range(), SkylineTier::Full);
+    sk.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     let view = chrome(PlotChrome::Full);
     let b = (h.clone(), sk.clone());
     let s = scene_of(&b, None, &view, 0.0);
@@ -328,7 +328,7 @@ fn live_the_cursor_holds_its_frame_as_rows_move_back() {
     assert_eq!(cell, at.cell);
     // Three rows and a bit later: the same frame, three rows back, older by that much.
     feed(&mut h, n + k / 2 + 3 * k + 1);
-    sk.update(&h, full_range(), SkylineTier::Full);
+    sk.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     let later = (h.clone(), sk.clone());
     let (cell2, v2, age2) = reads(&later);
     assert_eq!(v2, v, "the same row's level");
@@ -339,7 +339,7 @@ fn live_the_cursor_holds_its_frame_as_rows_move_back() {
     );
     // Once its frame has left the history, no cursor is drawn.
     feed(&mut h, 3 * n);
-    sk.update(&h, full_range(), SkylineTier::Full);
+    sk.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     assert!(scene_of(&(h, sk), None, &view, 0.0).cursor.is_none());
 }
 

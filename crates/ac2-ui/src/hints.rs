@@ -98,6 +98,7 @@ fn partner(c: CommandId, scope: Scope) -> Option<CommandId> {
         (C::PanLeft, Scope::Spectrograph3d) => Some(C::PanRight),
         (C::TiltUp, Scope::Spectrograph3d) => Some(C::TiltDown),
         (C::ZoomIn, Scope::Spectrograph3d) => Some(C::ZoomOut),
+        (C::SpikesLooser, Scope::Spectrograph3d) => Some(C::SpikesTighter),
         _ => None,
     }
 }
@@ -215,7 +216,7 @@ mod tests {
                 "G/Shift+G view",
                 "S start/stop",
                 "P peaks",
-                "W maximise",
+                "K/Shift+K spacing",
                 "H all keys"
             ]
         );

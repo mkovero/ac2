@@ -192,18 +192,74 @@ const CAPTION_H: f32 = 16.0;
 /// Room right of the plot: the 2D view's, so the plot keeps its place across G.
 const RIGHT_MARGIN: f32 = crate::spectrograph::RIGHT_MARGIN;
 
-/// The grid the skyline is made of: columns, and about how many rows of history.
-pub fn grid(tier: SkylineTier) -> (usize, usize) {
-    match tier {
-        SkylineTier::Full => (192, 96),
-        SkylineTier::Lite | SkylineTier::Bare => (128, 48),
+/// The grid the skyline is made of: columns, and about how many rows of history. `tier`
+/// sets what the GPU can fill; `spacing` scales both axes alike, so the cells stay the
+/// same shape and the spikes as even in depth as across.
+pub fn grid(tier: SkylineTier, spacing: SpikeSpacing) -> (usize, usize) {
+    let (cols, rows) = match tier {
+        SkylineTier::Full => (192.0, 96.0),
+        SkylineTier::Lite | SkylineTier::Bare => (128.0, 48.0),
+    };
+    let d = spacing.density();
+    ((cols * d).round() as usize, (rows * d).round() as usize)
+}
+
+/// Settings › Display › 3D spike spacing: how close the spikes stand, this machine's like
+/// the quality. Tighter is more spikes on the same floor, finer in frequency and time, at
+/// more GPU time; looser is fewer and wider apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum SpikeSpacing {
+    Tightest,
+    Tight,
+    #[default]
+    Normal,
+    Loose,
+    Loosest,
+}
+
+impl SpikeSpacing {
+    pub const ALL: [SpikeSpacing; 5] = [
+        SpikeSpacing::Tightest,
+        SpikeSpacing::Tight,
+        SpikeSpacing::Normal,
+        SpikeSpacing::Loose,
+        SpikeSpacing::Loosest,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            SpikeSpacing::Tightest => "tightest",
+            SpikeSpacing::Tight => "tight",
+            SpikeSpacing::Normal => "normal",
+            SpikeSpacing::Loose => "loose",
+            SpikeSpacing::Loosest => "loosest",
+        }
+    }
+
+    /// Spikes per unit of floor along each axis, of the normal step's. A step is √2 a
+    /// side, twice or half the spikes: the tightest stands four times the normal count,
+    /// which bounds each tier's fill at four times its present cost.
+    pub fn density(self) -> f64 {
+        match self {
+            SpikeSpacing::Tightest => 2.0,
+            SpikeSpacing::Tight => std::f64::consts::SQRT_2,
+            SpikeSpacing::Normal => 1.0,
+            SpikeSpacing::Loose => std::f64::consts::FRAC_1_SQRT_2,
+            SpikeSpacing::Loosest => 0.5,
+        }
+    }
+
+    /// `d` steps looser (negative: tighter), held at the ends.
+    pub fn step(self, d: i32) -> Self {
+        let i = Self::ALL.iter().position(|s| *s == self).unwrap_or(2) as i32;
+        Self::ALL[(i + d).clamp(0, Self::ALL.len() as i32 - 1) as usize]
     }
 }
 
 /// History slots per row of the skyline: an integer, so rows are whole slots anchored on
 /// absolute slot numbers and never shift as the history scrolls.
-pub fn bucket_slots(slots: usize, tier: SkylineTier) -> usize {
-    let rows = grid(tier).1;
+pub fn bucket_slots(slots: usize, tier: SkylineTier, spacing: SpikeSpacing) -> usize {
+    let rows = grid(tier, spacing).1;
     ((slots as f64 / rows as f64).round() as usize).max(1)
 }
 
@@ -227,6 +283,7 @@ struct Key {
     lo: f64,
     hi: f64,
     tier: SkylineTier,
+    spacing: SpikeSpacing,
 }
 
 /// The skyline of a spectrograph history: `C` log-spaced columns over the pane's frequency
@@ -254,11 +311,17 @@ pub struct Skyline {
 }
 
 impl Skyline {
-    /// Brings the skyline up to `h` over frequency span `freq` in `tier`'s grid: a fold
-    /// of what is new, or a rebuild when the history was reset or the span, the grid or
-    /// the tier changed.
-    pub fn update(&mut self, h: &SpectrographHistory, freq: Range, tier: SkylineTier) {
-        let (cols, _) = grid(tier);
+    /// Brings the skyline up to `h` over frequency span `freq` in the grid of `tier` and
+    /// `spacing`: a fold of what is new, or a rebuild when the history was reset or the
+    /// span, the grid, the tier or the spacing changed.
+    pub fn update(
+        &mut self,
+        h: &SpectrographHistory,
+        freq: Range,
+        tier: SkylineTier,
+        spacing: SpikeSpacing,
+    ) {
+        let (cols, _) = grid(tier, spacing);
         let key = h.rows().map(|r| {
             let lo = freq.lo.max(r.lo_hz());
             let hi = freq.hi.min(r.hi_hz());
@@ -272,10 +335,11 @@ impl Skyline {
                 lo,
                 hi,
                 tier,
+                spacing,
             }
         });
         if key != self.key {
-            let k = bucket_slots(h.slots(), tier);
+            let k = bucket_slots(h.slots(), tier, spacing);
             *self = Self {
                 cols: key
                     .as_ref()

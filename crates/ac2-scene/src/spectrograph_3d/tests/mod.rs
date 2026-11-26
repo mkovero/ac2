@@ -119,7 +119,7 @@ fn same(a: &Skyline, b: &Skyline) -> bool {
 
 fn rebuilt(h: &SpectrographHistory, freq: Range, tier: SkylineTier) -> Skyline {
     let mut s = Skyline::default();
-    s.update(h, freq, tier);
+    s.update(h, freq, tier, SpikeSpacing::Normal);
     s
 }
 
@@ -137,11 +137,15 @@ fn rows_are_whole_slots_per_span_and_tier() {
     ];
     for (span, tier, k, r) in table {
         let slots = crate::spectrograph::slots(span);
-        assert_eq!(bucket_slots(slots, tier), k, "{span} s {tier:?}");
+        assert_eq!(
+            bucket_slots(slots, tier, SpikeSpacing::Normal),
+            k,
+            "{span} s {tier:?}"
+        );
         assert_eq!(ring_rows(slots, k), r + 1, "{span} s {tier:?}");
     }
-    assert_eq!(grid(SkylineTier::Full).0, 192);
-    assert_eq!(grid(SkylineTier::Lite).0, 128);
+    assert_eq!(grid(SkylineTier::Full, SpikeSpacing::Normal).0, 192);
+    assert_eq!(grid(SkylineTier::Lite, SpikeSpacing::Normal).0, 128);
 }
 
 #[test]
@@ -189,13 +193,13 @@ fn a_tone_stands_in_one_column_and_bands_fill_theirs() {
 fn rows_are_the_highest_level_of_their_slots_anchored_on_absolute_slots() {
     let mut h = SpectrographHistory::new(10);
     let mut f = Feed::new(&log_bins());
-    let k = bucket_slots(h.slots(), SkylineTier::Full) as u64;
+    let k = bucket_slots(h.slots(), SkylineTier::Full, SpikeSpacing::Normal) as u64;
     assert_eq!(k, 3);
     let mut s = Skyline::default();
     // Start mid-row: slot 4 is the second slot of row 1.
     for slot in 4..10 {
         f.push(&mut h, slot, -(slot as f32));
-        s.update(&h, full_range(), SkylineTier::Full);
+        s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     }
     // Rows by absolute slot: 3–5 (4, 5 in), 6–8, 9 (newest, one slot filled).
     assert_eq!(s.row_back(0).expect("row 3")[50], -9.0);
@@ -204,7 +208,7 @@ fn rows_are_the_highest_level_of_their_slots_anchored_on_absolute_slots() {
     assert!(s.row_back(3).is_none(), "no frames before slot 4");
     assert_eq!(s.phase(), 1.0 / 3.0);
     f.push(&mut h, 10, 0.0);
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     assert_eq!(s.phase(), 2.0 / 3.0);
     assert_eq!(s.row_back(0).expect("row 3")[50], 0.0);
     assert_eq!(s.row_back(1).expect("row 2")[50], -6.0);
@@ -221,7 +225,7 @@ fn the_oldest_row_drops_slots_as_they_leave_the_history() {
     for slot in 1..n {
         f.push(&mut h, slot, -50.0);
     }
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     let oldest = |s: &Skyline| {
         (0..s.rows())
             .rev()
@@ -230,7 +234,7 @@ fn the_oldest_row_drops_slots_as_they_leave_the_history() {
     };
     assert_eq!(oldest(&s), 0.0);
     f.push(&mut h, n, -50.0);
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     assert_eq!(oldest(&s), -50.0);
     assert!(same(&s, &rebuilt(&h, full_range(), SkylineTier::Full)));
 }
@@ -285,7 +289,7 @@ fn folding_frame_by_frame_equals_rebuilding() {
             let n = f.edges.len();
             let l: Vec<f32> = (0..n).map(|_| -(rng.next(100) as f32)).collect();
             f.push_with(&mut h, slot, &l, None);
-            s.update(&h, full_range(), tier);
+            s.update(&h, full_range(), tier, SpikeSpacing::Normal);
             assert!(
                 same(&s, &rebuilt(&h, full_range(), tier)),
                 "seed {seed} frame {i}"
@@ -302,18 +306,18 @@ fn span_grid_tier_or_frequency_changes_rebuild() {
         f.tone(&mut h, slot, 1000.0, -80.0, -(slot as f32 % 30.0));
     }
     let mut s = Skyline::default();
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     let narrow = Range::new(500.0, 2000.0);
-    s.update(&h, narrow, SkylineTier::Full);
+    s.update(&h, narrow, SkylineTier::Full, SpikeSpacing::Normal);
     assert!(same(&s, &rebuilt(&h, narrow, SkylineTier::Full)));
     assert_eq!(s.span_hz(), Some((500.0, 2000.0)));
-    s.update(&h, narrow, SkylineTier::Lite);
+    s.update(&h, narrow, SkylineTier::Lite, SpikeSpacing::Normal);
     assert_eq!(s.cols(), 128);
     assert!(same(&s, &rebuilt(&h, narrow, SkylineTier::Lite)));
     // A new grid (an RTA) starts the history over: the skyline with it.
     let mut g = Feed::new(&third_octaves());
     g.push(&mut h, 300, -30.0);
-    s.update(&h, narrow, SkylineTier::Lite);
+    s.update(&h, narrow, SkylineTier::Lite, SpikeSpacing::Normal);
     assert!(same(&s, &rebuilt(&h, narrow, SkylineTier::Lite)));
     assert_eq!(
         (0..s.rows()).filter(|j| s.row_back(*j).is_some()).count(),
@@ -321,7 +325,7 @@ fn span_grid_tier_or_frequency_changes_rebuild() {
     );
     // Cleared: nothing.
     h.clear();
-    s.update(&h, narrow, SkylineTier::Lite);
+    s.update(&h, narrow, SkylineTier::Lite, SpikeSpacing::Normal);
     assert!((0..s.rows()).all(|j| s.row_back(j).is_none()));
 }
 
@@ -330,12 +334,12 @@ fn the_phase_advances_per_frame_from_the_data() {
     let mut h = SpectrographHistory::new(120);
     let mut f = Feed::new(&log_bins());
     let mut s = Skyline::default();
-    let k = bucket_slots(h.slots(), SkylineTier::Full) as u64;
+    let k = bucket_slots(h.slots(), SkylineTier::Full, SpikeSpacing::Normal) as u64;
     assert_eq!(k, 38);
     let mut phases = Vec::new();
     for slot in 38..42 {
         f.push(&mut h, slot, -20.0);
-        s.update(&h, full_range(), SkylineTier::Full);
+        s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
         phases.push(s.phase());
     }
     // The bucket boundary sits where the absolute slot count says, so the first phase is
@@ -348,7 +352,7 @@ fn the_phase_advances_per_frame_from_the_data() {
         assert!((p - phases[0] - i as f32 / 38.0).abs() < 1e-6, "{phases:?}");
     }
     // No new frame, no motion.
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     assert_eq!(s.phase(), phases[3]);
 }
 
@@ -363,9 +367,9 @@ fn an_update_without_a_new_frame_keeps_every_row() {
     for slot in 0..20 {
         f.push(&mut h, slot, -30.0);
     }
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     let before = s.ring().to_vec();
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     let kept = |a: &Option<HeatmapColumn>, b: &Option<HeatmapColumn>| match (a, b) {
         (Some(a), Some(b)) => Arc::ptr_eq(a, b),
         (None, None) => true,
@@ -373,7 +377,7 @@ fn an_update_without_a_new_frame_keeps_every_row() {
     };
     assert!(before.iter().zip(s.ring()).all(|(a, b)| kept(a, b)));
     f.push(&mut h, 19, -10.0);
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     assert_eq!(s.row_back(0).expect("newest")[50], -10.0);
     assert!(same(&s, &rebuilt(&h, full_range(), SkylineTier::Full)));
 }
@@ -394,7 +398,7 @@ fn rows_move_back_continuously_across_a_new_row() {
     for slot in 4..=7 {
         f.push(&mut h, slot, -20.0);
     }
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     let row2 = s.newest();
     let before = s.drawn(0.0);
     assert!((before.phase - 2.0 / 3.0).abs() < 1e-6);
@@ -405,7 +409,7 @@ fn rows_move_back_continuously_across_a_new_row() {
     // The next frame lands in slot 9: row 3 starts, in front of row 2. Drawn where the axis
     // stood, row 2 stays put and row 3 stands half a slot behind the front edge.
     f.push(&mut h, 9, -20.0);
-    s.update(&h, full_range(), SkylineTier::Full);
+    s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
     let row3 = s.newest();
     assert_ne!(row3, row2);
     let after = s.drawn(-0.5);
@@ -455,7 +459,7 @@ fn rows_move_evenly_per_display_frame_under_uneven_audio_steps() {
         let at = t0 + Duration::from_secs_f64(t);
         f.push_at(&mut h, (audio_s * 1e9).round() as u64, -20.0);
         clock.observe(at, audio_s);
-        s.update(&h, full_range(), SkylineTier::Full);
+        s.update(&h, full_range(), SkylineTier::Full, SpikeSpacing::Normal);
         // Drawn 4 ms after the frame arrived.
         let lead = h.lead_slots(clock.position_s(at + Duration::from_millis(4)));
         let d = s.drawn(lead);
@@ -654,3 +658,4 @@ mod mirror;
 mod pick;
 mod points;
 mod scene;
+mod spacing;

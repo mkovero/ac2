@@ -347,6 +347,8 @@ commands! {
     SpectrographIce => "spectrograph_colours_ice", "Colour map ice", [Spectrum, Spectrograph3d];
     TiltUp => "tilt_up", "Tilt up", [Spectrograph3d];
     TiltDown => "tilt_down", "Tilt down", [Spectrograph3d];
+    SpikesLooser => "spikes_looser", "Spikes looser", [Spectrograph3d];
+    SpikesTighter => "spikes_tighter", "Spikes tighter", [Spectrograph3d];
 
     NextView => "next_view", "Next view", [Transfer, Spectrum, Ir, Spl, Distortion, Programme, Spectrograph3d, Dynamics];
     PrevView => "prev_view", "Previous view", [Transfer, Spectrum, Ir, Spl, Distortion, Programme, Spectrograph3d, Dynamics];

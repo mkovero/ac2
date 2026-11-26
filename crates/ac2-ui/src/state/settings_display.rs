@@ -84,6 +84,7 @@ impl AppState {
             DisplayRow::LevelFollow if d != 0 => self.toggle_level_follow(),
             DisplayRow::SpectrumGlide if d != 0 => self.toggle_spec_ease(),
             DisplayRow::Quality3d if d != 0 => self.step_quality_3d(d),
+            DisplayRow::SpikeSpacing3d if d != 0 => self.step_spike_spacing(d.signum()),
             DisplayRow::InvertDrag3d if d != 0 => self.toggle_invert_drag_3d(),
             DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
@@ -218,6 +219,20 @@ impl AppState {
         self.toast(format!(
             "3D quality {}",
             crate::settings::quality_3d_text(self.prefs.quality_3d, self.auto_tier)
+        ));
+    }
+
+    /// The 3D spike spacing `d` steps looser (negative: tighter), held at the ends;
+    /// remembered in the prefs. The skylines rebuild on their next frame.
+    pub(super) fn step_spike_spacing(&mut self, d: i32) {
+        let next = self.prefs.spike_spacing.step(d);
+        if next != self.prefs.spike_spacing {
+            self.prefs.spike_spacing = next;
+            self.prefs_dirty = true;
+        }
+        self.toast(format!(
+            "3D spike spacing {}",
+            crate::settings::spike_spacing_text(next)
         ));
     }
 

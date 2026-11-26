@@ -311,3 +311,46 @@ fn the_pointer_over_the_view_reaches_its_scene_until_it_leaves_or_drags() {
     t.st.apply(Msg::Cam3d(p, Cam3dMsg::Hover(false)), &t.keys);
     assert_eq!(t.st.view_for(p).pointer_3d, None, "gone");
 }
+
+/// K and Shift+K step the spike spacing in the 3D view, held at the ends, remembered in the prefs
+/// and named in a toast; outside it they do nothing.
+#[test]
+fn k_steps_the_spike_spacing_in_3d_only() {
+    use ac2_scene::spectrograph_3d::SpikeSpacing as S;
+    let mut t = on_3d();
+    assert_eq!(t.st.prefs.spike_spacing, S::Normal);
+    t.st.prefs_dirty = false;
+    t.key("Shift+K");
+    assert_eq!(t.st.prefs.spike_spacing, S::Tight);
+    assert!(t.st.prefs_dirty);
+    assert_eq!(
+        t.last_toast(),
+        "3D spike spacing tight: 2× the spikes, more GPU time"
+    );
+    t.key("Shift+K");
+    t.key("Shift+K");
+    assert_eq!(t.st.prefs.spike_spacing, S::Tightest);
+    t.st.prefs_dirty = false;
+    let cam = camera(&t);
+    t.key("K");
+    assert_eq!(t.st.prefs.spike_spacing, S::Tight);
+    for _ in 0..5 {
+        t.key("K");
+    }
+    assert_eq!(t.st.prefs.spike_spacing, S::Loosest);
+    assert!(t.st.prefs_dirty);
+    assert_eq!(t.last_toast(), "3D spike spacing loosest: ¼ the spikes");
+    // The camera is untouched.
+    assert_eq!(camera(&t), cam);
+    // Back on the 2D spectrum, the keys are not the spacing's.
+    t.key("G");
+    assert_eq!(t.st.cam3d_target(), None);
+    t.key("Shift+K");
+    t.key("K");
+    assert_eq!(t.st.prefs.spike_spacing, S::Loosest);
+    // Nor on a GPU without the 3D view.
+    t.key("Shift+G");
+    t.st.auto_tier = None;
+    t.key("Shift+K");
+    assert_eq!(t.st.prefs.spike_spacing, S::Loosest);
+}
