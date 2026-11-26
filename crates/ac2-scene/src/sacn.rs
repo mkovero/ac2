@@ -49,9 +49,14 @@ pub fn parse_dest(text: &str) -> Result<Option<SacnDest>, String> {
         [ip] => SacnDest::Unicast {
             addr: ip.parse().map_err(|_| bad())?,
         },
-        [m, ip] | [m, "via", ip] if m.eq_ignore_ascii_case("multicast") => SacnDest::Multicast {
+        [m, ip] if m.eq_ignore_ascii_case("multicast") => SacnDest::Multicast {
             interface: ip.parse().map_err(|_| bad())?,
         },
+        [m, via, ip] if m.eq_ignore_ascii_case("multicast") && via.eq_ignore_ascii_case("via") => {
+            SacnDest::Multicast {
+                interface: ip.parse().map_err(|_| bad())?,
+            }
+        }
         _ => return Err(bad()),
     };
     check_dest(dest)?;
@@ -185,6 +190,8 @@ mod tests {
             ("multicast via 10.0.0.4".into(), "258".into(), "120".into())
         );
         assert_eq!(target("Multicast 10.0.0.4", "258", "120"), m);
+        assert_eq!(target("MULTICAST Via 10.0.0.4", "258", "120"), m);
+        assert!(parse_target("multicast by 10.0.0.4", "258", "").is_err());
         assert_eq!(target_texts(None), Default::default());
     }
 
