@@ -237,6 +237,64 @@ async fn a_taken_artnet_port_is_said_and_frames_still_go() {
     }
     let (_, from) = until(&node, "a frame", is_art_dmx);
     assert_eq!(from.port(), from_port);
+
+    // The other program quits; the operator sets the same target again: the port is tried
+    // at once, not at the 30 s retry.
+    let held_port = port_of(&held);
+    drop(held);
+    let (_, warnings) = c
+        .call_warned(Command::ArtnetTarget {
+            base: rig(&c).rev,
+            target: rig(&c).artnet_target,
+        })
+        .await
+        .unwrap();
+    assert_eq!(warnings, []);
+    rig_until(&c, "conforming", |r| {
+        r.artnet_socket == ArtnetSocket::Conforming
+    })
+    .await;
+    let deadline = Instant::now() + WAIT;
+    while until(&node, "a frame", is_art_dmx).1.port() != held_port {
+        assert!(
+            Instant::now() < deadline,
+            "no frame from the port bound at last"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_artnet_socket_that_cannot_open_is_said_on_every_set() {
+    init_log();
+    // An address no interface of this host has (TEST-NET-1): no socket opens there.
+    let h = Daemon::start(config(DmxPorts {
+        artnet_bind: SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 77), 0),
+        ..DmxPorts::LOOPBACK
+    }))
+    .unwrap();
+    let c = mirror(&h, "ac2d-dmx-net-test").await;
+    let node = socket();
+    let target = Some(ArtnetTarget {
+        addr: node.local_addr().unwrap(),
+        universe: PortAddress::new(1).unwrap(),
+    });
+    for _ in 0..2 {
+        let (_, warnings) = c
+            .call_warned(Command::ArtnetTarget {
+                base: rig(&c).rev,
+                target,
+            })
+            .await
+            .unwrap();
+        match warnings.as_slice() {
+            [Warning::ArtnetCannotOpen { os_error }] => assert!(!os_error.is_empty()),
+            other => panic!("{other:?}"),
+        }
+        rig_until(&c, "without a socket", |r| {
+            matches!(r.artnet_socket, ArtnetSocket::CannotOpen { .. }) && r.artnet_target == target
+        })
+        .await;
+    }
 }
 
 fn sacn_unicast(universe: u16) -> SacnTarget {
@@ -380,6 +438,64 @@ async fn sacn_carries_the_frame_beside_artnet_and_ends_its_stream() {
     assert!(n >= 3, "{n} packets");
     assert!(tail[n - 3..].iter().all(|p| terminated(p)));
     assert!(tail[..n - 3].iter().all(|p| !terminated(p)));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_new_priority_keeps_the_stream_and_a_new_universe_keeps_the_frame() {
+    init_log();
+    let rx = socket();
+    let h = Daemon::start(config(DmxPorts {
+        sacn_port: port_of(&rx),
+        ..DmxPorts::LOOPBACK
+    }))
+    .unwrap();
+    let c = mirror(&h, "ac2d-dmx-net-test").await;
+    set_sacn(&c, Some(sacn_unicast(9))).await.unwrap();
+    // A test frame holds for 5 s: what the output is while the target changes.
+    c.call(Command::ArtnetTest {
+        channels: levels("12=255"),
+    })
+    .await
+    .unwrap();
+    until(&rx, "the test frame", |p| slot(p, 12) == 255);
+
+    // A new priority: the same stream, nothing terminated, the test frame still out.
+    let t = SacnTarget {
+        priority: SacnPriority::new(120).unwrap(),
+        ..sacn_unicast(9)
+    };
+    set_sacn(&c, Some(t)).await.unwrap();
+    let mut buf = [0u8; 1024];
+    let deadline = Instant::now() + WAIT;
+    let first = loop {
+        assert!(Instant::now() < deadline, "no packet at priority 120");
+        let Ok(n) = rx.recv(&mut buf) else { continue };
+        let p = &buf[..n];
+        assert!(!terminated(p), "a new priority ended the stream");
+        assert_eq!(slot(p, 12), 255, "a new priority cut the output");
+        if p[108] == 120 {
+            break p.to_vec();
+        }
+    };
+    assert_eq!(first[113..115], [0, 9]);
+
+    // A new universe: the old one ends, the new one carries the frame as it was.
+    set_sacn(
+        &c,
+        Some(SacnTarget {
+            universe: SacnUniverse::new(10).unwrap(),
+            ..t
+        }),
+    )
+    .await
+    .unwrap();
+    let (e, _) = until(&rx, "the old universe's end", terminated);
+    assert_eq!(e[113..115], [0, 9]);
+    let (p, _) = until(&rx, "the new universe", |p| p[113..115] == [0, 10]);
+    assert!(!terminated(&p));
+    assert_eq!(slot(&p, 12), 255, "a new universe cut the output");
+    drop(c);
+    drop(h);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

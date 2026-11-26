@@ -14,8 +14,10 @@ use crate::rig::RigSettings;
 use crate::util::invalid;
 
 impl Control {
-    /// `sacn.target`. A changed or removed target ends the old stream first
-    /// (Stream_Terminated), so its receivers let go of the rig at once.
+    /// `sacn.target`. A removed target, or one moved to another universe or receiver, ends
+    /// the old stream first (Stream_Terminated), so its receivers let go of the rig at
+    /// once; a new priority alone is the same stream and ends nothing. Either way the frame
+    /// being output goes on at the new target: a fade or a test frame is not cut short.
     pub(super) fn sacn_target(
         &mut self,
         base: Rev,
@@ -46,14 +48,19 @@ impl Control {
             "sACN target {}",
             target.map_or_else(|| "off".to_owned(), |t| text(&t))
         );
-        if let Some(o) = old {
+        let same_stream = old
+            .zip(target)
+            .is_some_and(|(o, t)| o.dest == t.dest && o.universe == t.universe);
+        if let Some(o) = old
+            && !same_stream
+        {
             let last = self.rig.artnet.output_now(Instant::now());
             self.rig.artnet.sacn.terminate(&o, &last);
         }
-        let others = self.dmx_targets().artnet.is_some();
+        let output_running = old.is_some() || self.dmx_targets().artnet.is_some();
         let rev = self.commit_rig(|r| r.sacn_target = target);
         if target.is_some() {
-            self.dmx_target_added(others);
+            self.dmx_target_added(output_running);
         } else {
             self.artnet_sync(Instant::now());
         }

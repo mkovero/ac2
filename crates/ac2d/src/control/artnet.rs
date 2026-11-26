@@ -15,6 +15,9 @@
 //! after it and the shutdown frame jump: they are for looking at a fixture or for leaving it
 //! settled. A test frame is merged over the cue frame, so the cue lights stay up while one
 //! fixture is found.
+//!
+//! The shutdown frame goes out [`REPEATS`] times more back to back: no keepalive follows
+//! it to make good a lost datagram, and it is the levels the fixtures keep.
 
 use std::time::{Duration, Instant};
 
@@ -314,6 +317,40 @@ impl Universe {
     }
 }
 
+impl Universe {
+    /// `frame` to every target 1 + [`REPEATS`] times back to back, then the sACN stream's
+    /// end and the Art-Net socket's close: nothing is sent after it.
+    fn last_frame(&mut self, t: Targets, frame: [u8; DMX_CHANNELS], now: Instant) {
+        if t.any() {
+            for _ in 0..=REPEATS {
+                // Counted and kept in the status; nothing else to do at shutdown.
+                let _ = self.snap(t, frame, now);
+            }
+            if let Some(s) = t.sacn {
+                self.sacn.terminate(&s, &frame);
+            }
+        }
+        self.artnet.close();
+    }
+}
+
+/// What the reply says about the Art-Net socket just opened for a target: nothing while it
+/// conforms.
+fn socket_warning(s: &ArtnetSocket) -> Option<Warning> {
+    match s {
+        ArtnetSocket::Closed | ArtnetSocket::Conforming => None,
+        ArtnetSocket::NotConforming {
+            from_port, reason, ..
+        } => Some(Warning::ArtnetNotConforming {
+            from_port: *from_port,
+            reason: *reason,
+        }),
+        ArtnetSocket::CannotOpen { os_error } => Some(Warning::ArtnetCannotOpen {
+            os_error: os_error.clone(),
+        }),
+    }
+}
+
 impl Control {
     /// The DMX outputs' targets as the rig holds them.
     pub(super) fn dmx_targets(&self) -> Targets {
@@ -378,19 +415,13 @@ impl Control {
             .min()
     }
 
-    /// Clean shutdown: one frame of every cue's `ok` levels to every target; then the sACN
+    /// Clean shutdown: the frame of every cue's `ok` levels to every target, then the sACN
     /// stream ends (Stream_Terminated), so its receivers let go of the rig at once, and the
     /// Art-Net socket closes.
     pub(super) fn artnet_shutdown(&mut self) {
         let targets = self.dmx_targets();
-        if targets.any() {
-            let f = self.rig.osc.ok_frame();
-            let _ = self.rig.artnet.snap(targets, f, Instant::now());
-            if let Some(t) = targets.sacn {
-                self.rig.artnet.sacn.terminate(&t, &f);
-            }
-        }
-        self.rig.artnet.artnet.close();
+        let f = self.rig.osc.ok_frame();
+        self.rig.artnet.last_frame(targets, f, Instant::now());
     }
 
     /// Commits `rig.artnet`, `rig.sacn` and `rig.artnet_socket` when [`status_due`] or the
@@ -412,13 +443,14 @@ impl Control {
     }
 
     /// The frame goes to a target set just now: the current output at once, to every
-    /// target. Without another target there is no output yet: it starts afresh (the cue
-    /// frame jumps out).
-    pub(super) fn dmx_target_added(&mut self, others_before: bool) {
+    /// target, when `running` (it was going to another target, or to this output's old
+    /// one), a fade or test hold going on. Otherwise there is no output yet: it starts
+    /// afresh (the cue frame jumps out).
+    pub(super) fn dmx_target_added(&mut self, running: bool) {
         let now = Instant::now();
         let targets = self.dmx_targets();
         let u = &mut self.rig.artnet;
-        if others_before && let Some(f) = u.output(now) {
+        if running && let Some(f) = u.output(now) {
             let _ = u.send(targets, f, now);
             // The new target gets the frame as if it had changed.
             u.repeats = REPEATS;
@@ -431,7 +463,8 @@ impl Control {
         }
     }
 
-    /// `artnet.target`.
+    /// `artnet.target`. The same target again is not a no-op while the socket is not on
+    /// Art-Net's port or not open: it tries again at once and says how the socket stands.
     pub(super) fn artnet_target(
         &mut self,
         base: Rev,
@@ -442,6 +475,11 @@ impl Control {
             check_addr(t.addr).map_err(invalid)?;
         }
         if self.store.state().rig.artnet_target == target {
+            if target.is_some() {
+                let s = self.rig.artnet.artnet.open_for_target(Instant::now());
+                self.reply_warnings.extend(socket_warning(s));
+                self.commit_dmx_status(true);
+            }
             return Ok(ReplyBody::Ack {
                 rev: self.store.rev(),
             });
@@ -464,15 +502,8 @@ impl Control {
         }
         match target {
             Some(_) => {
-                if let ArtnetSocket::NotConforming {
-                    from_port, reason, ..
-                } = self.rig.artnet.artnet.open_for_target(Instant::now())
-                {
-                    self.reply_warnings.push(Warning::ArtnetNotConforming {
-                        from_port: *from_port,
-                        reason: *reason,
-                    });
-                }
+                let s = self.rig.artnet.artnet.open_for_target(Instant::now());
+                self.reply_warnings.extend(socket_warning(s));
             }
             None => self.rig.artnet.artnet.close(),
         }
@@ -729,6 +760,60 @@ mod tests {
             got.iter().map(|f| f[0]).collect::<Vec<_>>()
         );
         assert!(got.len() > 3, "the fade's steps went out");
+    }
+
+    #[test]
+    fn the_last_frame_goes_out_three_times_then_the_stream_ends() {
+        let node = std::net::UdpSocket::bind("127.0.0.1:0").expect("test value");
+        let rx = std::net::UdpSocket::bind("127.0.0.1:0").expect("test value");
+        for s in [&node, &rx] {
+            s.set_nonblocking(true).expect("test value");
+        }
+        let t = Targets {
+            artnet: Some(ArtnetTarget {
+                addr: node.local_addr().expect("test value"),
+                universe: ac2_proto::model::PortAddress::new(1).expect("test value"),
+            }),
+            sacn: Some(SacnTarget {
+                dest: ac2_proto::model::SacnDest::Unicast {
+                    addr: std::net::Ipv4Addr::LOCALHOST,
+                },
+                universe: ac2_proto::model::SacnUniverse::new(1).expect("test value"),
+                priority: ac2_proto::model::SacnPriority::DEFAULT,
+            }),
+        };
+        let ports = DmxPorts {
+            sacn_port: rx.local_addr().expect("test value").port(),
+            ..DmxPorts::LOOPBACK
+        };
+        let mut u = Universe::new(ports, RigId(1), "rig");
+        let mut f = [0u8; DMX_CHANNELS];
+        f[11] = 77;
+        u.last_frame(t, f, Instant::now());
+        // Every datagram sent arrives before the call returns: loopback queues it at once.
+        let mut buf = [0u8; 700];
+        let mut artnet = Vec::new();
+        while let Ok(n) = node.recv(&mut buf) {
+            artnet.push(buf[18 + 11..n].first().copied());
+        }
+        assert_eq!(artnet, [Some(77); 3]);
+        let mut sacn = Vec::new();
+        while let Ok(n) = rx.recv(&mut buf) {
+            assert_eq!(n, 638);
+            sacn.push((buf[112] & 0x40 != 0, buf[125 + 12]));
+        }
+        assert_eq!(
+            sacn,
+            [
+                (false, 77),
+                (false, 77),
+                (false, 77),
+                (true, 77),
+                (true, 77),
+                (true, 77)
+            ]
+        );
+        assert_eq!(*u.artnet.state(), ArtnetSocket::Closed);
     }
 
     #[test]

@@ -8,9 +8,11 @@
 //!
 //! The source's CID is derived from the rig's id, so a receiver sees the same source
 //! across restarts and does not hold a stale one beside it. The sequence number counts up
-//! per packet of the universe. When a target is turned off, changed or the daemon stops in
-//! order, the stream ends with three packets marked Stream_Terminated, so receivers let
-//! go of the source at once instead of after the network data loss timeout (2.5 s).
+//! per packet of the universe. When a target is turned off, moved to another universe or
+//! receiver, or the daemon stops in order, the stream ends with three packets marked
+//! Stream_Terminated, so receivers let go of the source at once instead of after the
+//! network data loss timeout (2.5 s). A new priority alone is the same stream: receivers
+//! keep the source and take its new priority from the next packet.
 
 use std::io;
 use std::net::{Ipv4Addr, SocketAddrV4};
@@ -188,6 +190,8 @@ impl SacnSender {
         frame: &[u8; DMX_CHANNELS],
         terminated: bool,
     ) -> Result<(), String> {
+        // Whether the socket is past use; a full send buffer only lost this datagram.
+        let mut broken = true;
         let r = self.open(target.dest).and_then(|()| {
             let bytes = encode(
                 &self.cid,
@@ -205,6 +209,7 @@ impl SacnSender {
             let s = self.socket.as_ref().map(|(s, _)| s);
             s.ok_or_else(|| "no sACN socket".to_owned()).and_then(|s| {
                 super::send_nowait(s, &bytes, to).map(|_| ()).map_err(|e| {
+                    broken = breaks_socket(&e);
                     format!("cannot send sACN universe {} to {to}: {e}", target.universe)
                 })
             })
@@ -212,7 +217,7 @@ impl SacnSender {
         // A receiver orders packets by the sequence and drops one that goes backwards; a
         // lost datagram still uses its number.
         self.sequence = self.sequence.wrapping_add(1);
-        if r.is_err() {
+        if r.is_err() && broken {
             // A socket set up for an interface that went away or changed its address fails
             // every send: the next packet sets up a new one.
             self.socket = None;
@@ -234,6 +239,12 @@ impl SacnSender {
     pub(crate) fn status(&self) -> &OutputStatus {
         &self.status
     }
+}
+
+/// Whether a send error means the socket is no use any more: every error but a full send
+/// buffer, which drops this datagram and clears as the buffer drains.
+fn breaks_socket(e: &io::Error) -> bool {
+    e.kind() != io::ErrorKind::WouldBlock
 }
 
 fn open_error(dest: SacnDest, e: &io::Error) -> String {
@@ -399,6 +410,21 @@ mod tests {
         let mut buf = [0u8; 700];
         assert_eq!(rx.recv(&mut buf).expect("test value"), PACKET_LEN);
         assert_eq!(s.status().last_error, None);
+    }
+
+    #[test]
+    fn a_full_send_buffer_keeps_the_socket() {
+        assert!(!breaks_socket(&io::Error::from(io::ErrorKind::WouldBlock)));
+        // As the send path says it: the error after `dropped`.
+        let said = super::super::dropped(io::Error::from(io::ErrorKind::WouldBlock));
+        assert!(!breaks_socket(&said));
+        for kind in [
+            io::ErrorKind::AddrNotAvailable,
+            io::ErrorKind::NetworkUnreachable,
+            io::ErrorKind::PermissionDenied,
+        ] {
+            assert!(breaks_socket(&io::Error::from(kind)), "{kind:?}");
+        }
     }
 
     #[test]
