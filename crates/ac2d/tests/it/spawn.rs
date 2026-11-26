@@ -538,7 +538,8 @@ fn slow_a_kill_around_the_autosave_write_leaves_a_loadable_autosave() {
 
 /// Under a zone the host names only by a rule, an SPL log's header gives the offset in
 /// force when the log started, not the one when it was written: a log started in summer
-/// and saved in winter says summer's.
+/// and saved in winter says summer's. Only where `TZ` sets the host's local time.
+#[cfg(unix)]
 #[test]
 fn a_logs_zone_offset_is_the_one_at_its_start() {
     use ac2_proto::model::SessionRef;

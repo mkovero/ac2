@@ -104,11 +104,13 @@ pub(crate) fn rtc() -> bool {
 
 /// Whether a `TZ` value names an IANA zone (`Europe/Helsinki`, `UTC`, `EST5EDT`) rather than
 /// a POSIX rule (`EET-2EEST,M3.5.0/3,M10.5.0/4`, `EST5`), in the zone database's directories.
+#[cfg(unix)]
 fn iana_name(tz: &str) -> Option<&str> {
     iana_name_in(tz, &zoneinfo_dirs())
 }
 
 /// Where the C library looks a `TZ` name up: `TZDIR`, else the usual places.
+#[cfg(unix)]
 fn zoneinfo_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs: Vec<std::path::PathBuf> = std::env::var_os("TZDIR")
         .into_iter()
@@ -129,6 +131,7 @@ fn zoneinfo_dirs() -> Vec<std::path::PathBuf> {
 /// when a zone file of that name exists, and a rule and a zone name can be spelled alike
 /// (`EST5EDT` is both); a value naming no zone file is a rule, or no zone at all (`Foo`,
 /// which the C library reads as UTC): the header then gives the offset, never the value.
+#[cfg(any(unix, test))]
 fn iana_name_in<'a>(tz: &'a str, dirs: &[std::path::PathBuf]) -> Option<&'a str> {
     let n = tz.strip_prefix(':').unwrap_or(tz);
     let shaped = !n.is_empty()
@@ -148,12 +151,26 @@ pub(crate) fn zone(local: LocalClock, wall_ns: u64) -> TimeZone {
     let utc_offset_s = local.offset_s(wall_ns);
     let name = match local {
         LocalClock::FixedOffset { .. } => None,
-        LocalClock::Host => match std::env::var("TZ") {
-            Ok(tz) if !tz.is_empty() => iana_name(&tz).map(str::to_owned),
-            _ => iana_time_zone::get_timezone().ok(),
-        },
+        LocalClock::Host => host_zone_name(),
     };
     TimeZone { name, utc_offset_s }
+}
+
+/// The host zone's IANA name. On Unix `TZ` decides local time when it is set, so it
+/// decides the name too: nil when it gives only a POSIX rule.
+#[cfg(unix)]
+fn host_zone_name() -> Option<String> {
+    match std::env::var("TZ") {
+        Ok(tz) if !tz.is_empty() => iana_name(&tz).map(str::to_owned),
+        _ => iana_time_zone::get_timezone().ok(),
+    }
+}
+
+/// Elsewhere local time follows the system's zone setting whatever `TZ` says, so the
+/// name is the system's.
+#[cfg(not(unix))]
+fn host_zone_name() -> Option<String> {
+    iana_time_zone::get_timezone().ok()
 }
 
 /// A log row's clock for the system clock's status.
