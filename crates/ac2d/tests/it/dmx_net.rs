@@ -82,6 +82,14 @@ fn gather(s: &UdpSocket, d: Duration) -> Vec<Vec<u8>> {
     out
 }
 
+/// Whether Linux lets a socket bind an address no interface has, which the tests that need
+/// a bind to fail there cannot run with.
+fn binds_any_address() -> bool {
+    cfg!(target_os = "linux")
+        && std::fs::read_to_string("/proc/sys/net/ipv4/ip_nonlocal_bind")
+            .is_ok_and(|v| v.trim() == "1")
+}
+
 fn levels(text: &str) -> Vec<DmxLevel> {
     parse_dmx_list(text).unwrap()
 }
@@ -141,7 +149,9 @@ async fn artnet_sends_from_its_port_and_answers_artpoll_sparingly() {
     for _ in 0..20 {
         poller.send_to(&ART_POLL, rig_addr).unwrap();
     }
-    let replies = gather(&poller, Duration::from_millis(700));
+    // Within the second the source waits, and long enough for a stalled runner to deliver
+    // any reply more than the one.
+    let replies = gather(&poller, Duration::from_secs(2));
     assert_eq!(replies.len(), 1, "one reply a second to a source");
     let r = &replies[0];
     assert!(is_poll_reply(r));
@@ -266,6 +276,10 @@ async fn a_taken_artnet_port_is_said_and_frames_still_go() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_artnet_socket_that_cannot_open_is_said_on_every_set() {
     init_log();
+    if binds_any_address() {
+        eprintln!("skipped: net.ipv4.ip_nonlocal_bind is 1, so a bind to 192.0.2.77 opens");
+        return;
+    }
     // An address no interface of this host has (TEST-NET-1): no socket opens there.
     let h = Daemon::start(config(DmxPorts {
         artnet_bind: SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 77), 0),
@@ -295,6 +309,49 @@ async fn an_artnet_socket_that_cannot_open_is_said_on_every_set() {
         })
         .await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_new_artnet_target_takes_the_frame_being_output() {
+    init_log();
+    let h = Daemon::start(config(DmxPorts::LOOPBACK)).unwrap();
+    let c = mirror(&h, "ac2d-dmx-net-test").await;
+    let set = |node: &UdpSocket| Command::ArtnetTarget {
+        base: rig(&c).rev,
+        target: Some(ArtnetTarget {
+            addr: node.local_addr().unwrap(),
+            universe: PortAddress::new(1).unwrap(),
+        }),
+    };
+    let (old, new) = (socket(), socket());
+    c.call(set(&old)).await.unwrap();
+    rig_until(&c, "on the old node", |r| {
+        r.artnet_target
+            .is_some_and(|t| t.addr == old.local_addr().unwrap())
+    })
+    .await;
+    // A test frame holds for 5 s: what the output is while the target changes.
+    c.call(Command::ArtnetTest {
+        channels: levels("12=255"),
+    })
+    .await
+    .unwrap();
+    until(&old, "the test frame", |p| {
+        is_art_dmx(p) && p[18 + 11] == 255
+    });
+
+    // The new node's first frames are the test frame, three times as a changed frame is.
+    c.call(set(&new)).await.unwrap();
+    for i in 0..3 {
+        let (p, _) = until(&new, "a frame", is_art_dmx);
+        assert_eq!(
+            p[18 + 11],
+            255,
+            "frame {i}: a new target cut the test frame"
+        );
+    }
+    drop(c);
+    drop(h);
 }
 
 fn sacn_unicast(universe: u16) -> SacnTarget {

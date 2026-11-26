@@ -465,6 +465,7 @@ impl Control {
 
     /// `artnet.target`. The same target again is not a no-op while the socket is not on
     /// Art-Net's port or not open: it tries again at once and says how the socket stands.
+    /// A changed target gets the frame being output: a fade or a test frame is not cut.
     pub(super) fn artnet_target(
         &mut self,
         base: Rev,
@@ -507,10 +508,12 @@ impl Control {
             }
             None => self.rig.artnet.artnet.close(),
         }
-        let others = self.dmx_targets().sacn.is_some();
+        // Asked before the commit: this output's old target, or sACN's, means the output
+        // is running, and a changed target takes the frame being output on from there.
+        let running = self.dmx_targets().any();
         let rev = self.commit_rig(|r| r.artnet_target = target);
         if target.is_some() {
-            self.dmx_target_added(others);
+            self.dmx_target_added(running);
         } else {
             self.artnet_sync(Instant::now());
         }
@@ -629,6 +632,26 @@ mod tests {
         Universe::new(DmxPorts::LOOPBACK, RigId(1), "rig")
     }
 
+    /// The next `n` datagrams on `s`, each waited for (loopback delivery is not immediate on
+    /// every system), then a short read that finds nothing more.
+    fn take(s: &std::net::UdpSocket, n: usize) -> Vec<Vec<u8>> {
+        let mut buf = [0u8; 700];
+        s.set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("test value");
+        let got = (0..n)
+            .map(|i| {
+                let k = s
+                    .recv(&mut buf)
+                    .unwrap_or_else(|e| panic!("datagram {i}: {e}"));
+                buf[..k].to_vec()
+            })
+            .collect();
+        s.set_read_timeout(Some(Duration::from_millis(200)))
+            .expect("test value");
+        assert!(s.recv(&mut buf).is_err(), "more than {n}");
+        got
+    }
+
     #[test]
     fn a_fade_steps_to_its_end_and_retargets_from_the_output() {
         let target = artnet_only();
@@ -707,22 +730,12 @@ mod tests {
     #[test]
     fn a_changed_frame_goes_out_three_times_then_at_the_keepalive() {
         let node = std::net::UdpSocket::bind("127.0.0.1:0").expect("test value");
-        node.set_nonblocking(true).expect("test value");
         let target = Targets {
             artnet: Some(ArtnetTarget {
                 addr: node.local_addr().expect("test value"),
                 universe: ac2_proto::model::PortAddress::new(1).expect("test value"),
             }),
             sacn: None,
-        };
-        let mut buf = [0u8; 600];
-        // Every frame sent arrives before the call returns: loopback queues it at once.
-        let mut drain = || {
-            let mut got = Vec::new();
-            while let Ok(n) = node.recv(&mut buf) {
-                got.push(buf[18..n].to_vec());
-            }
-            got
         };
         let ms = |t: Instant, n: u64| t + Duration::from_millis(n);
         let t0 = Instant::now();
@@ -736,9 +749,8 @@ mod tests {
         assert_eq!(u.next_keepalive, Some(ms(t0, 50) + KEEPALIVE));
         assert!(!u.tick(target, ms(t0, 75)));
         assert!(u.tick(target, ms(t0, 50) + KEEPALIVE));
-        let got = drain();
-        assert_eq!(got.len(), 4);
-        assert!(got.iter().all(|f| f[0] == 200));
+        let got = take(&node, 4);
+        assert!(got.iter().all(|f| f[18] == 200));
         // A fade: every step goes out, the end three times, then the keepalive.
         let t1 = ms(t0, 2000);
         u.cue_frame[0] = 0;
@@ -751,24 +763,16 @@ mod tests {
         assert!(u.tick(target, t + FADE_STEP));
         assert!(u.tick(target, t + FADE_STEP * 2));
         assert_eq!(u.next_keepalive, Some(t + FADE_STEP * 2 + KEEPALIVE));
-        let got = drain();
-        let ends = got.iter().rev().take_while(|f| f[0] == 0).count();
-        assert_eq!(
-            ends,
-            3,
-            "{:?}",
-            got.iter().map(|f| f[0]).collect::<Vec<_>>()
-        );
-        assert!(got.len() > 3, "the fade's steps went out");
+        // Four steps of 25 ms, the last at the end, then the end twice more.
+        let got: Vec<u8> = take(&node, 6).iter().map(|f| f[18]).collect();
+        assert!(got[..3].iter().all(|v| *v > 0 && *v < 200), "{got:?}");
+        assert_eq!(got[3..], [0; 3], "{got:?}");
     }
 
     #[test]
     fn the_last_frame_goes_out_three_times_then_the_stream_ends() {
         let node = std::net::UdpSocket::bind("127.0.0.1:0").expect("test value");
         let rx = std::net::UdpSocket::bind("127.0.0.1:0").expect("test value");
-        for s in [&node, &rx] {
-            s.set_nonblocking(true).expect("test value");
-        }
         let t = Targets {
             artnet: Some(ArtnetTarget {
                 addr: node.local_addr().expect("test value"),
@@ -790,18 +794,15 @@ mod tests {
         let mut f = [0u8; DMX_CHANNELS];
         f[11] = 77;
         u.last_frame(t, f, Instant::now());
-        // Every datagram sent arrives before the call returns: loopback queues it at once.
-        let mut buf = [0u8; 700];
-        let mut artnet = Vec::new();
-        while let Ok(n) = node.recv(&mut buf) {
-            artnet.push(buf[18 + 11..n].first().copied());
-        }
-        assert_eq!(artnet, [Some(77); 3]);
-        let mut sacn = Vec::new();
-        while let Ok(n) = rx.recv(&mut buf) {
-            assert_eq!(n, 638);
-            sacn.push((buf[112] & 0x40 != 0, buf[125 + 12]));
-        }
+        let artnet: Vec<u8> = take(&node, 3).iter().map(|p| p[18 + 11]).collect();
+        assert_eq!(artnet, [77; 3]);
+        let sacn: Vec<(bool, u8)> = take(&rx, 6)
+            .iter()
+            .map(|p| {
+                assert_eq!(p.len(), 638);
+                (p[112] & 0x40 != 0, p[125 + 12])
+            })
+            .collect();
         assert_eq!(
             sacn,
             [
