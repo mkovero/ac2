@@ -226,13 +226,13 @@ pub fn walk(cli: &Cli) -> R {
             at: [at[0], at[1], 1.2],
         })
         .collect();
-    cli.call(Command::WalkNew {
+    cli.call(Command::WalkNew(ac2_proto::WalkNewArgs {
         name: "Mains".into(),
         plan: "Hall".into(),
         kind: WalkKind::LiveTransfer,
         meas: vec![id_of(cli, "Main L")?, id_of(cli, "Delay tower")?],
         points,
-    })?;
+    }))?;
     Ok(())
 }
 

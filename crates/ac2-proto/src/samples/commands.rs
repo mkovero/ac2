@@ -417,7 +417,7 @@ pub fn commands() -> Vec<Command> {
         Command::PlanDelete {
             name: "Club".into(),
         },
-        Command::WalkNew {
+        Command::WalkNew(crate::WalkNewArgs {
             name: "Mains".into(),
             plan: "Hall".into(),
             kind: WalkKind::LiveTransfer,
@@ -432,15 +432,15 @@ pub fn commands() -> Vec<Command> {
                     at: [12.5, 15.0, 1.2],
                 },
             ],
-        },
-        Command::WalkUpdate {
+        }),
+        Command::WalkUpdate(crate::WalkUpdateArgs {
             walk: WalkId(1),
             name: "Mains L".into(),
             points: vec![WalkPointSpec {
                 label: "P1".into(),
                 at: [5.0, 12.0, 1.2],
             }],
-        },
+        }),
         Command::WalkGoto {
             walk: WalkId(1),
             step: 1,

@@ -196,13 +196,13 @@ async fn new_walk(
         .collect();
     let w = walk_call(
         c,
-        Command::WalkNew {
+        Command::WalkNew(ac2_proto::WalkNewArgs {
             name: n.name.clone(),
             plan: plan.name.clone(),
             kind,
             meas,
             points,
-        },
+        }),
     )
     .await?;
     // A rule the plan did not let the suggestion keep is the operator's to know.

@@ -382,13 +382,13 @@ impl AppState {
             return;
         }
         s.sent = true;
-        let cmd = Command::WalkNew {
+        let cmd = Command::WalkNew(ac2_proto::WalkNewArgs {
             name: s.name.clone(),
             plan: plan.name.clone(),
             kind: s.kind,
             meas: s.mics.clone(),
             points: s.point_specs(),
-        };
+        });
         out.push(Request::NewWalk {
             cmd,
             name: s.name.clone(),

@@ -12,7 +12,7 @@ mod warning;
 
 pub use command::{
     CalCurveImportArgs, CalSplElectricalArgs, Command, DynamicsEnvelopeArgs, DynamicsRunArgs,
-    SweepRunArgs, TraceImportArgs,
+    SweepRunArgs, TraceImportArgs, WalkNewArgs, WalkUpdateArgs,
 };
 pub use error::{ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason, ProtoError};
 pub use reply::{Reply, ReplyBody, Welcome};

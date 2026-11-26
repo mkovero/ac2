@@ -91,13 +91,13 @@ fn slow_a_two_mic_sweep_walk_captures_each_step_with_one_run() {
     );
 
     // A sweep walk takes one sweep measurement; its inputs are the mics.
-    let w = c.walk(Command::WalkNew {
+    let w = c.walk(Command::WalkNew(ac2_proto::WalkNewArgs {
         name: "Room".into(),
         plan: "Hall".into(),
         kind: WalkKind::Sweep,
         meas: vec![meas],
         points: points(4),
-    });
+    }));
     let mic = |input| WalkMic { meas, input };
     assert_eq!(w.mics, vec![mic(1), mic(2)]);
     assert_eq!(w.steps(), 2);

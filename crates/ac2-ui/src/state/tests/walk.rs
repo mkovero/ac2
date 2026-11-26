@@ -203,9 +203,9 @@ fn enter_starts_the_walk_in_its_own_pane() {
         panic!("{r:?}");
     };
     assert_eq!(name, "Walk 1");
-    let Command::WalkNew {
+    let Command::WalkNew(ac2_proto::WalkNewArgs {
         plan, meas, points, ..
-    } = cmd
+    }) = cmd
     else {
         panic!("{cmd:?}");
     };
@@ -455,7 +455,7 @@ fn a_walk_with_two_mics() {
     let r = t.key("Enter");
     let [
         Request::NewWalk {
-            cmd: Command::WalkNew { meas, .. },
+            cmd: Command::WalkNew(ac2_proto::WalkNewArgs { meas, .. }),
             ..
         },
     ] = r.as_slice()
@@ -604,7 +604,7 @@ fn a_sweep_walk_from_the_setup_to_its_run() {
     let r = t.key("Enter");
     let [
         Request::NewWalk {
-            cmd: Command::WalkNew { kind, meas, .. },
+            cmd: Command::WalkNew(ac2_proto::WalkNewArgs { kind, meas, .. }),
             ..
         },
     ] = r.as_slice()

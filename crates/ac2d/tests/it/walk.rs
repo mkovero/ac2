@@ -139,13 +139,13 @@ impl Rig {
     }
 
     fn new_walk(&mut self, labels: &[&str]) -> WalkState {
-        self.walk(Command::WalkNew {
+        self.walk(Command::WalkNew(ac2_proto::WalkNewArgs {
             name: "Mains".into(),
             plan: "Hall".into(),
             kind: WalkKind::LiveTransfer,
             meas: vec![MeasId(1)],
             points: points(labels),
-        })
+        }))
     }
 
     /// Fills, captures; the walk after.
@@ -391,13 +391,13 @@ fn two_mics_capture_a_step_at_a_time_and_swap_skip_redo_per_point() {
             at: [a[0], a[1], 1.2],
         })
         .collect();
-    let w = r.walk(Command::WalkNew {
+    let w = r.walk(Command::WalkNew(ac2_proto::WalkNewArgs {
         name: "Mains".into(),
         plan: "Hall".into(),
         kind: WalkKind::LiveTransfer,
         meas: vec![MeasId(1), m2],
         points,
-    });
+    }));
     // Each mic walks its own side: the cables cross nowhere.
     let plan: Vec<(u16, MeasId)> = w.points.iter().map(|p| (p.step, p.mic.meas)).collect();
     assert_eq!(
@@ -510,13 +510,13 @@ fn what_a_walk_names_cannot_be_deleted_and_its_delete_keeps_them() {
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     // A second walk cannot take the measurement.
     let e =
-        r.c.call(Command::WalkNew {
+        r.c.call(Command::WalkNew(ac2_proto::WalkNewArgs {
             name: "Again".into(),
             plan: "Hall".into(),
             kind: WalkKind::LiveTransfer,
             meas: vec![MeasId(1)],
             points: points(&["A"]),
-        })
+        }))
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
 
@@ -544,12 +544,14 @@ fn walk_new_refuses_what_it_cannot_walk() {
     r.c.ok(Command::MeasCreate {
         config: transfer("second"),
     });
-    let new = |meas: Vec<MeasId>, plan: &str, labels: &[&str]| Command::WalkNew {
-        name: "Mains".into(),
-        plan: plan.into(),
-        kind: WalkKind::LiveTransfer,
-        meas,
-        points: points(labels),
+    let new = |meas: Vec<MeasId>, plan: &str, labels: &[&str]| {
+        Command::WalkNew(ac2_proto::WalkNewArgs {
+            name: "Mains".into(),
+            plan: plan.into(),
+            kind: WalkKind::LiveTransfer,
+            meas,
+            points: points(labels),
+        })
     };
     let cases = [
         (

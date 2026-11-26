@@ -422,14 +422,16 @@ impl Control {
             Command::PlanSave { plan } => self.plan_save(plan),
             Command::PlanList => Ok(ReplyBody::Plans(self.store.state().plans.clone())),
             Command::PlanDelete { name } => self.plan_delete(&name),
-            Command::WalkNew {
+            Command::WalkNew(ac2_proto::WalkNewArgs {
                 name,
                 plan,
                 kind,
                 meas,
                 points,
-            } => self.walk_new(name, plan, kind, meas, points),
-            Command::WalkUpdate { walk, name, points } => self.walk_update(walk, name, points),
+            }) => self.walk_new(name, plan, kind, meas, points),
+            Command::WalkUpdate(ac2_proto::WalkUpdateArgs { walk, name, points }) => {
+                self.walk_update(walk, name, points)
+            }
             Command::WalkGoto { walk, step } => self.walk_goto(walk, step),
             Command::WalkCapture { walk } => self.walk_capture(walk),
             Command::WalkSkip { walk, point } => self.walk_skip(walk, point),

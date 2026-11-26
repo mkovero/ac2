@@ -4,9 +4,11 @@ mod import;
 mod meta;
 mod role;
 mod run;
+mod walk;
 
 pub use import::{CalCurveImportArgs, CalSplElectricalArgs, TraceImportArgs};
 pub use run::{DynamicsEnvelopeArgs, DynamicsRunArgs, SweepRunArgs};
+pub use walk::{WalkNewArgs, WalkUpdateArgs};
 
 use std::net::SocketAddr;
 
@@ -19,7 +21,7 @@ use crate::model::{
     GeneratorDesired, InputSetup, MeasConfig, MicCurveId, NetBind, OscMessage, OutputSetup,
     OwnedTraces, Pair, PaneLayout, PlanSpec, PreviewInput, RecordRequest, RecordingRef, ReplayPace,
     RigPeer, SacnTarget, SessionRef, SimFitRequest, SimMapRequest, SimRequest, SplLogWhich,
-    StreamConfig, TargetCurve, TraceEdit, TraceOwner, WalkKind, WalkPointSpec,
+    StreamConfig, TargetCurve, TraceEdit, TraceOwner,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, Rev, RigId, Seconds, TraceId,
@@ -780,32 +782,13 @@ pub enum Command {
     /// placing every mic once, mics carried least between steps (`ac2_room::steps`). At the
     /// first step a live walk's averages reset and delay tracking turns on.
     #[serde(rename = "walk.new")]
-    WalkNew {
-        /// Walk name.
-        name: String,
-        /// Plan name.
-        plan: String,
-        /// What a capture is.
-        kind: WalkKind,
-        /// The measurements capturing at the points: a live walk's in mic order, a sweep
-        /// walk's one.
-        meas: Vec<MeasId>,
-        /// The points, in walking order (at most [`crate::model::WalkState::MAX_POINTS`]).
-        points: Vec<WalkPointSpec>,
-    },
+    WalkNew(WalkNewArgs),
     /// Rename a walk and edit its points, matched by label: a point kept keeps its state,
     /// a new one is pending, and the points are grouped into steps again. A captured point
     /// keeps its place and its mic and cannot be removed (skip or redo it first). Last
     /// write wins.
     #[serde(rename = "walk.update")]
-    WalkUpdate {
-        /// The walk.
-        walk: WalkId,
-        /// New name.
-        name: String,
-        /// The points, in walking order.
-        points: Vec<WalkPointSpec>,
-    },
+    WalkUpdate(WalkUpdateArgs),
     /// Go to step `step` (moving the mics restarts the walk's measurements).
     #[serde(rename = "walk.goto")]
     WalkGoto {
