@@ -280,6 +280,9 @@ impl SplFiles {
         }
         for s in specs {
             let id = leq_log::lock(&s.log).id();
+            // The band file takes the SPL file's stem (a reader without the manifest pairs
+            // them by name): beside an SPL file started anew it starts anew too.
+            let mut spl_new = false;
             for (kind, resume) in [
                 (Kind::Spl, s.resume.clone()),
                 (Kind::Bands, s.resume_bands.clone()),
@@ -292,6 +295,7 @@ impl SplFiles {
                     f.info = s.info.clone();
                     continue;
                 }
+                let resume = resume.filter(|_| !spl_new);
                 if let Some(old) = self.files.remove(&key) {
                     self.close(old);
                 }
@@ -314,6 +318,7 @@ impl SplFiles {
                 }
                 let resumed = resume.is_some_and(|r| self.resume(&mut f, r));
                 if !resumed {
+                    spl_new = kind == Kind::Spl;
                     self.start(s.meas, &mut f);
                 }
                 self.files.insert(key, f);

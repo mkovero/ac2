@@ -431,6 +431,52 @@ fn band_rows_are_appended_beside_and_resumed() {
     );
 }
 
+/// An SPL file that cannot be carried on is written anew under a new stem, and its band
+/// file with it: the two are paired by name, so the band file is never resumed beside a
+/// new SPL file.
+#[test]
+fn a_band_file_starts_anew_with_its_spl_file() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dir = root.path().join("autosave");
+    let log: SharedLog = Arc::new(Mutex::new(LeqLog::default()));
+    push_bands(&log, 0, 40);
+    let mut files = SplFiles::new(dir.clone(), Instant::now());
+    files.apply(vec![spec(&log, None)]);
+    write(&dir, &with_meter(1), &files.linked(&[meter()])).expect("first");
+    files.close_all();
+    let r = restore(&dir).0.expect("restore");
+    let disk = r.logs[0].bands.clone().expect("band file");
+    let main = r.logs[0].clone();
+    let bands = r.data.spl_logs[0].bands.clone();
+    let restored = LeqLog::from_rows(r.data.spl_logs[0].rows.clone(), bands);
+    let log: SharedLog = Arc::new(Mutex::new(restored));
+
+    let mut files = SplFiles::new(dir.clone(), Instant::now());
+    files.apply(vec![LogSpec {
+        resume_bands: Some(Resume {
+            file: disk.file.clone(),
+            rows: disk.rows,
+            complete_len: disk.complete_len,
+        }),
+        ..spec(
+            &log,
+            Some(Resume {
+                file: main.file.clone(),
+                // More rows than the log holds: not the same log, not carried on.
+                rows: main.rows + 1,
+                complete_len: main.complete_len,
+            }),
+        )
+    }]);
+    write(&dir, &with_meter(2), &files.linked(&[meter()])).expect("second");
+    files.close_all();
+    let m = session::read_manifest(&dir).expect("manifest");
+    let l = &m.spl_logs[0];
+    assert_ne!(l.file, main.file, "the SPL file written anew");
+    let stem = l.file.strip_suffix(".csv").expect("a csv");
+    assert_eq!(l.bands.as_deref(), Some(format!("{stem}.bands.csv").as_str()));
+}
+
 /// `spl.log_new` swaps the log inside the shared handle: the next append closes the
 /// ended log's file and starts one for the new log; a log past its retention by
 /// [`spl_files::COMPACT_SLACK`] rows is rewritten with the retained rows only.
