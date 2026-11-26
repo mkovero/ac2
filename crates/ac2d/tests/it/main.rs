@@ -60,5 +60,6 @@ mod sync;
 mod traces;
 mod transfer;
 mod transfer_bins;
+mod true_time_finder;
 mod walk;
 mod walk_sweep;
