@@ -239,6 +239,13 @@ matches by key is installed with the binaries, before the first 106 start.
    After the next power cut, check again from pupu: the meter came back by itself, metering,
    with its calibration.
 
+A meter never stays with its units disabled: a power cut would bring it up metering nothing,
+with nobody there. At the first surprise in steps 3 to 6 (a converter error, a file set aside,
+a unit that does not stay active), go back at once: put each `<name>.pre106` back under its
+own name, the `prev-<rev>` binaries and the old `ac2-selfpair` back in place, `sync`, enable
+`ac2d` and `ac2-kiosk`, check the meter is metering on 105, `sudo ac2pi-ro`. Then find the
+cause off the meter, on copies of its files.
+
 The Pi 4 boots from `/srv/ac2pi/rootfs` on the build host: its binaries can be staged there,
 but its files are converted first all the same. A meter that is off during the window gets the
 whole sequence at first contact, before its unit is enabled on the new binaries; until then it
