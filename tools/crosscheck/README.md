@@ -259,7 +259,8 @@ then SIGTERM, then kill), keeping its `xruns <n>` line.
   load ≈ 20 on 12 cores 4096 xruns too, and `-p 8192 -w 85333`, `ci-host.sh`'s default,
   compared clean against the 2048 baselines)
   and an ac2d of its own (`--max-level -10 --no-autosave`, its own `XDG_RUNTIME_DIR`/`XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`),
-  `ac2` on PATH, `AC2_JACK_DUT` set, then
+  `ac2` on PATH, `AC2_JACK_DUT` set, its max level raised to the bound
+  (`ac2 gen ceiling -10dbfs --yes`: a JACK rig with no level stored starts at −50 dBFS), then
   `python -m crosscheck run --rig rigs/host.toml --stages dut --emit=-10dbfs --skip rew,ac2_tf --yes`
   and again at `-30dbfs`; `analyse` each, `baseline` writes `baselines/host/dut-<level>dbfs.json`.
   `./ci-host.sh <bin dir> <out dir> [--cases loud-hp] [--levels -10]` sets all of that up and
@@ -499,7 +500,7 @@ other. A case whose take hit an xrun on the runner is measured again (at most 3 
 is the runner's timing, not ac2's math. The reports are uploaded when it fails.
 
 **Safety:** only `jackd -d dummy`, whose playback ports lead nowhere, with ac2d bounded at
-`--max-level -10`; emission goes through `run --emit` and the level policy as on a rig.
+`--max-level -10` (its max level raised to that bound by `ci-host.sh`); emission goes through `run --emit` and the level policy as on a rig.
 
 **Not in CI:**
 - the rig stages (ambient, genelec, xone: real hardware, an operator for the speaker path);

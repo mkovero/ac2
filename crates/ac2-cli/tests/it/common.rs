@@ -36,8 +36,6 @@ pub fn rig_on(
     cfg: impl FnOnce(&mut DaemonConfig),
 ) -> (Handle, Endpoints) {
     let mut config = DaemonConfig::new(backend, local(), -10.0);
-    // A rig set up before: its max level stored at the bound.
-    config.memory_max_level = Some(-10.0);
     config.session_dir = Some(test_sessions());
     cfg(&mut config);
     let h = Daemon::start(config).unwrap();

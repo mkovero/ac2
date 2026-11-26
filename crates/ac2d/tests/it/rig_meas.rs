@@ -290,8 +290,7 @@ fn monitor_at_start_meters_with_no_client() {
         }
         assert!(Instant::now() < deadline, "the rig meter never metered");
     }
-    // The generator has no output to play on (at a level the quiet start of a fresh rig
-    // allows).
+    // The generator has no output to play on.
     let tok = c.acquire();
     let e = c
         .call(Command::GenSet {
@@ -299,7 +298,7 @@ fn monitor_at_start_meters_with_no_client() {
             desired: GeneratorDesired {
                 settings: GeneratorSettings {
                     signal: Signal::Pink,
-                    level: Dbfs(-60.0),
+                    level: Dbfs(-40.0),
                     band: None,
                     outputs: vec![0],
                 },

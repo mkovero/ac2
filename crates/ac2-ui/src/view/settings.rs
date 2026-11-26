@@ -298,7 +298,7 @@ fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Op
         ui.label(RichText::new(marker).color(ch.focus).monospace());
         let now = g
             .as_ref()
-            .map_or_else(|| "not connected".to_owned(), ac2_scene::rig::ceiling_line);
+            .map_or_else(|| "not connected".to_owned(), ac2_scene::rig::ceiling_row);
         let shown = if focused && s.ceiling.confirm.is_none() {
             if s.ceiling.text.is_empty() {
                 format!("{now}   new level: ▏")

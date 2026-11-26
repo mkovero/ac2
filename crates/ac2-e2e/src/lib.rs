@@ -91,9 +91,6 @@ pub fn sim_daemon_with(
     let audio = ac2d::backends(ac2d::BackendChoice::Fake)?;
     // The same global maximum as a stand-alone `ac2d` without `--max-level`.
     let mut config = ac2d::DaemonConfig::new(std::sync::Arc::clone(&audio[0]), listen, -10.0);
-    // A rig set up before: its max level stored at the bound, so the app plays without a
-    // raise first.
-    config.memory_max_level = Some(-10.0);
     config.backends = audio;
     config.name = "Simulated rig".into();
     config.session_dir = Some(sessions.path().to_owned());

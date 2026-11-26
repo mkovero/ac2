@@ -74,6 +74,9 @@ for _ in $(seq 100); do
   sleep 0.1
 done
 [ -S "$AC2_RUNTIME_DIR/ctrl.sock" ] || { cat "$out/ac2d.log" >&2; echo "ac2d did not start" >&2; exit 2; }
+# A JACK rig with no level stored starts quiet (-50 dBFS); the dummy server's playback ports
+# lead nowhere, so the max level is raised to the bound the cases play at.
+ac2 gen ceiling -10dbfs --yes >"$out/ceiling.log" 2>&1 || { cat "$out/ceiling.log" >&2; exit 2; }
 
 cd "$here"
 rc=0

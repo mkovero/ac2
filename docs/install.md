@@ -225,7 +225,10 @@ ac2 meas start main
 ac2-ui                                            # or start ac2 from the menu
 ```
 
-The app's dialogs use the same defaults as these commands. Then in the app (or with
+The app's dialogs use the same defaults as these commands. A new rig starts with its
+system max level at −50 dBFS, so nothing plays loud before you say so: raise it first, in
+Settings › Audio I/O (type `-30`, **Enter**, type `raise`, **Enter**) or with
+`ac2 gen ceiling -30dbfs --yes`. Then in the app (or with
 `ac2 gen pink --out 1 --level -30dbfs`, which runs in the foreground: **Enter** fires,
 **Esc** stops):
 

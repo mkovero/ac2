@@ -437,10 +437,11 @@ once).
 The generator never plays above the rig's maximum (dBFS RMS). The last row of the Audio
 I/O page shows it with its bound and who changed it last: at the bound,
 `−10.0 dBFS · the rig's bound (ac2d --max-level)`; below it,
-`−50.0 dBFS · below the rig's bound −10.0 dBFS (ac2d --max-level) · raise: Settings › Audio
-I/O, or ac2 gen ceiling <dBFS> --yes`. A rig with no level stored (a new rig, or one whose
+`−50.0 dBFS · below the rig's bound −10.0 dBFS · type a level to raise` (`ac2 gen ceiling`
+prints the same with where to raise it). A rig with no level stored (a new rig, or one whose
 settings file was lost) starts quiet, at −50 dBFS (or its bound, if that is lower): raise it
-here to what the system takes. Type a level and **Enter**:
+here to what the system takes. The simulated rig starts at its bound instead, as it drives
+no loudspeakers. Type a level and **Enter**:
 
 - a **lower** level applies at once for every client; a stimulus armed or playing above it
   is stopped;
@@ -459,12 +460,16 @@ The daemon keeps the level in its rig settings file across restarts: a restart w
 higher `--max-level` keeps the stored level (only a typed raise goes above it), and a restart
 with a lower bound caps the level there and stores the capped level, so raising the bound
 again later does not bring the older, higher level back. A start that reads no stored level
-starts at −50 dBFS, or at the bound when that is lower: the first start, a settings file of
-another format version (set aside), and a damaged file with no readable previous copy. A damaged file whose previous copy reads
+starts at −50 dBFS, or at the bound when that is lower (the simulated rig: at the bound):
+the first start, a settings file of another format version (set aside), and a damaged file
+with no readable previous copy. A damaged file whose previous copy reads
 takes that copy's level, never above the bound; the previous copy never holds a level higher
 than the one in force (a lowered level is written to both), so a torn file never brings a
 higher level back. Either way the start writes the file again with the level in force (an unreadable file that cannot be moved aside is never written:
-the daemon says so at start). CLI: `ac2 gen ceiling`,
+the daemon says so at start). With such a file the level stays at the quiet start: a raise
+must be stored first, so it is refused with `rig settings … are unreadable …; they are never
+overwritten — fix or move the file away and restart ac2d`; do that, and raise it again.
+CLI: `ac2 gen ceiling`,
 `ac2 gen ceiling -40dbfs`, `ac2 gen ceiling -30dbfs --yes`.
 
 #### Connection

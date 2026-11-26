@@ -171,6 +171,12 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
         !rec.linked("ac2:out_1", &phys(0)) && !rec.linked("ac2:out_2", &phys(1)),
         "nothing reaches playback before the operator chooses"
     );
+    // A JACK rig with no level stored starts quiet (−50 dBFS); the dummy server's playback
+    // leads nowhere, so the test raises it to the bound as an operator would.
+    c.ok(Command::GenCeiling {
+        ceiling: Dbfs(-10.0),
+        confirm_raise: true,
+    });
     let l = c.lease(Command::GenAcquire { force: false });
     let set = |c: &mut Client, outputs: Vec<u16>, firing: bool| {
         c.ok(Command::GenSet {

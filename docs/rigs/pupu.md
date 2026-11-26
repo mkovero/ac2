@@ -109,6 +109,10 @@ deleted) and nothing is read from it. When a converter for that change exists (P
 *Deploying PROTO 106* below), stop the daemon, convert the set-aside file, put it back under
 its own name and start again; without one, set the max level, labels, meters and cues again
 from the old file and redo the electrical calibration with the operator.
+A deploy that set `rig.json` aside (a format change without conversion, a damaged file) starts
+the max level at −50 dBFS: compare the max level line before and after (`ac2 gen ceiling`
+with no level) and raise it back to the level noted before with
+`ac2 gen ceiling <dBFS> --yes`.
 When an enum in the app's `ui.toml` loses a value, the app drops the whole section holding it
 (no compatibility shims): edit the value on ketunkolo and the Pi with the app stopped.
 
@@ -148,7 +152,8 @@ raw captures recorded under 105 are not replayed (keep the WAV).
    `AC2_RUNTIME_DIR`: every daemon takes the user manager's `XDG_RUNTIME_DIR`
    (`/run/user/<uid>`), and a CLI on the same host finds it only with the same value (hence
    the `XDG_RUNTIME_DIR=` in every `sudo -u ac2` command on the meters).
-5. Note pupu's max level line (`ac2 status`: −20.0, bound −20.0): it must read the same after.
+5. Note pupu's max level line (`ac2 --remote 192.168.9.27 gen ceiling` with no level, or
+   Settings › Audio I/O in the app: −20.0, the rig's bound −20.0): it must read the same after.
 
 **pupu (rig daemon with network clients)**
 

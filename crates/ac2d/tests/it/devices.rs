@@ -86,7 +86,6 @@ fn named_rig(drive: FakeDrive, noise: f32) -> FakeBackend {
 fn start(backend: Arc<dyn Backend>) -> ac2d::Handle {
     init_log();
     let mut cfg = DaemonConfig::new(backend, inproc("devices"), -10.0);
-    cfg.memory_max_level = Some(-10.0);
     cfg.session_dir = Some(crate::common::test_sessions());
     Daemon::start(cfg).unwrap()
 }
@@ -526,37 +525,6 @@ fn a_stream_plays_on_another_device_than_it_captures_from() {
     assert_eq!(o.clock, ClockRelation::Unknown);
 }
 
-/// The fake rig presented as a second backend (JACK), so a test can move the preview
-/// between backends the way the stream dialog's ←/→ does, without a JACK server.
-#[derive(Debug)]
-struct AsJack(FakeBackend);
-
-impl Backend for AsJack {
-    fn kind(&self) -> AudioKind {
-        AudioKind::Jack
-    }
-
-    fn enumerate(&self) -> Result<Vec<DeviceCaps>, AudioError> {
-        let mut caps = self.0.enumerate()?;
-        for c in &mut caps {
-            c.backend = AudioKind::Jack;
-        }
-        Ok(caps)
-    }
-
-    fn open(&self, request: DuplexRequest) -> Result<DuplexStream, AudioError> {
-        self.0.open(request)
-    }
-
-    fn probe(&self, device: &ac2_audio::DeviceSelector) -> ac2_audio::Presence {
-        self.0.probe(device)
-    }
-
-    fn control_panel(&self, device: &ac2_audio::DeviceSelector) -> Result<(), AudioError> {
-        self.0.control_panel(device)
-    }
-}
-
 /// The next preview frame, skipping any of another device still in flight.
 fn preview_of(s: &Sub, kind: BackendKind) -> Option<ac2_proto::frame::Frame> {
     s.frame(
@@ -575,7 +543,6 @@ fn slow_preview_follows_the_device_through_every_round() {
     let jack: Arc<dyn Backend> =
         Arc::new(AsJack(named_rig(FakeDrive::Thread(Pace::Realtime), 1e-3)));
     let mut cfg = DaemonConfig::new(Arc::clone(&fake), inproc("cycle"), -10.0);
-    cfg.memory_max_level = Some(-10.0);
     cfg.session_dir = Some(crate::common::test_sessions());
     cfg.backends = vec![fake, jack];
     let h = Daemon::start(cfg).unwrap();

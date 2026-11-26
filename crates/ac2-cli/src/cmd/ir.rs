@@ -704,10 +704,7 @@ mod tests {
         use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
         let backend = ac2d::backend(BackendChoice::Fake)?;
         let listen = Listen::apart();
-        let mut config = DaemonConfig::new(backend, listen, -10.0);
-        // A rig set up before: its max level stored at the bound.
-        config.memory_max_level = Some(-10.0);
-        let h = Daemon::start(config)?;
+        let h = Daemon::start(DaemonConfig::new(backend, listen, -10.0))?;
         let ep = Endpoints {
             ctrl: h.ctrl_endpoint().to_owned(),
             data: h.data_endpoint().to_owned(),

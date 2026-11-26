@@ -27,6 +27,18 @@ pub enum BackendKind {
     Asio,
 }
 
+impl BackendKind {
+    /// Whether what this backend plays can reach an amplifier and loudspeakers. A real
+    /// audio API may have anything behind its outputs; the simulated device and a replayed
+    /// recording play into nothing but the process itself.
+    pub fn reaches_loudspeakers(self) -> bool {
+        match self {
+            Self::Jack | Self::CoreAudio | Self::Asio => true,
+            Self::Fake | Self::Replay => false,
+        }
+    }
+}
+
 /// Capture or playback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

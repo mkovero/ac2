@@ -265,8 +265,9 @@ pub(crate) struct Setup {
     /// This daemon's identity (`DaemonConfig::rig_id`) and name, told every client at hello.
     pub(crate) rig_id: ac2_proto::units::RigId,
     pub(crate) name: String,
-    /// The system max level in force, dBFS RMS, and its sample-peak limit: start values
-    /// (the bound); [`Control::new`] sets the level the rig starts with.
+    /// The system max level in force, dBFS RMS, and its sample-peak limit: given as the
+    /// bound; [`Control::new`] sets the level the rig starts with (stored, or as with none
+    /// stored: quiet where loudspeakers may listen).
     pub(crate) ceiling_dbfs: f64,
     pub(crate) max_level: MaxLevel,
     /// The hard upper bound of the system max level (`--max-level`) and its peak limit,
@@ -275,8 +276,6 @@ pub(crate) struct Setup {
     pub(crate) bound_level: MaxLevel,
     /// Rig settings file; `None`: in memory only.
     pub(crate) rig_settings: Option<std::path::PathBuf>,
-    /// The stored max level of a memory-only rig (`DaemonConfig::memory_max_level`).
-    pub(crate) memory_max_level: Option<f64>,
     /// Where the rig's SPL meters keep their logs (`DaemonConfig::rig_logs`).
     pub(crate) rig_logs: Option<std::path::PathBuf>,
     /// How the daemon serves clients (`server.*`).

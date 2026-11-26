@@ -4,6 +4,7 @@
 #   jackd -n <name> -d dummy -r 96000 -p 2048 -w 21333 -C 8 -P 8   (JACK_DEFAULT_SERVER=<name>;
 #     without real-time scheduling a shorter period xruns)
 #   ac2d --max-level -10 --no-autosave       (XDG_RUNTIME_DIR etc. of its own: not the desktop's)
+#   ac2 gen ceiling -10dbfs --yes            (a fresh rig starts quiet at -50 dBFS: raise it to the bound)
 # with `ac2` on PATH and AC2_JACK_DUT naming the DUT binary; then
 #   python -m crosscheck run --rig rigs/host.toml --stages dut --emit=-10dbfs --skip rew,ac2_tf --yes
 
@@ -89,7 +90,7 @@ cmd = ["ac2"]
 timeout = "5s"
 stream_open = ["stream", "open", "--backend", "jack", "--in", "1-8", "--outputs", "6",
                 "--loopback-out", "2", "--loopback-in", "2"]
-dropin = "/nonexistent/crosscheck-host-{uid}.conf"   # never installed: the bound already is the emit ceiling
+dropin = "/nonexistent/crosscheck-host-{uid}.conf"   # never installed: the bound is the emit ceiling, and the max level is raised to it before a run (ci-host.sh)
 
 [stages.sine]
 # 50 Hz – 5 kHz: H5 of every tone stays below fs/2, and the LF tones sit where a 20 Hz

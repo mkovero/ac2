@@ -166,8 +166,9 @@ impl RigStore {
                     Some(to) => {
                         tracing::warn!(
                             "rig settings {} are format version {v} (this ac2d reads \
-                             {VERSION}); set aside as {} — the system max level starts at the \
-                             --max-level bound and the output labels are empty",
+                             {VERSION}); set aside as {} — the system max level starts as with \
+                             none stored (quiet: −50 dBFS, or the --max-level bound if lower; \
+                             the bound on a simulated rig) and the output labels are empty",
                             path.display(),
                             to.display()
                         );
@@ -231,8 +232,10 @@ impl RigStore {
         if let Some(p) = &self.path {
             tracing::error!(
                 "rig settings {} are unreadable ({reason}); they will not be written — the \
-                 system max level is the --max-level bound until the file is fixed or moved \
-                 away and ac2d restarted",
+                 system max level starts as with none stored (quiet: −50 dBFS, or the \
+                 --max-level bound if lower; the bound on a simulated rig) and cannot be \
+                 raised, as a raise must be stored, until the file is fixed or moved away \
+                 and ac2d restarted",
                 p.display()
             );
         }
@@ -269,7 +272,7 @@ impl RigStore {
         // unreadable as settings) is replaced by the new text first, and only then the file
         // itself: a failure or crash at either step leaves the file as it was and the copy
         // no higher. A copy holding no level counts as higher, as a start without one
-        // comes up at the bound.
+        // may come up at the bound (a daemon whose outputs reach nothing).
         let above = |bytes: Option<Vec<u8>>| {
             bytes.is_some_and(|b| {
                 match (read_whole(&b).ok().map(|p| p.ceiling_dbfs), s.ceiling_dbfs) {
@@ -356,19 +359,53 @@ fn set_aside(p: &Path, tag: &str) -> Option<PathBuf> {
     std::fs::rename(p, &to).ok().map(|()| to)
 }
 
-/// The system max level a rig starts with when none was stored, dBFS RMS (never above the
-/// `--max-level` bound). A rig nobody has set up yet, or one whose file was lost, may have
-/// any amplifier and speaker behind its outputs: it must not start able to play loud.
-/// −50 dBFS still reaches the speakers audibly enough to check the wiring, and the operator
-/// raises it, live, to what the system takes.
+/// The system max level a rig starts with when none was stored and its outputs can reach
+/// loudspeakers, dBFS RMS (never above the `--max-level` bound). A rig nobody has set up
+/// yet, or one whose file was lost, may have any amplifier and speaker behind its outputs:
+/// it must not start able to play loud. −50 dBFS still reaches the speakers audibly enough
+/// to check the wiring, and the operator raises it, live, to what the system takes.
 pub(crate) const UNSTORED_START_DBFS: f64 = -50.0;
 
+/// Where a daemon's outputs can go, which decides how it starts with no level stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OutputsReach {
+    /// At least one offered backend is a real audio API: loudspeakers may be behind it.
+    Loudspeakers,
+    /// Only the simulated device or a replay: nothing outside the process hears it.
+    Nothing,
+}
+
+impl OutputsReach {
+    /// Of the backends a daemon offers: any one that reaches loudspeakers decides it, as a
+    /// stream may open on it.
+    pub(crate) fn of(kinds: impl IntoIterator<Item = ac2_audio::BackendKind>) -> Self {
+        if kinds
+            .into_iter()
+            .any(ac2_audio::BackendKind::reaches_loudspeakers)
+        {
+            Self::Loudspeakers
+        } else {
+            Self::Nothing
+        }
+    }
+}
+
+/// The level a start takes with none stored: quiet ([`UNSTORED_START_DBFS`], or `bound`
+/// when lower) where loudspeakers may listen; `bound` where nothing does, so a simulated
+/// rig starts ready to measure.
+pub(crate) fn unstored_ceiling(bound: f64, reach: OutputsReach) -> f64 {
+    match reach {
+        OutputsReach::Loudspeakers => UNSTORED_START_DBFS.min(bound),
+        OutputsReach::Nothing => bound,
+    }
+}
+
 /// The system max level the daemon starts with: the one last set, never above `bound`
-/// (a later, lower `--max-level` wins), else [`UNSTORED_START_DBFS`] under `bound`; the
-/// start stores what this returns. A level the file holds but that cannot be read is
-/// `None` here, so the daemon starts quiet, as with no file.
-pub(crate) fn start_ceiling(saved: Option<f64>, bound: f64) -> f64 {
-    saved.unwrap_or(UNSTORED_START_DBFS).min(bound)
+/// (a later, lower `--max-level` wins), else [`unstored_ceiling`]; the start stores what
+/// this returns. A level the file holds but that cannot be read is `None` here, so the
+/// start is the same as with no file.
+pub(crate) fn start_ceiling(saved: Option<f64>, bound: f64, reach: OutputsReach) -> f64 {
+    saved.map_or_else(|| unstored_ceiling(bound, reach), |c| c.min(bound))
 }
 
 /// `current` with `rows` applied by channel (a `None` label removes the row), sorted.
@@ -416,12 +453,27 @@ mod tests {
         let (mut store, got) = RigStore::open(&p);
         assert_eq!(got, want);
         assert!(store.take_damage().is_none());
-        assert_eq!(start_ceiling(got.ceiling_dbfs, -10.0), -40.0);
+        assert_eq!(
+            start_ceiling(got.ceiling_dbfs, -10.0, OutputsReach::Loudspeakers),
+            -40.0
+        );
         // A lower bound given at start wins over the value kept.
-        assert_eq!(start_ceiling(got.ceiling_dbfs, -50.0), -50.0);
-        // Nothing stored: quiet, and never above a bound lower still.
-        assert_eq!(start_ceiling(None, -10.0), UNSTORED_START_DBFS);
-        assert_eq!(start_ceiling(None, -60.0), -60.0);
+        assert_eq!(
+            start_ceiling(got.ceiling_dbfs, -50.0, OutputsReach::Loudspeakers),
+            -50.0
+        );
+        // Nothing stored: quiet where loudspeakers may listen, never above a bound lower
+        // still; at the bound where nothing does.
+        let hw = OutputsReach::Loudspeakers;
+        assert_eq!(start_ceiling(None, -10.0, hw), UNSTORED_START_DBFS);
+        assert_eq!(start_ceiling(None, -60.0, hw), -60.0);
+        assert_eq!(start_ceiling(None, -10.0, OutputsReach::Nothing), -10.0);
+        use ac2_audio::BackendKind as K;
+        assert_eq!(
+            OutputsReach::of([K::Fake, K::Replay]),
+            OutputsReach::Nothing
+        );
+        assert_eq!(OutputsReach::of([K::Fake, K::Jack]), hw);
     }
 
     fn rig_meter(id: u32, scope: MeasScope) -> RigMeter {
@@ -588,7 +640,10 @@ mod tests {
             d.reason
         );
         assert_eq!(s.ceiling_dbfs, None);
-        assert_eq!(start_ceiling(s.ceiling_dbfs, -10.0), UNSTORED_START_DBFS);
+        assert_eq!(
+            start_ceiling(s.ceiling_dbfs, -10.0, OutputsReach::Loudspeakers),
+            UNSTORED_START_DBFS
+        );
         assert_eq!(s.outputs, vec![label(1, "Main R")]);
     }
 

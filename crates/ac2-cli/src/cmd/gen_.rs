@@ -420,10 +420,7 @@ mod tests {
     async fn daemon() -> R<(ac2d::Handle, Client)> {
         let listen = ac2d::Listen::apart();
         let backend = Arc::new(ac2d::fake_rig()?);
-        let mut config = ac2d::DaemonConfig::new(backend, listen, -10.0);
-        // A rig set up before: its max level stored at the bound.
-        config.memory_max_level = Some(-10.0);
-        let h = ac2d::Daemon::start(config)?;
+        let h = ac2d::Daemon::start(ac2d::DaemonConfig::new(backend, listen, -10.0))?;
         let ep = Endpoints {
             ctrl: h.ctrl_endpoint().to_owned(),
             data: h.data_endpoint().to_owned(),

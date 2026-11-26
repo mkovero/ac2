@@ -348,7 +348,8 @@ daemon start (`ac2d --max-level`); `gen.ceiling` above it, above 0 dBFS or not f
   the value in its rig settings file (atomic write) and starts with it; a value above a
   later, lower `--max-level` comes up at that bound. With no value read (no file, one set
   aside, or the field absent) the daemon starts at −50 dBFS, or at the bound when that is
-  lower, and stores that. A change that cannot be written is `internal` and leaves the
+  lower, and stores that; a daemon offering only the fake or replay backend (whose outputs
+  reach no loudspeaker) starts at the bound. A change that cannot be written is `internal` and leaves the
   maximum as it was.
 
 **Output labels (`stream.outputs`).** `OutputSetup` = {`channel`: u16 (zero-based), `label`: string |

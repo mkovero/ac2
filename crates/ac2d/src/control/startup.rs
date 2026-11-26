@@ -46,10 +46,7 @@ impl Control {
             Some(p) => crate::rig::RigStore::open(p),
             None => (
                 crate::rig::RigStore::memory(),
-                crate::rig::RigSettings {
-                    ceiling_dbfs: s.memory_max_level,
-                    ..crate::rig::RigSettings::default()
-                },
+                crate::rig::RigSettings::default(),
             ),
         };
         let mut s = s;
@@ -62,16 +59,29 @@ impl Control {
             .map(walks::load_plans)
             .unwrap_or_default();
         damaged.extend(plan_damage);
-        let ceiling = crate::rig::start_ceiling(saved.ceiling_dbfs, s.ceiling_bound);
-        match crate::stimulus::peak_limit(ceiling) {
-            Ok(m) => {
-                s.ceiling_dbfs = ceiling;
-                s.max_level = m;
+        let reach = crate::rig::OutputsReach::of(s.backends.iter().map(|b| b.kind()));
+        let ceiling = crate::rig::start_ceiling(saved.ceiling_dbfs, s.ceiling_bound, reach);
+        let (ceiling, m) = match crate::stimulus::peak_limit(ceiling) {
+            Ok(m) => (ceiling, m),
+            // A stored level the file check let through but no limit can be made of (minus
+            // infinity): the start falls back as with none stored, never to the bound where
+            // loudspeakers may listen. That level is finite and at most the bound, whose
+            // limit `Daemon::start` made, so its own limit is made too; were it not, the
+            // level still refuses every request above it under the bound's sample peak.
+            Err(e) => {
+                tracing::error!(
+                    "system max level {ceiling} dBFS: {e}; starting as with none stored"
+                );
+                let quiet = crate::rig::unstored_ceiling(s.ceiling_bound, reach);
+                (
+                    quiet,
+                    crate::stimulus::peak_limit(quiet).unwrap_or(s.bound_level),
+                )
             }
-            // Unreachable for a checked file; the bound stays in force.
-            Err(e) => tracing::error!("system max level {ceiling} dBFS: {e}"),
-        }
-        if saved.ceiling_dbfs.is_none() {
+        };
+        s.ceiling_dbfs = ceiling;
+        s.max_level = m;
+        if saved.ceiling_dbfs.is_none() && reach == crate::rig::OutputsReach::Loudspeakers {
             tracing::info!(
                 target: crate::AUDIT_TARGET,
                 "system max level {:.1} dBFS: none stored, so the start is quiet (bound {:.1} \
@@ -187,14 +197,14 @@ impl Control {
     /// Stores the level the daemon starts with when the file holds another (none, or one
     /// above a lowered bound). The level that protects the speakers then only ever rises by
     /// a typed, confirmed `gen.ceiling`: a later start with a higher `--max-level` reads
-    /// this level back instead of taking its own bound, and lowering then raising the bound
-    /// does not bring an older, higher level back.
+    /// this level back instead of starting as with none stored, and lowering then raising
+    /// the bound does not bring an older, higher level back.
     fn store_start_ceiling(&mut self, stored: Option<f64>) {
         let now = self.s.ceiling_dbfs;
         // A file read whole that holds the level in force needs nothing. Anything else
         // (no file, one set aside or recovered from its previous copy) is written now: after
         // the start the file always holds what is in force, so the next start cannot find
-        // it missing and take a higher bound.
+        // it missing and start as with none stored (a simulated rig's bound may be higher).
         if self.rig.settings.stored_ceiling() == Some(now) {
             return;
         }
@@ -214,7 +224,7 @@ impl Control {
                         "the rig settings file still holds {s:.1} dBFS, which a later start \
                          with a higher --max-level takes"
                     ),
-                    _ => "a later start finds no level and takes its --max-level bound".into(),
+                    _ => "a later start finds no level and starts as with none stored".into(),
                 };
                 tracing::error!(
                     "system max level {now:.1} dBFS not stored ({}): {then}",

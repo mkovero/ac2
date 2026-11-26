@@ -93,12 +93,8 @@ pub fn test_sessions() -> std::path::PathBuf {
         .join(format!("sessions-{}", std::process::id()))
 }
 
-/// A daemon on `backend` whose rig was set up before: the max level stored at the bound
-/// (−10 dBFS), so a test plays at its own levels without raising it first. A test of the
-/// start itself gives the rig a file (`rig_settings`), which this level never enters.
 pub fn config(backend: FakeBackend, listen: Listen) -> DaemonConfig {
     let mut cfg = DaemonConfig::new(Arc::new(backend), listen, -10.0);
-    cfg.memory_max_level = Some(-10.0);
     cfg.session_dir = Some(test_sessions());
     cfg
 }
@@ -110,6 +106,52 @@ pub fn config(backend: FakeBackend, listen: Listen) -> DaemonConfig {
 pub fn steady_config(backend: FakeBackend, listen: Listen) -> DaemonConfig {
     let mut cfg = config(backend, listen);
     cfg.lease_expiry = Duration::from_secs(60);
+    cfg
+}
+
+/// The fake rig presented as JACK, without a JACK server: a second backend a test can move
+/// the preview to, and a backend whose outputs the daemon treats as reaching loudspeakers
+/// (so a rig with no level stored starts quiet on it).
+#[derive(Debug)]
+pub struct AsJack(pub FakeBackend);
+
+impl ac2_audio::Backend for AsJack {
+    fn kind(&self) -> ac2_audio::BackendKind {
+        ac2_audio::BackendKind::Jack
+    }
+
+    fn enumerate(&self) -> Result<Vec<ac2_audio::DeviceCaps>, ac2_audio::AudioError> {
+        let mut caps = self.0.enumerate()?;
+        for c in &mut caps {
+            c.backend = ac2_audio::BackendKind::Jack;
+        }
+        Ok(caps)
+    }
+
+    fn open(
+        &self,
+        request: ac2_audio::DuplexRequest,
+    ) -> Result<ac2_audio::DuplexStream, ac2_audio::AudioError> {
+        self.0.open(request)
+    }
+
+    fn probe(&self, device: &ac2_audio::DeviceSelector) -> ac2_audio::Presence {
+        self.0.probe(device)
+    }
+
+    fn control_panel(
+        &self,
+        device: &ac2_audio::DeviceSelector,
+    ) -> Result<(), ac2_audio::AudioError> {
+        self.0.control_panel(device)
+    }
+}
+
+/// [`config`] on `backend` presented as JACK ([`AsJack`]): a rig whose outputs may reach
+/// loudspeakers.
+pub fn hardware_config(backend: FakeBackend, listen: Listen) -> DaemonConfig {
+    let mut cfg = DaemonConfig::new(Arc::new(AsJack(backend)), listen, -10.0);
+    cfg.session_dir = Some(test_sessions());
     cfg
 }
 
