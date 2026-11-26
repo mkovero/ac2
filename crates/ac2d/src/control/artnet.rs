@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    ArtnetFade, ArtnetSocket, ArtnetTarget, DMX_CHANNELS, DmxLevel, SacnTarget,
+    ArtnetFade, ArtnetSocket, ArtnetTarget, DMX_CHANNELS, DmxLevel, DmxOutput, SacnTarget,
 };
 use ac2_proto::units::{Rev, RigId, Seconds};
 use ac2_proto::{ProtoError, ReplyBody, Warning};
@@ -111,10 +111,39 @@ pub(crate) fn check_addr(a: std::net::SocketAddr) -> Result<(), String> {
     }
     if a.ip().is_unspecified() || a.port() == 0 {
         return Err(format!(
-            "{a} is not an address to send to: give a node's IP (or a broadcast address) and a port"
+            "{a} is not an address to send to: give a node's IPv4 address and a port"
         ));
     }
     Ok(())
+}
+
+/// What each output made of one frame: its error, `None` where it sent or has no target.
+#[derive(Debug, Default, PartialEq)]
+#[must_use]
+pub(crate) struct Sent {
+    artnet: Option<String>,
+    sacn: Option<String>,
+}
+
+/// `artnet.test`'s answer from what each output made of its frame: refused only when no
+/// output sent it; an output that failed beside one that sent is a warning naming it.
+fn test_outcome(t: Targets, sent: Sent) -> Result<Vec<Warning>, String> {
+    let failed: Vec<(DmxOutput, String)> = [
+        (DmxOutput::Artnet, sent.artnet),
+        (DmxOutput::Sacn, sent.sacn),
+    ]
+    .into_iter()
+    .filter_map(|(o, e)| e.map(|e| (o, e)))
+    .collect();
+    let targets = usize::from(t.artnet.is_some()) + usize::from(t.sacn.is_some());
+    if !failed.is_empty() && failed.len() == targets {
+        let all: Vec<String> = failed.into_iter().map(|(_, e)| e).collect();
+        return Err(all.join("; "));
+    }
+    Ok(failed
+        .into_iter()
+        .map(|(output, error)| Warning::DmxSendFailed { output, error })
+        .collect())
 }
 
 /// Where the frame goes: each output that has a target.
@@ -175,14 +204,15 @@ impl Universe {
 }
 
 impl Universe {
-    /// Sends `frame` to every target; the first error. A frame that differs from the one
-    /// last sent goes out [`REPEATS`] times more at the fade step.
-    fn send(&mut self, t: Targets, frame: [u8; DMX_CHANNELS], now: Instant) -> Result<(), String> {
-        let a = t.artnet.map_or(Ok(()), |a| {
-            self.artnet.send(a.addr, a.universe, &frame, now)
-        });
-        let s = t.sacn.map_or(Ok(()), |s| self.sacn.send(&s, &frame));
-        let r = a.and(s);
+    /// Sends `frame` to every target. A frame that differs from the one last sent goes out
+    /// [`REPEATS`] times more at the fade step.
+    fn send(&mut self, t: Targets, frame: [u8; DMX_CHANNELS], now: Instant) -> Sent {
+        let r = Sent {
+            artnet: t
+                .artnet
+                .and_then(|a| self.artnet.send(a.addr, a.universe, &frame, now).err()),
+            sacn: t.sacn.and_then(|s| self.sacn.send(&s, &frame).err()),
+        };
         self.repeats = if self.sent == Some(frame) {
             self.repeats.saturating_sub(1)
         } else {
@@ -224,7 +254,7 @@ impl Universe {
     }
 
     /// Sends `frame` at once, ending any fade.
-    fn snap(&mut self, t: Targets, frame: [u8; DMX_CHANNELS], now: Instant) -> Result<(), String> {
+    fn snap(&mut self, t: Targets, frame: [u8; DMX_CHANNELS], now: Instant) -> Sent {
         self.fade = None;
         self.send(t, frame, now)
     }
@@ -429,6 +459,9 @@ impl Control {
                 |t| format!("{} universe {} ({})", t.addr, t.universe, t.universe.get())
             )
         );
+        if target.is_some_and(|t| t.universe.get() == 0) {
+            self.reply_warnings.push(Warning::ArtnetUniverseZero);
+        }
         match target {
             Some(_) => {
                 if let ArtnetSocket::NotConforming {
@@ -498,11 +531,12 @@ impl Control {
             let slot = &mut frame[d.channel.index()];
             *slot = (*slot).max(d.value);
         }
-        let r = self.rig.artnet.snap(targets, frame, now);
+        let sent = self.rig.artnet.snap(targets, frame, now);
         self.rig.artnet.test_until = Some(now + TEST_HOLD);
         self.rig.artnet.after_test = true;
         self.commit_dmx_status(true);
-        r.map_err(internal)?;
+        let warnings = test_outcome(targets, sent).map_err(internal)?;
+        self.reply_warnings.extend(warnings);
         Ok(ReplyBody::Ack {
             rev: self.store.rev(),
         })
@@ -604,7 +638,7 @@ mod tests {
             "a jump repeats at the fade step"
         );
         // The cue frame coming back after a test frame jumps too.
-        u.snap(target, [9; DMX_CHANNELS], t1).expect("loopback");
+        assert_eq!(u.snap(target, [9; DMX_CHANNELS], t1), Sent::default());
         u.after_test = true;
         u.go_to_cue(target, Duration::from_secs(1), t1);
         assert!(u.fade.is_none() && !u.after_test);
@@ -695,6 +729,40 @@ mod tests {
             got.iter().map(|f| f[0]).collect::<Vec<_>>()
         );
         assert!(got.len() > 3, "the fade's steps went out");
+    }
+
+    #[test]
+    fn a_test_that_one_output_sent_is_ok_with_a_warning() {
+        let both = Targets {
+            sacn: Some(SacnTarget {
+                dest: ac2_proto::model::SacnDest::Unicast {
+                    addr: std::net::Ipv4Addr::LOCALHOST,
+                },
+                universe: ac2_proto::model::SacnUniverse::new(1).expect("test value"),
+                priority: ac2_proto::model::SacnPriority::DEFAULT,
+            }),
+            ..artnet_only()
+        };
+        let failed = |artnet: Option<&str>, sacn: Option<&str>| Sent {
+            artnet: artnet.map(Into::into),
+            sacn: sacn.map(Into::into),
+        };
+        assert_eq!(test_outcome(both, Sent::default()), Ok(vec![]));
+        assert_eq!(
+            test_outcome(both, failed(None, Some("no route"))),
+            Ok(vec![Warning::DmxSendFailed {
+                output: DmxOutput::Sacn,
+                error: "no route".into(),
+            }])
+        );
+        assert_eq!(
+            test_outcome(both, failed(Some("a"), Some("s"))),
+            Err("a; s".into())
+        );
+        assert_eq!(
+            test_outcome(artnet_only(), failed(Some("a"), None)),
+            Err("a".into())
+        );
     }
 
     #[test]

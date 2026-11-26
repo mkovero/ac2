@@ -4454,7 +4454,8 @@ universe is the highest level any cue's current state gives a channel (HTP, as l
 desks merge), and 0 for every channel no current state lists. A cue that goes away stops
 holding its levels; a clean daemon stop sends one last frame of every cue's `ok` levels.
 
-ac2 sends all 512 channels whenever the frame changes, and the same frame again every second
+ac2 sends all 512 channels whenever the frame changes, twice more within 50 ms (a lost
+datagram does not leave a node on the old levels), and the same frame again every 0.9 s
 (nodes give up on a source silent for a few seconds). A change fades: every channel moves
 from its level to the new one over the rig's fade time (1 s until you set another, 0–60 s;
 0 jumps), evenly as the eye sees brightness rather than evenly in DMX steps, so a lamp does
@@ -4463,9 +4464,11 @@ the lights are. A channel whose level ends in `!` jumps instead, for a strobe, a
 warning lamp that has to switch rather than glide (where two states give a channel the same
 highest level, one `!` is enough). Test frames, the cue frame coming back after a test and
 the last frame of a clean stop jump. A test frame lays its levels over the cue frame (each
-channel at the higher of the two), so the cue lights stay up while you find a fixture. Set the target to a node's address or
-to a broadcast address (`2.255.255.255`, or your LAN's), with the universe as a number
-0–32767 or as net.sub.uni (`0.0.1`). The levels of a channel no cue sets are 0, so keep ac2's
+channel at the higher of the two), so the cue lights stay up while you find a fixture. Set the
+target to a node's address, with the universe as a number 1–32767 or as net.sub.uni
+(`0.0.1`). A broadcast address (`2.255.255.255`, or your LAN's) is allowed, but not
+recommended by Art-Net 4, which asks for DMX to be sent to each node; universe 0 is allowed
+too, with a warning, as Art-Net 4 deprecates it and some nodes will not take it. The levels of a channel no cue sets are 0, so keep ac2's
 universe apart from the desk's and merge the two downstream:
 
 - **QLC+**: add an Art-Net *input* on ac2's universe (Inputs/Outputs, the network interface,
@@ -4475,8 +4478,8 @@ universe apart from the desk's and merge the two downstream:
   ac2 to the same port-address; the brighter of the two wins on each channel.
 
 ```
-ac2 artnet target 2.255.255.255 0.0.1     # broadcast, universe 1; `off`: send nothing
-ac2 artnet target 192.168.1.40:6454 17    # one node, port given
+ac2 artnet target 192.168.1.40 0.0.1      # one node, universe 1; `off`: send nothing
+ac2 artnet target 192.168.1.41:6454 17    # another node, port given
 ac2 artnet fade 1.5                       # cue changes fade over 1.5 s; 0: they jump
 ac2 artnet test 12=255 13=40              # light these channels for 5 s to find a fixture
 ac2 cue Stage meter --over-dmx "12=255 13=0" --ok-dmx "12=0 13=255" --fault-dmx "14=255!"
@@ -4498,17 +4501,24 @@ frames sent, the last error and the channels above 0.
 ac2 sends Art-Net from port 6454, the port Art-Net reserves, and answers a console's ArtPoll
 there: a console or a node browser lists the rig by its name, as a controller with one
 input port (the universe ac2 sends into the network). It answers each asker at most once a
-second, and takes nothing else it hears, DMX included. When another program on the host
-holds 6454 and does not share it, ac2 sends from another port instead: nodes still get the
-frames, but a console polling for the rig will not find it. Setting the target then says so
-in the reply (a toast in the app, a warning from `ac2 artnet target`), the status line keeps
-saying it with the system's reason (`ac2 rig status`: *Art-Net socket*), and ac2 tries 6454
-again every 30 s.
+second, and takes nothing else it hears, DMX included. ac2 does not poll for nodes itself: it
+sends to the one target you give it.
+
+Port 6454 is ac2's alone while an Art-Net target is set: two programs sharing a UDP port do
+not both get what is sent to it, so ac2 does not run beside another Art-Net program on the
+same host. When another program holds 6454, ac2 sends from another port instead: frames
+still go out, but nodes that check the source port drop them, and a console polling for the
+rig will not find it. Setting the target then says so in the reply (a toast in the app, a
+warning from `ac2 artnet target`), the status line keeps saying it with the system's reason
+(`ac2 rig status`: *Art-Net socket*), and ac2 tries 6454 again every 30 s: quit the other
+program or turn its Art-Net off, and ac2 takes the port within 30 s. When no socket can be
+opened at all, the status line says nothing is sent, and ac2 tries again on the same timer.
 
 #### sACN
 
 The same universe can go out as sACN (ANSI E1.31, *streaming ACN*) beside Art-Net or instead
-of it: the same frame, fades, `!` jumps, merges and test frames, sent again every second. A
+of it: the same frame, fades, `!` jumps, merges and test frames, a change three times and
+the frame again every 0.9 s. A
 receiver hearing several sACN sources on one universe takes the one with the highest
 priority (0–200, 100 unless you set another), so a desk at 100 and ac2 at 120 hand the
 lights to ac2's cues while ac2 sends. ac2 is one source by its rig: the same after a restart,
@@ -4517,8 +4527,13 @@ named with the rig's name.
 - **Unicast**: the receiver's IPv4 address, for a node or a console's sACN input.
 - **Multicast**: sent to the universe's group (239.255.0.1 for universe 1), which every
   receiver on the universe listens to. Name the interface by this host's own address on the
-  lighting network; the group stays on that network (TTL 1). ac2 only sends to the group and
-  never joins it, so switches see no IGMP from it.
+  lighting network, and give the host that address statically (not by DHCP): an address
+  that changes leaves ac2 sending out of an interface that no longer has it. The group stays
+  on that network (TTL 1). ac2 only sends to the group and never joins it, so switches see
+  no IGMP from it.
+
+ac2 sends no sACN universe discovery (a source browser does not list it) and no
+synchronisation packets, and sends over IPv4 only.
 
 Setting the target off, changing it, and a clean daemon stop end the stream at once (three
 packets marked *terminated*), so receivers let go of ac2's levels instead of holding them for

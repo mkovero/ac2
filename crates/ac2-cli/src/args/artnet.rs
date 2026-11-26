@@ -11,9 +11,10 @@ use ac2_scene::unit_text::{Time, UnitError};
 /// `artnet …`.
 #[derive(Debug, Subcommand)]
 pub enum ArtnetCmd {
-    /// Where the rig sends its Art-Net universe: a node's IPv4 address or a broadcast
-    /// address (port 6454 unless given), and the universe as a number 0–32767 or as
-    /// net.sub.uni; or `off` to send nothing. Kept by the rig, whatever session is open.
+    /// Where the rig sends its Art-Net universe: a node's IPv4 address (port 6454 unless
+    /// given; a broadcast address works, but Art-Net 4 asks for unicast), and the universe
+    /// as a number 0–32767 or as net.sub.uni (0 is deprecated: use 1 or above); or `off` to
+    /// send nothing. Kept by the rig, whatever session is open.
     #[command(after_help = ARTNET_TARGET_HELP)]
     Target {
         /// `ip[:port]` or `off`.
@@ -41,7 +42,7 @@ const ARTNET_TARGET_HELP: &str = "\
 ac2 owns one universe and sends all 512 channels; channels no cue sets are 0. Mix it with the
 lighting desk at the receiver: an Art-Net input in QLC+ on this universe, or a node's HTP merge.
 
-Examples: ac2 artnet target 2.255.255.255 0.0.1
+Examples: ac2 artnet target 192.168.1.40 0.0.1
           ac2 artnet target 192.168.1.40:6454 17
           ac2 artnet target off";
 
@@ -64,7 +65,7 @@ impl FromStr for ArtnetAddrArg {
             .map_err(|_| {
                 UnitError(format!(
                     "{s:?}: expected an IPv4 address with an optional port (e.g. \
-                     2.255.255.255, 192.168.1.40:6454) or off"
+                     192.168.1.40, 192.168.1.40:6454) or off"
                 ))
             })
     }

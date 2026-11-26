@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{ArtnetBindFailure, RecordingRef};
+use crate::model::{ArtnetBindFailure, DmxOutput, RecordingRef};
 use crate::units::{Dbu, MeasId};
 
 /// Something the command did that the caller should know about, beside its outcome.
@@ -30,13 +30,23 @@ pub enum Warning {
         recording: RecordingRef,
     },
     /// `artnet.target` opened the Art-Net socket, but not on Art-Net's port 6454: frames go
-    /// out from `from_port`, which a strict node drops, and no console lists the rig
-    /// (`rig.artnet_socket` holds it while it lasts).
+    /// out from `from_port`, which nodes that check the source port drop, and no console
+    /// lists the rig (`rig.artnet_socket` holds it while it lasts).
     ArtnetNotConforming {
         /// The port frames go out from.
         from_port: u16,
         /// Why 6454 could not be bound.
         reason: ArtnetBindFailure,
+    },
+    /// `artnet.target` set universe 0 (Port-Address 0): kept, but Art-Net 4 deprecates it
+    /// (sACN has no universe 0), so a node may not take it.
+    ArtnetUniverseZero,
+    /// `artnet.test` sent its frame to the other DMX output but not to `output`.
+    DmxSendFailed {
+        /// The output that did not send.
+        output: DmxOutput,
+        /// Why, in the system's words.
+        error: String,
     },
     /// `cal.line` stored a full scale outside the usual +4 … +30 dBu of line interfaces:
     /// within what an input can be (−40 … +50 dBu), but worth a second look at the volts

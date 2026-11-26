@@ -7,7 +7,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use ac2_proto::model::{
     ARTNET_PORT, ArtnetBindFailure, ArtnetFade, ArtnetSocket, ArtnetTarget, DmxEntry, DmxLevel,
-    DmxSet, PortAddress, Rig, dmx_list_text, parse_dmx_list,
+    DmxOutput, DmxSet, PortAddress, Rig, dmx_list_text, parse_dmx_list,
 };
 
 /// The Rig monitor page's Art-Net rows.
@@ -18,8 +18,8 @@ pub const TEST_TITLE: &str = "Send DMX test";
 /// The levels Send DMX test starts with.
 pub const DEFAULT_TEST: &str = "1=255";
 /// Under the target row.
-pub const TARGET_NOTE: &str = "IPv4 address of a node or a broadcast address (2.255.255.255), \
-                               port 6454 unless given; empty: off";
+pub const TARGET_NOTE: &str = "IPv4 address of a node, port 6454 unless given (a broadcast \
+                               address works, but Art-Net 4 asks for unicast); empty: off";
 /// Under the universe row.
 pub const UNIVERSE_NOTE: &str =
     "a number 0–32767 or net.sub.uni (0.0.1); Enter on either row applies both";
@@ -45,7 +45,7 @@ pub fn parse_addr(text: &str) -> Result<Option<SocketAddr>, String> {
     match t.parse::<SocketAddrV4>() {
         Ok(a) if a.port() != 0 => Ok(Some(a.into())),
         _ => Err(format!(
-            "{t:?}: type an IPv4 address with an optional port, like 2.255.255.255 or \
+            "{t:?}: type an IPv4 address with an optional port, like 192.168.1.40 or \
              192.168.1.40:6454 (empty: off)"
         )),
     }
@@ -153,6 +153,27 @@ pub fn socket_text(s: &ArtnetSocket) -> Option<String> {
     }
 }
 
+/// Universe 0 set: what the reply and the status line say.
+pub const UNIVERSE_ZERO: &str = "universe 0 is deprecated by Art-Net 4 (sACN has no universe \
+                                 0), so a node may not take it: use 0.0.1 or above";
+
+/// An `artnet.test` frame that one output did not send while the other did.
+pub fn send_failed_text(output: DmxOutput, error: &str) -> String {
+    let name = match output {
+        DmxOutput::Artnet => "Art-Net",
+        DmxOutput::Sacn => "sACN",
+    };
+    format!("the test frame did not go out on {name}: {error}")
+}
+
+/// Whether the Art-Net status line is one the operator must act on: a send error, a
+/// socket off Art-Net's port or none, or universe 0.
+pub fn status_warns(rig: &Rig) -> bool {
+    rig.artnet.last_error.is_some()
+        || socket_is_warning(&rig.artnet_socket)
+        || rig.artnet_target.is_some_and(|t| t.universe.get() == 0)
+}
+
 /// Whether the socket's state is one the operator must act on.
 pub fn socket_is_warning(s: &ArtnetSocket) -> bool {
     matches!(
@@ -184,6 +205,9 @@ pub fn cue_text<T: DmxEntry>(l: &[T]) -> String {
 /// off: `Art-Net off`.
 pub fn status_line(rig: &Rig) -> String {
     let mut s = target_text(rig.artnet_target);
+    if rig.artnet_target.is_some_and(|t| t.universe.get() == 0) {
+        s.push_str(&format!(" · {UNIVERSE_ZERO}"));
+    }
     if rig.artnet_target.is_some() || rig.artnet.sent > 0 {
         s.push_str(&format!(" · {}", sent_text(rig.artnet.sent)));
     }
@@ -382,8 +406,18 @@ mod tests {
             "Art-Net to 192.168.1.50:6454 universe 0.0.1 (1) · 40 frames sent · last error: \
              network unreachable"
         );
-        rig.artnet_target = None;
+        assert!(status_warns(&rig));
         rig.artnet.last_error = None;
+        assert!(!status_warns(&rig));
+        rig.artnet_target = parse_target("192.168.1.50", "0").expect("test value");
+        assert_eq!(
+            status_line(&rig),
+            "Art-Net to 192.168.1.50:6454 universe 0.0.0 (0) · universe 0 is deprecated by \
+             Art-Net 4 (sACN has no universe 0), so a node may not take it: use 0.0.1 or above \
+             · 40 frames sent"
+        );
+        assert!(status_warns(&rig));
+        rig.artnet_target = None;
         assert_eq!(status_line(&rig), "Art-Net off · 40 frames sent");
         rig.dmx = parse_dmx_list("12=255 14=40").expect("test value");
         assert_eq!(channels_line(&rig), "channels above 0: 12=255 14=40");

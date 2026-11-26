@@ -8,6 +8,16 @@ use serde::{Deserialize, Serialize};
 use super::{ArtnetFade, ArtnetSocket, ArtnetTarget, DmxLevel, LevelsSettings, RigCue, SacnTarget};
 use crate::units::{Rev, WallNs};
 
+/// One of the rig's DMX outputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DmxOutput {
+    /// Art-Net (`rig.artnet_target`).
+    Artnet,
+    /// sACN, E1.31 (`rig.sacn_target`).
+    Sacn,
+}
+
 /// How sending to one kind of receiver (OSC, Art-Net, sACN) fares.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

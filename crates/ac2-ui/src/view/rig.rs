@@ -149,11 +149,7 @@ pub(super) fn rig_page(
         if row == RigRow::Test {
             status(ui, osc::status_line(rig), rig.osc.last_error.is_some());
         } else if row == RigRow::DmxTest {
-            status(
-                ui,
-                artnet::status_line(rig),
-                rig.artnet.last_error.is_some() || artnet::socket_is_warning(&rig.artnet_socket),
-            );
+            status(ui, artnet::status_line(rig), artnet::status_warns(rig));
             status(ui, sacn::status_line(rig), rig.sacn.last_error.is_some());
             status(ui, artnet::channels_line(rig), false);
         }

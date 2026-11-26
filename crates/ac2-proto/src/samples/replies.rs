@@ -33,6 +33,11 @@ pub fn warnings() -> Vec<Warning> {
             from_port: 40_000,
             reason: ArtnetBindFailure::PortTaken,
         },
+        Warning::ArtnetUniverseZero,
+        Warning::DmxSendFailed {
+            output: DmxOutput::Sacn,
+            error: "cannot send sACN universe 1 to 192.168.1.60:5568: No route to host".into(),
+        },
     ]
 }
 

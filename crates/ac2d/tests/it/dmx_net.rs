@@ -166,6 +166,23 @@ async fn artnet_sends_from_its_port_and_answers_artpoll_sparingly() {
     poller.send_to(&ART_POLL, rig_addr).unwrap();
     until(&poller, "the next reply", is_poll_reply);
 
+    // Universe 0 is kept, with a warning: Art-Net 4 deprecates it.
+    let (_, warnings) = c
+        .call_warned(Command::ArtnetTarget {
+            base: rig(&c).rev,
+            target: Some(ArtnetTarget {
+                addr: node.local_addr().unwrap(),
+                universe: PortAddress::new(0).unwrap(),
+            }),
+        })
+        .await
+        .unwrap();
+    assert_eq!(warnings, [Warning::ArtnetUniverseZero]);
+    rig_until(&c, "on universe 0", |r| {
+        r.artnet_target.is_some_and(|t| t.universe.get() == 0)
+    })
+    .await;
+
     // Off: the socket closes and polls go unanswered.
     c.call(Command::ArtnetTarget {
         base: rig(&c).rev,
@@ -196,7 +213,7 @@ async fn a_taken_artnet_port_is_said_and_frames_still_go() {
             base: rig(&c).rev,
             target: Some(ArtnetTarget {
                 addr: node.local_addr().unwrap(),
-                universe: PortAddress::new(0).unwrap(),
+                universe: PortAddress::new(1).unwrap(),
             }),
         })
         .await
