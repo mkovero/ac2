@@ -474,7 +474,10 @@ fn a_band_file_starts_anew_with_its_spl_file() {
     let l = &m.spl_logs[0];
     assert_ne!(l.file, main.file, "the SPL file written anew");
     let stem = l.file.strip_suffix(".csv").expect("a csv");
-    assert_eq!(l.bands.as_deref(), Some(format!("{stem}.bands.csv").as_str()));
+    assert_eq!(
+        l.bands.as_deref(),
+        Some(format!("{stem}.bands.csv").as_str())
+    );
 }
 
 /// `spl.log_new` swaps the log inside the shared handle: the next append closes the

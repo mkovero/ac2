@@ -395,9 +395,10 @@ impl LeqLog {
             .max();
             match newest {
                 Some((second, run)) if result_ok && second >= m.anchor.second => {
-                    let (base_s, base_ms) = r
-                        .issued
-                        .map_or((m.anchor.second, m.anchor.boot_ms), |i| (i.second, i.boot_ms));
+                    let (base_s, base_ms) =
+                        r.issued.map_or((m.anchor.second, m.anchor.boot_ms), |i| {
+                            (i.second, i.boot_ms)
+                        });
                     let cover = second + RESERVE_S;
                     let boot_ms = base_ms + cover.saturating_sub(base_s) * 1000;
                     let c = r.mark_at(run, cover, boot_ms);

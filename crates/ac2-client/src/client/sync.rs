@@ -33,7 +33,7 @@ impl Rejoin {
     }
 
     fn start_if_due(&mut self, core: &Arc<CallCore>, name: &str, now: Instant) {
-        if self.asking.is_some() || !self.due.is_some_and(|at| now >= at) {
+        if self.asking.is_some() || self.due.is_none_or(|at| now < at) {
             return;
         }
         self.due = None;

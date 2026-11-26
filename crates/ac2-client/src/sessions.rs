@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 
 use ac2_archive::{ArchiveError, MAX_ARCHIVE_BYTES};
 use ac2_proto::model::{
-    ClientRole, ExportFormat, ImportFormat, ImportRole, IrImport, RecordingRef, SessionFile, SessionRef,
-    TraceMeta, TraceOwner, Transfer,
+    ClientRole, ExportFormat, ImportFormat, ImportRole, IrImport, RecordingRef, SessionFile,
+    SessionRef, TraceMeta, TraceOwner, Transfer,
 };
 use ac2_proto::units::{Blob, TraceId, TransferId};
 use ac2_proto::{Command, ErrorDetail, ImportProblem, ReplyBody, TraceImportArgs};

@@ -255,7 +255,10 @@ fn rows_held_past_the_reservation_wait_for_a_covering_mark() {
     assert_eq!(log.rows().len(), 550, "below the reservation: served");
 
     let (mut log, m) = held_for(RESERVE_S + 3);
-    assert!(log.rows().is_empty(), "rows past the reservation are not served");
+    assert!(
+        log.rows().is_empty(),
+        "rows past the reservation are not served"
+    );
     let c = log.take_want().expect("a covering mark asked for");
     assert!(c.anchor.second >= m.anchor.second + 2 + RESERVE_S);
     log.mark_written(MeasId(1), &c, Ok(()));

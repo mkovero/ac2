@@ -9,8 +9,7 @@ use ac2_proto::frame::{DaemonHealth, GenSummary, KaMeta};
 use ac2_proto::model::{ClientRole, TimingState};
 use ac2_proto::units::{RequestId, Rev, WallNs};
 use ac2_proto::{
-    Command, ErrorCode, ProtoError, Reply, ReplyBody, Welcome, decode_request,
-    encode_reply,
+    Command, ErrorCode, ProtoError, Reply, ReplyBody, Welcome, decode_request, encode_reply,
 };
 use ac2_zmq::Socket;
 use tokio::sync::{mpsc, watch};

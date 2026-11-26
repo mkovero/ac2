@@ -217,8 +217,7 @@ pub(crate) fn restore_replaced(staging: &Path, root: &Path) {
         for s in fs::read_dir(parked.path()).into_iter().flatten().flatten() {
             let name = s.file_name().to_string_lossy().into_owned();
             let to = root.join(&name);
-            if session::validate_name(&name).is_err() || fs::symlink_metadata(&to).is_ok()
-            {
+            if session::validate_name(&name).is_err() || fs::symlink_metadata(&to).is_ok() {
                 continue;
             }
             match fs::rename(s.path(), &to) {
