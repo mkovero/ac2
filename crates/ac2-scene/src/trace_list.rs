@@ -670,7 +670,7 @@ mod tests {
         assert_eq!(
             of("loudness 85 → 100 phon"),
             [
-                "target · generated · perceived shift, not an EQ target",
+                "target · generated · perceived shift, not an EQ target; extrapolated above 90 phon (ISO 226:2023)",
                 "target · generated",
                 "target"
             ]

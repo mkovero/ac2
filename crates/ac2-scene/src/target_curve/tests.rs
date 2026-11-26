@@ -38,9 +38,31 @@ fn names_follow_the_other_trace_names() {
 fn only_the_loudness_shift_carries_a_note() {
     assert_eq!(note(&TargetCurve::Flat), None);
     assert_eq!(note(&TargetCurve::house_tilt()), None);
+    let loud = |a, b| TargetCurve::LoudnessShift {
+        from: Phon(a),
+        to: Phon(b),
+    };
+    assert_eq!(
+        note(&loud(60.0, 80.0)),
+        Some("perceived shift, not an EQ target")
+    );
+}
+
+#[test]
+fn a_shift_beyond_the_levels_iso_226_specifies_is_marked_extrapolated() {
+    let loud = |a, b| TargetCurve::LoudnessShift {
+        from: Phon(a),
+        to: Phon(b),
+    };
+    assert_eq!(
+        note(&loud(70.0, 85.0)),
+        Some(
+            "perceived shift, not an EQ target; extrapolated from 5 kHz above 80 phon (ISO 226:2023)"
+        )
+    );
     assert_eq!(
         note(&TargetCurve::loudness_shift()),
-        Some("perceived shift, not an EQ target")
+        Some("perceived shift, not an EQ target; extrapolated above 90 phon (ISO 226:2023)")
     );
 }
 

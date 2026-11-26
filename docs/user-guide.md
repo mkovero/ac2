@@ -3002,13 +3002,17 @@ the curve's row: the math dialog opens with `curve ÷ target` (for a loudness sh
   same shape as an EQ low shelf, so one filter can match it. Sampled at 1/48 octave from
   20 Hz to 20 kHz.
 - **Loudness shift** (default 85 → 100 phon, each 20 … 100 phon): the difference between
-  two ISO 226:2003 equal-loudness contours, each set to 0 dB at 1 kHz. It shows how a
+  two ISO 226:2023 equal-loudness contours, each set to 0 dB at 1 kHz. It shows how a
   response balanced by ear at the first level is heard at the second: positive values are
   frequencies that sound louder there, relative to 1 kHz. From 85 to 100 phon that is about
-  +7.9 dB at 20 Hz, +4.7 dB at 100 Hz, −0.5 dB around 3–5 kHz and +2.5 dB at 12.5 kHz. The
+  +7.9 dB at 20 Hz, +4.6 dB at 100 Hz, −0.6 dB around 3–5 kHz and +2.3 dB at 12.5 kHz. The
   contours are defined from 20 Hz to 12.5 kHz only, so the curve stops there (1/48 octave,
-  interpolated in log frequency between the standard's one-third-octave points). Above
-  90 phon the contours rest on few measurements; treat a shift to 100 phon as indicative.
+  interpolated in log frequency between the standard's one-third-octave points). The
+  standard specifies them from 20 phon up to 90 phon, and from 5 kHz up only to 80 phon;
+  beyond that the same formula is extrapolated (100 phon below 1 kHz rests on one
+  institute's data, above 1 kHz on none). Such a shift is still made, and its legend, the
+  trace list and `ac2 trace show` say where: `extrapolated above 90 phon (ISO 226:2023)`,
+  or `extrapolated from 5 kHz above 80 phon (ISO 226:2023)`. Treat it as indicative.
 
 **A loudness shift is not an EQ target.** It describes perception, not the system: the ear
 flattens out at high levels, so the same response sounds bass-heavier the louder it plays.
@@ -3019,11 +3023,11 @@ itself, or how a tuning done quietly will sound loud. The chooser, the dialog ti
 the trace's legend say so (`perceived shift, not an EQ target`). A bare equal-loudness
 contour is deliberately not offered as a target at all.
 
-The contour model is ISO 226:2003's published formula (Lp = (10/αf)·lg Af − LU + 94 with
-Af = 4.47·10⁻³·(10^0.025·LN − 1.15) + (0.4·10^((Tf + LU)/10 − 9))^αf), as given in the
-open-access review by Suzuki, Takeshima and Kurakata, *Acoust. Sci. & Tech.* 45(1), 2024
-(CC BY-ND 4.0); the per-frequency αf, LU and Tf are the 2003 edition's, as reproduced in
-Parmanen, *Open Journal of Acoustics* 2, 2012. The paid ISO document is not used.
+The contour model is ISO 226:2023 Formula (1), Lf = (10/αf)·lg[(4·10⁻¹⁰)^(0.3 − αf)·
+(10^(0.03·LN) − 10^0.072) + 10^(αf·(Tf + LU)/10)] − LU, with the per-frequency αf, LU and Tf
+of its Table 1 (Tf is ISO 389-7's free-field threshold). The formula and the revision are
+described openly by Suzuki, Takeshima and Kurakata, *Acoust. Sci. & Tech.* 45(1), 2024
+(CC BY-ND 4.0). At 1 kHz the contour equals its phon value exactly.
 
 ### Export and import
 

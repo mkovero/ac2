@@ -1,7 +1,7 @@
 //! The built-in target curves, as the Target chooser, its dialogs and the trace list name
 //! them: flat, a house tilt, and the loudness shift between two listening levels.
 
-use ac2_proto::model::{LfShelf, TargetCurve};
+use ac2_proto::model::{Extrapolated, LfShelf, TargetCurve};
 use ac2_proto::units::{Db, Hz};
 
 use crate::format;
@@ -139,10 +139,19 @@ fn needed(v: f64) -> usize {
 
 /// The legend note of a generated curve. A loudness shift describes how a level change is
 /// heard: equalising a system to it would bake one listening level's perception into the
-/// response at every level.
+/// response at every level. Beyond the levels ISO 226:2023 specifies the formula still
+/// gives a curve, but no measurements stand behind it, so the note says it is extrapolated.
 pub fn note(c: &TargetCurve) -> Option<&'static str> {
     match c {
-        TargetCurve::LoudnessShift { .. } => Some("perceived shift, not an EQ target"),
+        TargetCurve::LoudnessShift { .. } => Some(match c.loudness_extrapolated() {
+            None => "perceived shift, not an EQ target",
+            Some(Extrapolated::AboveFourKhz) => {
+                "perceived shift, not an EQ target; extrapolated from 5 kHz above 80 phon (ISO 226:2023)"
+            }
+            Some(Extrapolated::Everywhere) => {
+                "perceived shift, not an EQ target; extrapolated above 90 phon (ISO 226:2023)"
+            }
+        }),
         _ => None,
     }
 }
@@ -171,7 +180,7 @@ pub mod loudness {
     pub const FROM: &str = "From";
     pub const FROM_HINT: &str = "the level the balance was judged at (20 … 100 phon)";
     pub const TO: &str = "To";
-    pub const TO_HINT: &str = "the level it is played at: shows how the same response is heard there (above 90 phon the contours rest on few data)";
+    pub const TO_HINT: &str = "the level it is played at: shows how the same response is heard there (ISO 226:2023 specifies up to 90 phon, 80 from 5 kHz: beyond, extrapolated)";
     pub const DEFAULT_FROM: &str = "85 phon";
     pub const DEFAULT_TO: &str = "100 phon";
 }

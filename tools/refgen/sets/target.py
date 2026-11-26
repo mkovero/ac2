@@ -1,12 +1,12 @@
 """Generated target curves (ac2_core::target): a house tilt with a cookbook low shelf, and
-the ISO 226:2003 equal-loudness-level model with the perceived-balance shift between two
-loudness levels.
+the ISO 226:2023 normal equal-loudness-level contours with the perceived-balance shift
+between two loudness levels.
 
 The tilt is the closed form; the shelf is the RBJ Audio EQ Cookbook analog low shelf
-(S = 1) written out and evaluated with scipy.signal.freqs. The contour model is the 2003
-edition's formula as Suzuki, Takeshima & Kurakata, Acoust. Sci. & Tech. 45(1) (2024)
-section 2.3 print it, with the per-frequency parameters of Parmanen, Open Journal of
-Acoustics 2 (2012) Table 1 — both open access.
+(S = 1) written out and evaluated with scipy.signal.freqs. The contours are ISO 226:2023
+Formula (1) with the parameters of its Table 1 (alpha_r = 0.3 and T_r = 2.4 dB at 1 kHz),
+as Suzuki, Takeshima & Kurakata, Acoust. Sci. & Tech. 45(1) (2024) section 2.3 also print
+the formula (open access).
 """
 
 import pathlib
@@ -23,16 +23,16 @@ ISO_F = np.array([
     1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500,
 ], dtype=float)
 ALPHA = np.array([
-    0.532, 0.506, 0.480, 0.455, 0.432, 0.409, 0.387, 0.367, 0.349, 0.330, 0.315, 0.301, 0.288,
-    0.276, 0.267, 0.259, 0.253, 0.250, 0.246, 0.244, 0.243, 0.243, 0.243, 0.242, 0.242, 0.245,
-    0.254, 0.271, 0.301,
+    0.635, 0.602, 0.569, 0.537, 0.509, 0.482, 0.456, 0.433, 0.412, 0.391, 0.373, 0.357, 0.343,
+    0.330, 0.320, 0.311, 0.303, 0.300, 0.295, 0.292, 0.290, 0.290, 0.289, 0.289, 0.289, 0.293,
+    0.303, 0.323, 0.354,
 ])
 LU = np.array([
-    -31.6, -27.2, -23.0, -19.1, -15.9, -13.0, -10.3, -8.1, -6.2, -4.5, -3.1, -2.0, -1.1, -0.4,
-    0.0, 0.3, 0.5, 0.0, -2.7, -4.1, -1.0, 1.7, 2.5, 1.2, -2.1, -7.1, -11.2, -10.7, -3.1,
+    -31.5, -27.2, -23.1, -19.3, -16.1, -13.1, -10.4, -8.2, -6.3, -4.6, -3.2, -2.1, -1.2, -0.5,
+    0.0, 0.4, 0.5, 0.0, -2.7, -4.2, -1.2, 1.4, 2.3, 1.0, -2.3, -7.2, -11.2, -10.9, -3.5,
 ])
 TF = np.array([
-    78.5, 68.7, 59.5, 51.1, 44.0, 37.5, 31.5, 26.5, 22.1, 17.9, 14.4, 11.4, 8.6, 6.2, 4.4, 3.0,
+    78.1, 68.7, 59.5, 51.1, 44.0, 37.5, 31.5, 26.5, 22.1, 17.9, 14.4, 11.4, 8.6, 6.2, 4.4, 3.0,
     2.2, 2.4, 3.5, 1.7, -1.3, -4.2, -6.0, -5.4, -1.5, 6.0, 12.6, 13.9, 12.3,
 ])
 REF = int(np.flatnonzero(ISO_F == 1000.0)[0])
@@ -47,8 +47,11 @@ TILTS = [  # name, slope dB/oct, pivot Hz, shelf gain dB (0: none), shelf corner
 
 
 def contour(phon: float) -> np.ndarray:
-    af = 4.47e-3 * (10 ** (0.025 * phon) - 1.15) + (0.4 * 10 ** ((TF + LU) / 10 - 9)) ** ALPHA
-    return 10 / ALPHA * np.log10(af) - LU + 94
+    # Formula (1) in its first form: (p0/pa)^(2 (alpha_r - alpha_f)) with p0 = 20 uPa, pa = 1 Pa.
+    a_r, t_r = 0.3, 2.4
+    k = (20e-6 / 1.0) ** (2 * (a_r - ALPHA))
+    inner = k * (10 ** (a_r * phon / 10) - 10 ** (a_r * t_r / 10)) + 10 ** (ALPHA * (TF + LU) / 10)
+    return 10 / ALPHA * np.log10(inner) - LU
 
 
 def shift(a: float, b: float) -> np.ndarray:
@@ -72,20 +75,20 @@ def gen_target_curves() -> g.VectorSet:
         name="target_curves",
         description=(
             "Generated target curves: house tilts with an optional cookbook low shelf on a "
-            "1/12-octave grid, ISO 226:2003 equal-loudness-level contours at the standard's 29 "
+            "1/12-octave grid, ISO 226:2023 equal-loudness-level contours at the standard's 29 "
             "frequencies, and the perceived-balance shift between two loudness levels."
         ),
         function="gen_target_curves",
         parameters={
             "tilt": "slope * log2(f / pivot) dB",
             "shelf": "RBJ cookbook analog low shelf, S = 1, f0 = half-gain frequency, scipy.signal.freqs",
-            "contour": "Lp = 10/af lg Af - LU + 94; Af = 4.47e-3 (10^(0.025 LN) - 1.15) + (0.4 10^((Tf+LU)/10 - 9))^af",
+            "contour": "Lf = 10/af lg((p0/pa)^(2 (ar - af)) (10^(ar LN/10) - 10^(ar Tr/10)) + 10^(af (Tf + LU)/10)) - LU; ar = 0.3, Tr = 2.4 dB, p0 = 20 uPa, pa = 1 Pa",
             "shift": "(C_from - C_from(1 kHz)) - (C_to - C_to(1 kHz))",
             "tilts": {n: [s, p, gdb, fc] for n, s, p, gdb, fc in TILTS},
         },
         references=[
             "Suzuki, Takeshima, Kurakata, Acoust. Sci. & Tech. 45(1) 1-8 (2024), doi:10.1250/ast.e23.66, sec. 2.3",
-            "Parmanen, Open Journal of Acoustics 2, 143-149 (2012), doi:10.4236/oja.2012.24016, Table 1",
+            "ISO 226:2023, Formula (1) and Table 1",
             "R. Bristow-Johnson, Audio EQ Cookbook",
         ],
     )

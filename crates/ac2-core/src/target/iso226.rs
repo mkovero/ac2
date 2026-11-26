@@ -1,29 +1,30 @@
-//! Normal equal-loudness-level contours (ISO 226:2003 model) and the perceived-balance
-//! shift between two loudness levels.
+//! Normal equal-loudness-level contours (ISO 226:2023) and the perceived-balance shift
+//! between two loudness levels.
 //!
-//! The model is Suzuki & Takeshima's loudness function: a pure tone of frequency f is as
-//! loud as a 1 kHz tone at loudness level L_N when its level is
+//! A pure tone of frequency f is as loud as a 1 kHz tone at loudness level L_N when its
+//! level is (ISO 226:2023, Formula (1))
 //!
 //! ```text
-//! L_p = (10 / α_f) · lg A_f − L_U + 94 dB
-//! A_f = 4.47·10⁻³ · (10^(0.025·L_N) − 1.15) + (0.4 · 10^((T_f + L_U)/10 − 9))^α_f
+//! L_f = (10 / α_f) · lg[ (p₀/p_a)^(2(α_r − α_f)) · (10^(α_r·L_N/10) − 10^(α_r·T_r/10))
+//!                        + 10^(α_f·(T_f + L_U)/10) ] − L_U   dB
 //! ```
 //!
-//! with α_f the exponent of loudness perception, L_U the ear's transfer function normalised
-//! at 1 kHz and T_f the threshold of hearing. Sources, all openly published:
-//! - the formula as the 2003 edition writes it: Y. Suzuki, H. Takeshima, K. Kurakata,
-//!   "Revision of ISO 226 'Normal Equal-Loudness-Level Contours' from 2003 to 2023
-//!   edition: The background and results", Acoust. Sci. & Tech. 45(1), 1–8 (2024),
-//!   doi:10.1250/ast.e23.66 (open access), section 2.3;
-//! - the per-frequency parameters: J. Parmanen, "Some Reasons to Revise the International
-//!   Standard ISO 226:2003", Open Journal of Acoustics 2, 143–149 (2012),
-//!   doi:10.4236/oja.2012.24016 (open access), Table 1, which reproduces the standard's;
-//! - the derivation: Y. Suzuki et al., "Precise and Full-range Determination of
-//!   Two-dimensional Equal Loudness Contours" (NEDO project report IS-01, 2003), and
-//!   Suzuki & Takeshima, J. Acoust. Soc. Am. 116(2), 918–933 (2004).
+//! with p₀ = 20 µPa, p_a = 1 Pa, α_f the exponent of loudness perception, L_U the ear's
+//! transfer function normalised at 1 kHz and T_f the free-field threshold of hearing
+//! (ISO 389-7); α_r = 0.3 and T_r = 2.4 dB are their values at 1 kHz. It is a loudness
+//! function: loudness grows as intensity to the power α_f above a threshold-related offset,
+//! and two tones are equally loud when those loudnesses match. At L_N = T_r the bracket
+//! reduces to its last term, so the contour through the 1 kHz threshold is the threshold of
+//! hearing itself; at 1 kHz (α_f = α_r, L_U = 0, T_f = T_r) L_f = L_N exactly.
 //!
-//! The standard defines the contours at these 29 one-third-octave frequencies only; nothing
-//! here interpolates them.
+//! Sources: ISO 226:2023, *Acoustics — Normal equal-loudness-level contours*, Formula (1)
+//! and Table 1; the open-access account of the model and its revision, Y. Suzuki,
+//! H. Takeshima, K. Kurakata, "Revision of ISO 226 'Normal Equal-Loudness-Level Contours'
+//! from 2003 to 2023 edition: The background and results", Acoust. Sci. & Tech. 45(1), 1–8
+//! (2024), doi:10.1250/ast.e23.66, section 2.3.
+//!
+//! The standard specifies the contours at these 29 one-third-octave frequencies only, and
+//! only from [`MIN_PHON`] up to [`max_phon`] there; nothing here interpolates them.
 
 /// The nominal one-third-octave frequencies the contours are given at, Hz.
 pub const FREQS: [f64; 29] = [
@@ -34,37 +35,63 @@ pub const FREQS: [f64; 29] = [
 
 /// α_f: exponent of loudness perception.
 const ALPHA: [f64; 29] = [
-    0.532, 0.506, 0.480, 0.455, 0.432, 0.409, 0.387, 0.367, 0.349, 0.330, 0.315, 0.301, 0.288,
-    0.276, 0.267, 0.259, 0.253, 0.250, 0.246, 0.244, 0.243, 0.243, 0.243, 0.242, 0.242, 0.245,
-    0.254, 0.271, 0.301,
+    0.635, 0.602, 0.569, 0.537, 0.509, 0.482, 0.456, 0.433, 0.412, 0.391, 0.373, 0.357, 0.343,
+    0.330, 0.320, 0.311, 0.303, 0.300, 0.295, 0.292, 0.290, 0.290, 0.289, 0.289, 0.289, 0.293,
+    0.303, 0.323, 0.354,
 ];
 
 /// L_U: magnitude of the linear transfer function normalised at 1 kHz, dB.
 const LU: [f64; 29] = [
-    -31.6, -27.2, -23.0, -19.1, -15.9, -13.0, -10.3, -8.1, -6.2, -4.5, -3.1, -2.0, -1.1, -0.4, 0.0,
-    0.3, 0.5, 0.0, -2.7, -4.1, -1.0, 1.7, 2.5, 1.2, -2.1, -7.1, -11.2, -10.7, -3.1,
+    -31.5, -27.2, -23.1, -19.3, -16.1, -13.1, -10.4, -8.2, -6.3, -4.6, -3.2, -2.1, -1.2, -0.5, 0.0,
+    0.4, 0.5, 0.0, -2.7, -4.2, -1.2, 1.4, 2.3, 1.0, -2.3, -7.2, -11.2, -10.9, -3.5,
 ];
 
-/// T_f: threshold of hearing, dB.
-const TF: [f64; 29] = [
-    78.5, 68.7, 59.5, 51.1, 44.0, 37.5, 31.5, 26.5, 22.1, 17.9, 14.4, 11.4, 8.6, 6.2, 4.4, 3.0,
+/// T_f: free-field threshold of hearing, dB.
+pub const THRESHOLD: [f64; 29] = [
+    78.1, 68.7, 59.5, 51.1, 44.0, 37.5, 31.5, 26.5, 22.1, 17.9, 14.4, 11.4, 8.6, 6.2, 4.4, 3.0,
     2.2, 2.4, 3.5, 1.7, -1.3, -4.2, -6.0, -5.4, -1.5, 6.0, 12.6, 13.9, 12.3,
 ];
 
 /// Index of 1 kHz in [`FREQS`].
 pub const REF_INDEX: usize = 17;
 
-/// The lowest loudness level the contours rest on measurements for, phon (below it the
-/// report draws them dotted, between the threshold and 20 phon).
+/// α_r: the exponent of loudness perception at 1 kHz.
+const ALPHA_R: f64 = 0.3;
+
+/// (p₀ / p_a)²: the reference pressure 20 µPa over 1 Pa, squared.
+const P0_PA_SQ: f64 = 4e-10;
+
+/// The lowest loudness level the standard specifies, phon: below it there are no
+/// measurements between 20 phon and the threshold, and Formula (1) is informative only.
 pub const MIN_PHON: f64 = 20.0;
 
+/// The highest loudness level the standard specifies up to 4 kHz, phon.
+pub const MAX_PHON: f64 = 90.0;
+
+/// The highest loudness level the standard specifies from 5 kHz up, phon.
+pub const MAX_PHON_HF: f64 = 80.0;
+
+/// The highest loudness level the standard specifies at `FREQS[i]`, phon: above it
+/// Formula (1) still gives a value, but no measurements (or only one institute's, up to
+/// 100 phon below 1 kHz) stand behind it.
+pub fn max_phon(i: usize) -> f64 {
+    if FREQS[i] <= 4000.0 {
+        MAX_PHON
+    } else {
+        MAX_PHON_HF
+    }
+}
+
 /// The level of a pure tone at `FREQS[i]` that is as loud as a 1 kHz tone at `phon`, dB
-/// SPL; NaN for a level so far below the threshold that `A_f` is not positive.
+/// SPL (Formula (1)). NaN below the 1 kHz threshold far enough that the bracket is not
+/// positive; at or above [`MIN_PHON`] it always is.
 pub fn spl(i: usize, phon: f64) -> f64 {
-    let (a, lu, tf) = (ALPHA[i], LU[i], TF[i]);
-    let af = 4.47e-3 * (10f64.powf(0.025 * phon) - 1.15)
-        + (0.4 * 10f64.powf((tf + lu) / 10.0 - 9.0)).powf(a);
-    10.0 / a * af.log10() - lu + 94.0
+    let (a, lu, tf) = (ALPHA[i], LU[i], THRESHOLD[i]);
+    let t_r = THRESHOLD[REF_INDEX];
+    let inner = P0_PA_SQ.powf(ALPHA_R - a)
+        * (10f64.powf(ALPHA_R * phon / 10.0) - 10f64.powf(ALPHA_R * t_r / 10.0))
+        + 10f64.powf(a * (tf + lu) / 10.0);
+    10.0 / a * inner.log10() - lu
 }
 
 /// The contour at `phon` at every [`FREQS`] point, dB SPL.

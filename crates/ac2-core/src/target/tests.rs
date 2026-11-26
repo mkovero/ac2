@@ -1,4 +1,6 @@
-use super::iso226::{FREQS, REF_INDEX, contour, loudness_shift, spl};
+use super::iso226::{
+    FREQS, MAX_PHON, MAX_PHON_HF, REF_INDEX, THRESHOLD, contour, loudness_shift, max_phon, spl,
+};
 use super::*;
 
 #[test]
@@ -42,12 +44,31 @@ fn a_shelf_of_no_gain_is_flat_and_a_bad_one_is_refused() {
 
 #[test]
 fn a_contour_crosses_1_khz_at_its_own_loudness_level() {
-    // The phon's definition; the 2003 formula's rounded constants leave about 0.01 dB.
+    // The phon's definition: at 1 kHz Formula (1) reduces to L_f = L_N exactly.
     assert_eq!(FREQS[REF_INDEX], 1000.0);
-    for phon in [20.0, 40.0, 60.0, 80.0, 90.0, 100.0] {
+    for phon in [20.0, 40.0, 60.0, 80.0, 85.0, 90.0, 100.0] {
         let at = spl(REF_INDEX, phon);
-        assert!((at - phon).abs() < 0.05, "{phon} phon: {at} dB at 1 kHz");
+        assert!((at - phon).abs() < 1e-9, "{phon} phon: {at} dB at 1 kHz");
     }
+}
+
+#[test]
+fn the_contour_through_the_1_khz_threshold_is_the_threshold_of_hearing() {
+    // At L_N = T_r the loudness term vanishes and only the threshold term is left.
+    let at = contour(THRESHOLD[REF_INDEX]);
+    for (i, (c, t)) in at.iter().zip(&THRESHOLD).enumerate() {
+        assert!((c - t).abs() < 1e-9, "{} Hz: {c} vs {t}", FREQS[i]);
+    }
+}
+
+#[test]
+fn the_specified_range_ends_at_90_phon_up_to_4_khz_and_80_phon_above() {
+    for (i, f) in FREQS.iter().enumerate() {
+        let want = if *f <= 4000.0 { MAX_PHON } else { MAX_PHON_HF };
+        assert_eq!(max_phon(i), want, "{f} Hz");
+    }
+    assert_eq!((MAX_PHON, MAX_PHON_HF), (90.0, 80.0));
+    assert_eq!(FREQS.iter().filter(|f| **f >= 5000.0).count(), 5);
 }
 
 #[test]
@@ -82,7 +103,7 @@ fn played_louder_the_lows_seem_louder_and_the_presence_region_slightly_quieter()
     let s = loudness_shift(85.0, 100.0);
     let at = |f: f64| s[FREQS.iter().position(|x| *x == f).expect("iso freq")];
     assert!((at(20.0) - 7.9).abs() < 0.1, "{}", at(20.0));
-    assert!((at(100.0) - 4.7).abs() < 0.1, "{}", at(100.0));
+    assert!((at(100.0) - 4.6).abs() < 0.1, "{}", at(100.0));
     assert!(at(4000.0) < 0.0 && at(4000.0) > -1.0, "{}", at(4000.0));
     // Monotonic from 20 Hz up to 1 kHz: the lower, the more.
     assert!(s[..=REF_INDEX].windows(2).all(|w| w[0] > w[1]));

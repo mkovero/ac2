@@ -21,7 +21,7 @@ pub enum TargetCurve {
         lf_shelf: Option<LfShelf>,
     },
     /// How the perceived tonal balance shifts when the playback level changes from
-    /// `from` to `to` (equal-loudness contours, ISO 226:2003), 0 dB at 1 kHz. A view of
+    /// `from` to `to` (equal-loudness contours, ISO 226:2023), 0 dB at 1 kHz. A view of
     /// perception, not a response to equalise a system to: the ear applies it itself.
     LoudnessShift {
         /// The level the programme was balanced at.
@@ -29,6 +29,15 @@ pub enum TargetCurve {
         /// The level it is played at.
         to: Phon,
     },
+}
+
+/// Where a loudness shift is extrapolated beyond the contours ISO 226:2023 specifies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Extrapolated {
+    /// A level above 80 but not 90 phon: the contours from 5 kHz up.
+    AboveFourKhz,
+    /// A level above 90 phon: every contour point.
+    Everywhere,
 }
 
 /// A second-order low shelf (the cookbook shelf at slope S = 1).
@@ -50,9 +59,14 @@ impl TargetCurve {
     pub const MAX_SHELF_DB: f64 = 20.0;
     /// Shelf corner range, Hz: a low-frequency shelf.
     pub const SHELF_CORNER_HZ: (f64, f64) = (20.0, 1000.0);
-    /// Loudness level range, phon: 20 phon is the lowest contour the measurements under
-    /// the standard support; above 100 phon there are none.
+    /// Loudness level range, phon: ISO 226:2023 specifies nothing below 20 phon (no
+    /// measurements between there and the threshold), and its formula is informative at
+    /// best above 100 phon.
     pub const PHON: (f64, f64) = (20.0, 100.0);
+    /// The highest loudness level ISO 226:2023 specifies, phon: 20 Hz … 4 kHz, then
+    /// 5 … 12.5 kHz. A shift to or from a level above it is computed by the same formula
+    /// but extrapolated, and says so ([`TargetCurve::loudness_extrapolated`]).
+    pub const PHON_SPECIFIED: (f64, f64) = (90.0, 80.0);
 
     /// The default house tilt: −1 dB/oct about 1 kHz, no shelf.
     pub fn house_tilt() -> Self {
@@ -68,6 +82,23 @@ impl TargetCurve {
         Self::LoudnessShift {
             from: Phon(85.0),
             to: Phon(100.0),
+        }
+    }
+
+    /// Where a loudness shift leaves the range ISO 226:2023 specifies; `None` for one
+    /// inside it and for every other curve.
+    pub fn loudness_extrapolated(&self) -> Option<Extrapolated> {
+        let Self::LoudnessShift { from, to } = *self else {
+            return None;
+        };
+        let top = from.0.max(to.0);
+        let (all, hf) = Self::PHON_SPECIFIED;
+        if top > all {
+            Some(Extrapolated::Everywhere)
+        } else if top > hf {
+            Some(Extrapolated::AboveFourKhz)
+        } else {
+            None
         }
     }
 
@@ -152,5 +183,27 @@ mod tests {
         assert!(loud(85.0, 85.0).check().is_err());
         assert!(loud(10.0, 85.0).check().is_err());
         assert!(loud(85.0, 110.0).check().is_err());
+    }
+
+    #[test]
+    fn a_shift_beyond_the_specified_contours_says_where_it_is_extrapolated() {
+        let loud = |a, b| TargetCurve::LoudnessShift {
+            from: Phon(a),
+            to: Phon(b),
+        };
+        assert_eq!(loud(20.0, 80.0).loudness_extrapolated(), None);
+        assert_eq!(
+            loud(85.0, 60.0).loudness_extrapolated(),
+            Some(Extrapolated::AboveFourKhz)
+        );
+        assert_eq!(
+            loud(70.0, 90.0).loudness_extrapolated(),
+            Some(Extrapolated::AboveFourKhz)
+        );
+        assert_eq!(
+            TargetCurve::loudness_shift().loudness_extrapolated(),
+            Some(Extrapolated::Everywhere)
+        );
+        assert_eq!(TargetCurve::house_tilt().loudness_extrapolated(), None);
     }
 }

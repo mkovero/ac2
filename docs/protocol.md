@@ -1571,12 +1571,14 @@ display edits and are never applied to the stored data.
   with half its gain at `corner` (analog prototype); both on the 1/48-octave log grid from
   20 Hz to 20 kHz; `loudness_shift` {`from: Phon`, `to: Phon`} — how the perceived tonal
   balance of a programme balanced at `from` changes when played at `to`: the difference of
-  the two ISO 226:2003 equal-loudness-level contours, each referred to its own 1 kHz value
+  the two ISO 226:2023 equal-loudness-level contours, each referred to its own 1 kHz value
   (`C_from − C_to`, 0 dB at 1 kHz), defined at the standard's 29 one-third-octave
   frequencies (20 Hz … 12.5 kHz) and on the log grid between them linear over log frequency.
-  It describes perception, not a response to equalise to. `invalid` outside slope ±6 dB/oct,
-  pivot 20 Hz … 20 kHz, shelf gain ±20 dB, corner 20 … 1000 Hz, loudness 20 … 100 phon, or
-  `from` = `to`.
+  It describes perception, not a response to equalise to. The standard specifies the
+  contours up to 90 phon (80 phon from 5 kHz); a level above that is accepted and computed
+  by the same formula, and the curve is extrapolated there (clients say so). `invalid`
+  outside slope ±6 dB/oct, pivot 20 Hz … 20 kHz, shelf gain ±20 dB, corner 20 … 1000 Hz,
+  loudness 20 … 100 phon, or `from` = `to`.
 - `trace.export` `format: ir_wav`: the trace's impulse response (a transfer trace's `ir`,
   else a sweep's) as a mono 32-bit float WAV at its sample rate, every stored sample as
   stored (an imported file's samples come back bit-exact; `file_name` `<name>.wav`). A trace

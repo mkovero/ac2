@@ -2,7 +2,7 @@
   "format": "ac2-golden",
   "format_version": 1,
   "name": "target_curves",
-  "description": "Generated target curves: house tilts with an optional cookbook low shelf on a 1/12-octave grid, ISO 226:2003 equal-loudness-level contours at the standard's 29 frequencies, and the perceived-balance shift between two loudness levels.",
+  "description": "Generated target curves: house tilts with an optional cookbook low shelf on a 1/12-octave grid, ISO 226:2023 equal-loudness-level contours at the standard's 29 frequencies, and the perceived-balance shift between two loudness levels.",
   "generator": {
     "script": "tools/refgen/generate.py",
     "function": "gen_target_curves"
@@ -14,7 +14,7 @@
   "parameters": {
     "tilt": "slope * log2(f / pivot) dB",
     "shelf": "RBJ cookbook analog low shelf, S = 1, f0 = half-gain frequency, scipy.signal.freqs",
-    "contour": "Lp = 10/af lg Af - LU + 94; Af = 4.47e-3 (10^(0.025 LN) - 1.15) + (0.4 10^((Tf+LU)/10 - 9))^af",
+    "contour": "Lf = 10/af lg((p0/pa)^(2 (ar - af)) (10^(ar LN/10) - 10^(ar Tr/10)) + 10^(af (Tf + LU)/10)) - LU; ar = 0.3, Tr = 2.4 dB, p0 = 20 uPa, pa = 1 Pa",
     "shift": "(C_from - C_from(1 kHz)) - (C_to - C_to(1 kHz))",
     "tilts": {
       "tilt_m1_1k": [
@@ -39,14 +39,14 @@
   },
   "references": [
     "Suzuki, Takeshima, Kurakata, Acoust. Sci. & Tech. 45(1) 1-8 (2024), doi:10.1250/ast.e23.66, sec. 2.3",
-    "Parmanen, Open Journal of Acoustics 2, 143-149 (2012), doi:10.4236/oja.2012.24016, Table 1",
+    "ISO 226:2023, Formula (1) and Table 1",
     "R. Bristow-Johnson, Audio EQ Cookbook"
   ],
   "scalars": {},
   "blob": {
     "file": "target_curves.bin",
     "nbytes": 6808,
-    "sha256": "5743666c6eb25b0b012a284fe7f0fec1ec5c5b18e4e9435ce90797b25033deeb"
+    "sha256": "f552e362c83a37f65bde81de81aabdc75ba58b6365bd3c0ad75d935c26117f33"
   },
   "arrays": [
     {

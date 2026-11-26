@@ -135,6 +135,16 @@ mod tests {
     }
 
     #[test]
+    fn the_accepted_and_specified_phon_ranges_are_the_models() {
+        assert_eq!(TargetCurve::PHON.0, iso226::MIN_PHON);
+        let (all, hf) = TargetCurve::PHON_SPECIFIED;
+        assert_eq!((all, hf), (iso226::MAX_PHON, iso226::MAX_PHON_HF));
+        let top = (0..iso226::FREQS.len()).map(iso226::max_phon);
+        assert!(top.clone().all(|p| p == all || p == hf));
+        assert!(top.fold(f64::NEG_INFINITY, f64::max) == all);
+    }
+
+    #[test]
     fn refused_parameters_say_why() {
         let e = generate(&TargetCurve::LoudnessShift {
             from: Phon(90.0),

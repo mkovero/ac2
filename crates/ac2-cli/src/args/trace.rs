@@ -377,8 +377,9 @@ pub enum TargetArg {
         #[arg(long, default_value = "100Hz", requires = "shelf")]
         shelf_corner: Freq,
     },
-    /// The change in perceived balance from one loudness level to another (ISO 226:2003
-    /// equal-loudness contours, 0 dB at 1 kHz). Not an EQ target.
+    /// The change in perceived balance from one loudness level to another (ISO 226:2023
+    /// equal-loudness contours, 0 dB at 1 kHz; 20 … 100 phon, extrapolated above 90 phon,
+    /// and from 5 kHz above 80 phon). Not an EQ target.
     Loudness {
         /// The level the balance was judged at, e.g. `85phon`.
         #[arg(long, default_value = "85phon")]
