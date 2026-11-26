@@ -74,6 +74,8 @@ pub struct Sim {
     pub stamp_step: Option<(f64, f64)>,
     /// The first audio observation at or after this time is flagged as a restart.
     pub restart_at: Option<f64>,
+    /// From `.0` seconds on, the device runs `.1` ppm faster.
+    pub rate_step: Option<(f64, f64)>,
     pub cfg: ServoConfig,
 }
 
@@ -99,6 +101,7 @@ impl Sim {
             gaps: Vec::new(),
             stamp_step: None,
             restart_at: None,
+            rate_step: None,
             cfg: ServoConfig::default(),
         }
     }
@@ -182,7 +185,11 @@ pub fn run(sim: &Sim, servo: &mut Servo) -> (Run, Truth) {
     let mut restart_at = sim.restart_at;
     for k in 0..n {
         let t = k as f64 * BLOCK_S;
-        let rate = (sim.ppm + sim.drift_ppm_per_h * t / 3600.0) * 1e-6 + walk;
+        let stepped = sim
+            .rate_step
+            .filter(|&(at, _)| t >= at)
+            .map_or(0.0, |s| s.1);
+        let rate = (sim.ppm + stepped + sim.drift_ppm_per_h * t / 3600.0) * 1e-6 + walk;
         let ns = START_NS + k as u64 * 100_000_000;
         if gaps.peek().is_some_and(|&(at, _)| t >= at) {
             let (_, len) = gaps.next().unwrap_or_default();

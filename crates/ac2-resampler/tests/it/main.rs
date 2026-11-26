@@ -11,6 +11,7 @@ mod pull;
 mod quality;
 mod retention;
 mod servo;
+mod servo_cross_rig;
 mod servo_loop;
 mod servo_sim;
 mod servo_stamps;

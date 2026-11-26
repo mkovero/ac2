@@ -270,6 +270,15 @@ pub struct Status {
     pub mode: Mode,
     /// The device's rate against the media clock, ppm (positive: the device runs fast).
     pub rate_ppm: Option<f64>,
+    /// The model's 1-sigma of [`Status::rate_ppm`], ppm, from the filter's covariance: what
+    /// the rate's error would be if the stamps were as the config describes, not a
+    /// measurement of it. It starts at the 1 % prior, is at most
+    /// [`ServoConfig::acquire_rate_ppm`] once acquired and falls with the span of stamps
+    /// (at [`ServoConfig::cross_rig`], one stamp a second: 1.0 ppm at acquisition after
+    /// 23 s, 0.88 after 28 s, 0.38 after 100 s, 0.16 after 280 s); over a [`Servo::reset_phase`] it is kept with the
+    /// rate and grows by the rate walk until stamps return. `None` with no rate: before the
+    /// first stamp or after [`Servo::reset`].
+    pub rate_sd_ppm: Option<f64>,
     /// The model's 1-sigma of the phase against the stamps' long-term line, now: what the
     /// error would be if the stamps were as the config describes. It is close to a constant
     /// of the config while stamps arrive (14.1 µs at the defaults) and grows while coasting;
@@ -664,9 +673,14 @@ impl Servo {
     /// that observation's time).
     pub fn status(&self, now: MediaTime) -> Status {
         let Some(t) = &self.track else {
+            let kept_sd = |k: Kept| {
+                let since = self.seconds(self.media(now) - k.at).max(0.0);
+                (k.var + self.model.q_rate * since).sqrt() / self.fs * 1e6
+            };
             return Status {
                 mode: Mode::Acquiring,
                 rate_ppm: self.kept.map(|k| k.rate / self.fs * 1e6),
+                rate_sd_ppm: self.kept.map(kept_sd),
                 phase_sd_s: None,
                 stamp_scatter_s: None,
                 audio_sd_s: None,
@@ -695,6 +709,7 @@ impl Servo {
         Status {
             mode,
             rate_ppm: Some(rate * 1e6),
+            rate_sd_ppm: Some(f.p[RATE][RATE].sqrt() / self.fs * 1e6),
             phase_sd_s: Some(f.p[THETA][THETA].sqrt() / self.fs),
             stamp_scatter_s: t.scatter.rms(),
             audio_sd_s,

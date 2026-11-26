@@ -112,6 +112,31 @@ impl std::fmt::Display for BadConfig {
 impl std::error::Error for BadConfig {}
 
 impl ServoConfig {
+    /// For a device on another host, stamped through both hosts' system clocks: one stamp a
+    /// second, each the mean of a second of the remote host's capture times placed on this
+    /// host's sample timeline.
+    ///
+    /// - `wander_sd_s` 33 µs: the wander of both stamp paths and of the two system clocks
+    ///   against each other add as independent errors, √(15.5² + 27.8² + 9²) µs (the
+    ///   hardware-PTP and software-PTP hosts' stamp wander, and their system clocks' 9 µs sd
+    ///   apart over an hour).
+    /// - `stamp_white_s` 7 µs: each host's one-second white part (5 µs) once per host, √2 × 5.
+    /// - `acquire_min_s` 0.9 s: two one-second stamps span 1 s give or take one remote period,
+    ///   so at 1 s exactly half the acquisitions would wait for a third stamp.
+    ///
+    /// The rest are the defaults. The larger wander slows acquisition: the rate's sd falls
+    /// about as σ√(2(1 − e^(−T/τ)))/T over a span T of stamps (σ the wander, τ its
+    /// correlation time), under 1 ppm (acquired) after 23 s of stamps a second apart instead of the
+    /// default's 11 s at ten a second.
+    pub fn cross_rig() -> Self {
+        Self {
+            wander_sd_s: 33e-6,
+            stamp_white_s: 7e-6,
+            acquire_min_s: 0.9,
+            ..Self::default()
+        }
+    }
+
     pub(super) fn check(&self) -> Result<(), BadConfig> {
         use BadConfig as B;
         for (v, e) in [
