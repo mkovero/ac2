@@ -3,10 +3,10 @@
 //! Art-Net target and its sACN target: one frame, computed once here, encoded by each
 //! output (`crate::dmx`).
 //!
-//! A frame that changes is sent at once; the current frame is sent again every
-//! [`KEEPALIVE`] while a target is set, because Art-Net nodes drop a source that has been
-//! silent for about 4 s, and sACN receivers one silent for 2.5 s (and with it, under HTP
-//! merge, the light it held).
+//! A frame that changes is sent at once and [`REPEATS`] times more a [`FADE_STEP`] apart;
+//! after that the current frame is sent again every [`KEEPALIVE`] while a target is set,
+//! because Art-Net nodes drop a source that has been silent for about 4 s, and sACN
+//! receivers one silent for 2.5 s (and with it, under HTP merge, the light it held).
 //!
 //! A changed cue frame fades in over the rig's `artnet_fade`: every channel moves from the
 //! level last output to its new level in perceived-brightness steps, a frame every
@@ -26,15 +26,22 @@ use ac2_proto::units::{Rev, RigId, Seconds};
 use ac2_proto::{ProtoError, ReplyBody, Warning};
 
 use super::Control;
-use super::osc::{REPEAT, status_due};
+use super::osc::status_due;
 use crate::dmx::DmxPorts;
 use crate::dmx::artnet::ArtnetSender;
 use crate::dmx::sacn::SacnSender;
 use crate::rig::RigSettings;
 use crate::util::{internal, invalid};
 
-/// How often the current frame is sent again.
-pub(crate) const KEEPALIVE: Duration = REPEAT;
+/// How often the settled frame is sent again: within the 800–1000 ms that E1.31 sets for a
+/// source's keep-alive and that Art-Net 4 recommends for ArtDmx to match it.
+pub(crate) const KEEPALIVE: Duration = Duration::from_millis(900);
+
+/// How many times a frame that changed is sent again, a [`FADE_STEP`] apart, before the
+/// [`KEEPALIVE`] rate: E1.31 has a source send three packets of unchanged data before it
+/// slows to the keep-alive, and a datagram lost on the way to an Art-Net node is made good
+/// in 25 ms instead of a second.
+pub(crate) const REPEATS: u8 = 2;
 
 /// How long an `artnet.test` frame holds before the cue frame comes back: long enough to
 /// walk to the fixture and look.
@@ -141,6 +148,8 @@ pub(crate) struct Universe {
     after_test: bool,
     /// The fade in progress.
     fade: Option<Fade>,
+    /// How many more times the frame last sent goes out at the fade step.
+    repeats: u8,
     /// When the next frame goes out: the next fade step, else the keepalive.
     next_keepalive: Option<Instant>,
     /// When `rig.artnet` and `rig.sacn` were last committed for the sent counters alone.
@@ -158,6 +167,7 @@ impl Universe {
             test_until: None,
             after_test: false,
             fade: None,
+            repeats: 0,
             next_keepalive: None,
             status_at: None,
         }
@@ -165,21 +175,52 @@ impl Universe {
 }
 
 impl Universe {
-    /// Sends `frame` to every target; the first error.
+    /// Sends `frame` to every target; the first error. A frame that differs from the one
+    /// last sent goes out [`REPEATS`] times more at the fade step.
     fn send(&mut self, t: Targets, frame: [u8; DMX_CHANNELS], now: Instant) -> Result<(), String> {
         let a = t.artnet.map_or(Ok(()), |a| {
             self.artnet.send(a.addr, a.universe, &frame, now)
         });
         let s = t.sacn.map_or(Ok(()), |s| self.sacn.send(&s, &frame));
         let r = a.and(s);
+        self.repeats = if self.sent == Some(frame) {
+            self.repeats.saturating_sub(1)
+        } else {
+            REPEATS
+        };
         self.sent = Some(frame);
-        let next = if self.fade.is_some() {
+        self.schedule(now);
+        r
+    }
+
+    /// The next frame: a fade step or a repeat at the fade step, else the keepalive.
+    fn schedule(&mut self, now: Instant) {
+        let next = if self.fade.is_some() || self.repeats > 0 {
             FADE_STEP
         } else {
             KEEPALIVE
         };
         self.next_keepalive = Some(now + next);
-        r
+    }
+
+    /// The next fade step, repeat or keepalive, when due; whether a frame went out.
+    fn tick(&mut self, t: Targets, now: Instant) -> bool {
+        if self.next_keepalive.is_none_or(|at| at > now) {
+            return false;
+        }
+        let f = match self.fade {
+            Some(fade) => {
+                let (f, ended) = fade.at(now);
+                if ended {
+                    self.fade = None;
+                }
+                f
+            }
+            None => self.sent.unwrap_or(self.cue_frame),
+        };
+        // Counted and kept in the status; nothing else to do with a lost datagram.
+        let _ = self.send(t, f, now);
+        true
     }
 
     /// Sends `frame` at once, ending any fade.
@@ -292,19 +333,7 @@ impl Control {
         if !targets.any() {
             return;
         }
-        let u = &mut self.rig.artnet;
-        if u.next_keepalive.is_some_and(|t| t <= now) {
-            let f = match u.fade {
-                Some(fade) => {
-                    let (f, ended) = fade.at(now);
-                    if ended {
-                        u.fade = None;
-                    }
-                    f
-                }
-                None => u.sent.unwrap_or(u.cue_frame),
-            };
-            let _ = u.send(targets, f, now);
+        if self.rig.artnet.tick(targets, now) {
             self.commit_dmx_status(false);
         }
     }
@@ -361,6 +390,9 @@ impl Control {
         let u = &mut self.rig.artnet;
         if others_before && let Some(f) = u.output(now) {
             let _ = u.send(targets, f, now);
+            // The new target gets the frame as if it had changed.
+            u.repeats = REPEATS;
+            u.schedule(now);
         } else {
             u.sent = None;
             u.fade = None;
@@ -566,7 +598,11 @@ mod tests {
         u.go_to_cue(target, Duration::ZERO, t1);
         assert!(u.fade.is_none());
         assert_eq!(u.sent, Some(u.cue_frame));
-        assert_eq!(u.next_keepalive, Some(t1 + KEEPALIVE));
+        assert_eq!(
+            u.next_keepalive,
+            Some(t1 + FADE_STEP),
+            "a jump repeats at the fade step"
+        );
         // The cue frame coming back after a test frame jumps too.
         u.snap(target, [9; DMX_CHANNELS], t1).expect("loopback");
         u.after_test = true;
@@ -600,7 +636,65 @@ mod tests {
         u.go_to_cue(target, Duration::from_secs(1), t0);
         assert!(u.fade.is_none());
         assert_eq!(u.sent.map(|f| (f[0], f[1])), Some((0, 200)));
-        assert_eq!(u.next_keepalive, Some(t0 + KEEPALIVE));
+        assert_eq!(u.next_keepalive, Some(t0 + FADE_STEP));
+    }
+
+    #[test]
+    fn a_changed_frame_goes_out_three_times_then_at_the_keepalive() {
+        let node = std::net::UdpSocket::bind("127.0.0.1:0").expect("test value");
+        node.set_nonblocking(true).expect("test value");
+        let target = Targets {
+            artnet: Some(ArtnetTarget {
+                addr: node.local_addr().expect("test value"),
+                universe: ac2_proto::model::PortAddress::new(1).expect("test value"),
+            }),
+            sacn: None,
+        };
+        let mut buf = [0u8; 600];
+        // Every frame sent arrives before the call returns: loopback queues it at once.
+        let mut drain = || {
+            let mut got = Vec::new();
+            while let Ok(n) = node.recv(&mut buf) {
+                got.push(buf[18..n].to_vec());
+            }
+            got
+        };
+        let ms = |t: Instant, n: u64| t + Duration::from_millis(n);
+        let t0 = Instant::now();
+        let mut u = universe();
+        // A jump: sent, then twice more a fade step apart, then the keepalive.
+        u.cue_frame[0] = 200;
+        u.go_to_cue(target, Duration::ZERO, t0);
+        assert!(!u.tick(target, ms(t0, 24)));
+        assert!(u.tick(target, ms(t0, 25)));
+        assert!(u.tick(target, ms(t0, 50)));
+        assert_eq!(u.next_keepalive, Some(ms(t0, 50) + KEEPALIVE));
+        assert!(!u.tick(target, ms(t0, 75)));
+        assert!(u.tick(target, ms(t0, 50) + KEEPALIVE));
+        let got = drain();
+        assert_eq!(got.len(), 4);
+        assert!(got.iter().all(|f| f[0] == 200));
+        // A fade: every step goes out, the end three times, then the keepalive.
+        let t1 = ms(t0, 2000);
+        u.cue_frame[0] = 0;
+        u.go_to_cue(target, Duration::from_millis(100), t1);
+        let mut t = t1;
+        while u.fade.is_some() {
+            t += FADE_STEP;
+            assert!(u.tick(target, t));
+        }
+        assert!(u.tick(target, t + FADE_STEP));
+        assert!(u.tick(target, t + FADE_STEP * 2));
+        assert_eq!(u.next_keepalive, Some(t + FADE_STEP * 2 + KEEPALIVE));
+        let got = drain();
+        let ends = got.iter().rev().take_while(|f| f[0] == 0).count();
+        assert_eq!(
+            ends,
+            3,
+            "{:?}",
+            got.iter().map(|f| f[0]).collect::<Vec<_>>()
+        );
+        assert!(got.len() > 3, "the fade's steps went out");
     }
 
     #[test]

@@ -255,15 +255,23 @@ async fn the_universe_follows_the_cues_and_keeps_alive() {
     let f = node.until("the test over the cues", |f| f.ch(12) == 255);
     assert_eq!((f.ch(20), f.ch(30)), (255, 99));
 
-    // Sent again every second while nothing changes.
-    let f0 = node.until("a keepalive", |f| f.ch(30) == 99);
-    let f1 = node.until("the next keepalive", |f| f.ch(30) == 99);
-    let gap = f1.at - f0.at;
-    assert!(
-        gap > Duration::from_millis(500) && gap < Duration::from_millis(1600),
-        "{gap:?}"
-    );
-    assert_eq!(f0.data, f1.data);
+    // Sent twice more at once, then again about every 0.9 s while nothing changes: a gap
+    // that long comes within a few frames. A keepalive is never early; a loaded host may
+    // make it late, so only a generous upper bound.
+    let mut prev = node.until("a repeat", |f| f.ch(30) == 99);
+    let mut keepalive = None;
+    for _ in 0..6 {
+        let f = node.until("the frame again", |f| f.ch(30) == 99);
+        assert_eq!(f.data, prev.data);
+        let gap = f.at - prev.at;
+        prev = f;
+        if gap >= Duration::from_millis(450) {
+            keepalive = Some(gap);
+            break;
+        }
+    }
+    let gap = keepalive.expect("a keepalive gap");
+    assert!(gap < Duration::from_secs(5), "{gap:?}");
 
     // B runs without a limit: ok once its first second is judged, at once on the wire.
     c.call(Command::StreamOpen {

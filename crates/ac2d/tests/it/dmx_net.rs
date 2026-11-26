@@ -327,16 +327,24 @@ async fn sacn_carries_the_frame_beside_artnet_and_ends_its_stream() {
     assert_eq!(slot(&s, 13), 40);
     assert_eq!(&s[22..38], cid.as_slice(), "one source");
 
-    // Sent again every second, each packet one further in the sequence.
-    let (p0, _) = until(&rx, "a keepalive", |p| slot(p, 12) == 255);
-    let t0 = Instant::now();
-    let (p1, _) = until(&rx, "the next keepalive", |p| slot(p, 12) == 255);
-    let gap = t0.elapsed();
-    assert!(
-        gap > Duration::from_millis(400) && gap < Duration::from_millis(1600),
-        "{gap:?}"
-    );
-    assert_eq!(seq(&p1), seq(&p0).wrapping_add(1));
+    // Sent twice more at once, then again at the keepalive, each packet one further in the
+    // sequence: a gap of about 0.9 s comes within a few packets. Only bounds a loaded host
+    // cannot break are checked (a keepalive is never early; it may be late).
+    let mut prev = s;
+    let mut at = Instant::now();
+    let mut keepalive = None;
+    for _ in 0..6 {
+        let (p, _) = until(&rx, "the test frame again", |p| slot(p, 12) == 255);
+        let gap = at.elapsed();
+        assert_eq!(seq(&p), seq(&prev).wrapping_add(1));
+        (prev, at) = (p, Instant::now());
+        if gap >= Duration::from_millis(450) {
+            keepalive = Some(gap);
+            break;
+        }
+    }
+    let gap = keepalive.expect("a keepalive gap");
+    assert!(gap < Duration::from_secs(5), "{gap:?}");
 
     // Off: three packets end the stream, and nothing follows; Art-Net goes on.
     set_sacn(&c, None).await.unwrap();

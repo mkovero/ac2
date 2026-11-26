@@ -212,6 +212,11 @@ impl SacnSender {
         // A receiver orders packets by the sequence and drops one that goes backwards; a
         // lost datagram still uses its number.
         self.sequence = self.sequence.wrapping_add(1);
+        if r.is_err() {
+            // A socket set up for an interface that went away or changed its address fails
+            // every send: the next packet sets up a new one.
+            self.socket = None;
+        }
         match &r {
             Ok(()) => {
                 self.status.sent += 1;
@@ -243,6 +248,7 @@ fn open_error(dest: SacnDest, e: &io::Error) -> String {
 /// A UDP socket on `bind` (a port the system picks) set up for `dest`.
 fn socket(bind: Ipv4Addr, dest: SacnDest) -> io::Result<Socket> {
     let s = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    super::nonblocking_on_windows(&s)?;
     if let SacnDest::Multicast { interface } = dest {
         s.set_multicast_if_v4(&interface)?;
         s.set_multicast_ttl_v4(MULTICAST_TTL)?;
@@ -367,6 +373,32 @@ mod tests {
         s.send(&t, &frame).expect("test value");
         rx.recv(&mut buf).expect("test value");
         assert_eq!((buf[111], s.sequence), (255, 0));
+    }
+
+    #[test]
+    fn a_failed_send_sets_up_a_new_socket_for_the_next() {
+        let rx = UdpSocket::bind("127.0.0.1:0").expect("test value");
+        rx.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .expect("test value");
+        let ports = DmxPorts {
+            sacn_port: rx.local_addr().expect("test value").port(),
+            ..DmxPorts::LOOPBACK
+        };
+        let mut s = SacnSender::new(ports, RigId(3), "rig");
+        let t = target(Ipv4Addr::LOCALHOST, 1, 100);
+        let frame = [0u8; DMX_CHANNELS];
+        // A socket that cannot send there, as one whose interface went away: an IPv6-only
+        // socket refuses every IPv4 destination.
+        let broken = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)).expect("v6");
+        broken.set_only_v6(true).expect("v6 only");
+        s.socket = Some((broken, t.dest));
+        assert!(s.send(&t, &frame).is_err());
+        assert!(s.status().last_error.is_some());
+        assert!(s.socket.is_none(), "the failed socket is dropped");
+        s.send(&t, &frame).expect("a new socket");
+        let mut buf = [0u8; 700];
+        assert_eq!(rx.recv(&mut buf).expect("test value"), PACKET_LEN);
+        assert_eq!(s.status().last_error, None);
     }
 
     #[test]
