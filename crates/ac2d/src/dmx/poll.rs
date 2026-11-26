@@ -22,12 +22,13 @@
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac2_proto::model::PortAddress;
+use socket2::SockRef;
 
 /// The Art-Net packet ID: "Art-Net" and a NUL (Art-Net 4, every packet's field 1).
 pub(super) const ID: [u8; 8] = *b"Art-Net\0";
@@ -68,8 +69,10 @@ const PER_SOURCE: Duration = Duration::from_secs(1);
 const REPLIES_PER_SECOND: usize = 8;
 
 /// Of [`REPLIES_PER_SECOND`], how many may go to sources not in the table: the rest stay
-/// for the consoles already answered, so a flood of new (spoofed) sources cannot starve
-/// a console that polls every 2.5–3 s.
+/// for the consoles already answered, so polls from sources never seen before, however
+/// many, cannot starve a console in the table that polls every 2.5–3 s. Polls spoofed from
+/// addresses already in the table are not held back by this and can spend the whole total
+/// (see the module's notes).
 const NEW_PER_SECOND: usize = 4;
 
 /// Sources remembered; past that the one answered longest ago is forgotten. A console
@@ -85,8 +88,7 @@ const RECV_BUF: usize = 2048;
 const _: () = assert!(RECV_BUF > 42 + 2 * 512);
 
 /// Read errors in a row after which the thread pauses for [`WAKE`] before reading again:
-/// an error that repeats at once must not spin a core, while a single one (an ICMP report
-/// of an earlier send, on Windows) costs no wait.
+/// an error that repeats at once must not spin a core, while a single one costs no wait.
 const ERRORS_BEFORE_PAUSE: u32 = 16;
 
 /// How long the thread waits for a datagram before it looks whether it should stop.
@@ -97,8 +99,9 @@ const WAKE: Duration = Duration::from_millis(250);
 /// [`WAKE`] ends its wait.
 const STOP_WAIT: Duration = Duration::from_millis(500);
 
-/// How old the list of the host's directed broadcast addresses may get: interfaces come
-/// and go rarely, and the list is read again on Art-Net's own retry period.
+/// How old the list of the host's directed broadcast addresses may get before a poll
+/// arriving has it read again: interfaces come and go rarely, and Art-Net's own retry
+/// period is the rig's pace for noticing what changed on the host.
 const BROADCASTS_FOR: Duration = super::artnet::RETRY;
 
 /// An ArtPoll's request, as far as a reply depends on it.
@@ -303,9 +306,10 @@ pub(super) fn answers(
     limiter.allow(from, now)
 }
 
-/// The listener thread's handle. Dropping it stops the thread and waits until the thread
-/// has dropped its handle of the socket (at most [`STOP_WAIT`]): a handle left open holds
-/// the port, and the target set again at once would find it taken by the rig itself.
+/// The listener thread's handle. [`Listener::stop`] (and dropping it) stops the thread and
+/// waits until the thread has dropped its handle of the socket (at most [`STOP_WAIT`]): a
+/// handle left open holds the port, and the target set again at once would find it taken
+/// by the rig itself.
 #[derive(Debug)]
 pub(super) struct Listener {
     stop: Arc<AtomicBool>,
@@ -314,32 +318,45 @@ pub(super) struct Listener {
     wake: UdpSocket,
     /// Where that datagram goes: the socket's own address, on loopback when it is bound to
     /// every interface.
-    wake_to: SocketAddr,
+    wake_to: SocketAddrV4,
+    /// The thread, until it is stopped.
+    thread: Option<Closing>,
+}
+
+/// A listener thread told to stop: whether it has let go of the socket yet.
+#[derive(Debug)]
+pub(super) struct Closing {
     /// Signalled when the thread has dropped its socket (disconnected if it panicked).
     done: Receiver<()>,
     thread: Option<JoinHandle<()>>,
 }
 
-impl Drop for Listener {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(t) = &self.thread {
-            t.thread().unpark();
-        }
-        // Read as no ArtPoll; it only ends the thread's wait for a datagram.
-        let _ = self.wake.send_to(&[], self.wake_to);
-        match self.done.recv_timeout(STOP_WAIT) {
-            Ok(()) | Err(RecvTimeoutError::Disconnected) => {
+impl Closing {
+    /// Whether the thread has let go of the socket; it is joined once it has.
+    pub(super) fn ended(&mut self) -> bool {
+        match self.done.try_recv() {
+            Ok(()) | Err(TryRecvError::Disconnected) => {
                 if let Some(t) = self.thread.take() {
                     let _ = t.join();
                 }
+                true
             }
-            Err(RecvTimeoutError::Timeout) => tracing::warn!(
-                "artnet: the ArtPoll listener did not stop within {STOP_WAIT:?}: {} stays \
-                 held until it does",
-                self.wake_to
-            ),
+            Err(TryRecvError::Empty) => false,
         }
+    }
+
+    /// One that ends when the returned sender sends or is dropped.
+    #[cfg(test)]
+    pub(super) fn pending() -> (mpsc::Sender<()>, Self) {
+        let (tx, done) = mpsc::channel();
+        (tx, Self { done, thread: None })
+    }
+}
+
+impl Drop for Listener {
+    fn drop(&mut self) {
+        // Nothing is left to ask later whether it has ended: the warning in `stop` says it.
+        let _ = self.stop();
     }
 }
 
@@ -353,9 +370,12 @@ impl Listener {
         let wake = socket.try_clone()?;
         let wake_to = match socket.local_addr()? {
             SocketAddr::V4(a) if a.ip().is_unspecified() => {
-                SocketAddr::from((Ipv4Addr::LOCALHOST, a.port()))
+                SocketAddrV4::new(Ipv4Addr::LOCALHOST, a.port())
             }
-            a => a,
+            SocketAddr::V4(a) => a,
+            SocketAddr::V6(a) => {
+                return Err(io::Error::other(format!("{a}: Art-Net is IPv4 only")));
+            }
         };
         let stop = Arc::new(AtomicBool::new(false));
         let info = Arc::new(Mutex::new(info));
@@ -373,8 +393,10 @@ impl Listener {
             info,
             wake,
             wake_to,
-            done,
-            thread: Some(thread),
+            thread: Some(Closing {
+                done,
+                thread: Some(thread),
+            }),
         })
     }
 
@@ -385,6 +407,113 @@ impl Listener {
             .unwrap_or_else(PoisonError::into_inner)
             .universe = u;
     }
+
+    /// Stops the thread and waits up to [`STOP_WAIT`] for it to let go of the socket; the
+    /// thread when it has not by then, still holding the port.
+    pub(super) fn stop(&mut self) -> Option<Closing> {
+        let mut c = self.thread.take()?;
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = &c.thread {
+            t.thread().unpark();
+        }
+        // Read as no ArtPoll; it only ends the thread's wait for a datagram. Not waited
+        // for: a full send buffer leaves the thread's own WAKE to end the wait.
+        let _ = super::send_nowait(&SockRef::from(&self.wake), &[], self.wake_to);
+        match c.done.recv_timeout(STOP_WAIT) {
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => {
+                if let Some(t) = c.thread.take() {
+                    let _ = t.join();
+                }
+                None
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                tracing::warn!(
+                    "artnet: the ArtPoll listener did not stop within {STOP_WAIT:?}: {} stays \
+                     held until it does",
+                    self.wake_to
+                );
+                Some(c)
+            }
+        }
+    }
+}
+
+/// What a failed read means to the listener.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReadFailure {
+    /// The wait for a datagram ended with none.
+    Idle,
+    /// The system reporting an ICMP error for an earlier send (Winsock returns a port
+    /// unreachable as WSAECONNRESET on the next read): about a datagram already gone, once
+    /// per report, so it says nothing about this socket and never pauses the reads. A
+    /// frame target with nothing listening draws one per frame.
+    SendReport,
+    /// Anything else; one that repeats at once must not spin a core.
+    Fault,
+}
+
+fn read_failure(e: &io::Error) -> ReadFailure {
+    match e.kind() {
+        // The read timeout. Not on Windows: there the wait said a datagram was ready, and
+        // a socket in an error state that a read does not clear says so at once every time.
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut if !cfg!(windows) => ReadFailure::Idle,
+        io::ErrorKind::ConnectionReset => ReadFailure::SendReport,
+        _ => ReadFailure::Fault,
+    }
+}
+
+/// The host's directed broadcast addresses, read again when a poll arrives and the list is
+/// [`BROADCASTS_FOR`] old.
+#[derive(Debug)]
+struct Broadcasts {
+    list: Vec<Ipv4Addr>,
+    at: Instant,
+    /// The latest error the system gave when asked, said once until another or a success.
+    error: Option<String>,
+}
+
+impl Broadcasts {
+    fn new(r: io::Result<Vec<Ipv4Addr>>, now: Instant) -> Self {
+        let mut b = Self {
+            list: Vec::new(),
+            at: now,
+            error: None,
+        };
+        b.take(r, now);
+        b
+    }
+
+    /// Reads the list again through `read` when it is due.
+    fn refresh(&mut self, now: Instant, read: impl FnOnce() -> io::Result<Vec<Ipv4Addr>>) {
+        if now.saturating_duration_since(self.at) >= BROADCASTS_FOR {
+            self.take(read(), now);
+        }
+    }
+
+    /// Takes a new reading; a failed one keeps the list last read (an interface that was
+    /// there is likely still there). Whether an error was logged.
+    fn take(&mut self, r: io::Result<Vec<Ipv4Addr>>, now: Instant) -> bool {
+        self.at = now;
+        match r {
+            Ok(list) => {
+                self.list = list;
+                self.error = None;
+                false
+            }
+            Err(e) => {
+                let e = e.to_string();
+                let new = self.error.as_ref() != Some(&e);
+                if new {
+                    tracing::debug!(
+                        "artnet: cannot list the host's interfaces ({e}): polls from their \
+                         broadcast addresses are told apart by the list last read"
+                    );
+                }
+                self.error = Some(e);
+                new
+            }
+        }
+    }
 }
 
 fn listen(socket: &UdpSocket, reply_port: u16, stop: &AtomicBool, info: &Mutex<ReplyInfo>) {
@@ -392,7 +521,7 @@ fn listen(socket: &UdpSocket, reply_port: u16, stop: &AtomicBool, info: &Mutex<R
     let mut limiter = Limiter::default();
     let mut count: u16 = 0;
     let mut errors: u32 = 0;
-    let mut broadcasts = (local_broadcasts(), Instant::now());
+    let mut broadcasts = Broadcasts::new(super::local_broadcasts(), Instant::now());
     while !stop.load(Ordering::Relaxed) {
         #[cfg(windows)]
         match super::winsock::wait_readable(socket, WAKE) {
@@ -413,37 +542,25 @@ fn listen(socket: &UdpSocket, reply_port: u16, stop: &AtomicBool, info: &Mutex<R
                 }
             }
             Ok(_) => continue,
-            // The read timeout. Not on Windows: there the wait said a datagram was ready,
-            // and a socket in an error state that a read does not clear says so at once
-            // every time, so it counts as an error below.
-            Err(e)
-                if !cfg!(windows)
-                    && matches!(
-                        e.kind(),
-                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                    ) =>
-            {
-                continue;
-            }
-            Err(_) => {
-                errors += 1;
-                if errors >= ERRORS_BEFORE_PAUSE {
-                    errors = 0;
-                    std::thread::park_timeout(WAKE);
+            Err(e) => {
+                if read_failure(&e) == ReadFailure::Fault {
+                    errors += 1;
+                    if errors >= ERRORS_BEFORE_PAUSE {
+                        errors = 0;
+                        std::thread::park_timeout(WAKE);
+                    }
                 }
                 continue;
             }
         };
         let now = Instant::now();
-        if now.saturating_duration_since(broadcasts.1) >= BROADCASTS_FOR {
-            broadcasts = (local_broadcasts(), now);
-        }
+        broadcasts.refresh(now, super::local_broadcasts);
         let i = *info.lock().unwrap_or_else(PoisonError::into_inner);
         if !answers(
             poll,
             *from.ip(),
             i.universe,
-            &broadcasts.0,
+            &broadcasts.list,
             &mut limiter,
             now,
         ) {
@@ -454,28 +571,14 @@ fn listen(socket: &UdpSocket, reply_port: u16, stop: &AtomicBool, info: &Mutex<R
         };
         count = count.wrapping_add(1) % 10_000;
         let reply = encode_reply(ip, &i, count);
-        // Art-Net 4: ArtPollReply is unicast to the poller, never broadcast.
+        // Art-Net 4: ArtPollReply is unicast to the poller, never broadcast. Not waited
+        // for, like a frame: a full send buffer loses this reply, and the console polls
+        // again within seconds.
         let to = SocketAddrV4::new(*from.ip(), reply_port);
-        if let Err(e) = socket.send_to(&reply, to) {
+        if let Err(e) = super::send_nowait(&SockRef::from(socket), &reply, to) {
             tracing::debug!("artnet: cannot answer ArtPoll from {from}: {e}");
         }
     }
-}
-
-/// The directed broadcast address of each of the host's IPv4 interfaces (none for a /31 or
-/// /32, which has no broadcast address); empty when the system will not list them.
-fn local_broadcasts() -> Vec<Ipv4Addr> {
-    let Ok(all) = if_addrs::get_if_addrs() else {
-        return Vec::new();
-    };
-    all.into_iter()
-        .filter_map(|i| match i.addr {
-            if_addrs::IfAddr::V4(a) if a.prefixlen <= 30 => {
-                Some(Ipv4Addr::from(u32::from(a.ip) | !u32::from(a.netmask)))
-            }
-            _ => None,
-        })
-        .collect()
 }
 
 /// The rig's own address on the way to `peer`: the reply's IP field, which a console shows
@@ -737,7 +840,7 @@ mod tests {
     fn the_hosts_directed_broadcasts_are_listed() {
         // Loopback is a /8 on every system that lists it: its directed broadcast is
         // 127.255.255.255, never one of the host's own addresses.
-        let b = local_broadcasts();
+        let b = super::super::local_broadcasts().expect("interfaces");
         assert!(!b.contains(&Ipv4Addr::LOCALHOST), "{b:?}");
         let all = if_addrs::get_if_addrs().expect("interfaces");
         for i in all {
@@ -756,7 +859,7 @@ mod tests {
         // Room for the whole flood, so the poll after it is not dropped on a small default
         // buffer.
         socket2::SockRef::from(&rig)
-            .set_recv_buffer_size(1 << 20)
+            .set_recv_buffer_size(1 << 21)
             .expect("test value");
         let poller = UdpSocket::bind("127.0.0.1:0").expect("test value");
         poller
@@ -769,7 +872,7 @@ mod tests {
         dmx[..8].copy_from_slice(&ID);
         dmx[8..10].copy_from_slice(&[0x00, 0x50]);
         let firmware = [0x33u8; 1066];
-        for _ in 0..50 {
+        for _ in 0..200 {
             poller.send_to(&dmx, to).expect("test value");
             poller.send_to(&firmware, to).expect("test value");
         }
@@ -782,11 +885,55 @@ mod tests {
         let mut buf = [0u8; 300];
         let n = poller.recv(&mut buf).expect("a reply");
         assert_eq!(n, REPLY_LEN);
-        // A read that paused per foreign datagram would take a second for these 100.
+        // A read that paused even 10 ms per foreign datagram would take 4 s for these 400;
+        // the bound leaves a loaded runner its stalls.
+        assert!(t0.elapsed() < Duration::from_secs(3), "{:?}", t0.elapsed());
+    }
+
+    #[test]
+    fn a_report_of_an_earlier_send_never_pauses_the_reads() {
+        // Winsock's word for an ICMP port unreachable that an earlier send drew: one per
+        // report, however many come.
+        let reset = io::Error::from(io::ErrorKind::ConnectionReset);
+        assert_eq!(read_failure(&reset), ReadFailure::SendReport);
+        for kind in [
+            io::ErrorKind::PermissionDenied,
+            io::ErrorKind::InvalidInput,
+            io::ErrorKind::Other,
+        ] {
+            assert_eq!(read_failure(&io::Error::from(kind)), ReadFailure::Fault);
+        }
+        let timeout = read_failure(&io::Error::from(io::ErrorKind::WouldBlock));
+        if cfg!(windows) {
+            assert_eq!(timeout, ReadFailure::Fault);
+        } else {
+            assert_eq!(timeout, ReadFailure::Idle);
+        }
+    }
+
+    #[test]
+    fn a_failed_interface_list_is_said_once_per_error_and_keeps_the_last() {
+        let t0 = Instant::now();
+        let lan = vec![Ipv4Addr::new(192, 168, 1, 255)];
+        let mut b = Broadcasts::new(Ok(lan.clone()), t0);
+        let fail = |what: &str| Err(io::Error::other(what.to_owned()));
+        assert!(b.take(fail("no netlink"), t0));
+        assert!(!b.take(fail("no netlink"), t0), "the same error again");
+        assert_eq!(b.list, lan, "the list last read stays");
+        assert!(b.take(fail("out of memory"), t0), "another error");
+        assert!(!b.take(Ok(lan.clone()), t0));
         assert!(
-            t0.elapsed() < Duration::from_millis(900),
-            "{:?}",
-            t0.elapsed()
+            b.take(fail("no netlink"), t0),
+            "failing again after a success"
         );
+        // Read again only when the list is due.
+        let mut read = false;
+        b.refresh(t0 + BROADCASTS_FOR / 2, || {
+            read = true;
+            Ok(Vec::new())
+        });
+        assert!(!read);
+        b.refresh(t0 + BROADCASTS_FOR, || Ok(Vec::new()));
+        assert!(b.list.is_empty() && b.error.is_none());
     }
 }

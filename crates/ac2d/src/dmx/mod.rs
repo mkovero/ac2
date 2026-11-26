@@ -147,6 +147,20 @@ mod winsock {
     }
 }
 
+/// The directed broadcast address of each of the host's IPv4 interfaces (none for a /31 or
+/// /32, which has no broadcast address).
+fn local_broadcasts() -> io::Result<Vec<Ipv4Addr>> {
+    Ok(if_addrs::get_if_addrs()?
+        .into_iter()
+        .filter_map(|i| match i.addr {
+            if_addrs::IfAddr::V4(a) if a.prefixlen <= 30 => {
+                Some(Ipv4Addr::from(u32::from(a.ip) | !u32::from(a.netmask)))
+            }
+            _ => None,
+        })
+        .collect())
+}
+
 /// `text` in a fixed field of `N` bytes, NUL-terminated: cut at a character boundary to at
 /// most `N - 1` bytes, every character outside printable ASCII written as `?` when `ascii`.
 fn fixed_text<const N: usize>(text: &str, ascii: bool) -> [u8; N] {

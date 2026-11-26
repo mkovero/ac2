@@ -36,12 +36,17 @@ use ac2_proto::model::{ArtnetBindFailure, ArtnetSocket, DMX_CHANNELS, OutputStat
 use socket2::{Domain, Protocol, Socket, Type};
 
 use super::DmxPorts;
-use super::poll::{ID, Listener, ReplyInfo};
+use super::poll::{Closing, ID, Listener, ReplyInfo};
 
 /// How often a socket not on Art-Net's port tries to bind it again: the program holding
 /// it may have quit, and a rig left running all season should come back to conforming on
 /// its own.
 pub(crate) const RETRY: Duration = Duration::from_secs(30);
+
+/// How soon Art-Net's port is tried again while the daemon's own ArtPoll listener, told to
+/// stop, still holds it: the thread wakes every quarter second to look whether to stop, so
+/// it lets go within about that.
+const CLOSING_RETRY: Duration = Duration::from_secs(1);
 
 /// Bytes of an ArtDmx packet carrying a whole universe: an 18-byte header, then the data.
 pub(crate) const PACKET_LEN: usize = 18 + DMX_CHANNELS;
@@ -75,6 +80,8 @@ pub(crate) struct ArtnetSender {
     socket: Option<Socket>,
     /// Answers ArtPoll while the socket is on Art-Net's port.
     listener: Option<Listener>,
+    /// A listener stopped by [`Self::close`] that had not let go of the port by then.
+    closing: Option<Closing>,
     /// The universe the ArtPollReply names.
     universe: Option<PortAddress>,
     rig_name: String,
@@ -90,6 +97,7 @@ impl ArtnetSender {
             ports,
             socket: None,
             listener: None,
+            closing: None,
             universe: None,
             rig_name: rig_name.to_owned(),
             state: ArtnetSocket::Closed,
@@ -98,10 +106,10 @@ impl ArtnetSender {
         }
     }
 
-    /// Opens the socket unless it is open or failed to open (tried again by [`Self::retry`]):
-    /// on Art-Net's port, else on one the system picks. The state after it.
+    /// Opens the socket unless it is open or waits for a try (by [`Self::retry`]): on
+    /// Art-Net's port, else on one the system picks. The state after it.
     pub(crate) fn open(&mut self, now: Instant) -> &ArtnetSocket {
-        if self.socket.is_none() && !matches!(self.state, ArtnetSocket::CannotOpen { .. }) {
+        if self.socket.is_none() && self.retry_at.is_none() {
             self.open_now(now);
         }
         &self.state
@@ -123,13 +131,37 @@ impl ArtnetSender {
     fn open_now(&mut self, now: Instant) {
         match self.bind_conforming() {
             Ok(()) => self.retry_at = None,
+            // The rig's own listener still holds the port: no other program to name, and
+            // no port of the system's choice for the second it takes. The state stays as it
+            // was until the port is tried again.
+            Err(e) if port_taken(&e) && self.own_listener_closing() => {
+                tracing::debug!(
+                    "artnet: {} still held by the stopping ArtPoll listener; trying again in \
+                     {CLOSING_RETRY:?}",
+                    self.ports.artnet_bind
+                );
+                self.retry_at = Some(now + CLOSING_RETRY);
+            }
             Err(e) => self.bind_fallback(&e, now),
         }
     }
 
-    /// Closes the socket and stops answering ArtPoll; the port is free when it returns.
+    /// Whether a listener stopped earlier still holds the port.
+    fn own_listener_closing(&mut self) -> bool {
+        if self.closing.as_mut().is_some_and(|c| !c.ended()) {
+            return true;
+        }
+        self.closing = None;
+        false
+    }
+
+    /// Closes the socket and stops answering ArtPoll; the port is free when it returns,
+    /// unless the listener has not let go of it within its wait (then the port is tried
+    /// again soon, not at [`RETRY`]).
     pub(crate) fn close(&mut self) {
-        self.listener = None;
+        if let Some(c) = self.listener.take().and_then(|mut l| l.stop()) {
+            self.closing = Some(c);
+        }
         self.socket = None;
         self.retry_at = None;
         self.state = ArtnetSocket::Closed;
@@ -176,6 +208,8 @@ impl ArtnetSender {
         let listener = Listener::spawn(clone, self.ports.artnet_reply_port, info)?;
         self.socket = Some(s);
         self.listener = Some(listener);
+        // Bound alone: a listener stopped earlier has let go of the port.
+        self.closing = None;
         self.state = ArtnetSocket::Conforming;
         Ok(())
     }
@@ -243,6 +277,10 @@ impl ArtnetSender {
                 ArtnetSocket::CannotOpen { os_error } => {
                     format!("cannot open an Art-Net socket: {os_error}")
                 }
+                _ if self.closing.is_some() => format!(
+                    "no Art-Net socket: {} is still held by the stopping ArtPoll listener",
+                    self.ports.artnet_bind
+                ),
                 _ => "no Art-Net socket".to_owned(),
             }),
         };
@@ -429,8 +467,20 @@ mod tests {
         assert_eq!(s.retry_due(), None);
     }
 
+    /// Whether Linux lets a socket bind an address no interface has, which the tests that
+    /// need a bind to fail there cannot run with.
+    fn binds_any_address() -> bool {
+        cfg!(target_os = "linux")
+            && std::fs::read_to_string("/proc/sys/net/ipv4/ip_nonlocal_bind")
+                .is_ok_and(|v| v.trim() == "1")
+    }
+
     #[test]
     fn no_socket_at_all_is_said_and_tried_again_on_the_timer() {
+        if binds_any_address() {
+            eprintln!("skipped: net.ipv4.ip_nonlocal_bind is 1, so a bind to 192.0.2.77 opens");
+            return;
+        }
         // An address no interface of this host has (TEST-NET-1): neither Art-Net's port
         // nor any other can be bound there.
         let ports = DmxPorts {
@@ -465,6 +515,68 @@ mod tests {
         ));
         s.close();
         assert_eq!((s.state(), s.retry_due()), (&ArtnetSocket::Closed, None));
+    }
+
+    #[test]
+    fn a_port_its_own_stopping_listener_holds_is_tried_again_soon_and_blames_no_one() {
+        // The port as a listener thread that has not yet let go of it holds it.
+        let held = UdpSocket::bind("127.0.0.1:0").expect("test value");
+        let SocketAddr::V4(port) = held.local_addr().expect("test value") else {
+            panic!("v4");
+        };
+        let ports = DmxPorts {
+            artnet_bind: port,
+            ..DmxPorts::LOOPBACK
+        };
+        let mut s = ArtnetSender::new(ports, "rig");
+        let (ended, closing) = Closing::pending();
+        s.closing = Some(closing);
+        let t0 = Instant::now();
+        // Not another program's port: no fallback, and the state does not say taken.
+        assert_eq!(*s.open_for_target(t0), ArtnetSocket::Closed);
+        assert!(s.socket.is_none());
+        assert_eq!(s.retry_due(), Some(t0 + CLOSING_RETRY));
+        // A send before the try says why and tries nothing.
+        let to: SocketAddr = "127.0.0.1:9".parse().expect("test value");
+        let uni = PortAddress::new(1).expect("test value");
+        let e = s.send(to, uni, &[0; 512], t0).expect_err("no socket");
+        assert!(e.contains("still held"), "{e}");
+        assert_eq!(s.retry_due(), Some(t0 + CLOSING_RETRY));
+        // Still held at the try: tried again as soon.
+        assert!(!s.retry(t0 + CLOSING_RETRY));
+        assert_eq!(s.retry_due(), Some(t0 + CLOSING_RETRY * 2));
+        // The thread lets go: the next try binds the port.
+        drop(held);
+        drop(ended);
+        assert!(s.retry(t0 + CLOSING_RETRY * 2));
+        assert_eq!(*s.state(), ArtnetSocket::Conforming);
+        assert!(s.closing.is_none());
+    }
+
+    #[test]
+    fn a_port_held_after_its_own_listener_ended_is_taken_by_another() {
+        let held = UdpSocket::bind("127.0.0.1:0").expect("test value");
+        let SocketAddr::V4(port) = held.local_addr().expect("test value") else {
+            panic!("v4");
+        };
+        let ports = DmxPorts {
+            artnet_bind: port,
+            ..DmxPorts::LOOPBACK
+        };
+        let mut s = ArtnetSender::new(ports, "rig");
+        let (ended, closing) = Closing::pending();
+        s.closing = Some(closing);
+        ended.send(()).expect("test value");
+        let t0 = Instant::now();
+        assert!(matches!(
+            s.open_for_target(t0),
+            ArtnetSocket::NotConforming {
+                reason: ArtnetBindFailure::PortTaken,
+                ..
+            }
+        ));
+        assert_eq!(s.retry_due(), Some(t0 + RETRY));
+        assert!(s.closing.is_none());
     }
 
     #[test]
