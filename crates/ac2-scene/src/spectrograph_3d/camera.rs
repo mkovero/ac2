@@ -112,31 +112,59 @@ pub(super) fn normalize(a: V3) -> V3 {
     scale(a, 1.0 / dot(a, a).sqrt())
 }
 
-/// The skyline's box: the floor and the full height above it.
+/// What the camera frames: the skyline standing on the floor, or with a second channel
+/// mirrored below it ([`crate::primitives::SkylineMirror`]) the floor as a lake surface
+/// with a skyline on each side.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Stage {
+    #[default]
+    Floor,
+    Lake,
+}
+
+impl Stage {
+    /// The orbit target: a little above the floor's centre, where the spikes stand; on the
+    /// lake the floor itself, the line both halves meet on.
+    pub fn target(self) -> V3 {
+        match self {
+            Stage::Floor => TARGET,
+            Stage::Lake => [TARGET[0], 0.0, TARGET[2]],
+        }
+    }
+
+    /// The box the spikes fill: the floor and the full height above it, and on the lake the
+    /// full depth below it too.
+    pub(super) fn box_min(self) -> V3 {
+        match self {
+            Stage::Floor => BOX_MIN,
+            Stage::Lake => [BOX_MIN[0], -MAX_HEIGHT, BOX_MIN[2]],
+        }
+    }
+}
+
+/// The skyline's box above the floor.
 pub(super) const BOX_MIN: V3 = [-FLOOR_HALF_W, 0.0, 0.0];
 pub(super) const BOX_MAX: V3 = [FLOOR_HALF_W, MAX_HEIGHT, FLOOR_DEPTH];
 
-pub(super) fn box_corners() -> [V3; 8] {
+pub(super) fn box_corners(stage: Stage) -> [V3; 8] {
+    let lo = stage.box_min();
     let mut out = [[0.0; 3]; 8];
     for (i, c) in out.iter_mut().enumerate() {
         for (a, v) in c.iter_mut().enumerate() {
-            *v = if i & (1 << a) != 0 {
-                BOX_MAX[a]
-            } else {
-                BOX_MIN[a]
-            };
+            *v = if i & (1 << a) != 0 { BOX_MAX[a] } else { lo[a] };
         }
     }
     out
 }
 
 /// Distance along `dir` (unit) from the target to where the ray leaves the box.
-pub(super) fn exit_distance(dir: V3) -> f64 {
+pub(super) fn exit_distance(dir: V3, stage: Stage) -> f64 {
+    let (lo, t) = (stage.box_min(), stage.target());
     (0..3)
         .filter(|&a| dir[a] != 0.0)
         .map(|a| {
-            let bound = if dir[a] > 0.0 { BOX_MAX[a] } else { BOX_MIN[a] };
-            (bound - TARGET[a]) / dir[a]
+            let bound = if dir[a] > 0.0 { BOX_MAX[a] } else { lo[a] };
+            (bound - t[a]) / dir[a]
         })
         .fold(f64::INFINITY, f64::min)
 }
@@ -176,9 +204,16 @@ impl ViewProj {
 
 /// `shift` moves the picture up the plot by that much of its half-height (an off-axis
 /// lens: the pose and its perspective stay, only the frame slides).
-pub(super) fn view_proj_at(pose: Pose, distance: f64, aspect: f64, shift: f64) -> ViewProj {
-    let eye = add(TARGET, scale(pose.towards_eye(), distance));
-    let f = normalize(sub(TARGET, eye));
+pub(super) fn view_proj_at(
+    pose: Pose,
+    distance: f64,
+    aspect: f64,
+    shift: f64,
+    stage: Stage,
+) -> ViewProj {
+    let target = stage.target();
+    let eye = add(target, scale(pose.towards_eye(), distance));
+    let f = normalize(sub(target, eye));
     // Right-handed world seen with +x to the right of the screen when looking along +z:
     // right = up × forward.
     let r = normalize(cross([0.0, 1.0, 0.0], f));
@@ -200,9 +235,14 @@ pub(super) fn view_proj_at(pose: Pose, distance: f64, aspect: f64, shift: f64) -
 
 /// The box's lowest and highest corner in NDC y at `distance`, unshifted; `None` when a
 /// corner is behind the near plane.
-pub(super) fn box_y_extent(pose: Pose, distance: f64, aspect: f64) -> Option<(f64, f64)> {
-    let vp = view_proj_at(pose, distance, aspect, 0.0);
-    box_corners()
+pub(super) fn box_y_extent(
+    pose: Pose,
+    distance: f64,
+    aspect: f64,
+    stage: Stage,
+) -> Option<(f64, f64)> {
+    let vp = view_proj_at(pose, distance, aspect, 0.0, stage);
+    box_corners(stage)
         .iter()
         .try_fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
             let n = vp.ndc(*p)?;
@@ -217,15 +257,15 @@ pub(super) fn box_y_extent(pose: Pose, distance: f64, aspect: f64) -> Option<(f6
 /// once at the default: from above and aside the box's projected outline is another shape.
 /// The fit is continuous in the angles (each corner's distance to fit is), so a camera
 /// easing through an orbit dollies smoothly with it.
-pub fn fitted_distance(pose: Pose, aspect: f64) -> f64 {
+pub fn fitted_distance(pose: Pose, aspect: f64, stage: Stage) -> f64 {
     let pose = pose.clamped();
     let lim = 1.0 - FIT_MARGIN;
     let fits = |d: f64| {
-        let vp = view_proj_at(pose, d, aspect, 0.0);
-        box_corners()
+        let vp = view_proj_at(pose, d, aspect, 0.0, stage);
+        box_corners(stage)
             .iter()
             .all(|p| vp.ndc(*p).is_some_and(|n| n[0].abs() <= lim))
-            && box_y_extent(pose, d, aspect).is_some_and(|(lo, hi)| {
+            && box_y_extent(pose, d, aspect, stage).is_some_and(|(lo, hi)| {
                 // The lens shift centres the box but moves it at most half the plot.
                 let shift = (-(lo + hi) / 2.0).clamp(-SHIFT_MAX, SHIFT_MAX);
                 lo + shift >= -lim && hi + shift <= lim
@@ -250,7 +290,7 @@ pub(super) const SHIFT_MAX: f64 = 0.5;
 /// camera sees the floor as a thin strip under tall spikes, and with the orbit target in
 /// the middle of the floor the picture would sit high, a dead band under it. Taken at the
 /// zoom-0 distance, so a dolly scales the picture about the same point.
-pub fn lens_shift(pose: Pose, aspect: f64) -> f64 {
+pub fn lens_shift(pose: Pose, aspect: f64, stage: Stage) -> f64 {
     let pose = pose.clamped();
     let d = eye_distance(
         Pose {
@@ -258,32 +298,36 @@ pub fn lens_shift(pose: Pose, aspect: f64) -> f64 {
             ..pose
         },
         aspect,
+        stage,
     );
-    box_y_extent(pose, d, aspect).map_or(0.0, |(lo, hi)| {
+    box_y_extent(pose, d, aspect, stage).map_or(0.0, |(lo, hi)| {
         (-(lo + hi) / 2.0).clamp(-SHIFT_MAX, SHIFT_MAX)
     })
 }
 
 /// The eye's distance from the target: the dolly's, never inside the grown box. The stored
 /// zoom step is left as set; only the distance drawn is held off.
-pub fn eye_distance(pose: Pose, aspect: f64) -> f64 {
+pub fn eye_distance(pose: Pose, aspect: f64, stage: Stage) -> f64 {
     let pose = pose.clamped();
-    let dolly = fitted_distance(pose, aspect) * 2f64.powf(-pose.zoom_step / ZOOM_STEPS_PER_OCTAVE);
-    dolly.max(exit_distance(pose.towards_eye()) + EYE_CLEARANCE)
+    let dolly =
+        fitted_distance(pose, aspect, stage) * 2f64.powf(-pose.zoom_step / ZOOM_STEPS_PER_OCTAVE);
+    dolly.max(exit_distance(pose.towards_eye(), stage) + EYE_CLEARANCE)
 }
 
-/// The camera's view-projection for a plot of aspect `aspect`.
-pub fn view_proj(pose: Pose, aspect: f64) -> ViewProj {
+/// The camera's view-projection for a plot of aspect `aspect` framing `stage`.
+pub fn view_proj(pose: Pose, aspect: f64, stage: Stage) -> ViewProj {
     let pose = pose.clamped();
     view_proj_at(
         pose,
-        eye_distance(pose, aspect),
+        eye_distance(pose, aspect, stage),
         aspect,
-        lens_shift(pose, aspect),
+        lens_shift(pose, aspect, stage),
+        stage,
     )
 }
 
-/// Whether `eye` is outside the skyline's box grown by `margin`.
-pub fn outside_box(eye: V3, margin: f64) -> bool {
-    (0..3).any(|a| eye[a] < BOX_MIN[a] - margin || eye[a] > BOX_MAX[a] + margin)
+/// Whether `eye` is outside the skyline's box of `stage` grown by `margin`.
+pub fn outside_box(eye: V3, margin: f64, stage: Stage) -> bool {
+    let lo = stage.box_min();
+    (0..3).any(|a| eye[a] < lo[a] - margin || eye[a] > BOX_MAX[a] + margin)
 }

@@ -878,7 +878,8 @@ pub fn spectrograph_scene(
     // pane's legend. Over the
     // cursor's lines, as the plates are on every view.
     let legend = if alone {
-        legend_over(&mut c.overlay, traces, sg.map(|s| s.key), view, plot, theme)
+        let keys: Vec<_> = sg.map(|s| (s.key, None)).into_iter().collect();
+        legend_over(&mut c.overlay, traces, &keys, view, plot, theme)
     } else {
         None
     };

@@ -21,7 +21,8 @@ use crate::canvas::{self, Canvas, MARGINS, anchor, label};
 use crate::colormap;
 use crate::primitives::{
     Color, Colormap, Dash, FillPolygon, FillRect, HAlign, HeatmapColumn, Label, Polyline, Rect,
-    Scene, Skyline3d, SkylineGlow, SkylineId, SkylineLook, SkylineTier, Stroke, VAlign, Viewport,
+    Scene, Skyline3d, SkylineGlow, SkylineId, SkylineLook, SkylineMirror, SkylineTier, Stroke,
+    VAlign, Viewport,
 };
 use crate::spectrograph::SpectrographHistory;
 use crate::spectrum::{SpectrumTrace, offset_note};
@@ -34,10 +35,12 @@ type V3 = [f64; 3];
 
 mod camera;
 mod cursor;
+mod mirror;
 mod pick;
 mod points;
 mod scene;
 pub use camera::*;
+pub use mirror::{MIRRORED, Mirror3dInput};
 pub use pick::{PICK_PX, PickFrame, Picked, Pointer3d, cell_at, col_hz, pick, row_age};
 pub use points::PeakPoint3d;
 pub use scene::*;

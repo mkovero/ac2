@@ -19,7 +19,8 @@ struct Sky {
     clip: vec4<f32>,
     // The eye; w: the floor's nearest depth along the view (its nearest corner's clip w).
     eye: vec4<f32>,
-    // Floor half width, depth, full height.
+    // Floor half width, depth, full height; w: which way the spikes grow from the floor,
+    // 1 up, −1 down (the channel mirrored below it).
     world: vec4<f32>,
     // Levels at height 0 and full height.
     range: vec2<f32>,
@@ -148,7 +149,7 @@ fn spike(vi: u32, ii: u32, size: vec2<f32>, scale: f32) -> SpikeOut {
     let z = (f32(j) + sky.phase + off.y) * depth / f32(sky.rows);
     let foot = vec3<f32>(x, 0.0, z);
     let f = to_target(foot, size);
-    let t = to_target(vec3<f32>(x, sky.world.z * h, z), size);
+    let t = to_target(vec3<f32>(x, sky.world.z * sky.world.w * h, z), size);
     let nb = to_target(vec3<f32>(x + pitch, 0.0, z), size);
     if (f.z <= 1e-3 || t.z <= 1e-3 || nb.z <= 1e-3) {
         return out;

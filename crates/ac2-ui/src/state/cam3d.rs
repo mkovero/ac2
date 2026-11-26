@@ -72,8 +72,9 @@ impl CamNav {
 }
 
 /// The commands the 3D view takes over: the frequency axis's navigation keys move the
-/// camera, and the cursor's steps and compare do nothing (the cursor is put by a click on a
-/// spike, and there is no compared curve in 3D). The cursor's toggle stays its own.
+/// camera, and the cursor's steps do nothing (the cursor is put by a click on a spike).
+/// The cursor's toggle stays its own, and compare (C) its own: the first spectrum compared
+/// hangs mirrored below the floor.
 pub(super) fn is_nav(c: CommandId) -> bool {
     use CommandId as C;
     matches!(
@@ -87,7 +88,6 @@ pub(super) fn is_nav(c: CommandId) -> bool {
             | C::TiltDown
             | C::CursorLeft
             | C::CursorRight
-            | C::Compare
     )
 }
 
@@ -184,7 +184,7 @@ impl AppState {
             C::ZoomIn => spectrograph_3d::step(now, 0, 0, ZOOM_KEY_STEPS),
             C::ZoomOut => spectrograph_3d::step(now, 0, 0, -ZOOM_KEY_STEPS),
             C::ResetView => SpectrumCamera::DEFAULT,
-            // No cursor and no compared curves in 3D.
+            // No cursor steps in 3D.
             _ => return,
         };
         if next != now {

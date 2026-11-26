@@ -89,7 +89,7 @@ impl crate::App {
             full = crate::scenes::spectrograph_3d(
                 st,
                 req.pane,
-                &mut ac2_scene::spectrograph_3d::Skyline::default(),
+                &mut crate::scenes::PaneSkylines::default(),
                 (ac2_scene::primitives::SkylineTier::Full, false),
                 // An export is a documented picture: its axes are read, not revealed, and
                 // its rows stand where the data puts them.

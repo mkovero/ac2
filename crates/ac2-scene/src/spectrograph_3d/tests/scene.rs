@@ -60,6 +60,7 @@ fn scene_3d_as(
         tier_forced: forced,
         axes,
         lead_slots: 0.0,
+        mirror: None,
     };
     spectrograph_3d_scene(
         &[],
@@ -144,6 +145,7 @@ fn labels_stay_whole_inside_the_field() {
                 tier_forced: false,
                 axes: 1.0,
                 lead_slots: 0.0,
+                mirror: None,
             };
             let s = spectrograph_3d_scene(
                 &[],
@@ -424,6 +426,7 @@ fn heights_follow_the_range_and_offset() {
         tier_forced: false,
         axes: 1.0,
         lead_slots: 0.0,
+        mirror: None,
     };
     let s = spectrograph_3d_scene(
         &[],
@@ -580,8 +583,8 @@ fn the_box_fits_at_zoom_zero_from_every_angle() {
                     pitch_deg: f64::from(pitch),
                     zoom_step: 0.0,
                 };
-                let vp = view_proj(pose, aspect);
-                for p in box_corners() {
+                let vp = view_proj(pose, aspect, Stage::Floor);
+                for p in box_corners(Stage::Floor) {
                     let n = vp.ndc(p).expect("in front of the eye");
                     assert!(
                         n[0].abs() <= lim && n[1].abs() <= lim,
@@ -599,6 +602,7 @@ fn the_box_fits_at_zoom_zero_from_every_angle() {
             zoom_step: 0.0,
         },
         1.78,
+        Stage::Floor,
     );
     for x in [-FLOOR_HALF_W, FLOOR_HALF_W] {
         let n = vp.ndc([x, 0.0, 0.0]).expect("front corner");
@@ -618,6 +622,7 @@ fn the_fit_moves_smoothly_through_an_orbit() {
                 zoom_step: 0.0,
             },
             1.78,
+            Stage::Floor,
         )
     };
     for pitch in [2.0, 8.0, 30.0, 75.0] {
@@ -648,6 +653,6 @@ fn the_fit_moves_smoothly_through_an_orbit() {
         zoom_step: 2.0,
         ..pose
     };
-    let r = eye_distance(near, 1.78) / fitted_distance(pose, 1.78);
+    let r = eye_distance(near, 1.78, Stage::Floor) / fitted_distance(pose, 1.78, Stage::Floor);
     assert!((r - 2f64.powf(-0.25)).abs() < 1e-9);
 }

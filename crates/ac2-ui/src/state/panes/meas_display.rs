@@ -184,6 +184,32 @@ impl AppState {
             .collect()
     }
 
+    /// The measurement spectrum pane `pane`'s 3D spectrograph mirrors below its floor: the
+    /// first live spectrum compared into the pane's measurement (C), in compare order, whose
+    /// spectrograph history is folded over the same span as the pane's own; `None` draws the
+    /// pane's measurement alone.
+    pub fn lake_mirror(&self, pane: PaneId) -> Option<&Measurement> {
+        let own = self
+            .pane_meas(pane)
+            .filter(|m| crate::state::spectrum_stream(m).is_some())?;
+        let span = self.display_of(own).spectrograph_span_s;
+        let ms = self.measurements();
+        self.compared_into(pane).into_iter().find_map(|e| {
+            ms.iter().copied().find(|m| {
+                self.entry_brings(e, EntryRef::Live { meas: m.id })
+                    && self.live_compared_on(PaneKind::Spectrum, m, pane)
+                    && crate::state::spectrum_stream(m).is_some()
+                    && self.display_of(m).spectrograph_span_s == span
+                    && self
+                        .rig
+                        .folded
+                        .spectrographs
+                        .get(&m.id)
+                        .is_some_and(|h| h.span_s() == span)
+            })
+        })
+    }
+
     /// The group measurement `id` draws: its own, or a math trace's owner's.
     fn group_meas(&self, id: MeasId) -> Option<MeasId> {
         let m = self.meas(id)?;

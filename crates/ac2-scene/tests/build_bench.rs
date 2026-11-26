@@ -374,6 +374,7 @@ fn spectrograph_3d_view_with_a_full_history() {
         tier_forced: false,
         axes: 1.0,
         lead_slots,
+        mirror: None,
     };
     let scene = time(50, || {
         std::hint::black_box(spectrograph_3d_scene(

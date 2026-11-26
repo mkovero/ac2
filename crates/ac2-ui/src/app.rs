@@ -201,10 +201,9 @@ pub struct App {
     /// The time-driven texts the panes were last built with ([`ClockTexts`]).
     clock: ClockTexts,
     pub(crate) scenes: HashMap<crate::state::PaneId, CachedScene>,
-    /// The 3D spectrograph's skyline of each pane showing it, folded as frames arrive, with
-    /// whose history it is made of.
-    pub(crate) skylines:
-        HashMap<crate::state::PaneId, (SkylineOf, ac2_scene::spectrograph_3d::Skyline)>,
+    /// The 3D spectrograph's skylines of each pane showing it (its measurement's and the
+    /// mirrored one's), folded as frames arrive, with whose history the first is made of.
+    pub(crate) skylines: HashMap<crate::state::PaneId, (SkylineOf, crate::scenes::PaneSkylines)>,
     /// Wheel scroll over a 3D spectrograph not yet a whole zoom step, logical pixels.
     pub(crate) cam3d_wheel: f32,
     /// The pane a pointer button is down on, as last told to the reducer.

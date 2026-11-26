@@ -6,8 +6,10 @@
 //! `WGPU_BACKEND=gl` (llvmpipe, the WebGL2-class limits a GLES adapter gets):
 //! `cargo nextest run -p ac2-plot --test skyline`.
 
-#[path = "it/common/mod.rs"]
+#[path = "../it/common/mod.rs"]
 mod common;
+mod mirror;
+mod parity;
 
 use std::sync::Arc;
 
@@ -17,7 +19,7 @@ use ac2_plot::{
 };
 use ac2_proto::model::layout::SpectrumCamera;
 use ac2_scene::spectrograph_3d::{
-    self, FIELD, FLOOR_DEPTH, FLOOR_HALF_W, LITE_WIDTH_PX, LOOK, MAX_HEIGHT, Pose, ViewProj,
+    self, FIELD, FLOOR_DEPTH, FLOOR_HALF_W, LITE_WIDTH_PX, LOOK, MAX_HEIGHT, Pose, Stage, ViewProj,
     glow_gain,
 };
 use ac2_testkit::image::{Image, ImageTolerance};
@@ -42,7 +44,7 @@ fn camera(yaw: i8, pitch: u8) -> SpectrumCamera {
 }
 
 fn view(cam: SpectrumCamera) -> ViewProj {
-    spectrograph_3d::view_proj(Pose::from(cam), f64::from(W / H))
+    spectrograph_3d::view_proj(Pose::from(cam), f64::from(W / H), Stage::Floor)
 }
 
 struct Sky {
@@ -98,6 +100,7 @@ impl Sky {
             tier: self.tier,
             look: self.look,
             data: self.data.clone(),
+            mirror: None,
         }
     }
 
@@ -616,99 +619,6 @@ fn skyline_goldens() {
     golden_of("skyline_pink_room_orbit", &orbit);
 }
 
-/// Renders histories exported from the look emulator (`AC2_SKYLINE_PARITY=<dir>` holding
-/// `<case>.f32`: rows × 192 levels, newest first) at 960×540 from the emulator's cameras
-/// (default and tilted, eye 2.6 from the target), Full tier with its bloom (without it when
-/// `AC2_SKYLINE_PARITY_NO_GLOW` is set), to set beside its pictures. Skipped
-/// without the variable: a tool for look work, not a check.
-#[test]
-fn parity_renders() {
-    let Some(dir) = std::env::var_os("AC2_SKYLINE_PARITY") else {
-        return;
-    };
-    let Some(gpu) = gpu("parity_renders") else {
-        return;
-    };
-    let dir = std::path::PathBuf::from(dir);
-    let glow = std::env::var_os("AC2_SKYLINE_PARITY_NO_GLOW").is_none();
-    let (w, h) = (960.0f32, 540.0f32);
-    let aspect = f64::from(w / h);
-    let cols = 192u32;
-    for (case, full, narrow) in [
-        ("pink-room", [-100.0, 0.0], [-60.0, 0.0]),
-        ("rta-pink", [-100.0, 0.0], [-45.0, -5.0]),
-        ("tonal", [-100.0, 0.0], [-100.0, 0.0]),
-    ] {
-        let bytes = std::fs::read(dir.join(format!("{case}.f32"))).expect("exported history");
-        let levels: Vec<f32> = bytes
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-            .collect();
-        let rows = (levels.len() / cols as usize) as u32 + 1;
-        let mut data: Vec<Option<HeatmapColumn>> = levels
-            .chunks_exact(cols as usize)
-            .map(|r| Some(Arc::from(r)))
-            .collect();
-        data.push(None);
-        for (cname, yaw, pitch) in [("default", 0.0, 8.0), ("tilted", 25.0, 30.0)] {
-            let at = Pose {
-                yaw_deg: yaw,
-                pitch_deg: pitch,
-                zoom_step: 0.0,
-            };
-            let d0 = spectrograph_3d::fitted_distance(at, aspect);
-            let pose = Pose {
-                zoom_step: -spectrograph_3d::ZOOM_STEPS_PER_OCTAVE * (2.6 / d0).log2(),
-                ..at
-            };
-            let vp = spectrograph_3d::view_proj(pose, aspect);
-            for (vname, colormap, range) in [
-                ("ice", Colormap::Ice, full),
-                ("viridis", Colormap::Viridis, full),
-                ("ice_narrow", Colormap::Ice, narrow),
-            ] {
-                let rect = Rect::new(0.0, 0.0, w, h);
-                let mut l = Layer::default();
-                l.rects.push(FillRect::new(rect, FIELD));
-                l.skylines.push(Skyline3d {
-                    id: SkylineId(1),
-                    rect,
-                    clip: Some(rect),
-                    cols,
-                    rows,
-                    newest: 0,
-                    newest_id: 0,
-                    phase: 1e-3,
-                    view_proj: vp.gpu(),
-                    eye: vp.eye.map(|v| v as f32),
-                    world: [FLOOR_HALF_W as f32, FLOOR_DEPTH as f32, MAX_HEIGHT as f32],
-                    range,
-                    colormap,
-                    tier: SkylineTier::Full,
-                    look: LOOK,
-                    data: data.clone(),
-                });
-                if glow {
-                    l.glows.push(SkylineGlow {
-                        id: SkylineId(1),
-                        clip: Some(rect),
-                        gain: glow_gain(colormap),
-                    });
-                }
-                let img = render_on(
-                    gpu,
-                    &mut renderer(gpu),
-                    &scene(w, h, vec![l]),
-                    1.0,
-                    Color::BLACK,
-                );
-                img.save_png(&dir.join(format!("real_{case}_{cname}_{vname}.png")))
-                    .expect("written");
-            }
-        }
-    }
-}
-
 // ---- frame cost -------------------------------------------------------------------------
 
 /// Frame cost per tier on this machine's adapter, printed as a table: a 1920×1080 pane of
@@ -881,6 +791,7 @@ fn bench_frame_cost() {
                     tier_forced: false,
                     axes: 1.0,
                     lead_slots: 0.0,
+                    mirror: None,
                 };
                 let sc = spectrograph_3d_scene(
                     &[],

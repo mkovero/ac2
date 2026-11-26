@@ -305,7 +305,7 @@ Where the implementation differs from the text above, and why:
   dark plate with dark text would not read. The 3D view keeps the dark plate and the dark
   theme's text, since its field is dark in every theme.
 - **3D points** show only when the pick is the pane's own measurement (its legend row's); the
-  3D view draws no compared curve, so another pick has nothing to stand on.
+  mirrored channel (the lake mirror) carries no points, so another pick has nothing to stand on.
 - **Transfer.** The pick chooses min / max's curve only; the mark readout and the cursor
   jumps (Alt+P/N/D) still follow the selection, as before.
 - **Daemon run.** A pick stores the daemon incarnation it was made under and is dropped

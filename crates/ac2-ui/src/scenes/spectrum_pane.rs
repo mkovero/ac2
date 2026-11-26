@@ -15,7 +15,7 @@ use ac2_scene::spectrograph::{
     SpectrographHistory, SpectrographInput, SpectrographScene, spectrograph_scene,
 };
 use ac2_scene::spectrograph_3d::{
-    Skyline, Spectrograph3dInput, Spectrograph3dScene, spectrograph_3d_scene,
+    Mirror3dInput, Skyline, Spectrograph3dInput, Spectrograph3dScene, spectrograph_3d_scene,
 };
 use ac2_scene::spectrum::{Quantity, SpectrumScene, SpectrumTrace, spectrum_scene};
 use ac2_scene::theme::Theme;
@@ -131,8 +131,18 @@ pub fn spectrograph(
     })
 }
 
-/// The spectrum pane's 3D spectrograph of its measurement: `skyline` (kept by the caller
-/// across frames, so a new frame only folds in) is brought up to the history first.
+/// The skylines a pane's 3D spectrograph is made of, kept across frames so a new frame only
+/// folds in: its measurement's, and the mirrored one's with whose history it is
+/// ([`AppState::lake_mirror`]).
+#[derive(Debug, Default)]
+pub struct PaneSkylines {
+    pub own: Skyline,
+    pub mirror: Option<(MeasId, Skyline)>,
+}
+
+/// The spectrum pane's 3D spectrograph of its measurement, and below the floor the one
+/// compared into it if any ([`AppState::lake_mirror`]): `skylines` (kept by the caller
+/// across frames) are brought up to their histories first.
 /// `tier` is how it is drawn and whether Settings forced it; `motion` how much its axis
 /// decorations show and how many history slots past the newest its time axis stands
 /// ([`AppState::scroll_lead`]; an export: 1 and 0).
@@ -140,7 +150,7 @@ pub fn spectrograph(
 pub fn spectrograph_3d(
     st: &AppState,
     pane: PaneId,
-    skyline: &mut Skyline,
+    skylines: &mut PaneSkylines,
     tier: (SkylineTier, bool),
     (axes, lead_slots): (f32, f64),
     theme: &Theme,
@@ -159,12 +169,33 @@ pub fn spectrograph_3d(
         .and_then(|(m, _)| st.rig.folded.spectrographs.get(&m.id))
         .filter(|h| h.span_s() == display.spectrograph_span_s)
         .unwrap_or(&empty);
-    skyline.update(
-        history,
-        ac2_scene::axis::Range::new(view.freq.lo, view.freq.hi),
-        tier.0,
-    );
-    let skyline = &*skyline;
+    let freq = ac2_scene::axis::Range::new(view.freq.lo, view.freq.hi);
+    skylines.own.update(history, freq, tier.0);
+    // Another measurement's history is another skyline: a fold would keep the old one's
+    // rows wherever the two agree on slots and revision.
+    let lower = shown.and_then(|_| st.lake_mirror(pane));
+    let lower = lower.and_then(|m| Some((m, st.rig.folded.spectrographs.get(&m.id)?)));
+    match lower {
+        Some((m, h)) => {
+            if skylines.mirror.as_ref().is_none_or(|(id, _)| *id != m.id) {
+                skylines.mirror = Some((m.id, Skyline::default()));
+            }
+            if let Some((_, sk)) = skylines.mirror.as_mut() {
+                sk.update(h, freq, tier.0);
+            }
+        }
+        None => skylines.mirror = None,
+    }
+    let skyline = &skylines.own;
+    let mirror = lower
+        .zip(skylines.mirror.as_ref())
+        .map(|((m, h), (_, sk))| Mirror3dInput {
+            key: TraceKey::Live(m.id),
+            history: h,
+            skyline: sk,
+            name: m.config.name.clone(),
+            offset_db: st.meas_offset(m.id),
+        });
     let input = shown.map(|(m, stream)| {
         let scale = history.scale().unwrap_or_else(|| spectrum_scale(st, pane));
         Spectrograph3dInput {
@@ -181,6 +212,7 @@ pub fn spectrograph_3d(
             tier_forced: tier.1,
             axes,
             lead_slots,
+            mirror,
         }
     });
     with_spectrum(st, pane, theme, now, |traces, status, view| {

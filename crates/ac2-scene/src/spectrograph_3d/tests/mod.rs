@@ -522,9 +522,9 @@ fn the_eye_stays_outside_the_skyline_at_every_clamp_corner() {
                         pitch_deg: pitch,
                         zoom_step: zoom,
                     };
-                    let vp = view_proj(Pose::from(c), aspect);
+                    let vp = view_proj(Pose::from(c), aspect, Stage::Floor);
                     assert!(
-                        outside_box(vp.eye, EYE_CLEARANCE * 0.99),
+                        outside_box(vp.eye, EYE_CLEARANCE * 0.99, Stage::Floor),
                         "{c:?} at {aspect}: {:?}",
                         vp.eye
                     );
@@ -539,8 +539,8 @@ fn the_eye_stays_outside_the_skyline_at_every_clamp_corner() {
 #[test]
 fn the_default_camera_frames_the_floor() {
     for aspect in [1.0, 1.78, 3.0] {
-        let vp = view_proj(Pose::from(SpectrumCamera::DEFAULT), aspect);
-        for p in box_corners() {
+        let vp = view_proj(Pose::from(SpectrumCamera::DEFAULT), aspect, Stage::Floor);
+        for p in box_corners(Stage::Floor) {
             let n = vp.ndc(p).expect("in front of the eye");
             assert!(
                 n[0].abs() <= 1.0 && n[1].abs() <= 1.0,
@@ -548,7 +548,7 @@ fn the_default_camera_frames_the_floor() {
             );
         }
         // Centred up and down: no dead band under a low camera's floor.
-        let ys: Vec<f64> = box_corners()
+        let ys: Vec<f64> = box_corners(Stage::Floor)
             .iter()
             .map(|p| vp.ndc(*p).expect("in front")[1])
             .collect();
@@ -572,6 +572,7 @@ fn the_default_camera_frames_the_floor() {
                     zoom_step: 0,
                 }),
                 1.78,
+                Stage::Floor,
             );
             let mid = FLOOR_DEPTH / 2.0;
             let l = vp.ndc([-0.1, 0.0, mid]).expect("left");
@@ -580,13 +581,14 @@ fn the_default_camera_frames_the_floor() {
         }
     }
     // Zooming in brings the eye closer.
-    let a = eye_distance(Pose::from(SpectrumCamera::DEFAULT), 1.78);
+    let a = eye_distance(Pose::from(SpectrumCamera::DEFAULT), 1.78, Stage::Floor);
     let b = eye_distance(
         Pose {
             zoom_step: 2.0,
             ..Pose::from(SpectrumCamera::DEFAULT)
         },
         1.78,
+        Stage::Floor,
     );
     assert!((b / a - 2f64.powf(-0.25)).abs() < 1e-9);
 }
@@ -648,6 +650,7 @@ fn auto_tier_by_adapter() {
     assert_eq!(Quality::Bare.step(1), Quality::Auto);
 }
 
+mod mirror;
 mod pick;
 mod points;
 mod scene;

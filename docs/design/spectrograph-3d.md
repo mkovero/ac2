@@ -354,7 +354,8 @@ The spectrum scope's commands in the 3D scope:
 | offset (J), colour maps (palette) | in the palette and help, J bound | the offset moves the heights; the map colours them |
 | smooth_coarser/finer (K, Shift+K), smoothing presets | inert, unbound | the history is built from unsmoothed frames |
 | spectrum_style (B), peak_hold (P), next/prev peak and notch (Alt+P/N), cursor_mark / clear_mark (Alt+D) | inert, unbound | they act on the curve or the cursor, not drawn here; the front-row peaks follow the measurement's Track, set with P on the 2D views |
-| global Shift+←/→ (cursor steps), C (compare) | inert, intercepted | the cursor is picked with the mouse; no compared curves in 3D. Shift+T toggles the cursor as everywhere |
+| global Shift+←/→ (cursor steps) | inert, intercepted | the cursor is picked with the mouse. Shift+T toggles the cursor as everywhere |
+| C (compare) | as everywhere | the first spectrum compared hangs mirrored below the floor (*Stereo: the lake mirror*) |
 
 Commands bound in both scopes keep the same default keys (a test checks it). `keys.toml`
 rebinds are per section, as `[ir]`'s are: a `start_stop` rebound in `[spectrum]` is not
@@ -373,6 +374,33 @@ frequency, a touch pinch (egui's zoom delta without Ctrl) dollies, a click only 
 Putting curves into a pane is unaffected: that drag starts on a list row and runs through
 `row_drag`, never the pane's drag response; legend plates keep the pointer first
 (`plates_mouse`).
+
+## Stereo: the lake mirror
+
+A second channel draws reflected in the floor plane (world `y → −y`), as if a perfectly
+still lake lay between the two: the pane's measurement stands on the floor, the first live
+spectrum compared into it (C, `AppState::lake_mirror`: in compare order, a spectrum stream,
+a folded history of the pane's span) hangs below it. No wire or layout field: the compare
+list already says which curves a pane draws.
+
+- **Same placement**: frequency (x) and age (z) as the upper half, the same scatter (by its
+  own row numbers), level range, colour map and look; heights are its displayed levels (its
+  own offset) over the pane's range, measured down from the floor. The floor band is the
+  lake's surface.
+- **Primitive**: `Skyline3d.mirror: Option<SkylineMirror>` (its own ring, size and scroll).
+  The renderer keeps a second R32Float ring and uniform per skyline and draws both into the
+  one spike target and bloom source, the mirror's uniform with `world.w = −1` (the sign of
+  the height in the shader). Max and add being order-independent, bloom, glow and composite
+  treat both halves alike. Without a mirror, the upper half's pixels are unchanged.
+- **Camera**: `Stage::Lake` aims the orbit target at the floor (`y = 0`) and fits the box
+  grown to `−MAX_HEIGHT`, so both halves are framed; `Stage::Floor` is the single view.
+- **Legend and caption**: rows upper then mirrored, the second tagged `mirrored`; the
+  caption reads `Main L · mirrored Main R · last 30 s`.
+- **Cursor, pick, hover, peaks**: the upper channel only; a pick tests its spikes alone, so
+  a pointer on a mirrored spike picks nothing there.
+- **Level follow** already samples every compared curve of the pane, so neither half clips.
+- The app keeps the mirror's `Skyline` beside the pane's (`scenes::PaneSkylines`), rebuilt
+  when the mirrored measurement changes; a pane export draws the same.
 
 ## Persistence and wire
 

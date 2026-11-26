@@ -30,6 +30,9 @@ pub struct Spectrograph3dInput<'a> {
     /// ([`Skyline::drawn`], [`SpectrographHistory::lead_slots`]); 0 draws the rows at
     /// their places (scroll off, an exported picture).
     pub lead_slots: f64,
+    /// A second channel drawn mirrored below the floor ([`super::mirror`]); `None` draws
+    /// this one alone. Cursor, pick and tracked peaks stay with this one.
+    pub mirror: Option<Mirror3dInput<'a>>,
 }
 
 /// Which axis a label belongs to.
@@ -292,7 +295,11 @@ pub fn spectrograph_3d_scene(
     );
     let aspect = f64::from(plot.w / plot.h);
     let pose = sg.map_or(Pose::from(SpectrumCamera::DEFAULT), |s| s.camera);
-    let vp = view_proj(pose, aspect);
+    let stage = match sg.and_then(|s| s.mirror.as_ref()) {
+        Some(_) => Stage::Lake,
+        None => Stage::Floor,
+    };
+    let vp = view_proj(pose, aspect, stage);
     let pj = Projector::new(vp, plot);
     // The field and the labels in it keep the dark theme's colours in every theme.
     let dark = Theme::dark();
@@ -583,7 +590,10 @@ pub fn spectrograph_3d_scene(
             } else {
                 s.name.clone()
             };
-            caption = format!("{name} · last {span_s} s");
+            caption = match &s.mirror {
+                Some(m) => format!("{name} · {} · last {span_s} s", m.caption_name()),
+                None => format!("{name} · last {span_s} s"),
+            };
             if let Some(unit) = s.history.unit_noted() {
                 caption.push_str(&format!(" · {unit}"));
             }
@@ -640,6 +650,7 @@ pub fn spectrograph_3d_scene(
                         ..LOOK
                     },
                     data,
+                    mirror: s.mirror.as_ref().and_then(|m| m.rows(range, s.lead_slots)),
                 });
                 if s.tier.bloom_taps().is_some() {
                     c.data.glows.push(SkylineGlow {
@@ -768,7 +779,11 @@ pub fn spectrograph_3d_scene(
     let legend = crate::spectrograph::legend_over(
         &mut c.overlay,
         traces,
-        sg.map(|s| s.key),
+        &sg.map_or_else(Vec::new, |s| {
+            std::iter::once((s.key, None))
+                .chain(s.mirror.as_ref().map(|m| (m.key, Some(MIRRORED))))
+                .collect()
+        }),
         view,
         plot,
         theme,

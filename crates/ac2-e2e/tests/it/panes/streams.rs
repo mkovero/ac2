@@ -294,7 +294,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
         .map(ac2_ui::hints::KeyHint::text)
         .collect();
     assert!(hints.iter().any(|h| h == "←/→ orbit"), "{hints:?}");
-    let mut skyline = ac2_scene::spectrograph_3d::Skyline::default();
+    let mut skyline = ac2_ui::scenes::PaneSkylines::default();
     let three_d = ac2_ui::scenes::spectrograph_3d(
         &d.st,
         pane,

@@ -518,6 +518,27 @@ pub struct Skyline3d {
     /// The ring, `rows` long, by ring position; each row `cols` levels (NaN: no value);
     /// `None` is a row without data.
     pub data: Vec<Option<HeatmapColumn>>,
+    /// A second channel reflected in the floor: its spikes hang from the floor as the
+    /// first's stand on it, in the same target, so the bloom and the composite treat both
+    /// halves alike.
+    pub mirror: Option<SkylineMirror>,
+}
+
+/// The mirrored channel of a [`Skyline3d`]: its own ring, placed on the same floor, seen by
+/// the same camera and coloured by the same map, with heights measured down from the floor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkylineMirror {
+    pub cols: u32,
+    pub rows: u32,
+    /// As [`Skyline3d::newest`], [`Skyline3d::newest_id`] and [`Skyline3d::phase`].
+    pub newest: u32,
+    pub newest_id: u32,
+    pub phase: f32,
+    /// Levels mapped to the floor and full depth below it: the pane's range less this
+    /// channel's own display offset.
+    pub range: [f32; 2],
+    /// As [`Skyline3d::data`].
+    pub data: Vec<Option<HeatmapColumn>>,
 }
 
 /// The bloom of the [`Skyline3d`] with `id` in the same scene, blurred and added over its

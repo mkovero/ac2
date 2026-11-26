@@ -70,7 +70,7 @@ pub(super) fn unit_forms(traces: &[SpectrumTrace<'_>]) -> (Vec<String>, Option<S
 
 /// Legend line of one curve: its name and what sets it apart — `cmp`, `stopped`,
 /// `STALE 3.2 s`, `offset +3.0 dB` (a spread is never read as a level difference).
-pub(super) fn legend_entry(t: &SpectrumTrace<'_>) -> LegendEntry {
+pub(crate) fn legend_entry(t: &SpectrumTrace<'_>) -> LegendEntry {
     // A compared curve is not of the pane's group: said first, as the transfer legend does.
     let mut tags: Vec<String> = t
         .compared
@@ -111,6 +111,20 @@ pub(crate) fn legend_of(
     theme: &Theme,
 ) -> SpectrumLegend {
     let entries: Vec<LegendEntry> = traces.iter().map(legend_entry).collect();
+    legend_with(layer, traces, entries, view, area, clip, theme)
+}
+
+/// [`legend_of`] with the entries made by the caller: one per curve of `traces`, in its
+/// order, as [`legend_entry`] makes them with whatever the view adds.
+pub(crate) fn legend_with(
+    layer: &mut crate::primitives::Layer,
+    traces: &[SpectrumTrace<'_>],
+    entries: Vec<LegendEntry>,
+    view: &ViewState,
+    area: Rect,
+    clip: Rect,
+    theme: &Theme,
+) -> SpectrumLegend {
     let styles: Vec<crate::legend::RowStyle> = traces
         .iter()
         .zip(&entries)

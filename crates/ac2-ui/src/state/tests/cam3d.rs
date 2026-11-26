@@ -134,12 +134,20 @@ fn camera_limits_hold() {
 }
 
 #[test]
-fn cursor_steps_and_compare_are_inert_and_the_cursor_toggles() {
+fn cursor_steps_are_inert_compare_opens_and_the_cursor_toggles() {
     let mut t = on_3d();
     let freq = t.st.view.freq;
-    for k in ["Shift+ArrowLeft", "Shift+ArrowRight", "C"] {
+    for k in ["Shift+ArrowLeft", "Shift+ArrowRight"] {
         t.key(k);
     }
+    // C picks what hangs mirrored below the floor, as it picks what 2D draws behind.
+    t.key("C");
+    assert!(
+        matches!(t.st.overlay, Overlay::Choose(_)),
+        "{:?}",
+        t.st.overlay
+    );
+    t.key("Escape");
     assert_eq!(camera(&t), SpectrumCamera::DEFAULT);
     assert_eq!(t.st.view.freq, freq);
     assert_eq!(t.st.view.cursor_hz, None);

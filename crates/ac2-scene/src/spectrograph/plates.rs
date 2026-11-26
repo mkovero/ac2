@@ -114,26 +114,39 @@ pub(crate) fn legend_shows(
     !view.legend.hidden && traces.iter().any(|t| t.key == key)
 }
 
-/// The legend plate of a spectrograph shown alone, in `plot`, over the one curve it draws
-/// (`key`'s, found in `traces`): its name and tags as the spectrum's legend has them, moved,
-/// scaled and hidden as every legend is. `None` without that curve.
+/// The legend plate of a spectrograph shown alone, in `plot`, over the curves it draws
+/// (`keys`, found in `traces`, in that order, each with a tag of its own the view adds):
+/// their names and tags as the spectrum's legend has them, moved, scaled and hidden as
+/// every legend is. `None` without any of them.
 pub(crate) fn legend_over(
     layer: &mut crate::primitives::Layer,
     traces: &[SpectrumTrace<'_>],
-    key: Option<crate::trace::TraceKey>,
+    keys: &[(crate::trace::TraceKey, Option<&str>)],
     view: &ViewState,
     plot: Rect,
     theme: &Theme,
 ) -> Option<crate::spectrum::SpectrumLegend> {
-    let drawn: Vec<SpectrumTrace<'_>> = traces
+    let drawn: Vec<(SpectrumTrace<'_>, Option<&str>)> = keys
         .iter()
-        .filter(|t| Some(t.key) == key)
-        .cloned()
+        .filter_map(|(k, tag)| Some((traces.iter().find(|t| t.key == *k)?.clone(), *tag)))
         .collect();
     if drawn.is_empty() {
         return None;
     }
-    Some(crate::spectrum::legend_of(
-        layer, &drawn, view, plot, plot, theme,
+    let entries = drawn
+        .iter()
+        .map(|(t, tag)| {
+            let mut e = crate::spectrum::legend_entry(t);
+            if let Some(tag) = tag {
+                e.tags.push((*tag).to_string());
+                e.text.push_str(" · ");
+                e.text.push_str(tag);
+            }
+            e
+        })
+        .collect();
+    let drawn: Vec<SpectrumTrace<'_>> = drawn.into_iter().map(|(t, _)| t).collect();
+    Some(crate::spectrum::legend_with(
+        layer, &drawn, entries, view, plot, plot, theme,
     ))
 }

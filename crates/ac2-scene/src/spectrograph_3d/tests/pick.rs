@@ -448,7 +448,11 @@ fn spikes_scatter_inside_their_cells_and_keep_it_as_rows_move_back() {
 #[test]
 fn a_column_under_the_eye_no_longer_stacks_on_one_pixel_column() {
     let (cols, rows) = (9, 48);
-    let vp = view_proj(Pose::from(SpectrumCamera::DEFAULT), 16.0 / 9.0);
+    let vp = view_proj(
+        Pose::from(SpectrumCamera::DEFAULT),
+        16.0 / 9.0,
+        Stage::Floor,
+    );
     // The middle column stands at x = 0, the eye's own x at yaw 0.
     let col = cols / 2;
     assert!(vp.eye[0].abs() < 1e-9, "{:?}", vp.eye);

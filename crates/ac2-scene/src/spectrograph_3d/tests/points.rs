@@ -106,6 +106,7 @@ pub(super) fn scene_posed(
         tier_forced: false,
         axes,
         lead_slots,
+        mirror: None,
     };
     spectrograph_3d_scene(
         &[trace(peaks)],

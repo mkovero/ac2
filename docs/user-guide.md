@@ -2027,8 +2027,20 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
 - **Mouse**: drag orbits and tilts (a drag down looks from higher; **Settings › Display ›
   Invert vertical drag** off: a drag up does, touch the same), the wheel or a pinch dollies; Ctrl+wheel and
   Shift+wheel still zoom and pan the level range. The camera is kept with the pane and the
-  measurement's layout. The cursor's steps (Shift+←/→) and **C** do nothing here: the
-  cursor is put with the mouse, and there is no compared curve in 3D.
+  measurement's layout. The cursor's steps (Shift+←/→) do nothing here: the cursor is put
+  with the mouse.
+- **Stereo, the lake mirror**: compare a second live spectrum into the pane's measurement
+  (**C**, e.g. the right channel into the left's pane) and the 3D view draws it mirrored
+  below the floor, as if a perfectly still lake lay between the two: the pane's own
+  measurement stands on the floor as always, the compared one hangs down from it, the same
+  frequency and age meeting at the same point of the surface. Both halves share the level
+  range, the frequency span and the colour map; each draws its own display offset. The
+  camera aims at the floor line so both halves are framed. The legend lists the upper
+  channel first, then the mirrored one tagged `mirrored`; the caption names both. Of
+  several compared spectra the first in compare order is mirrored, if its history span is
+  the pane's; a stored trace is never mirrored. The cursor, the pointer's mark and the
+  peaks (**P**) read the upper channel only. Clear the compare and the view is the single
+  skyline again.
 - **Cursor**: the spike under the pointer is marked with a light line and a ring at its
   tip; a click (or tap) puts the cursor on that spike: drawn thick in the cursor's colour
   on a dark edge, with a box at its tip, its frequency, age and level read on the cursor
@@ -2039,7 +2051,7 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
   picture. The cursor is the 2D views' too: **G** back reads the same frequency and time.
   **Shift+T** takes it off; *traces only* hides it and the mark.
 - **Legend**: the same plate as in 2D, moved and sized the same way; a click on its row
-  selects the measurement.
+  selects the measurement. With the lake mirror it has a row for each channel.
 - **Peaks**: while the measurement's peaks track (**P**, set one **G** back: the key is
   the 2D views'), its five peaks stand as boxes on the front (newest) row, each labelled
   with its row of the peak list (rank, frequency, level: `1  1.00 kHz  −32.0 dBFS`) on a

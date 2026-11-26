@@ -6,14 +6,14 @@ use super::*;
 use ac2_scene::view::follow::HANDS_OFF_S;
 
 /// Frames at 10 a second on the app's clock, each measurement's `seq` its own.
-struct Clock {
+pub(super) struct Clock {
     now: f64,
     seq: u64,
     incarnation: u64,
 }
 
 impl Clock {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             now: 1.0,
             seq: 10,
@@ -30,7 +30,7 @@ impl Clock {
     }
 
     /// `s` seconds of frames.
-    fn run(&mut self, t: &mut T, s: f64, meas: &[(u32, f32)]) {
+    pub(super) fn run(&mut self, t: &mut T, s: f64, meas: &[(u32, f32)]) {
         for _ in 0..(s * 10.0).round() as usize {
             self.frame(t, meas);
         }
@@ -96,7 +96,7 @@ fn frames(t: &mut T, meas: &[(u32, f32)], seq: u64, incarnation: u64) {
     })));
 }
 
-fn sp(t: &T) -> PaneId {
+pub(super) fn sp(t: &T) -> PaneId {
     t.pane(PaneKind::Spectrum)
 }
 
@@ -455,7 +455,7 @@ fn a_step_in_the_3d_view_moves_the_skyline_heights() {
     c.frame(&mut t, &[(2, -30.0)]);
     c.run(&mut t, 2.0, &[(2, -30.0)]);
     let heights = |t: &T| {
-        let mut sky = ac2_scene::spectrograph_3d::Skyline::default();
+        let mut sky = crate::scenes::PaneSkylines::default();
         let s = crate::scenes::spectrograph_3d(
             &t.st,
             p,

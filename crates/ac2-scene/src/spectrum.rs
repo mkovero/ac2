@@ -39,7 +39,7 @@ pub(crate) use draw::{
 };
 pub use legend::caption_forms;
 use legend::unit_forms;
-pub(crate) use legend::{SpectrumLegend, legend_of};
+pub(crate) use legend::{SpectrumLegend, legend_entry, legend_of, legend_with};
 pub use mark::jump;
 pub use units::{
     BinWidth, cal_caption, density_unit_help, fraction_label, level_noted, level_text, level_unit,

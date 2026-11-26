@@ -421,6 +421,7 @@ mod axis;
 mod view_fit;
 
 mod follow;
+mod lake;
 
 mod delete;
 

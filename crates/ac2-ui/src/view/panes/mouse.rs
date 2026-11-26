@@ -327,7 +327,7 @@ pub(super) fn navigate(
             });
             if let Some(at) = marked
                 .map(|m| m.1)
-                .or_else(|| ac2_scene::spectrograph_3d::pick(&f, sk, at))
+                .or_else(|| ac2_scene::spectrograph_3d::pick(&f, &sk.own, at))
             {
                 app.dispatch(Msg::SpectrographCursor {
                     hz: at.hz,

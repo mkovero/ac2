@@ -11,7 +11,7 @@ use bytemuck::{Pod, Zeroable};
 use crate::PrepareError;
 use crate::geometry::ClipPx;
 use crate::heatmap::Luts;
-use crate::scene::{HeatmapColumn, Skyline3d, SkylineId, SkylineTier};
+use crate::scene::{HeatmapColumn, Skyline3d, SkylineId, SkylineMirror, SkylineTier};
 
 /// The spike target: level in R, the square root of brightness in G. Rg8Unorm is
 /// renderable, blendable and filterable on every backend, GL included; 256 level steps
@@ -77,6 +77,30 @@ struct Gpu {
     uploaded: Vec<Option<HeatmapColumn>>,
     seen: u64,
     /// Spikes to draw this frame (`cols · rows`), 0 when the target is empty.
+    instances: u32,
+    /// The channel mirrored below the floor, drawn into the same target.
+    mirror: Option<MirrorGpu>,
+}
+
+impl Gpu {
+    /// Whether anything is drawn into the target this frame, either half.
+    fn drawn(&self) -> bool {
+        self.instances > 0 || self.mirror.as_ref().is_some_and(|m| m.instances > 0)
+    }
+}
+
+/// The mirrored channel's ring and uniform: the first's look, camera and target, its own
+/// rows and the heights' sign turned down.
+#[derive(Debug)]
+struct MirrorGpu {
+    cols: u32,
+    rows: u32,
+    ring: wgpu::Texture,
+    uniform: wgpu::Buffer,
+    spike_bg: wgpu::BindGroup,
+    /// Its bloom source's bind group over the current LUT; made with the target.
+    source_bg: Option<wgpu::BindGroup>,
+    uploaded: Vec<Option<HeatmapColumn>>,
     instances: u32,
 }
 
@@ -227,7 +251,7 @@ impl Skylines {
     pub fn composite_bind_group(&self, id: SkylineId) -> Option<&wgpu::BindGroup> {
         self.gpus
             .get(&id)
-            .filter(|g| g.instances > 0)
+            .filter(|g| g.drawn())
             .and_then(|g| g.target.as_ref().map(|t| &t.composite_bg))
     }
 
@@ -235,7 +259,7 @@ impl Skylines {
     pub fn glow_bind_group(&self, id: SkylineId) -> Option<&wgpu::BindGroup> {
         self.gpus
             .get(&id)
-            .filter(|g| g.instances > 0)
+            .filter(|g| g.drawn())
             .and_then(|g| g.target.as_ref()?.bloom.as_ref().map(|b| &b.a_bg))
     }
 
@@ -319,6 +343,9 @@ impl Skylines {
         if s.newest >= s.rows {
             return Err(bad(format!("newest row {} of {}", s.newest, s.rows)));
         }
+        if let Some(m) = &s.mirror {
+            check_mirror(m, max).map_err(|e| bad(format!("mirror: {e}")))?;
+        }
         if self.gpus.get(&s.id).is_some_and(|g| g.seen == self.frame) {
             return Err(bad("id used twice in one scene".into()));
         }
@@ -329,27 +356,8 @@ impl Skylines {
             .is_some_and(|g| g.cols == s.cols && g.rows == s.rows)
         {
             let ring = new_ring(device, queue, s.cols, s.rows);
-            let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("ac2-plot skyline uniform"),
-                size: std::mem::size_of::<Uniform>() as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let view = ring.create_view(&wgpu::TextureViewDescriptor::default());
-            let spike_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("ac2-plot skyline spikes"),
-                layout: &layouts.spike,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: uniform.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                ],
-            });
+            let uniform = uniform_buffer(device);
+            let spike_bg = spike_bind_group(device, layouts, &uniform, &ring);
             self.gpus.insert(
                 s.id,
                 Gpu {
@@ -363,6 +371,7 @@ impl Skylines {
                     uploaded: vec![None; s.rows as usize],
                     seen: 0,
                     instances: 0,
+                    mirror: None,
                 },
             );
         }
@@ -370,7 +379,23 @@ impl Skylines {
             unreachable!("inserted above")
         };
         g.seen = self.frame;
-        upload_changed(queue, g, &s.data);
+        upload_changed(queue, &g.ring, g.cols, &mut g.uploaded, &s.data);
+        match &s.mirror {
+            None => g.mirror = None,
+            Some(m) => {
+                if !g
+                    .mirror
+                    .as_ref()
+                    .is_some_and(|x| x.cols == m.cols && x.rows == m.rows)
+                {
+                    g.mirror = Some(new_mirror(device, queue, layouts, m));
+                }
+                let Some(x) = g.mirror.as_mut() else {
+                    unreachable!("made above")
+                };
+                upload_changed(queue, &x.ring, x.cols, &mut x.uploaded, &m.data);
+            }
+        }
 
         let down = match s.tier {
             SkylineTier::Full => 1.0,
@@ -430,25 +455,7 @@ impl Skylines {
             let bloom = taps.map(|_| {
                 let a = texture(device, "ac2-plot skyline bloom a", bloom_px, BLOOM_FORMAT);
                 let b = texture(device, "ac2-plot skyline bloom b", bloom_px, BLOOM_FORMAT);
-                let ring = g.ring.create_view(&wgpu::TextureViewDescriptor::default());
-                let source_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("ac2-plot skyline bloom source"),
-                    layout: &layouts.bloom_source,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: g.uniform.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(&ring),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: wgpu::BindingResource::TextureView(&lut),
-                        },
-                    ],
-                });
+                let source_bg = source_bind_group(device, layouts, &g.uniform, &g.ring, &lut);
                 let reads = |t: &wgpu::Texture| {
                     let view = t.create_view(&wgpu::TextureViewDescriptor::default());
                     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -484,6 +491,19 @@ impl Skylines {
                 bloom,
             });
             g.colormap = Some(s.colormap);
+            if let Some(m) = g.mirror.as_mut() {
+                m.source_bg = None;
+            }
+        }
+        // The mirror's bloom source reads its own ring and uniform with the LUT; made once
+        // per target or ring.
+        if let (Some(m), Some(_)) = (g.mirror.as_mut(), taps)
+            && m.source_bg.is_none()
+        {
+            let lut = luts.view(device, queue, s.colormap);
+            m.source_bg = Some(source_bind_group(
+                device, layouts, &m.uniform, &m.ring, &lut,
+            ));
         }
 
         let look = &s.look;
@@ -497,7 +517,7 @@ impl Skylines {
                 s.eye[2],
                 nearest_depth(&s.view_proj, s.world),
             ],
-            world: [s.world[0], s.world[1], s.world[2], 0.0],
+            world: [s.world[0], s.world[1], s.world[2], 1.0],
             range: s.range,
             phase: s
                 .phase
@@ -533,14 +553,34 @@ impl Skylines {
         } else {
             0
         };
+        if let (Some(m), Some(x)) = (&s.mirror, g.mirror.as_mut()) {
+            let mirrored = Uniform {
+                world: [s.world[0], s.world[1], s.world[2], -1.0],
+                range: m.range,
+                phase: m
+                    .phase
+                    .clamp(0.0, ac2_scene::spectrograph_3d::MAX_PHASE as f32),
+                cols: m.cols,
+                rows: m.rows,
+                newest: m.newest,
+                newest_id: m.newest_id,
+                ..uniform
+            };
+            queue.write_buffer(&x.uniform, 0, bytemuck::bytes_of(&mirrored));
+            x.instances = if m.data.iter().any(Option::is_some) {
+                m.cols * m.rows
+            } else {
+                0
+            };
+        }
 
         let Some(t) = &g.target else {
             unreachable!("made above")
         };
-        let draw = g.instances;
         let instanced = |pass: &mut wgpu::RenderPass<'_>,
                          pipeline: &wgpu::RenderPipeline,
-                         bg: &wgpu::BindGroup| {
+                         bg: &wgpu::BindGroup,
+                         draw: u32| {
             if draw > 0 {
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(0, passes.globals, &[]);
@@ -548,14 +588,23 @@ impl Skylines {
                 pass.draw(0..4, 0..draw);
             }
         };
+        // Both halves into one target and one bloom: max and add are order-independent, so
+        // the mirror composites, glows and fades exactly as the first channel does.
+        let mirror = g.mirror.as_ref().filter(|m| m.instances > 0);
         let mut pass = begin(encoder, "ac2-plot skyline spikes", &t.spikes);
-        instanced(&mut pass, passes.spikes, &g.spike_bg);
+        instanced(&mut pass, passes.spikes, &g.spike_bg, g.instances);
+        if let Some(m) = mirror {
+            instanced(&mut pass, passes.spikes, &m.spike_bg, m.instances);
+        }
         drop(pass);
         if let Some(b) = &t.bloom
-            && draw > 0
+            && g.drawn()
         {
             let mut pass = begin(encoder, "ac2-plot skyline bloom source", &b.a);
-            instanced(&mut pass, passes.bloom_source, &b.source_bg);
+            instanced(&mut pass, passes.bloom_source, &b.source_bg, g.instances);
+            if let Some((m, bg)) = mirror.and_then(|m| Some((m, m.source_bg.as_ref()?))) {
+                instanced(&mut pass, passes.bloom_source, bg, m.instances);
+            }
             drop(pass);
             for (label, pipeline, from, to) in [
                 ("ac2-plot skyline blur across", passes.blur_h, &b.a_bg, &b.b),
@@ -570,6 +619,122 @@ impl Skylines {
         }
         Ok(())
     }
+}
+
+/// What the spike pass reads besides the globals: `uniform` and the ring.
+fn spike_bind_group(
+    device: &wgpu::Device,
+    layouts: &Layouts,
+    uniform: &wgpu::Buffer,
+    ring: &wgpu::Texture,
+) -> wgpu::BindGroup {
+    let view = ring.create_view(&wgpu::TextureViewDescriptor::default());
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("ac2-plot skyline spikes"),
+        layout: &layouts.spike,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+        ],
+    })
+}
+
+/// What the bloom source pass reads: `uniform`, the ring and the LUT.
+fn source_bind_group(
+    device: &wgpu::Device,
+    layouts: &Layouts,
+    uniform: &wgpu::Buffer,
+    ring: &wgpu::Texture,
+    lut: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+    let ring = ring.create_view(&wgpu::TextureViewDescriptor::default());
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("ac2-plot skyline bloom source"),
+        layout: &layouts.bloom_source,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&ring),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(lut),
+            },
+        ],
+    })
+}
+
+fn uniform_buffer(device: &wgpu::Device) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("ac2-plot skyline uniform"),
+        size: std::mem::size_of::<Uniform>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+/// The mirrored channel's ring of `m`'s size, all NaN, with its uniform and bind group.
+fn new_mirror(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layouts: &Layouts,
+    m: &SkylineMirror,
+) -> MirrorGpu {
+    let ring = new_ring(device, queue, m.cols, m.rows);
+    let uniform = uniform_buffer(device);
+    MirrorGpu {
+        cols: m.cols,
+        rows: m.rows,
+        spike_bg: spike_bind_group(device, layouts, &uniform, &ring),
+        ring,
+        uniform,
+        source_bg: None,
+        uploaded: vec![None; m.rows as usize],
+        instances: 0,
+    }
+}
+
+/// What the mirrored channel must be for the renderer, as [`Skylines::prepare`] checks the
+/// first's.
+fn check_mirror(m: &SkylineMirror, max: u32) -> Result<(), String> {
+    if m.cols == 0 || m.rows == 0 || m.cols > max || m.rows > max {
+        return Err(format!(
+            "{} columns x {} rows; each must be 1..={max}",
+            m.cols, m.rows
+        ));
+    }
+    if !(m.range[0].is_finite() && m.range[1].is_finite() && m.range[0] != m.range[1]) {
+        return Err(format!("range {:?} must be finite and non-empty", m.range));
+    }
+    if m.data.len() != m.rows as usize {
+        return Err(format!(
+            "{} data rows for a ring of {}",
+            m.data.len(),
+            m.rows
+        ));
+    }
+    let cols = m.cols as usize;
+    if let Some(i) = m
+        .data
+        .iter()
+        .position(|r| r.as_ref().is_some_and(|r| r.len() != cols))
+    {
+        return Err(format!("row {i} has not {cols} values"));
+    }
+    if m.newest >= m.rows {
+        return Err(format!("newest row {} of {}", m.newest, m.rows));
+    }
+    Ok(())
 }
 
 fn texture(
@@ -621,31 +786,37 @@ fn begin<'e>(
 
 /// Uploads the ring positions whose row differs from the one uploaded there, one write per
 /// run of adjacent changed positions.
-fn upload_changed(queue: &wgpu::Queue, g: &mut Gpu, data: &[Option<HeatmapColumn>]) {
+fn upload_changed(
+    queue: &wgpu::Queue,
+    ring: &wgpu::Texture,
+    cols: u32,
+    uploaded: &mut [Option<HeatmapColumn>],
+    data: &[Option<HeatmapColumn>],
+) {
     let same = |a: &Option<HeatmapColumn>, b: &Option<HeatmapColumn>| match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => Arc::ptr_eq(a, b),
         _ => false,
     };
-    let cols = g.cols as usize;
+    let n = cols as usize;
     let mut run: Vec<f32> = Vec::new();
     let mut i = 0;
     while i < data.len() {
-        if same(&data[i], &g.uploaded[i]) {
+        if same(&data[i], &uploaded[i]) {
             i += 1;
             continue;
         }
         let first = i;
         run.clear();
-        while i < data.len() && !same(&data[i], &g.uploaded[i]) {
+        while i < data.len() && !same(&data[i], &uploaded[i]) {
             match &data[i] {
                 Some(r) => run.extend_from_slice(r),
-                None => run.extend(std::iter::repeat_n(f32::NAN, cols)),
+                None => run.extend(std::iter::repeat_n(f32::NAN, n)),
             }
-            g.uploaded[i] = data[i].clone();
+            uploaded[i] = data[i].clone();
             i += 1;
         }
-        write_rows(queue, &g.ring, g.cols, first as u32, &run);
+        write_rows(queue, ring, cols, first as u32, &run);
     }
 }
 
