@@ -39,8 +39,8 @@ def _run(tmp: Path, sine_err=None, sweep_err=None, xruns=0) -> Path:
     sw = pd / "ac2_sweep" / "10Hz-5.5s"
     sw.mkdir(parents=True)
     f = dsp.log_centres(10.0, 40000.0, 48)
-    info = {"sample_rate": FS, "rate": 0.7, "duration": 5.8, "repeats": 1, "arrival": 0.0, "reference_level": 0.0}
-    lines = ["# ac2 trace export v3", "# kind: sweep", "# sweep_info: " + json.dumps(info),
+    info = {"sample_rate_hz": FS, "rate": 0.7, "duration": 5.8, "repeats": 1, "arrival": 0.0, "reference_level": 0.0}
+    lines = ["# ac2 trace export v7", "# kind: sweep", "# sweep_info: " + json.dumps(info),
              "freq_hz,mag_db,phase_deg,h2_db,h2_floor_db,h3_db,h3_floor_db,h4_db,h4_floor_db,h5_db,h5_floor_db"]
     sweep_err = sweep_err or (lambda fc, k: 0.0)
     for fc in f:

@@ -1552,8 +1552,7 @@ display edits and are never applied to the stored data.
   response imports as a `sweep` trace. `source.imported` {`file_name`, `format`, `notes`,
   `ir_file`}:
   `notes` lists what the file held that the trace does not keep (`ImportNote`:
-  `sweep_without_analysis` — a v1 sweep export, imported as its transfer function with the
-  distortion dropped; `sweep_off_grid` — distortion is never resampled;
+  `sweep_without_analysis` — reserved, no import sets it; `sweep_off_grid` — distortion is never resampled;
   `mic_curve_not_applied` — the export named a mic curve applied after capture, the
   columns are without it; `ir_truncated` — an impulse response longer than 65536 samples,
   cut around its peak). `ir_file` (`IrFile` \| nil) are the facts of an imported impulse
@@ -3195,7 +3194,7 @@ What a daemon reads of each artefact; any other version is refused:
 ### 7.1 Trace text (`trace.import` / `trace.export`)
 
 **ac2 CSV** (`ac2_csv`, what `trace.export` writes): the first line is exactly
-`# ac2 trace export v7` (`v6`, `v5`, `v4`, `v3`, `v2` and `v1` are read too, their `sample_rate`, `lo` and `hi` in JSON header lines read as `sample_rate_hz`, `lo_hz` and `hi_hz`; another version is `bad_header`); then
+`# ac2 trace export v7` (any other version is `bad_header`, the message naming the file's version and the one this build reads); then
 `# key: value` lines with every metadata field (`name`, `kind`, `source`, `time_base`,
 `delay_ms`, `delay_nudge_ms`, `polarity`, `offset_db`, `smoothing` (display only, not
 applied), `depth`, `lf_window`, `cal`, `mic` (`name (curve: <label>, …; file …, hash …)`: in the
@@ -3222,9 +3221,8 @@ reads `name`, `kind`, `grid`, `delay_ms` and, for a sweep, `sweep_info`, `sweep_
 `room_metrics`, the distortion columns and the impulse response, for a transfer trace
 `transfer_ir` and its impulse response (`sweep_ir` on another kind than `sweep`, or
 `transfer_ir` on another than `transfer`, is `bad_header`; as a target, nothing of it is
-kept); a v5 sweep export imports without `reference_harmonics`; a v4 sweep export imports without `unresolved`; a v3 export imports as written (no transfer trace in it has an IR); a v2 sweep export imports
-as a sweep without room parameters; a v1 sweep export (no `sweep_info`) imports as
-its transfer function (note `sweep_without_analysis`).
+kept); a sweep without its `sweep_info`, `sweep_ir`, impulse response or distortion
+columns is `bad_header`.
 
 A dynamics trace (`kind: dynamics`) has no frequency rows: after the common header lines
 (without `grid`) come `# dynamics_info:` (the JSON `DynamicsInfo`), `# dynamics_inputs:`

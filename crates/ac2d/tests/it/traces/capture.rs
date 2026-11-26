@@ -243,30 +243,6 @@ fn capture_average_math_export_import() {
     r.h.shutdown();
 }
 
-/// A field sweep export from before the analysis facts were exported: its transfer
-/// function with the delay it states, and a note saying why the distortion is not there.
-#[test]
-fn old_sweep_export_imports_as_transfer_with_its_delay() {
-    let mut r = rig("trace-v1-sweep");
-    let c = &mut r.c;
-    let t = c.import_trace(Import {
-        file_name: "ac2-v1-sweep1.csv".into(),
-        format: ImportFormat::Auto,
-        role: ImportRole::Trace,
-        ir: None,
-        content: Blob(fixture("ac2-v1-sweep1.csv")),
-        owner: ac2_proto::model::TraceOwner::Imported,
-    });
-    assert_eq!(t.kind, TraceKind::Transfer);
-    assert!((t.delay.0 * 1000.0 - 3.333_333_333_333_333_5).abs() < 1e-12);
-    assert!(matches!(
-        &t.source,
-        TraceSource::Imported { notes, .. } if notes == &[ImportNote::SweepWithoutAnalysis]
-    ));
-    assert!(data(c, t.id).sweep.is_none());
-    r.h.shutdown();
-}
-
 /// Time of the largest |sample| of a stored transfer IR, seconds re the trace's delay.
 fn ir_peak_s(ir: &TransferIr) -> f64 {
     let (i, _) = ir

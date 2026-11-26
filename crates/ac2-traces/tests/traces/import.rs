@@ -129,6 +129,32 @@ fn typed_refusals() {
     assert_eq!(e.problem, ImportProblem::NoData);
 }
 
+/// An export of any other version is refused whole, naming its version and this one:
+/// its header lines may mean something else, so nothing of it is read.
+#[test]
+fn other_export_versions_are_refused() {
+    let csv = export_csv(&delayed(7, 3, 0.0125, 0.0120, 0.97));
+    for v in 1..=6 {
+        let old = csv.replacen(
+            "# ac2 trace export v7\n",
+            &format!("# ac2 trace export v{v}\n"),
+            1,
+        );
+        for format in [ImportFormat::Auto, ImportFormat::Ac2Csv] {
+            let e = import(old.as_bytes(), format, ImportRole::Trace).unwrap_err();
+            assert_eq!(
+                (e.line, e.problem),
+                (Some(1), ImportProblem::BadHeader),
+                "v{v}"
+            );
+            assert_eq!(
+                e.msg,
+                format!("ac2 trace export version {v}; this build reads version 7 only"),
+            );
+        }
+    }
+}
+
 #[test]
 fn ac2_csv_round_trips_bit_for_bit() {
     let mut t = delayed(7, 3, 0.0125, 0.0120, 0.97);

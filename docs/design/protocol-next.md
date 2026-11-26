@@ -875,7 +875,7 @@ Every serde writer of the workspace was walked; stored formats that change shape
 | rig settings (`rig.json`) | 11 → 12 | `RigPeer`, `DmxSet.snap`, stream config names, tag keys, unit suffixes, required layout fields, string integers | converter |
 | authorized clients | grammar | role on every line (§3) | converter adds `operator` |
 | plan files (`plans/*.json`) | unversioned → `version: 1` | `Surface` tag `type` | converter |
-| trace export | v6 → v7 | sweep info, `ir` header and dynamics info carry `sample_rate_hz`, `lo_hz` / `hi_hz`, `type` tags; a `mic_curve` header's `imported_at` a string | none (open question 1) |
+| trace export | v6 → v7 | sweep info, `ir` header and dynamics info carry `sample_rate_hz`, `lo_hz` / `hi_hz`, `type` tags; a `mic_curve` header's `imported_at` a string | none: older exports are refused (open question 1) |
 | network settings | 2, unchanged | no affected type | — |
 | `ui.toml` | unchanged | its own file types; rig ids already hex strings | — |
 
@@ -892,8 +892,8 @@ place. The steps per host kind, verification, recovery and rollback are in
 
 ## Open questions
 
-1. **Trace export v6.** Exports are the operator's archive; the reader reads v1–v5.
-   Recommendation: v6 stays readable on its own versioned path, as the older ones are.
+1. **Trace export v6.** Decided: no reader for older exports; the reader reads v7 only and
+   refuses any other version with `bad_header`.
 2. **Re-stamping on disk.** Rows already appended to the autosave's log file before the sync
    keep `unsynced` there until the next whole write. Recommendation: accept it; the next
    generation carries `derived`.

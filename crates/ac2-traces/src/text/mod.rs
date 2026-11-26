@@ -46,16 +46,10 @@
 //! `t_s,linear,etc_db` table after the frequency rows, `t_s` re the trace's `delay_ms` (the
 //! inserted delay at capture). It re-imports with the trace.
 //!
-//! A version 6 export and older name the sample rate `sample_rate` and a range's edges
-//! `lo` / `hi` in their JSON header lines; they are read under the names with the unit.
-//! A version 5 export (written before sweeps kept the reference input's own harmonics)
-//! imports as a sweep without them. A version 4 export (written before sweeps said where their columns are finer than
-//! their windows resolve) imports as a sweep without that. A version 3 export (written before transfer traces kept their impulse response) imports
-//! as it was. A version 2 export (written before
-//! the room parameters were exported) imports as a sweep without them. A version 1 export
-//! (written before the analysis facts were exported) is still read: a sweep among them
-//! imports as its transfer function with the distortion dropped and
-//! [`ImportNote::SweepWithoutAnalysis`] on the trace.
+//! Only this version is read: a file of another version is refused with
+//! [`ImportProblem::BadHeader`], naming its version and this one. A sweep without its
+//! analysis facts, impulse response or distortion columns is refused too: its header
+//! promises them, so a file without them is damaged.
 //!
 //! # Analyzer text
 //!
@@ -97,23 +91,6 @@ use table::{on_import_grid, table, validate};
 
 /// First line of an ac2 CSV file of this format version.
 pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v7";
-/// First line of the previous version, still read: its JSON header lines name a sample
-/// rate `sample_rate` and a frequency range's edges `lo` / `hi`, without their unit.
-const AC2_CSV_MAGIC_V6: &str = "# ac2 trace export v6";
-/// First line of the previous version, still read: no sweep in it has the reference
-/// input's own harmonics (and nothing else differs).
-const AC2_CSV_MAGIC_V5: &str = "# ac2 trace export v5";
-/// First line of the previous version, still read: no sweep in it says where its columns
-/// are finer than its windows resolve (and nothing else differs).
-const AC2_CSV_MAGIC_V4: &str = "# ac2 trace export v4";
-/// First line of the previous version, still read: no transfer trace in it has an impulse
-/// response (and nothing else differs).
-const AC2_CSV_MAGIC_V3: &str = "# ac2 trace export v3";
-/// First line of the version before, still read: it has no room parameters either.
-const AC2_CSV_MAGIC_V2: &str = "# ac2 trace export v2";
-/// First line of the version before, still read: it has no sweep analysis facts and no
-/// impulse response either.
-const AC2_CSV_MAGIC_V1: &str = "# ac2 trace export v1";
 const AC2_CSV_PREFIX: &str = "# ac2 trace export";
 /// Column header of an export's impulse-response table.
 const IR_HEADER: &str = "t_s,linear,etc_db";

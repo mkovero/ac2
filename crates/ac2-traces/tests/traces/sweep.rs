@@ -178,63 +178,15 @@ fn sweep_csv_and_session_round_trip() {
     assert_eq!(back.room, s.room);
     assert!(s.unresolved.is_some());
     assert_eq!(back.unresolved, s.unresolved);
-    // An export written before sweeps said where they are unresolved (v4) is the same
-    // sweep without that.
-    let v4: String = csv
-        .replacen("# ac2 trace export v7", "# ac2 trace export v4", 1)
+    // A sweep header without its analysis is damaged, not a transfer function.
+    let bare: String = csv
         .lines()
-        .filter(|l| !l.starts_with("# sweep_unresolved"))
+        .filter(|l| !l.starts_with("# sweep_info"))
         .map(|l| format!("{l}\n"))
         .collect();
-    // An export written before sweeps kept the reference's own harmonics (v5) is the same
-    // sweep without them.
-    let v5 = csv
-        .replacen("# ac2 trace export v7", "# ac2 trace export v5", 1)
-        .replace(
-            ",ref_h2_db,ref_h2_floor_db,ref_h3_db,ref_h3_floor_db\n",
-            "\n",
-        );
-    let v5: String = v5
-        .lines()
-        .map(|l| {
-            let cells: Vec<&str> = l.split(',').collect();
-            if l.starts_with('#') || cells.len() != 13 {
-                format!("{l}\n")
-            } else {
-                format!("{}\n", cells[..9].join(","))
-            }
-        })
-        .collect();
-    // An export written before the header lines named their units (v6) is the same sweep.
-    let v6 = csv
-        .replacen("# ac2 trace export v7", "# ac2 trace export v6", 1)
-        .replace("\"sample_rate_hz\":", "\"sample_rate\":")
-        .replace("\"lo_hz\":", "\"lo\":")
-        .replace("\"hi_hz\":", "\"hi\":");
-    assert!(v6.contains("\"lo\":") && v6.contains("\"sample_rate\":"));
-    let old = import(v6.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
-    let old = old.sweep.unwrap();
-    assert_eq!(old.info, s.info);
-    assert_eq!(old.unresolved, s.unresolved);
-    let old = import(v5.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
-    let old = old.sweep.unwrap();
-    assert!(old.reference_harmonics.is_none());
-    assert_eq!(old.harmonics[1], back.harmonics[1]);
-    let old = import(v4.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
-    let old = old.sweep.unwrap();
-    assert!(old.unresolved.is_none());
-    assert_eq!(old.room, s.room);
-    // An export written before the room parameters (v2) is the same sweep without them.
-    let v2: String = csv
-        .replacen("# ac2 trace export v7", "# ac2 trace export v2", 1)
-        .lines()
-        .filter(|l| !l.starts_with("# room_metrics"))
-        .map(|l| format!("{l}\n"))
-        .collect();
-    let old = import(v2.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
-    let old = old.sweep.unwrap();
-    assert!(old.room.is_none());
-    assert_eq!(old.info, s.info);
+    let e = import(bare.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap_err();
+    assert_eq!(e.problem, ImportProblem::BadHeader, "{e}");
+    assert!(e.msg.contains("a sweep without its sweep_info"), "{e}");
     // As a target it is a magnitude only, with nothing of the sweep.
     let tgt = import(csv.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Target).unwrap();
     assert_eq!(tgt.kind, TraceKind::Target);
@@ -333,17 +285,6 @@ fn transfer_ir_csv_and_session_round_trip() {
     // A target keeps the magnitude only.
     let tgt = import(csv.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Target).unwrap();
     assert!(tgt.ir.is_none());
-    // An export written before transfer traces kept their IR (v3) imports without one.
-    let v3: String = csv[..csv.find("# impulse response").unwrap()]
-        .replacen("# ac2 trace export v7", "# ac2 trace export v3", 1)
-        .lines()
-        .filter(|l| !l.starts_with("# transfer_ir"))
-        .map(|l| format!("{l}\n"))
-        .collect();
-    let old = import(v3.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
-    assert_eq!(old.kind, TraceKind::Transfer);
-    assert!(old.ir.is_none());
-    assert_eq!(old.columns, imp.columns);
     // A transfer IR on another kind, or announced without its table, is refused.
     let wrong = csv.replacen("# kind: transfer", "# kind: spectrum dBFS", 1);
     let e = import(wrong.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap_err();
@@ -373,28 +314,6 @@ fn transfer_ir_csv_and_session_round_trip() {
     assert_eq!(back.traces[0].data().ir, t.ir, "served with the trace");
     assert_eq!(back.traces[1].ir, None);
     assert_eq!(back.traces[1].columns, without.columns);
-}
-
-/// Field exports written before the analysis facts were exported (v1): the transfer
-/// function with its delay, the distortion dropped with a note saying why.
-#[test]
-fn v1_sweep_export_imports_as_transfer_with_a_note() {
-    for (f, delay_ms) in [
-        ("ac2-v1-sweep1.csv", Some(3.333_333_333_333_333_5)),
-        ("ac2-v1-sweep3-94cm-8x.csv", None),
-    ] {
-        let imp = import(&fixture(f), ImportFormat::Auto, ImportRole::Trace).unwrap();
-        assert_eq!(imp.format, ImportFormat::Ac2Csv, "{f}");
-        assert_eq!(imp.kind, TraceKind::Transfer, "{f}");
-        assert!(imp.sweep.is_none());
-        assert_eq!(imp.notes, vec![ImportNote::SweepWithoutAnalysis], "{f}");
-        assert!(imp.columns.phase_deg.is_some());
-        let d = imp.delay.unwrap().0 * 1000.0;
-        assert!(d > 0.0, "{f}: delay {d} ms");
-        if let Some(want) = delay_ms {
-            assert!((d - want).abs() < 1e-12, "{f}: {d}");
-        }
-    }
 }
 
 /// An imported trace keeps the delay its export states, whatever its kind.
