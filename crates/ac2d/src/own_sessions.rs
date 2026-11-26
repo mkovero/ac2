@@ -29,11 +29,15 @@ impl OwnSessions {
             std::process::id(),
             crate::util::random_u64()
         ));
-        let mut b = std::fs::DirBuilder::new();
-        #[cfg(unix)]
-        std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
-        b.create(&dir)?;
-        Ok(Self(dir))
+        builder().create(&dir)?;
+        let me = Self(dir);
+        // Closed to other users as the local sockets' directory is, per OS: Unix by owner
+        // and mode 0700, Windows by lying under the user's `%LOCALAPPDATA%` (the usual
+        // `%TEMP%`), whose ACL grants only the user, SYSTEM and administrators. A temp dir
+        // elsewhere is refused, saying so, rather than holding sessions others can read.
+        ac2_paths::socket_dir::check(&me.0)
+            .map_err(|e| io::Error::other(format!("the session directory: {e}")))?;
+        Ok(me)
     }
 
     pub(crate) fn path(&self) -> &Path {
@@ -88,13 +92,29 @@ fn sweep(parent: &Path, own: &Path) {
     }
 }
 
+/// Made with mode 0700 on Unix: no other user enters it.
+#[cfg(unix)]
+fn builder() -> std::fs::DirBuilder {
+    use std::os::unix::fs::DirBuilderExt;
+    let mut b = std::fs::DirBuilder::new();
+    b.mode(0o700);
+    b
+}
+
+/// Windows has no mode: the ACL inherited from `%LOCALAPPDATA%` closes it (checked when made).
+#[cfg(not(unix))]
+fn builder() -> std::fs::DirBuilder {
+    std::fs::DirBuilder::new()
+}
+
 #[cfg(unix)]
 fn same_owner(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
     use std::os::unix::fs::MetadataExt;
     a.uid() == b.uid()
 }
 
-/// The temp dir is the user's own on Windows.
+/// Every directory here was made under the user's own `%LOCALAPPDATA%` (checked when made),
+/// which no other user can write to.
 #[cfg(not(unix))]
 fn same_owner(_: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
     true

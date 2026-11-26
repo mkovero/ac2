@@ -153,8 +153,6 @@ fn sessions_are_deleted_and_renamed_by_name_and_never_replaced() {
     h.shutdown();
 }
 
-/// A link in the session directory is never followed: what it points to stays.
-#[cfg(unix)]
 /// The open session is found by its folder, not by how its path was spelt: opened by a
 /// path through a link to the session directory (as a name differing only in case reaches
 /// it on a file system that ignores case), it is still refused for `file.delete`.
@@ -179,6 +177,9 @@ fn the_open_session_reached_another_way_is_not_deleted() {
     h.shutdown();
 }
 
+/// A link in the session directory is never followed: what it points to stays. Unix only:
+/// a directory symlink on Windows needs a privilege a test run does not have.
+#[cfg(unix)]
 #[test]
 fn a_link_in_the_session_directory_is_not_followed() {
     let dir = tempfile::tempdir().unwrap();
