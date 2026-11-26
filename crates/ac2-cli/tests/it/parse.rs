@@ -841,3 +841,65 @@ fn artnet_grammar() {
     assert_eq!(fade(&["artnet", "fade", "500ms"]), 0.5);
     assert_eq!(fade(&["artnet", "fade", "60s"]), 60.0);
 }
+
+#[test]
+fn sacn_grammar() {
+    let target = |args: &[&str]| match ok(args).cmd {
+        Cmd::Sacn {
+            cmd:
+                SacnCmd::Target {
+                    dest,
+                    universe,
+                    via,
+                    priority,
+                },
+        } => (
+            dest,
+            universe.map(|u| u.0.get()),
+            via.map(|v| v.to_string()),
+            priority.map(|p| p.0.get()),
+        ),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        target(&["sacn", "target", "192.168.1.40", "1"]),
+        (
+            SacnDestArg::Unicast("192.168.1.40".parse().expect("test value")),
+            Some(1),
+            None,
+            None
+        )
+    );
+    assert_eq!(
+        target(&[
+            "sacn",
+            "target",
+            "multicast",
+            "63999",
+            "--via",
+            "10.0.0.4",
+            "--priority",
+            "200"
+        ]),
+        (
+            SacnDestArg::Multicast,
+            Some(63999),
+            Some("10.0.0.4".into()),
+            Some(200)
+        )
+    );
+    assert_eq!(
+        target(&["sacn", "target", "OFF"]),
+        (SacnDestArg::Off, None, None, None)
+    );
+    for bad in [
+        &["sacn", "target", "1.2.3.4", "0"][..],
+        &["sacn", "target", "1.2.3.4", "64000"],
+        &["sacn", "target", "1.2.3.4", "1", "--priority", "201"],
+        &["sacn", "target", "1.2.3.4:5568", "1"],
+        &["sacn", "target", "rx.local", "1"],
+        &["sacn", "target", "multicast", "1", "--via", "eth0"],
+    ] {
+        assert!(parse(bad).is_err(), "{bad:?}");
+    }
+}

@@ -23,6 +23,7 @@ mod osc;
 mod readouts;
 mod rec;
 mod remote;
+mod sacn;
 mod salvage;
 mod selftest;
 mod selftest_frames;
@@ -75,6 +76,7 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::Sim { cmd } => sim::run(cli, cmd, out).await,
         Cmd::Osc { cmd } => osc::osc(cli, cmd, out).await,
         Cmd::Artnet { cmd } => artnet::artnet(cli, cmd, out).await,
+        Cmd::Sacn { cmd } => sacn::sacn(cli, cmd, out).await,
         Cmd::Levels { cmd } => levels::run(cli, cmd.as_ref(), out).await,
         Cmd::Cue(a) => osc::cue(cli, a, out).await,
         Cmd::Rig { cmd } => osc::rig(cli, cmd, out).await,

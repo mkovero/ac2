@@ -13,6 +13,7 @@ mod levels;
 mod math;
 mod meas;
 mod osc;
+mod sacn;
 mod server;
 mod session;
 mod sim;
@@ -34,6 +35,7 @@ pub use levels::*;
 pub use math::*;
 pub use meas::*;
 pub use osc::*;
+pub use sacn::*;
 pub use server::*;
 pub use session::*;
 pub use sim::*;
@@ -217,11 +219,18 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: OscCmd,
     },
-    /// The rig's Art-Net universe: where it goes, and a test frame.
+    /// The rig's Art-Net universe: where it goes; the fade and a test frame of every DMX
+    /// output.
     Artnet {
         /// Action.
         #[command(subcommand)]
         cmd: ArtnetCmd,
+    },
+    /// The rig's universe as sACN (E1.31), beside Art-Net: where it goes.
+    Sacn {
+        /// Action.
+        #[command(subcommand)]
+        cmd: SacnCmd,
     },
     /// The programme meters of the open stream's inputs (one frame: ppm, true peak, max,
     /// overs, CLIP, each pair's correlation, the loudness of each pair and unpaired line or

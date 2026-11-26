@@ -18,7 +18,7 @@ pub(crate) async fn osc(cli: &Cli, cmd: &OscCmd, out: &mut Out<'_>) -> Result<()
     match cmd {
         OscCmd::Target { addr } => {
             let addr = addr.0;
-            let rig = rig_edit(&c, |base| Command::OscTarget { base, addr }).await?;
+            let rig = rig_edit(&c, out, |base| Command::OscTarget { base, addr }).await?;
             out.emit(&rig, || match rig.osc_target {
                 Some(a) => format!("OSC cues go to {a}"),
                 None => "OSC target off: no cues are sent".to_owned(),
@@ -53,7 +53,7 @@ pub(crate) async fn rig(cli: &Cli, cmd: &RigCmd, out: &mut Out<'_>) -> Result<()
     match cmd {
         RigCmd::MonitorAtStart { on } => {
             let on = on.on();
-            let rig = rig_edit(&c, |base| Command::RigMonitorAtStart { base, on }).await?;
+            let rig = rig_edit(&c, out, |base| Command::RigMonitorAtStart { base, on }).await?;
             out.emit(&rig, || {
                 if rig.monitor_at_start {
                     "monitor at start on: a restarted daemon reopens the last stream's \
@@ -84,10 +84,13 @@ pub(crate) async fn rig(cli: &Cli, cmd: &RigCmd, out: &mut Out<'_>) -> Result<()
             let json = json!({
                 "osc_target": st.rig.osc_target.map(|a| a.to_string()),
                 "artnet_target": st.rig.artnet_target,
+                "sacn_target": st.rig.sacn_target,
                 "artnet_fade": st.rig.artnet_fade,
                 "monitor_at_start": st.rig.monitor_at_start,
                 "osc": st.rig.osc,
                 "artnet": st.rig.artnet,
+                "artnet_socket": st.rig.artnet_socket,
+                "sacn": st.rig.sacn,
                 "dmx": st.rig.dmx,
                 "meters": meters.iter().map(|(m, cues)| json!({
                     "id": m.id,
@@ -406,13 +409,21 @@ fn conflict(e: &CliError) -> bool {
 }
 
 /// A rev-guarded rig edit made on the current `rig.rev`; on `conflict` (another client
-/// edited the rig meanwhile) made once more on the new one. Returns the rig after it.
-pub(super) async fn rig_edit(c: &Client, cmd: impl Fn(Rev) -> Command) -> Result<Rig, CliError> {
+/// edited the rig meanwhile) made once more on the new one; the reply's warnings go to `out`.
+/// Returns the rig after it.
+pub(super) async fn rig_edit(
+    c: &Client,
+    out: &mut Out<'_>,
+    cmd: impl Fn(Rev) -> Command,
+) -> Result<Rig, CliError> {
     let mut tries = 0;
     loop {
         let base = state(c).await?.rig.rev;
-        let r = match c.call(cmd(base)).await {
-            Ok(r) => r,
+        let r = match c.call_warned(cmd(base)).await {
+            Ok((r, warnings)) => {
+                note_warnings(c, &warnings, out).await;
+                r
+            }
             Err(e) => {
                 let e = CliError::from(e);
                 tries += 1;

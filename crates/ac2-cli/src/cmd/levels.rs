@@ -49,7 +49,7 @@ pub(crate) async fn run(
                 gate.map(|g| g.0),
                 loudness_target.map(|t| t.0),
             );
-            let rig = rig_edit(&c, |base| Command::LevelsSet {
+            let rig = rig_edit(&c, out, |base| Command::LevelsSet {
                 base,
                 ballistic,
                 correlation_window: window,

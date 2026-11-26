@@ -22,6 +22,7 @@ mod parse;
 mod process;
 mod rec_rig;
 mod recovery_rig;
+mod sacn_rig;
 mod salvage_rig;
 mod server_rig;
 mod spl_rig;

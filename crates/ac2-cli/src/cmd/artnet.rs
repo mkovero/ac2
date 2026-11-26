@@ -34,7 +34,7 @@ pub(crate) async fn artnet(cli: &Cli, cmd: &ArtnetCmd, out: &mut Out<'_>) -> Res
                 }),
             };
             let c = connect(cli, false).await?;
-            let rig = rig_edit(&c, |base| Command::ArtnetTarget { base, target }).await?;
+            let rig = rig_edit(&c, out, |base| Command::ArtnetTarget { base, target }).await?;
             out.emit(&rig, || match rig.artnet_target {
                 Some(t) => format!("Art-Net universe {} goes to {}", universe_text(&t), t.addr),
                 None => "Art-Net target off: no frames are sent".to_owned(),
@@ -43,12 +43,12 @@ pub(crate) async fn artnet(cli: &Cli, cmd: &ArtnetCmd, out: &mut Out<'_>) -> Res
         ArtnetCmd::Fade { seconds } => {
             let c = connect(cli, false).await?;
             let seconds = Seconds(seconds.0.seconds());
-            let rig = rig_edit(&c, |base| Command::ArtnetFade { base, seconds }).await?;
+            let rig = rig_edit(&c, out, |base| Command::ArtnetFade { base, seconds }).await?;
             out.emit(&rig, || match fade_text(rig.artnet_fade) {
                 t if rig.artnet_fade.seconds() == 0.0 => {
-                    format!("Art-Net fade {t}: cue changes jump")
+                    format!("DMX fade {t}: cue changes jump (Art-Net and sACN)")
                 }
-                t => format!("Art-Net fade {t}: cue changes fade over it"),
+                t => format!("DMX fade {t}: cue changes fade over it (Art-Net and sACN)"),
             })?;
         }
         ArtnetCmd::Test { channels } => {
@@ -61,18 +61,33 @@ pub(crate) async fn artnet(cli: &Cli, cmd: &ArtnetCmd, out: &mut Out<'_>) -> Res
             let rev = expect_body!("artnet.test", r, ReplyBody::Ack { rev } => rev)?;
             let rig = state(&c).await?.rig;
             out.emit(
-                &json!({ "rev": rev, "sent": channels, "artnet": rig.artnet }),
+                &json!({
+                    "rev": rev,
+                    "sent": channels,
+                    "artnet": rig.artnet,
+                    "sacn": rig.sacn,
+                }),
                 || {
-                    let to = rig.artnet_target.map_or_else(
-                        || "?".to_owned(),
-                        |t| format!("universe {} at {}", universe_text(&t), t.addr),
-                    );
+                    let mut to = Vec::new();
+                    if let Some(t) = rig.artnet_target {
+                        to.push(format!(
+                            "Art-Net universe {} at {}",
+                            universe_text(&t),
+                            t.addr
+                        ));
+                    }
+                    if rig.sacn_target.is_some() {
+                        to.push(ac2_scene::sacn::target_text(rig.sacn_target));
+                    }
                     let mut s = format!(
-                        "sent {} to {to} (held 5 s, then the cues' frame)",
-                        dmx_list_text(channels)
+                        "sent {} to {} (held 5 s, then the cues' frame)",
+                        dmx_list_text(channels),
+                        to.join(" and ")
                     );
-                    if let Some(e) = &rig.artnet.last_error {
-                        s.push_str(&format!("\nlast error: {e}"));
+                    for (what, e) in [("Art-Net", &rig.artnet), ("sACN", &rig.sacn)] {
+                        if let Some(e) = &e.last_error {
+                            s.push_str(&format!("\n{what} last error: {e}"));
+                        }
                     }
                     s
                 },
@@ -92,21 +107,25 @@ fn fade_text(f: ArtnetFade) -> String {
     format!("{} s", f.seconds())
 }
 
-/// The Art-Net lines of `rig status`.
+/// The DMX lines of `rig status`: Art-Net, sACN, then what both carry.
 pub(crate) fn status_text(rig: &Rig) -> String {
     let lit = if rig.dmx.is_empty() {
         "none".to_owned()
     } else {
         dmx_list_text(&rig.dmx)
     };
+    let socket = ac2_scene::artnet::socket_text(&rig.artnet_socket)
+        .map_or_else(String::new, |t| format!("Art-Net socket: {t}\n"));
     format!(
-        "Art-Net target: {}\nfade: {}\nsent: {}\nlast error: {}\nchannels above 0: {lit}\n",
+        "Art-Net target: {}\n{socket}sent: {}\nlast error: {}\n{}DMX fade: {}\nchannels above 0: \
+         {lit}\n",
         rig.artnet_target.map_or_else(
             || "off".to_owned(),
             |t| format!("{} universe {}", t.addr, universe_text(&t))
         ),
-        fade_text(rig.artnet_fade),
         rig.artnet.sent,
         rig.artnet.last_error.as_deref().unwrap_or("none"),
+        super::sacn::status_text(rig),
+        fade_text(rig.artnet_fade),
     )
 }
