@@ -3,6 +3,10 @@
 use super::*;
 use ac2_scene::unit_text::{Freq, LevelDbfs, in_field};
 
+/// What Enter says in a dialog whose reference is not chosen.
+pub(crate) const CHOOSE_REFERENCE: &str =
+    "choose the reference: the input that records the loopback (a copy of the stimulus)";
+
 impl Form {
     pub(crate) fn new(kind: FormKind, fields: Vec<Field>) -> Self {
         Self {
@@ -226,8 +230,10 @@ impl Form {
     }
 
     /// A measurement dialog over the stream's captured `inputs` (channel, name). The
-    /// reference defaults to the stream's loopback input, the measurement input to the
-    /// first mic (`mics`: the inputs of mic kind), else the first other captured input.
+    /// reference is the stream's loopback input; without one it is left for the operator
+    /// to choose, as in every dialog with a reference: an input picked by channel order
+    /// would give a plausible but meaningless result. The measurement input defaults to
+    /// the first mic (`mics`: the inputs of mic kind), else the first other captured input.
     pub fn measurement(
         kind: FormKind,
         open: Option<&OpenStream>,
@@ -238,22 +244,22 @@ impl Form {
         let captured: Vec<u16> = inputs.iter().map(|(c, _)| *c).collect();
         let reference = open
             .and_then(|o| o.config.loopback.map(|l| l.input))
-            .filter(|r| captured.contains(r))
-            .or_else(|| captured.first().copied())
-            .unwrap_or(0);
+            .filter(|r| captured.contains(r));
+        // With no reference yet, the first input is the likeliest one to become it.
+        let kept = reference.or_else(|| captured.first().copied());
         let measurement = mics
             .iter()
             .copied()
-            .find(|m| *m != reference && captured.contains(m))
-            .or_else(|| captured.iter().copied().find(|c| *c != reference))
-            .unwrap_or(reference);
+            .find(|m| Some(*m) != kept && captured.contains(m))
+            .or_else(|| captured.iter().copied().find(|c| Some(*c) != kept))
+            .or(kept);
         let n = existing
             .iter()
             .filter(|m| form_kind(&m.config.kind) == Some(kind))
             .count()
             + 1;
         let name = |base: &str| Field::text(FieldId::Name, "Name", format!("{base} {n}"), "");
-        let input_field = Field::channel(FieldId::Input, "Input", inputs, Some(measurement), "");
+        let input_field = Field::channel(FieldId::Input, "Input", inputs, measurement, "");
         let fields = match kind {
             // Built by [`Form::sweep`], [`Form::math`], [`crate::ir_import_dialog::form`] and
             // [`crate::target_dialog`]; the programme meter's by [`crate::meter_dialog`], the
@@ -277,14 +283,14 @@ impl Form {
                     FieldId::Reference,
                     "Reference",
                     inputs,
-                    Some(reference),
+                    reference,
                     "the loopback (stimulus copy)",
                 ),
                 Field::channel(
                     FieldId::Measurement,
                     "Measurement",
                     inputs,
-                    Some(measurement),
+                    measurement,
                     "the mic",
                 ),
                 name("TF"),
@@ -522,11 +528,7 @@ impl Form {
             }
         };
         if self.channel(FieldId::Reference).is_none() {
-            return Err(
-                "choose the reference: the input that records the loopback (a copy of the \
-                 stimulus)"
-                    .into(),
-            );
+            return Err(CHOOSE_REFERENCE.into());
         }
         let reference = input(FieldId::Reference, "reference input")?;
         input(FieldId::Measurement, "measurement input")?;
@@ -661,6 +663,11 @@ impl Form {
             }
             FormKind::Math | FormKind::MathEdit => return self.math_config(),
             FormKind::Transfer | FormKind::TransferEdit => {
+                if captured.is_some_and(|c| !c.is_empty())
+                    && self.channel(FieldId::Reference).is_none()
+                {
+                    return Err(CHOOSE_REFERENCE.into());
+                }
                 let r = input(FieldId::Reference, "reference input")?;
                 let m = input(FieldId::Measurement, "measurement input")?;
                 if r == m {

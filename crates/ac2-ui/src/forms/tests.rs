@@ -364,7 +364,13 @@ fn inputs_are_picked_by_name_and_mics_come_first() {
 
 #[test]
 fn measurement_choices() {
-    let o = open(vec![0, 1], None);
+    let o = open(
+        vec![0, 1],
+        Some(LoopbackRoute {
+            output: 0,
+            input: 0,
+        }),
+    );
     let mut f = Form::measurement(FormKind::Transfer, Some(&o), &[], &names(&o), &[]);
     let at = |f: &Form, id| f.fields.iter().position(|x| x.id == id).expect("field");
     f.focus = at(&f, FieldId::Smoothing);
@@ -978,4 +984,17 @@ fn channel_list_offers_what_the_field_can_name() {
     let i = at(&f, FieldId::Name);
     f.open_list(i, &[]);
     assert!(f.list.is_none());
+}
+
+/// Without a loopback a transfer asks for its reference, as a sweep does: none is guessed.
+#[test]
+fn a_transfer_without_a_loopback_asks_for_its_reference() {
+    let o = open(vec![0, 1], None);
+    let mut f = Form::measurement(FormKind::Transfer, Some(&o), &[], &names(&o), &[]);
+    assert_eq!(f.channel(FieldId::Reference), None);
+    assert_eq!(f.channel(FieldId::Measurement), Some(1));
+    let e = f.meas_config(Some(&o)).expect_err("no reference");
+    assert!(e.contains("choose the reference"), "{e}");
+    f.cycle(1);
+    f.meas_config(Some(&o)).expect("tf");
 }

@@ -543,7 +543,15 @@ fn create(t: &mut T, i: usize, id: u32) -> MeasConfig {
             t.key("Escape");
             sweep_measurement().config
         }
-        None => panic!("kind {i}: {r:?} {:?}", t.st.overlay),
+        // A transfer on a stream without a loopback asks for its reference: the first input.
+        None => {
+            t.key("Right");
+            let r = t.key("Enter");
+            match created(&r) {
+                Some(c) => c.clone(),
+                None => panic!("kind {i}: {r:?} {:?}", t.st.overlay),
+            }
+        }
     };
     let m = meas(id, &c.name, c.kind.clone());
     t.remirror(|s| s.measurements.push(m.clone()));

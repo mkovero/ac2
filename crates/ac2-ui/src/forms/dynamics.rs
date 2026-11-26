@@ -161,7 +161,7 @@ impl Form {
         let open = open.ok_or("no audio I/O: open one first")?;
         let reference = self
             .channel(FieldId::Reference)
-            .ok_or("choose the reference: the input that records the loopback")?;
+            .ok_or(super::build::CHOOSE_REFERENCE)?;
         let measurement = self.sweep_inputs();
         let c = DynamicsConfig {
             reference_input: reference,

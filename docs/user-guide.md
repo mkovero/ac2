@@ -406,6 +406,10 @@ A new transfer is named after what it compares: *Reference → M30 FOH* (the mea
 input's name), numbered *Reference → M30 FOH 2* … when that name is taken; *TF n* only when
 the input has no name.
 
+Every dialog with a reference (transfer, sweep, dynamics) takes it from the Audio I/O page:
+the input marked *reference*. With none marked the Reference field reads *choose the
+reference* and Enter says so; no dialog picks one by channel order.
+
 ### Settings
 
 **Ctrl+P** (palette *Settings…*, or the ⚙) opens every setting in one view below the top

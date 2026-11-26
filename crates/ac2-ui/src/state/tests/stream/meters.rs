@@ -402,6 +402,9 @@ fn new_measurements_start_and_become_selected() {
     assert_eq!(t.st.rig.selected, Some(MeasId(1)));
     t.st.apply(Msg::Command(CommandId::NewTransfer), &t.keys);
     assert_eq!(form(&t).kind, FormKind::Transfer);
+    // The stream has no loopback: the reference is the operator's to choose.
+    assert!(created(&t.key("Enter")).is_none());
+    t.key("Right");
     let r = t.key("Enter");
     let c = created(&r).expect("meas.create");
     // One transfer exists, so this is the second; inputs from the stream (1 → 2).
