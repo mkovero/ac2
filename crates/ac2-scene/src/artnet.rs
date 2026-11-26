@@ -128,8 +128,8 @@ pub fn not_conforming_text(from_port: u16, reason: ArtnetBindFailure) -> String 
         ArtnetBindFailure::Refused => "the system refused it",
     };
     format!(
-        "Art-Net sends from port {from_port}, not {ARTNET_PORT} ({why}): nodes still get the \
-         frames, consoles polling for the rig won't find it"
+        "Art-Net sends from port {from_port}, not {ARTNET_PORT} ({why}): frames still go out, \
+         but nodes that check the source port drop them, and consoles will not list the rig"
     )
 }
 
@@ -146,7 +146,19 @@ pub fn socket_text(s: &ArtnetSocket) -> Option<String> {
             "{} — {os_error}",
             not_conforming_text(*from_port, *reason)
         )),
+        // The system's words are the status's last error.
+        ArtnetSocket::CannotOpen { .. } => {
+            Some("no Art-Net socket: nothing is sent; tried again every 30 s".to_owned())
+        }
     }
+}
+
+/// Whether the socket's state is one the operator must act on.
+pub fn socket_is_warning(s: &ArtnetSocket) -> bool {
+    matches!(
+        s,
+        ArtnetSocket::NotConforming { .. } | ArtnetSocket::CannotOpen { .. }
+    )
 }
 
 /// A test frame's levels as typed: at least one `channel=value`.
@@ -337,15 +349,32 @@ mod tests {
         assert_eq!(
             status_line(&rig),
             "Art-Net to 192.168.1.50:6454 universe 0.0.1 (1) · 1 frame sent · Art-Net sends \
-             from port 40000, not 6454 (another program holds it): nodes still get the frames, \
-             consoles polling for the rig won't find it — Address in use (os error 98)"
+             from port 40000, not 6454 (another program holds it): frames still go out, but \
+             nodes that check the source port drop them, and consoles will not list the rig — \
+             Address in use (os error 98)"
         );
         assert_eq!(
             not_conforming_text(51000, ArtnetBindFailure::Refused),
-            "Art-Net sends from port 51000, not 6454 (the system refused it): nodes still get \
-             the frames, consoles polling for the rig won't find it"
+            "Art-Net sends from port 51000, not 6454 (the system refused it): frames still go \
+             out, but nodes that check the source port drop them, and consoles will not list \
+             the rig"
         );
+        assert!(socket_is_warning(&rig.artnet_socket));
+        rig.artnet_socket = ArtnetSocket::CannotOpen {
+            os_error: "Too many open files (os error 24)".into(),
+        };
+        rig.artnet.last_error =
+            Some("cannot open an Art-Net socket: Too many open files (os error 24)".into());
+        assert_eq!(
+            status_line(&rig),
+            "Art-Net to 192.168.1.50:6454 universe 0.0.1 (1) · 1 frame sent · no Art-Net \
+             socket: nothing is sent; tried again every 30 s · last error: cannot open an \
+             Art-Net socket: Too many open files (os error 24)"
+        );
+        assert!(socket_is_warning(&rig.artnet_socket));
+        rig.artnet.last_error = None;
         rig.artnet_socket = ArtnetSocket::Closed;
+        assert!(!socket_is_warning(&rig.artnet_socket));
         rig.artnet.sent = 40;
         rig.artnet.last_error = Some("network unreachable".into());
         assert_eq!(

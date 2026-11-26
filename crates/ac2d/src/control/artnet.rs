@@ -401,7 +401,7 @@ impl Control {
             Some(_) => {
                 if let ArtnetSocket::NotConforming {
                     from_port, reason, ..
-                } = self.rig.artnet.artnet.open(Instant::now())
+                } = self.rig.artnet.artnet.open_for_target(Instant::now())
                 {
                     self.reply_warnings.push(Warning::ArtnetNotConforming {
                         from_port: *from_port,

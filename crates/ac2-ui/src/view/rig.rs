@@ -149,14 +149,10 @@ pub(super) fn rig_page(
         if row == RigRow::Test {
             status(ui, osc::status_line(rig), rig.osc.last_error.is_some());
         } else if row == RigRow::DmxTest {
-            let not_conforming = matches!(
-                rig.artnet_socket,
-                ac2_proto::model::ArtnetSocket::NotConforming { .. }
-            );
             status(
                 ui,
                 artnet::status_line(rig),
-                rig.artnet.last_error.is_some() || not_conforming,
+                rig.artnet.last_error.is_some() || artnet::socket_is_warning(&rig.artnet_socket),
             );
             status(ui, sacn::status_line(rig), rig.sacn.last_error.is_some());
             status(ui, artnet::channels_line(rig), false);

@@ -50,9 +50,9 @@ num-complex = { workspace = true }
 rayon = "1.11"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["float_roundtrip"] }
-# The DMX outputs' sockets: address reuse before bind (Art-Net's shared port 6454) and the
-# multicast interface (sACN), which std does not set; "all" for SO_REUSEPORT on macOS.
-socket2 = { workspace = true, features = ["all"] }
+# The DMX outputs' sockets: options set before bind and the multicast interface (sACN),
+# which std does not set.
+socket2 = { workspace = true }
 # Whole-host CPU use for the health meter (only its CPU figures are read).
 sysinfo = { workspace = true, features = ["system"] }
 tracing = { workspace = true }
@@ -62,7 +62,10 @@ tracing = { workspace = true }
 libc = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_System_WindowsProgramming"] }
+windows-sys = { workspace = true, features = [
+    "Win32_Networking_WinSock",
+    "Win32_System_WindowsProgramming",
+] }
 
 [dev-dependencies]
 ac2d = { path = ".", features = ["fault-injection"] }

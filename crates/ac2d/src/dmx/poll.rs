@@ -23,6 +23,10 @@ const OP_POLL: u16 = 0x2000;
 /// OpPollReply (Art-Net 4, Table 1).
 const OP_POLL_REPLY: u16 = 0x2100;
 
+/// The oldest protocol revision answered: Art-Net 4 has controllers ignore devices on a
+/// lower one (ArtPoll field 4, ProtVerLo).
+const PROT_VER_MIN: u16 = 14;
+
 /// The shortest ArtPoll a receiver accepts (Art-Net 4, ArtPoll, "Minimum Packet Length"):
 /// fields after it are newer and read as zero when absent.
 const POLL_MIN_LEN: usize = 14;
@@ -45,13 +49,31 @@ const RC_POWER_OK: u16 = 0x0001;
 /// one reply a second answers every honest poller.
 const PER_SOURCE: Duration = Duration::from_secs(1);
 
-/// Sources remembered for [`PER_SOURCE`]; past that the one answered longest ago is
-/// forgotten. A fixed table: no allocation however many sources poll.
-const SOURCES: usize = 16;
-
 /// Most replies a second in total, whatever the sources: a 14-byte poll draws a 239-byte
 /// reply, so this caps what spoofed polls could make the rig send at a few kB/s.
 const REPLIES_PER_SECOND: usize = 8;
+
+/// Of [`REPLIES_PER_SECOND`], how many may go to sources not in the table: the rest stay
+/// for the consoles already answered, so a flood of new (spoofed) sources cannot starve
+/// a console that polls every 2.5–3 s.
+const NEW_PER_SECOND: usize = 4;
+
+/// Sources remembered; past that the one answered longest ago is forgotten. A console
+/// polling every 3 s stays in it while new sources come in at [`NEW_PER_SECOND`] (12 in
+/// those 3 s). A fixed table: no allocation however many sources poll.
+const SOURCES: usize = 32;
+
+/// Bytes read per datagram: more than the largest Art-Net 4 packet (ArtFirmwareMaster,
+/// 1066 bytes), so no Art-Net packet arriving here is cut, nor reported as too long.
+const RECV_BUF: usize = 2048;
+// ArtFirmwareMaster: 42 bytes from ID to Spare, then 512 16-bit words (Art-Net 4,
+// ArtFirmwareMaster packet definition).
+const _: () = assert!(RECV_BUF > 42 + 2 * 512);
+
+/// Read errors in a row after which the thread pauses before reading again: an error that
+/// repeats at once must not spin a core, while a single one (an ICMP report of an earlier
+/// send, on Windows) costs no wait.
+const ERRORS_BEFORE_PAUSE: u32 = 16;
 
 /// How long the thread waits for a datagram before it looks whether it should stop.
 const WAKE: Duration = Duration::from_millis(250);
@@ -66,6 +88,9 @@ pub(super) struct Poll {
 /// The ArtPoll in `p`; `None` for any other packet.
 pub(super) fn parse_poll(p: &[u8]) -> Option<Poll> {
     if p.len() < POLL_MIN_LEN || p[..8] != ID || p[8..10] != OP_POLL.to_le_bytes() {
+        return None;
+    }
+    if u16::from_be_bytes([p[10], p[11]]) < PROT_VER_MIN {
         return None;
     }
     let byte = |i: usize| p.get(i).copied().unwrap_or(0);
@@ -149,22 +174,51 @@ pub(super) fn encode_reply(ip: Ipv4Addr, info: &ReplyInfo, count: u16) -> [u8; R
     p
 }
 
-/// The reply budget: one reply a second per source, [`REPLIES_PER_SECOND`] in total.
+/// Replies sent within the last second, oldest at `next`.
+#[derive(Debug)]
+struct Window<const N: usize> {
+    at: [Option<Instant>; N],
+    next: usize,
+}
+
+impl<const N: usize> Window<N> {
+    fn new() -> Self {
+        Self {
+            at: [None; N],
+            next: 0,
+        }
+    }
+
+    /// `N` replies within the second before `now`.
+    fn full(&self, now: Instant) -> bool {
+        self.at[self.next]
+            .is_some_and(|t| now.saturating_duration_since(t) < Duration::from_secs(1))
+    }
+
+    fn push(&mut self, now: Instant) {
+        self.at[self.next] = Some(now);
+        self.next = (self.next + 1) % N;
+    }
+}
+
+/// The reply budget: one reply a second per source, [`REPLIES_PER_SECOND`] in total, of
+/// which [`NEW_PER_SECOND`] to sources not in the table.
 #[derive(Debug)]
 pub(super) struct Limiter {
     /// Each source's latest reply.
     sources: [Option<(Ipv4Addr, Instant)>; SOURCES],
-    /// The latest replies to anyone, oldest at `next`.
-    recent: [Option<Instant>; REPLIES_PER_SECOND],
-    next: usize,
+    /// Replies to anyone.
+    all: Window<REPLIES_PER_SECOND>,
+    /// Replies to sources not in the table.
+    new: Window<NEW_PER_SECOND>,
 }
 
 impl Default for Limiter {
     fn default() -> Self {
         Self {
             sources: [None; SOURCES],
-            recent: [None; REPLIES_PER_SECOND],
-            next: 0,
+            all: Window::new(),
+            new: Window::new(),
         }
     }
 }
@@ -172,19 +226,21 @@ impl Default for Limiter {
 impl Limiter {
     /// Whether `from` may have a reply at `now`; a yes is counted.
     pub(super) fn allow(&mut self, from: Ipv4Addr, now: Instant) -> bool {
-        let within = |t: Instant, d: Duration| now.saturating_duration_since(t) < d;
         let slot = self
             .sources
             .iter()
             .position(|s| s.is_some_and(|(ip, _)| ip == from));
-        if slot.is_some_and(|i| self.sources[i].is_some_and(|(_, t)| within(t, PER_SOURCE))) {
+        let last = slot.and_then(|i| self.sources[i]).map(|(_, t)| t);
+        if last.is_some_and(|t| now.saturating_duration_since(t) < PER_SOURCE) {
             return false;
         }
-        if self.recent[self.next].is_some_and(|t| within(t, Duration::from_secs(1))) {
+        if self.all.full(now) || (slot.is_none() && self.new.full(now)) {
             return false;
         }
-        self.recent[self.next] = Some(now);
-        self.next = (self.next + 1) % REPLIES_PER_SECOND;
+        self.all.push(now);
+        if slot.is_none() {
+            self.new.push(now);
+        }
         let slot = slot.unwrap_or_else(|| {
             // A free slot, else the source answered longest ago.
             (0..SOURCES)
@@ -194,6 +250,28 @@ impl Limiter {
         self.sources[slot] = Some((from, now));
         true
     }
+}
+
+/// Whether a poll from `from` gets a reply at `now`, the rig sending `universe`: never to
+/// an address no reply can go to (a spoofed source such as 0.0.0.0, a broadcast or a
+/// group, which would also spend the budget), only for the rig's universe in targeted
+/// mode, and within the [`Limiter`]'s budget.
+pub(super) fn answers(
+    poll: Poll,
+    from: Ipv4Addr,
+    universe: Option<PortAddress>,
+    limiter: &mut Limiter,
+    now: Instant,
+) -> bool {
+    if from.is_unspecified() || from.is_broadcast() || from.is_multicast() {
+        return false;
+    }
+    if let Some((bottom, top)) = poll.targeted
+        && !universe.is_some_and(|u| (bottom..=top).contains(&u.get()))
+    {
+        return false;
+    }
+    limiter.allow(from, now)
 }
 
 /// The listener thread's handle: dropping it stops the thread within [`WAKE`].
@@ -233,43 +311,41 @@ impl Listener {
 }
 
 fn listen(socket: &UdpSocket, reply_port: u16, stop: &AtomicBool, info: &Mutex<ReplyInfo>) {
-    // An ArtPoll is at most 22 bytes; a longer datagram is cut to the buffer (or reported
-    // as too long, on Windows) and is no ArtPoll anyway.
-    let mut buf = [0u8; 64];
+    let mut buf = [0u8; RECV_BUF];
     let mut limiter = Limiter::default();
     let mut count: u16 = 0;
+    let mut errors: u32 = 0;
     while !stop.load(Ordering::Relaxed) {
-        let from = match socket.recv_from(&mut buf) {
-            Ok((n, SocketAddr::V4(from))) => match parse_poll(&buf[..n]) {
-                Some(poll) => (poll, from),
-                None => continue,
-            },
+        #[cfg(windows)]
+        super::winsock::wait_readable(socket, WAKE);
+        let (poll, from) = match socket.recv_from(&mut buf) {
+            Ok((n, SocketAddr::V4(from))) => {
+                errors = 0;
+                match parse_poll(&buf[..n]) {
+                    Some(poll) => (poll, from),
+                    None => continue,
+                }
+            }
             Ok(_) => continue,
-            Err(e) => {
-                if !matches!(
+            Err(e)
+                if matches!(
                     e.kind(),
                     io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                ) {
-                    // A datagram too long, or an ICMP error of an earlier send reported
-                    // here (Windows): nothing to do but read on; the pause keeps an error
-                    // that repeats at once from spinning the thread.
+                ) =>
+            {
+                continue;
+            }
+            Err(_) => {
+                errors += 1;
+                if errors >= ERRORS_BEFORE_PAUSE {
+                    errors = 0;
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 continue;
             }
         };
-        let (poll, from) = from;
         let i = *info.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((bottom, top)) = poll.targeted {
-            // Targeted mode: reply only for a Port-Address in the range.
-            if !i
-                .universe
-                .is_some_and(|u| (bottom..=top).contains(&u.get()))
-            {
-                continue;
-            }
-        }
-        if !limiter.allow(*from.ip(), Instant::now()) {
+        if !answers(poll, *from.ip(), i.universe, &mut limiter, Instant::now()) {
             continue;
         }
         let Some(ip) = local_ip_toward(*from.ip()) else {
@@ -313,6 +389,13 @@ mod tests {
         ];
         assert_eq!(parse_poll(&poll), Some(Poll { targeted: None }));
         assert_eq!(parse_poll(&poll[..13]), None);
+        // An older protocol revision than 14 is not answered.
+        let mut old = poll;
+        old[11] = 13;
+        assert_eq!(parse_poll(&old), None);
+        let mut newer = poll;
+        newer[11] = 15;
+        assert_eq!(parse_poll(&newer), Some(Poll { targeted: None }));
         let mut dmx = poll;
         dmx[8..10].copy_from_slice(&[0x00, 0x50]); // OpDmx
         assert_eq!(parse_poll(&dmx), None);
@@ -420,12 +503,12 @@ mod tests {
         assert!(!l.allow(a, ms(10)));
         assert!(!l.allow(a, ms(999)));
         assert!(l.allow(a, ms(1000)));
-        // Many sources: the total stops at REPLIES_PER_SECOND within any second.
+        // Many new sources: they stop at NEW_PER_SECOND within any second.
         let mut l = Limiter::default();
         let sent = (0..100u8)
             .filter(|i| l.allow(Ipv4Addr::new(10, 0, 1, *i), ms(u64::from(*i))))
             .count();
-        assert_eq!(sent, REPLIES_PER_SECOND);
+        assert_eq!(sent, NEW_PER_SECOND);
         assert!(l.allow(Ipv4Addr::new(10, 0, 2, 1), ms(1000)));
         // More sources than the table holds: the oldest is forgotten, never a panic.
         let mut l = Limiter::default();
@@ -433,5 +516,122 @@ mod tests {
             l.allow(Ipv4Addr::new(10, 0, 3, i), ms(u64::from(i) * 200));
         }
         assert!(l.sources.iter().all(Option::is_some));
+    }
+
+    #[test]
+    fn a_flood_of_new_sources_leaves_room_for_a_known_console() {
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        let console = Ipv4Addr::new(10, 0, 0, 1);
+        let mut l = Limiter::default();
+        assert!(l.allow(console, t0));
+        // From a second on, a poll every millisecond from a new source each time, for
+        // three seconds; the console polls again 2.5 s in and is answered.
+        let mut new = 0;
+        for i in 1000..4000u64 {
+            if i == 2500 {
+                assert!(l.allow(console, ms(i)), "the console starved");
+            }
+            let spoofed = Ipv4Addr::from(0x0a01_0000 + u32::try_from(i).expect("small"));
+            new += usize::from(l.allow(spoofed, ms(i)));
+        }
+        assert_eq!(new, 3 * NEW_PER_SECOND);
+        // Known sources (in the table) take the rest of the total.
+        let mut l = Limiter::default();
+        let known: Vec<Ipv4Addr> = (1..=REPLIES_PER_SECOND as u8)
+            .map(|i| Ipv4Addr::new(10, 0, 4, i))
+            .collect();
+        for (i, ip) in known.iter().enumerate() {
+            // Learned a second apart, within the new budget.
+            assert!(l.allow(*ip, t0 + Duration::from_secs(i as u64)));
+        }
+        let t = t0 + Duration::from_secs(20);
+        assert!(known.iter().all(|ip| l.allow(*ip, t)));
+        assert!(
+            !l.allow(Ipv4Addr::new(10, 0, 5, 1), t),
+            "the total is spent"
+        );
+    }
+
+    #[test]
+    fn a_poll_from_nowhere_is_not_answered_nor_counted() {
+        let poll = Poll { targeted: None };
+        let t0 = Instant::now();
+        let mut l = Limiter::default();
+        for from in [
+            Ipv4Addr::UNSPECIFIED,
+            Ipv4Addr::BROADCAST,
+            Ipv4Addr::new(239, 255, 0, 1),
+            Ipv4Addr::new(224, 0, 0, 1),
+        ] {
+            for _ in 0..20 {
+                assert!(!answers(poll, from, None, &mut l, t0), "{from}");
+            }
+        }
+        assert!(l.sources.iter().all(Option::is_none));
+        assert!(answers(poll, Ipv4Addr::new(10, 0, 0, 1), None, &mut l, t0));
+        // Targeted: only for the rig's universe.
+        let u = PortAddress::new(0x20).expect("test value");
+        let narrow = Poll {
+            targeted: Some((0x10, 0x1f)),
+        };
+        let wide = Poll {
+            targeted: Some((0x10, 0x30)),
+        };
+        assert!(!answers(
+            narrow,
+            Ipv4Addr::new(10, 0, 0, 2),
+            Some(u),
+            &mut l,
+            t0
+        ));
+        assert!(!answers(wide, Ipv4Addr::new(10, 0, 0, 2), None, &mut l, t0));
+        assert!(answers(
+            wide,
+            Ipv4Addr::new(10, 0, 0, 2),
+            Some(u),
+            &mut l,
+            t0
+        ));
+    }
+
+    #[test]
+    fn a_poll_after_a_flood_of_long_datagrams_is_answered_at_once() {
+        let rig = UdpSocket::bind("127.0.0.1:0").expect("test value");
+        // Room for the whole flood, so the poll after it is not dropped on a small default
+        // buffer.
+        socket2::SockRef::from(&rig)
+            .set_recv_buffer_size(1 << 20)
+            .expect("test value");
+        let poller = UdpSocket::bind("127.0.0.1:0").expect("test value");
+        poller
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("test value");
+        let to = rig.local_addr().expect("test value");
+        let reply_port = poller.local_addr().expect("test value").port();
+        let _l = Listener::spawn(rig, reply_port, ReplyInfo::new("rig")).expect("test value");
+        let mut dmx = [0x55u8; 530];
+        dmx[..8].copy_from_slice(&ID);
+        dmx[8..10].copy_from_slice(&[0x00, 0x50]);
+        let firmware = [0x33u8; 1066];
+        for _ in 0..50 {
+            poller.send_to(&dmx, to).expect("test value");
+            poller.send_to(&firmware, to).expect("test value");
+        }
+        let t0 = Instant::now();
+        let mut poll = [0u8; 14];
+        poll[..8].copy_from_slice(&ID);
+        poll[8..10].copy_from_slice(&[0x00, 0x20]);
+        poll[10..12].copy_from_slice(&[0, 14]);
+        poller.send_to(&poll, to).expect("test value");
+        let mut buf = [0u8; 300];
+        let n = poller.recv(&mut buf).expect("a reply");
+        assert_eq!(n, REPLY_LEN);
+        // A read that paused per foreign datagram would take a second for these 100.
+        assert!(
+            t0.elapsed() < Duration::from_millis(900),
+            "{:?}",
+            t0.elapsed()
+        );
     }
 }

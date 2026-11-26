@@ -4,13 +4,17 @@
 //! other, and a console finds the rig only by its answer to ArtPoll on that port
 //! ([`super::poll`]).
 //!
-//! The port is bound with address reuse, so a lighting program on the same host (QLC+,
-//! a visualiser) that shares it keeps working beside the daemon: broadcasts reach both.
-//! When 6454 cannot be bound (a program holds it without sharing), frames still go out,
-//! from a port the system picks, and the socket's state says so in `rig.artnet_socket`
-//! and in the `artnet.target` reply: the light keeps working on the nodes that accept it,
-//! and the operator reads why a console does not list the rig, instead of a dark rig
-//! with nothing to show for it. The daemon tries 6454 again every [`RETRY`].
+//! The port is the daemon's alone while an Art-Net target is set: it is bound without
+//! address reuse (and exclusively on Windows), because two programs sharing a UDP port do
+//! not both get its unicast: the system hands each datagram to one of them, by bind order
+//! and platform, so sharing would either take another program's ArtPollReply and DMX or
+//! leave the daemon deaf while it seemed to answer. When 6454 cannot be bound (a lighting
+//! program on the same host holds it), frames still go out, from a port the system picks,
+//! and the socket's state says so in `rig.artnet_socket` and in the `artnet.target`
+//! reply; nodes that check the source port drop those frames and no console lists the rig.
+//! The daemon tries 6454 again every [`RETRY`], so quitting the other program (or turning
+//! its Art-Net off) brings the rig back to conforming on its own. When no socket can be
+//! opened at all, it says so once and tries again on the same timer.
 //!
 //! Like OSC, a send never waits and never panics; every failure is kept in the status as
 //! the operating system said it.
@@ -85,16 +89,29 @@ impl ArtnetSender {
         }
     }
 
-    /// Opens the socket unless it is open: on Art-Net's port, else on one the system
-    /// picks. The state after it.
+    /// Opens the socket unless it is open or failed to open (tried again by [`Self::retry`]):
+    /// on Art-Net's port, else on one the system picks. The state after it.
     pub(crate) fn open(&mut self, now: Instant) -> &ArtnetSocket {
-        if self.socket.is_none() {
-            match self.bind_conforming() {
-                Ok(()) => {}
-                Err(e) => self.bind_fallback(&e, now),
-            }
+        if self.socket.is_none() && !matches!(self.state, ArtnetSocket::CannotOpen { .. }) {
+            self.open_now(now);
         }
         &self.state
+    }
+
+    /// [`Self::open`] for an operator's new target: a socket that could not be opened is
+    /// tried again at once, not at the next retry.
+    pub(crate) fn open_for_target(&mut self, now: Instant) -> &ArtnetSocket {
+        if self.socket.is_none() {
+            self.open_now(now);
+        }
+        &self.state
+    }
+
+    fn open_now(&mut self, now: Instant) {
+        match self.bind_conforming() {
+            Ok(()) => self.retry_at = None,
+            Err(e) => self.bind_fallback(&e, now),
+        }
     }
 
     /// Closes the socket and stops answering ArtPoll.
@@ -110,29 +127,32 @@ impl ArtnetSender {
         &self.state
     }
 
-    /// When the next try for Art-Net's port is due.
+    /// When the next try for Art-Net's port (or for any socket) is due.
     pub(crate) fn retry_due(&self) -> Option<Instant> {
         self.retry_at
     }
 
-    /// Tries Art-Net's port again when due; whether the state changed.
+    /// Tries Art-Net's port again when due (and, with no socket at all, any port); whether
+    /// the state changed.
     pub(crate) fn retry(&mut self, now: Instant) -> bool {
         if self.retry_at.is_none_or(|t| t > now) {
             return false;
         }
-        let before = self.socket.take();
-        match self.bind_conforming() {
-            Ok(()) => {
-                tracing::info!("artnet: port {} bound at last", self.ports.artnet_bind);
-                self.retry_at = None;
-                true
-            }
-            Err(_) => {
-                self.socket = before;
-                self.retry_at = Some(now + RETRY);
-                false
-            }
+        let before = self.state.clone();
+        match self.socket.take() {
+            None => self.open_now(now),
+            Some(fallback) => match self.bind_conforming() {
+                Ok(()) => self.retry_at = None,
+                Err(_) => {
+                    self.socket = Some(fallback);
+                    self.retry_at = Some(now + RETRY);
+                }
+            },
         }
+        if self.state == ArtnetSocket::Conforming && before != ArtnetSocket::Conforming {
+            tracing::info!("artnet: port {} bound at last", self.ports.artnet_bind);
+        }
+        self.state != before
     }
 
     fn bind_conforming(&mut self) -> io::Result<()> {
@@ -148,22 +168,22 @@ impl ArtnetSender {
     }
 
     fn bind_fallback(&mut self, e: &io::Error, now: Instant) {
-        let reason = if e.kind() == io::ErrorKind::AddrInUse {
+        let reason = if port_taken(e) {
             ArtnetBindFailure::PortTaken
         } else {
             ArtnetBindFailure::Refused
         };
+        self.retry_at = Some(now + RETRY);
         let any = SocketAddrV4::new(*self.ports.artnet_bind.ip(), 0);
         match bind(any, false).and_then(|s| Ok((s.local_addr()?, s))) {
             Ok((local, s)) => {
                 let from_port = local.as_socket().map_or(0, |a| a.port());
                 tracing::warn!(
-                    "artnet: cannot bind {} ({e}): sending from port {from_port}; strict \
-                     nodes drop these frames and no console lists this rig",
+                    "artnet: cannot bind {} ({e}): sending from port {from_port}; nodes that \
+                     check the source port drop these frames and no console lists this rig",
                     self.ports.artnet_bind
                 );
                 self.socket = Some(s);
-                self.retry_at = Some(now + RETRY);
                 self.state = ArtnetSocket::NotConforming {
                     from_port,
                     reason,
@@ -171,10 +191,15 @@ impl ArtnetSender {
                 };
             }
             Err(e2) => {
-                let msg = format!("cannot open an Art-Net socket: {e2}");
-                tracing::warn!("artnet: {msg}");
-                self.status.last_error = Some(msg);
-                self.state = ArtnetSocket::Closed;
+                let os_error = e2.to_string();
+                // Said once: the retry every RETRY would otherwise log the same line all
+                // night.
+                if !matches!(&self.state, ArtnetSocket::CannotOpen { os_error: o } if *o == os_error)
+                {
+                    tracing::warn!("artnet: cannot open an Art-Net socket: {os_error}");
+                }
+                self.status.last_error = Some(format!("cannot open an Art-Net socket: {os_error}"));
+                self.state = ArtnetSocket::CannotOpen { os_error };
             }
         }
     }
@@ -201,11 +226,12 @@ impl ArtnetSender {
                 .map(|_| ())
                 .map_err(|e| format!("cannot send Art-Net universe {universe} to {target}: {e}")),
             (Some(_), SocketAddr::V6(_)) => Err(format!("{target}: Art-Net is IPv4 only")),
-            (None, _) => Err(self
-                .status
-                .last_error
-                .clone()
-                .unwrap_or_else(|| "no Art-Net socket".into())),
+            (None, _) => Err(match &self.state {
+                ArtnetSocket::CannotOpen { os_error } => {
+                    format!("cannot open an Art-Net socket: {os_error}")
+                }
+                _ => "no Art-Net socket".to_owned(),
+            }),
         };
         match &r {
             Ok(()) => {
@@ -226,25 +252,35 @@ impl ArtnetSender {
     }
 }
 
-/// A UDP socket on `addr` that may broadcast; `share`: with address reuse, so that another
-/// Art-Net program on the host can hold the same port.
-fn bind(addr: SocketAddrV4, share: bool) -> io::Result<Socket> {
+/// A UDP socket on `addr` that may broadcast, never sharing its port: no address reuse is
+/// set, and `exclusive` also keeps a later SO_REUSEADDR socket off it on Windows, which
+/// otherwise lets one bind over a socket that did not ask to share.
+fn bind(addr: SocketAddrV4, exclusive: bool) -> io::Result<Socket> {
     let s = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-    if share {
-        s.set_reuse_address(true)?;
-        // BSD sockets share an exact address and port only with SO_REUSEPORT as well.
-        #[cfg(target_os = "macos")]
-        s.set_reuse_port(true)?;
+    #[cfg(windows)]
+    if exclusive {
+        super::winsock::exclusive(&s)?;
     }
-    // Art-Net is often broadcast to a subnet (2.255.255.255, or the LAN's); without
-    // SO_BROADCAST the kernel refuses that send (EACCES).
+    let _ = exclusive;
+    super::nonblocking_on_windows(&s)?;
+    // A target may be a subnet's broadcast address (allowed, though Art-Net 4 asks for
+    // unicast); without SO_BROADCAST the kernel refuses that send (EACCES).
     s.set_broadcast(true)?;
     s.bind(&addr.into())?;
     Ok(s)
 }
 
+/// Whether a bind failed because another socket holds the port: Winsock says so with
+/// WSAEACCES when that socket holds it exclusively.
+fn port_taken(e: &io::Error) -> bool {
+    e.kind() == io::ErrorKind::AddrInUse
+        || (cfg!(windows) && e.kind() == io::ErrorKind::PermissionDenied)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
+
     use super::*;
 
     #[test]
@@ -321,8 +357,62 @@ mod tests {
     }
 
     #[test]
-    fn a_port_held_without_sharing_falls_back_and_says_so() {
-        // A program that holds the port without address reuse.
+    fn the_port_is_held_alone() {
+        let mut s = ArtnetSender::new(ephemeral(), "rig");
+        assert_eq!(*s.open(Instant::now()), ArtnetSocket::Conforming);
+        let bound = s
+            .socket
+            .as_ref()
+            .and_then(|s| s.local_addr().ok())
+            .expect("bound");
+        // Another Art-Net program asking to share the port is refused, on every system:
+        // sharing would hand the unicast to one of the two.
+        let other = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).expect("socket");
+        other.set_reuse_address(true).expect("reuse");
+        assert!(other.bind(&bound).is_err(), "the port was shared");
+    }
+
+    #[test]
+    fn no_socket_at_all_is_said_and_tried_again_on_the_timer() {
+        // An address no interface of this host has (TEST-NET-1): neither Art-Net's port
+        // nor any other can be bound there.
+        let ports = DmxPorts {
+            artnet_bind: SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 77), 0),
+            ..DmxPorts::LOOPBACK
+        };
+        let mut s = ArtnetSender::new(ports, "rig");
+        let t0 = Instant::now();
+        let os_error = match s.open(t0).clone() {
+            ArtnetSocket::CannotOpen { os_error } => os_error,
+            other => panic!("{other:?}"),
+        };
+        assert!(!os_error.is_empty());
+        assert_eq!(s.retry_due(), Some(t0 + RETRY));
+        // A send before the retry is due says why and tries nothing.
+        let to: SocketAddr = "127.0.0.1:9".parse().expect("test value");
+        let uni = PortAddress::new(1).expect("test value");
+        let e = s
+            .send(to, uni, &[0; 512], t0 + RETRY / 2)
+            .expect_err("no socket");
+        assert!(e.contains("cannot open an Art-Net socket"), "{e}");
+        assert_eq!(s.retry_due(), Some(t0 + RETRY));
+        assert_eq!(s.status().sent, 0);
+        // Due: tried again, still failing the same way, and the next try is a period on.
+        assert!(!s.retry(t0 + RETRY));
+        assert!(matches!(s.state(), ArtnetSocket::CannotOpen { .. }));
+        assert_eq!(s.retry_due(), Some(t0 + RETRY + RETRY));
+        // An operator's new target tries at once.
+        assert!(matches!(
+            s.open_for_target(t0 + RETRY),
+            ArtnetSocket::CannotOpen { .. }
+        ));
+        s.close();
+        assert_eq!((s.state(), s.retry_due()), (&ArtnetSocket::Closed, None));
+    }
+
+    #[test]
+    fn a_taken_port_falls_back_and_says_so() {
+        // A program that holds the port.
         let held = UdpSocket::bind("127.0.0.1:0").expect("test value");
         let SocketAddr::V4(port) = held.local_addr().expect("test value") else {
             panic!("v4");
