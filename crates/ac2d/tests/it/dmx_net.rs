@@ -32,11 +32,6 @@ fn port_of(s: &UdpSocket) -> u16 {
     s.local_addr().unwrap().port()
 }
 
-/// A loopback port free a moment ago, for the daemon to bind.
-fn free_port() -> u16 {
-    port_of(&UdpSocket::bind("127.0.0.1:0").unwrap())
-}
-
 fn config(dmx: DmxPorts) -> DaemonConfig {
     let mut cfg = steady_config(realtime_rig(), local_ipc());
     cfg.name = RIG_NAME.into();
@@ -107,10 +102,10 @@ fn is_poll_reply(p: &[u8]) -> bool {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn artnet_sends_from_its_port_and_answers_artpoll_sparingly() {
     init_log();
-    let port = free_port();
     let poller = socket();
+    // The daemon binds a port the system picks, learnt from its first frame: a port picked
+    // here and freed for the daemon could be taken in between.
     let h = Daemon::start(config(DmxPorts {
-        artnet_bind: SocketAddrV4::new(Ipv4Addr::LOCALHOST, port),
         artnet_reply_port: port_of(&poller),
         ..DmxPorts::LOOPBACK
     }))
@@ -132,9 +127,10 @@ async fn artnet_sends_from_its_port_and_answers_artpoll_sparingly() {
         r.artnet_socket == ArtnetSocket::Conforming
     })
     .await;
-    // Frames go out from the Art-Net port.
+    // Frames go out from the Art-Net port, the one polls are heard on.
     let (_, from) = until(&node, "a frame", is_art_dmx);
-    assert_eq!(from.port(), port);
+    let port = from.port();
+    assert_ne!(port, 0);
 
     // A flood of ArtPoll, and DMX sent to the rig, which it never takes.
     let rig_addr = (Ipv4Addr::LOCALHOST, port);
@@ -376,6 +372,8 @@ async fn sacn_carries_the_frame_beside_artnet_and_ends_its_stream() {
     set_sacn(&c, Some(sacn_unicast(9))).await.unwrap();
     until(&rx, "the stream back", |p| !terminated(p));
     drop(c);
+    // Dropping the handle joins the daemon's threads, so its last packets are already in
+    // `rx`'s buffer and the gather below only drains it.
     drop(h);
     let tail = gather(&rx, Duration::from_millis(500));
     let n = tail.len();

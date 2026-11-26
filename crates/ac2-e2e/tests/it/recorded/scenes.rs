@@ -290,8 +290,9 @@ pub fn eq(cli: &Cli) -> R {
 
 /// [`rig`] with a rig-scope meter "FOH limit" on in 1 whose first Leq window has a 99 dB
 /// limit and the meter a cue (its input is not calibrated, so the rig cannot judge it: the
-/// fault cue, holding DMX 12 at 255 and 14 at 40), OSC and Art-Net targets on this machine
-/// (nothing listens there), a 1.5 s Art-Net fade and the monitor started with the daemon.
+/// fault cue, holding DMX 12 at 255 and 14 at 40), an OSC target on this machine (nothing
+/// listens there), an Art-Net target this test holds, a 1.5 s Art-Net fade and the monitor
+/// started with the daemon.
 pub fn rig_monitor(cli: &Cli) -> R {
     rig(cli)?;
     let mut config = SplConfig::on_input(0, Weighting::A, TimeWeighting::Fast);
@@ -324,7 +325,7 @@ pub fn rig_monitor(cli: &Cli) -> R {
     cli.call(Command::ArtnetTarget {
         base: base()?,
         target: Some(ArtnetTarget {
-            addr: "127.0.0.1:6454".parse()?,
+            addr: artnet_node()?,
             universe: "0.0.1".parse()?,
         }),
     })?;
@@ -337,6 +338,17 @@ pub fn rig_monitor(cli: &Cli) -> R {
         on: true,
     })?;
     Ok(())
+}
+
+/// A loopback socket of this test's own standing in for an Art-Net node, held for the
+/// whole run: the frames sent to it reach nothing else, where Art-Net's own port could
+/// reach an Art-Net program on the host.
+fn artnet_node() -> R<std::net::SocketAddr> {
+    static NODE: std::sync::OnceLock<std::net::UdpSocket> = std::sync::OnceLock::new();
+    if NODE.get().is_none() {
+        let _ = NODE.set(std::net::UdpSocket::bind("127.0.0.1:0")?);
+    }
+    Ok(NODE.get().ok_or("no Art-Net node socket")?.local_addr()?)
 }
 
 /// [`rig`] with the mic "MM1 34804" (its 0° and 90° curves), in 2 calibrated with it from

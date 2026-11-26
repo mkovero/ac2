@@ -42,7 +42,9 @@ fn doc<T: Serialize>(value: &T) -> R<Value> {
 /// - whether the host has a battery-backed clock, and the host's time zone with the offset
 ///   in force;
 /// - a local client's tag, the routing id libzmq gave its connection, which starts from the
-///   C library's random generator and so differs by platform.
+///   C library's random generator and so differs by platform;
+/// - the Art-Net target's port: a socket the scene holds stands in for the node, on a port
+///   the system picks, written as Art-Net's own.
 fn pin_host(mut v: Value) -> Value {
     fn walk(v: &mut Value) {
         match v {
@@ -65,6 +67,9 @@ fn pin_host(mut v: Value) -> Value {
     }
     if let Some(e) = v.pointer_mut("/clocks/rtc") {
         *e = Value::Bool(true);
+    }
+    if let Some(e) = v.pointer_mut("/rig/artnet_target/addr") {
+        *e = Value::String("127.0.0.1:6454".to_owned());
     }
     if let Some(e) = v.pointer_mut("/rig/zone") {
         *e = serde_json::json!({"name": "Europe/Helsinki", "utc_offset_s": 7200});
