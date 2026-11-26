@@ -980,8 +980,9 @@ or it boots without its meter and refuses every network client.
 13. **Stale socket files.** The daemon holding the instance lock removes the files at its own
    endpoints before it binds; the app removes a simulated rig's files once it killed the rig
    or saw it end, and at start removes those of every app (`sim-<pid>-…`) no longer running.
-14. **A `TZ` name with digits** (`EST5EDT`) is a zone name when the zone database has a file
-   of that name, as the C library reads `TZ`; else it is a rule and the header gives the offset.
+14. **A `TZ` value** (`Europe/Helsinki`, `EST5EDT`) is a zone name only when the zone
+   database has a file of that name, as the C library reads `TZ`; else it is a rule, or
+   names no zone (`Foo`), and the header gives the offset.
 
 ## Finding map
 
