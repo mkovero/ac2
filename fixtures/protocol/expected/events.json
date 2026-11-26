@@ -1436,6 +1436,14 @@
     "universe": 1
    },
    "artnet_fade": 1.5,
+   "sacn_target": {
+    "dest": {
+     "type": "multicast",
+     "interface": "192.168.9.4"
+    },
+    "universe": 1,
+    "priority": 100
+   },
    "monitor_at_start": true,
    "levels": {
     "ballistic": "type1",
@@ -1454,6 +1462,13 @@
    },
    "artnet": {
     "sent": 340,
+    "last_error": null
+   },
+   "artnet_socket": {
+    "type": "conforming"
+   },
+   "sacn": {
+    "sent": 338,
     "last_error": null
    },
    "dmx": [

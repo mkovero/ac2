@@ -120,6 +120,7 @@ impl Control {
             Command::OscTarget { base, addr } => self.osc_target(base, addr),
             Command::OscTest { msg } => self.osc_test(&msg),
             Command::ArtnetTarget { base, target } => self.artnet_target(base, target),
+            Command::SacnTarget { base, target } => self.sacn_target(base, target),
             Command::ArtnetFade { base, seconds } => self.artnet_fade(base, seconds),
             Command::ArtnetTest { channels } => self.artnet_test(&channels),
             Command::LevelsSet {

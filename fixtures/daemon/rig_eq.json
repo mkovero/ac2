@@ -1,5 +1,5 @@
 {
-  "proto_version": 106,
+  "proto_version": 107,
   "value": {
     "grids": [
       {
@@ -382,6 +382,9 @@
           "sent": 0
         },
         "artnet_fade": 1.0,
+        "artnet_socket": {
+          "type": "closed"
+        },
         "artnet_target": null,
         "cues": [],
         "damaged_files": [],
@@ -400,6 +403,11 @@
         },
         "osc_target": null,
         "rev": 0,
+        "sacn": {
+          "last_error": null,
+          "sent": 0
+        },
+        "sacn_target": null,
         "zone": {
           "name": "Europe/Helsinki",
           "utc_offset_s": 7200
@@ -421,11 +429,11 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-54769968"
+              "since": "now-17543462"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-54769968"
+              "since": "now-17543462"
             }
           },
           "started_at": null,
@@ -433,31 +441,31 @@
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-54769968",
+              "since": "now-17543462",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-54769968",
+              "since": "now-17543462",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-54769968",
+              "since": "now-17543462",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-54769968",
+              "since": "now-17543462",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-54769968",
+              "since": "now-17543462",
               "weighting": "a"
             }
           ]
@@ -498,7 +506,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-126538845",
+          "opened_at": "now-71027935",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -523,7 +531,7 @@
             "type": "uncalibrated"
           },
           "captured_unsettled": false,
-          "created_at": "now-40245298",
+          "created_at": "now-8700963",
           "delay": 0.0,
           "depth": null,
           "edit": {
@@ -574,7 +582,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-35053859"
+        "saved_at": "now-6534822"
       }
     },
     "traces": [
@@ -1310,7 +1318,7 @@
             "type": "uncalibrated"
           },
           "captured_unsettled": false,
-          "created_at": "now-40245298",
+          "created_at": "now-8700963",
           "delay": 0.0,
           "depth": null,
           "edit": {

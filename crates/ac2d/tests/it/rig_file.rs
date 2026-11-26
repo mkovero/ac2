@@ -85,7 +85,7 @@ fn seeded() -> Seeded {
 }
 
 /// The format version this build reads.
-const VERSION: u32 = 12;
+const VERSION: u32 = 13;
 
 /// A rig settings file of the current version holding the seeded settings and `meters`.
 fn file_with_meters(s: &Seeded, meters: Value) -> Value {
@@ -100,6 +100,7 @@ fn file_with_meters(s: &Seeded, meters: Value) -> Value {
         "osc_target": null,
         "artnet_target": s.target,
         "artnet_fade": 2.5,
+        "sacn_target": null,
         "levels": LevelsSettings::default(),
         "peers": [{
             "rig": PEER_RIG,

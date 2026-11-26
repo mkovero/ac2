@@ -34,7 +34,7 @@ use crate::util::{internal, invalid};
 /// How often the current states are sent again.
 pub(crate) const REPEAT: Duration = Duration::from_secs(1);
 
-/// The longest `rig.osc` (and `rig.artnet`) waits to show a moved sent counter.
+/// The longest `rig.osc` (and `rig.artnet`, `rig.sacn`) waits to show a moved sent counter.
 pub(crate) const STATUS_EVERY: Duration = Duration::from_secs(10);
 
 /// A cued meter reports every second; one silent this long has stopped judging (a stalled
@@ -387,7 +387,7 @@ impl Control {
             rig.cues = cues;
             rig.dmx = dmx;
             rig.osc = self.rig.osc.status().clone();
-            rig.artnet = self.rig.artnet.status().clone();
+            self.rig.artnet.fill_status(&mut rig);
             self.rig.osc.status_at = Some(now);
             self.rig.artnet.status_at = Some(now);
             self.commit(Change::Rig(rig));

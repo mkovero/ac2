@@ -6,14 +6,14 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use ac2_proto::model::{
-    ARTNET_PORT, ArtnetFade, ArtnetTarget, DmxEntry, DmxLevel, DmxSet, PortAddress, Rig,
-    dmx_list_text, parse_dmx_list,
+    ARTNET_PORT, ArtnetBindFailure, ArtnetFade, ArtnetSocket, ArtnetTarget, DmxEntry, DmxLevel,
+    DmxSet, PortAddress, Rig, dmx_list_text, parse_dmx_list,
 };
 
 /// The Rig monitor page's Art-Net rows.
 pub const TARGET_TITLE: &str = "Art-Net target";
-pub const UNIVERSE_TITLE: &str = "Universe";
-pub const FADE_TITLE: &str = "Fade (s)";
+pub const UNIVERSE_TITLE: &str = "Art-Net universe";
+pub const FADE_TITLE: &str = "DMX fade (s)";
 pub const TEST_TITLE: &str = "Send DMX test";
 /// The levels Send DMX test starts with.
 pub const DEFAULT_TEST: &str = "1=255";
@@ -27,8 +27,8 @@ pub const UNIVERSE_NOTE: &str =
 pub const FADE_NOTE: &str = "seconds the lights take to move to a new cue state, evenly in \
                              brightness, 0–60; 0 or empty: they jump";
 /// Under the test row.
-pub const TEST_NOTE: &str = "Enter sends these levels, every other channel 0: the test frame \
-                             holds 5 s, then the cue levels return";
+pub const TEST_NOTE: &str = "Enter sends these levels to Art-Net and sACN, every other \
+                             channel 0: the test frame holds 5 s, then the cue levels return";
 /// A cue row's DMX line in the limit editor, under its OSC line.
 pub const CUE_LINE: &str = "DMX";
 
@@ -110,12 +110,42 @@ pub fn fade_text(f: ArtnetFade) -> String {
     format!("{}", f.seconds())
 }
 
-/// The fade as its toast says it: `Art-Net fade 1.5 s`, or `Art-Net fade off` for 0.
+/// The fade as its toast says it: `DMX fade 1.5 s`, or `DMX fade off` for 0. One fade
+/// serves Art-Net and sACN.
 pub fn fade_toast(f: ArtnetFade) -> String {
     if f.seconds() == 0.0 {
-        "Art-Net fade off: cue changes jump".to_owned()
+        "DMX fade off: cue changes jump".to_owned()
     } else {
-        format!("Art-Net fade {} s", f.seconds())
+        format!("DMX fade {} s", f.seconds())
+    }
+}
+
+/// Port 6454 could not be bound: what the operator is told when setting a target, and what
+/// the status line keeps saying.
+pub fn not_conforming_text(from_port: u16, reason: ArtnetBindFailure) -> String {
+    let why = match reason {
+        ArtnetBindFailure::PortTaken => "another program holds it",
+        ArtnetBindFailure::Refused => "the system refused it",
+    };
+    format!(
+        "Art-Net sends from port {from_port}, not {ARTNET_PORT} ({why}): nodes still get the \
+         frames, consoles polling for the rig won't find it"
+    )
+}
+
+/// How the Art-Net socket stands, for the status line: nothing while closed.
+pub fn socket_text(s: &ArtnetSocket) -> Option<String> {
+    match s {
+        ArtnetSocket::Closed => None,
+        ArtnetSocket::Conforming => Some(format!("from port {ARTNET_PORT}, answers ArtPoll")),
+        ArtnetSocket::NotConforming {
+            from_port,
+            reason,
+            os_error,
+        } => Some(format!(
+            "{} — {os_error}",
+            not_conforming_text(*from_port, *reason)
+        )),
     }
 }
 
@@ -145,13 +175,16 @@ pub fn status_line(rig: &Rig) -> String {
     if rig.artnet_target.is_some() || rig.artnet.sent > 0 {
         s.push_str(&format!(" · {}", sent_text(rig.artnet.sent)));
     }
+    if let Some(t) = socket_text(&rig.artnet_socket) {
+        s.push_str(&format!(" · {t}"));
+    }
     if let Some(e) = &rig.artnet.last_error {
         s.push_str(&format!(" · last error: {e}"));
     }
     s
 }
 
-fn sent_text(n: u64) -> String {
+pub(crate) fn sent_text(n: u64) -> String {
     if n == 1 {
         "1 frame sent".into()
     } else {
@@ -243,11 +276,11 @@ mod tests {
         assert_eq!(fade_text(ArtnetFade::new(0.25).expect("valid")), "0.25");
         assert_eq!(
             fade_toast(ArtnetFade::new(0.25).expect("valid")),
-            "Art-Net fade 0.25 s"
+            "DMX fade 0.25 s"
         );
         assert_eq!(
             fade_toast(ArtnetFade::SNAP),
-            "Art-Net fade off: cue changes jump"
+            "DMX fade off: cue changes jump"
         );
     }
 
@@ -290,6 +323,29 @@ mod tests {
             status_line(&rig),
             "Art-Net to 192.168.1.50:6454 universe 0.0.1 (1) · 1 frame sent"
         );
+        rig.artnet_socket = ArtnetSocket::Conforming;
+        assert_eq!(
+            status_line(&rig),
+            "Art-Net to 192.168.1.50:6454 universe 0.0.1 (1) · 1 frame sent · from port 6454, \
+             answers ArtPoll"
+        );
+        rig.artnet_socket = ArtnetSocket::NotConforming {
+            from_port: 40000,
+            reason: ArtnetBindFailure::PortTaken,
+            os_error: "Address in use (os error 98)".into(),
+        };
+        assert_eq!(
+            status_line(&rig),
+            "Art-Net to 192.168.1.50:6454 universe 0.0.1 (1) · 1 frame sent · Art-Net sends \
+             from port 40000, not 6454 (another program holds it): nodes still get the frames, \
+             consoles polling for the rig won't find it — Address in use (os error 98)"
+        );
+        assert_eq!(
+            not_conforming_text(51000, ArtnetBindFailure::Refused),
+            "Art-Net sends from port 51000, not 6454 (the system refused it): nodes still get \
+             the frames, consoles polling for the rig won't find it"
+        );
+        rig.artnet_socket = ArtnetSocket::Closed;
         rig.artnet.sent = 40;
         rig.artnet.last_error = Some("network unreachable".into());
         assert_eq!(

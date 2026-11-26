@@ -15,7 +15,7 @@ use std::net::SocketAddr;
 
 use ac2_proto::model::{
     ArtnetFade, ArtnetTarget, ColourFamily, LevelsSettings, MeasConfig, MeasKind, MeasScope,
-    OutputSetup, PaneLayout, RigPeer, StreamConfig,
+    OutputSetup, PaneLayout, RigPeer, SacnTarget, StreamConfig,
 };
 use ac2_proto::units::MeasId;
 use serde::Serialize;
@@ -25,7 +25,7 @@ use serde_json::{Map, Value};
 use super::{RigMeter, RigSettings};
 
 pub(super) const FORMAT: &str = "ac2-rig-settings";
-pub(super) const VERSION: u32 = 12;
+pub(super) const VERSION: u32 = 13;
 
 /// The file as written: every section always present (`null` for none), so that a key
 /// missing on read is damage, not a default.
@@ -41,6 +41,7 @@ struct Out<'a> {
     osc_target: Option<SocketAddr>,
     artnet_target: Option<ArtnetTarget>,
     artnet_fade: ArtnetFade,
+    sacn_target: Option<SacnTarget>,
     levels: LevelsSettings,
     peers: &'a [RigPeer],
 }
@@ -58,6 +59,7 @@ pub(super) fn write(s: &RigSettings) -> serde_json::Result<Vec<u8>> {
         osc_target: s.osc_target,
         artnet_target: s.artnet_target,
         artnet_fade: s.artnet_fade,
+        sacn_target: s.sacn_target,
         levels: s.levels,
         peers: &s.peers,
     })
@@ -74,6 +76,7 @@ pub(super) struct Sections {
     pub(super) osc_target: Option<Option<SocketAddr>>,
     pub(super) artnet_target: Option<Option<ArtnetTarget>>,
     pub(super) artnet_fade: Option<ArtnetFade>,
+    pub(super) sacn_target: Option<Option<SacnTarget>>,
     pub(super) levels: Option<LevelsSettings>,
     pub(super) peers: Option<Vec<RigPeer>>,
 }
@@ -90,6 +93,7 @@ impl Sections {
             osc_target: self.osc_target.or(other.osc_target),
             artnet_target: self.artnet_target.or(other.artnet_target),
             artnet_fade: self.artnet_fade.or(other.artnet_fade),
+            sacn_target: self.sacn_target.or(other.sacn_target),
             levels: self.levels.or(other.levels),
             peers: self.peers.or(other.peers),
         }
@@ -106,6 +110,7 @@ impl Sections {
             ("osc_target", self.osc_target.is_none()),
             ("artnet_target", self.artnet_target.is_none()),
             ("artnet_fade", self.artnet_fade.is_none()),
+            ("sacn_target", self.sacn_target.is_none()),
             ("levels", self.levels.is_none()),
             ("peers", self.peers.is_none()),
         ]
@@ -128,6 +133,7 @@ impl Sections {
             osc_target: self.osc_target.flatten(),
             artnet_target: self.artnet_target.flatten(),
             artnet_fade: self.artnet_fade.unwrap_or_default(),
+            sacn_target: self.sacn_target.flatten(),
             levels: self.levels.unwrap_or_default(),
             peers: self.peers.unwrap_or_default(),
         }
@@ -185,6 +191,9 @@ pub(super) fn read(text: &[u8]) -> Result<Read, String> {
             })
         }),
         artnet_fade: r.section("artnet_fade", |_| Ok(())),
+        sacn_target: r.section("sacn_target", |t: &Option<SacnTarget>| {
+            t.as_ref().map_or(Ok(()), crate::control::check_sacn_target)
+        }),
         levels: r.section("levels", |l: &LevelsSettings| l.check()),
         peers: r.section("peers", |p: &Vec<RigPeer>| crate::control::check_peers(p)),
     };

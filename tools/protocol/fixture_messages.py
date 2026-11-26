@@ -71,6 +71,11 @@ RIG = {
     "osc_target": "192.168.9.20:9000",
     "artnet_target": {"addr": "192.168.9.255:6454", "universe": 1},
     "artnet_fade": 1.5,
+    "sacn_target": {
+        "dest": {"type": "multicast", "interface": "192.168.9.4"},
+        "universe": 1,
+        "priority": 100,
+    },
     "monitor_at_start": True,
     "levels": {
         "ballistic": "type1",
@@ -82,6 +87,8 @@ RIG = {
     "zone": {"name": "Europe/Helsinki", "utc_offset_s": 10800},
     "osc": {"sent": 12, "last_error": "Connection refused (os error 111)"},
     "artnet": {"sent": 340, "last_error": None},
+    "artnet_socket": {"type": "conforming"},
+    "sacn": {"sent": 338, "last_error": None},
     "dmx": dmx([(12, 255), (14, 40)]),
     "cues": [
         {"meas": 4, "subject": {"type": "meter"}, "state": "over"},
@@ -795,6 +802,18 @@ def requests():
         req(81, "artnet.test", {"channels": dmx([(12, 255), (13, 40)])}),
         req(82, "artnet.fade", {"base": 38, "seconds": 2.5}),
         req(84, "cal.line", {"channel": 4, "volts": 1.2277}),
+        req(
+            114,
+            "sacn.target",
+            {
+                "base": 38,
+                "target": {
+                    "dest": {"type": "unicast", "addr": "192.168.9.40"},
+                    "universe": 17,
+                    "priority": 120,
+                },
+            },
+        ),
         req(
             87,
             "levels.set",

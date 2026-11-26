@@ -88,6 +88,7 @@ impl Command {
             | Self::OscTarget { .. }
             | Self::OscTest { .. }
             | Self::ArtnetTarget { .. }
+            | Self::SacnTarget { .. }
             | Self::ArtnetFade { .. }
             | Self::ArtnetTest { .. }
             | Self::RigMonitorAtStart { .. }

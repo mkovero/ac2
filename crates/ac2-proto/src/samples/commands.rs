@@ -509,6 +509,16 @@ pub fn commands() -> Vec<Command> {
                 name: "rec-2026-11-25T20-14-03Z".into(),
             },
         },
+        Command::SacnTarget {
+            base: Rev(38),
+            target: Some(SacnTarget {
+                dest: SacnDest::Unicast {
+                    addr: std::net::Ipv4Addr::new(192, 168, 9, 40),
+                },
+                universe: SacnUniverse::new(17).expect("valid sample universe"),
+                priority: SacnPriority::new(120).expect("valid sample priority"),
+            }),
+        },
     ])
     .collect()
 }

@@ -18,8 +18,8 @@ use crate::model::{
     CorrelationWindow, DelayPick, DelayReference, DeviceId, DmxLevel, ExportFormat, FinderBand,
     GeneratorDesired, InputSetup, MeasConfig, MicCurveId, NetBind, OscMessage, OutputSetup,
     OwnedTraces, Pair, PaneLayout, PlanSpec, PreviewInput, RecordRequest, RecordingRef, ReplayPace,
-    RigPeer, SessionRef, SimFitRequest, SimMapRequest, SimRequest, SplLogWhich, StreamConfig,
-    TargetCurve, TraceEdit, TraceOwner, WalkKind, WalkPointSpec,
+    RigPeer, SacnTarget, SessionRef, SimFitRequest, SimMapRequest, SimRequest, SplLogWhich,
+    StreamConfig, TargetCurve, TraceEdit, TraceOwner, WalkKind, WalkPointSpec,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, Rev, RigId, Seconds, TraceId,
@@ -169,8 +169,7 @@ pub enum Command {
     },
 
     // -- rig / osc / artnet -------------------------------------------------------------
-    /// Set where OSC cues go (`rig.osc_target`), or stop sending (`None`). Kept by the
-    /// daemon across restarts.
+    /// Set where OSC cues go (`rig.osc_target`), `None`: nowhere. Kept across restarts.
     #[serde(rename = "osc.target")]
     OscTarget {
         /// The `rig.rev` the edit was made on; another is refused with `conflict`.
@@ -182,10 +181,7 @@ pub enum Command {
     /// Send one message to the OSC target now, to check the receiver (setup). Refused
     /// (`invalid`) without a target; `append_level` appends 0 dB SPL.
     #[serde(rename = "osc.test")]
-    OscTest {
-        /// Message.
-        msg: OscMessage,
-    },
+    OscTest { msg: OscMessage },
     /// Set where the rig's Art-Net universe goes (`rig.artnet_target`), or stop sending
     /// (`None`). Kept by the daemon across restarts.
     #[serde(rename = "artnet.target")]
@@ -195,32 +191,32 @@ pub enum Command {
         /// Address and universe; `None`: send nowhere.
         target: Option<ArtnetTarget>,
     },
-    /// Set how long the DMX channels take to move to a new cue frame (`rig.artnet_fade`),
-    /// 0–60 s, 0: they jump; out of range or not finite is refused (`invalid`). Kept by the
-    /// daemon across restarts.
+    /// Set where the Art-Net universe's frame also goes as sACN (`rig.sacn_target`), or end
+    /// that stream (`None`), on `base` (`conflict` otherwise). Kept across restarts.
+    #[serde(rename = "sacn.target")]
+    SacnTarget {
+        base: Rev,
+        target: Option<SacnTarget>,
+    },
+    /// How long every DMX output's channels take to move to a new cue frame
+    /// (`rig.artnet_fade`), 0–60 s (0 jumps; else `invalid`). Kept across restarts.
     #[serde(rename = "artnet.fade")]
     ArtnetFade {
         /// The `rig.rev` the edit was made on; another is refused with `conflict`.
         base: Rev,
-        /// Fade time.
         seconds: Seconds,
     },
-    /// Send one frame with these levels merged over the cue frame (each channel at the
-    /// higher of the two) to the Art-Net target now, to find a fixture's channels while the
-    /// cue lights stay. The cue frame comes back after a few seconds, or at once when a cue
-    /// changes state. Refused (`invalid`) without a target.
+    /// Send these levels merged HTP over the cue frame to every DMX target now, to find a
+    /// fixture's channels while the cue lights stay; the cue frame returns after a few
+    /// seconds or when a cue changes state. Refused (`invalid`) without any target.
     #[serde(rename = "artnet.test")]
-    ArtnetTest {
-        /// Levels.
-        channels: Vec<DmxLevel>,
-    },
+    ArtnetTest { channels: Vec<DmxLevel> },
     /// Whether the daemon reopens the last stream's device capture-only when it starts,
     /// so the rig measurements meter with no client connected (`rig.monitor_at_start`).
     #[serde(rename = "rig.monitor_at_start")]
     RigMonitorAtStart {
         /// The `rig.rev` the edit was made on; another is refused with `conflict`.
         base: Rev,
-        /// On or off.
         on: bool,
     },
     /// Set the rig's programme-meter settings (`rig.levels`): bar ballistic, correlator

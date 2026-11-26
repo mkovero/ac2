@@ -29,6 +29,7 @@ impl Command {
             Self::OscTarget { .. } => "osc.target",
             Self::OscTest { .. } => "osc.test",
             Self::ArtnetTarget { .. } => "artnet.target",
+            Self::SacnTarget { .. } => "sacn.target",
             Self::ArtnetFade { .. } => "artnet.fade",
             Self::ArtnetTest { .. } => "artnet.test",
             Self::RigMonitorAtStart { .. } => "rig.monitor_at_start",
@@ -169,6 +170,7 @@ impl Command {
             | Self::OscTarget { .. }
             | Self::OscTest { .. }
             | Self::ArtnetTarget { .. }
+            | Self::SacnTarget { .. }
             | Self::ArtnetFade { .. }
             | Self::ArtnetTest { .. }
             | Self::RigMonitorAtStart { .. }

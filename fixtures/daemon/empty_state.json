@@ -1,5 +1,5 @@
 {
-  "proto_version": 106,
+  "proto_version": 107,
   "value": {
     "autosave": {
       "log_failures": [],
@@ -53,6 +53,9 @@
         "sent": 0
       },
       "artnet_fade": 1.0,
+      "artnet_socket": {
+        "type": "closed"
+      },
       "artnet_target": null,
       "cues": [],
       "damaged_files": [],
@@ -71,6 +74,11 @@
       },
       "osc_target": null,
       "rev": 0,
+      "sacn": {
+        "last_error": null,
+        "sent": 0
+      },
+      "sacn_target": null,
       "zone": {
         "name": "Europe/Helsinki",
         "utc_offset_s": 7200

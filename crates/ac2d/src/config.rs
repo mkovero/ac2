@@ -86,6 +86,10 @@ pub struct DaemonConfig {
     pub systemd_notify: bool,
     /// Where the system clock's status comes from.
     pub system_clock: SystemClockSource,
+    /// The DMX outputs' UDP addresses: [`crate::DmxPorts::STANDARD`] for the `ac2d`
+    /// program; [`Self::new`] gives the loopback ones, so that a daemon run inside a test
+    /// never takes the host's Art-Net port or sends past it.
+    pub dmx: crate::DmxPorts,
 }
 
 /// Where the daemon reads its system clock's status (`docs/design/multi-rig.md` §4).
@@ -228,6 +232,7 @@ impl fmt::Debug for DaemonConfig {
             .field("local_clock", &self.local_clock)
             .field("system_clock", &self.system_clock)
             .field("systemd_notify", &self.systemd_notify)
+            .field("dmx", &self.dmx)
             .finish()
     }
 }
@@ -267,6 +272,7 @@ impl DaemonConfig {
             local_clock: LocalClock::Host,
             systemd_notify: false,
             system_clock: SystemClockSource::Os,
+            dmx: crate::DmxPorts::LOOPBACK,
         }
     }
 }

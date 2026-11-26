@@ -23,7 +23,7 @@ pub mod units;
 
 /// The one protocol version this build speaks. Peers on any other version are refused
 /// (`version_mismatch`); there is no negotiation and no fallback.
-pub const PROTO_VERSION: u16 = 106;
+pub const PROTO_VERSION: u16 = 107;
 
 pub use ctrl::{
     CalSplElectricalArgs, Command, CtrlError, DynamicsEnvelopeArgs, DynamicsRunArgs, Envelope,

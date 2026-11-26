@@ -29,6 +29,10 @@ pub fn warnings() -> Vec<Warning> {
         Warning::LineLevelUnusual {
             full_scale: Dbu(-12.5),
         },
+        Warning::ArtnetNotConforming {
+            from_port: 40_000,
+            reason: ArtnetBindFailure::PortTaken,
+        },
     ]
 }
 

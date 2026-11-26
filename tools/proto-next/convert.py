@@ -1,29 +1,33 @@
 #!/usr/bin/env python3
-"""One-shot converter of a host's stored files to the PROTO 106 shapes.
+"""One-shot converter of a host's stored files to the PROTO 107 shapes.
 
-Run once per host with the old daemon stopped, before the first start of a 106 daemon:
+Run once per host with the old daemon stopped, before the first start of a 107 daemon
+(a 105 host's files and a 106 host's rig.json alike):
 
     python3 tools/proto-next/convert.py --rig ~/.config/ac2/rig.json \
         --cal ~/.config/ac2/calibrations.json --plans ~/.local/share/ac2/plans \
         --auth ~/.config/ac2/authorized_clients
 
-A 106 daemon started before that sets an old authorized-clients file aside as
+A 106 or later daemon started before that sets an old authorized-clients file aside as
 `authorized_clients.damaged-<time>`: convert that file and put it back as
 `authorized_clients`, the daemon stopped.
 
 Run it as the daemon's user: a file another user owns is refused, since the rewritten
 file would belong to whoever ran this.
 
-Each file is rewritten atomically; the original is kept beside it as `<name>.pre106`
-(`.pre106.1`, … when an earlier run's backup is there: none is ever written over).
+Each file is rewritten atomically; the original is kept beside it as `<name>.pre106` (the
+name the first run of this converter gave its backups; `.pre106.1`, … when an earlier run's
+backup is there: none is ever written over).
 A file already in the new shape is left alone. Covers, per file:
 
-- rig.json (rig settings) 11 -> 12: `monitor_session` -> `monitor_stream`; a band
+- rig.json (rig settings) 11 or 12 -> 13: `monitor_session` -> `monitor_stream`; a band
   transfer's bands tagged by `type`, not `status`; a paired rig without `data` (its data
   endpoint is the port after `ctrl`); a pane layout's `levels` and `plates` written out
   where missing (none set, every plate at its default place and size); every rig id (a
   paired rig's `rig`, a remote input's `rig`, a pane's pinned rig `id`) a decimal string;
-  every cue state's DMX level with `snap: false` (it fades, as every level did).
+  every cue state's DMX level with `snap: false` (it fades, as every level did); a
+  `sacn_target` of `null` (no sACN output). A file of format 12 (a 106 daemon's) gets the
+  `sacn_target` alone.
 - calibration store 4 -> 5: an input's `InputKind` tagged by `type`, not `kind`; an
   electrical calibration's `loading` written out (`null`, unloaded) where missing; every
   `calibrated_at` and `imported_at` a decimal string.
@@ -149,14 +153,16 @@ def electrical_loading(node):
 
 
 def convert_rig(doc):
-    """The rig settings document in format 12; raises ValueError on another version."""
+    """The rig settings document in format 13; raises ValueError on another version."""
     if doc.get("format") != RIG_FORMAT:
         raise ValueError(f"not {RIG_FORMAT}")
     version = doc.get("version")
-    if version == 12:
+    if version == 13:
         return None
+    if version == 12:
+        return rig_12_to_13(doc)
     if version != 11:
-        raise ValueError(f"format version {version!r}; this converter reads 11")
+        raise ValueError(f"format version {version!r}; this converter reads 11 and 12")
     out = {}
     for key, value in doc.items():
         out["monitor_stream" if key == "monitor_session" else key] = value
@@ -171,6 +177,18 @@ def convert_rig(doc):
     rig_ids(out.get("monitor_stream"))
     dmx_snaps(out.get("meters"))
     out["version"] = 12
+    return rig_12_to_13(out)
+
+
+def rig_12_to_13(doc):
+    """Format 12 -> 13: the `sacn_target` section, `null` (no sACN output was set)."""
+    out = {}
+    for key, value in doc.items():
+        out[key] = value
+        if key == "artnet_fade":
+            out["sacn_target"] = None
+    out.setdefault("sacn_target", None)
+    out["version"] = 13
     return out
 
 

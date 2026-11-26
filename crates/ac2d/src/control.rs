@@ -76,6 +76,7 @@ mod request;
 pub(crate) mod rig;
 mod rig_meas;
 mod roles;
+mod sacn;
 mod salvage_logs;
 mod sim;
 mod standing;
@@ -91,6 +92,7 @@ mod walk_sweep;
 mod walks;
 mod working;
 
+pub(crate) use crate::dmx::sacn::check_target as check_sacn_target;
 pub(crate) use artnet::check_addr as check_artnet_addr;
 pub(crate) use osc::{Judged, has_cue};
 pub(crate) use remote::check_peers;
@@ -306,6 +308,8 @@ pub(crate) struct Setup {
     pub(crate) local_clock: crate::config::LocalClock,
     pub(crate) system_clock: crate::config::SystemClockSource,
     pub(crate) systemd_notify: bool,
+    /// The DMX outputs' UDP addresses.
+    pub(crate) dmx: crate::dmx::DmxPorts,
     /// State files found damaged before the control thread started (the server keys).
     pub(crate) damaged: Vec<crate::damage::Damage>,
 }
@@ -547,7 +551,7 @@ struct RigState {
     meas: rig_meas::RigMeas,
     /// The OSC cues' states and their sender.
     osc: osc::Cues,
-    /// The Art-Net universe the cue states make, and its sender.
+    /// The DMX universe the cue states make, and its Art-Net and sACN outputs.
     artnet: artnet::Universe,
 }
 

@@ -21,6 +21,7 @@ mod converted;
 mod dedup;
 mod devices;
 mod discovery;
+mod dmx_net;
 mod drift;
 mod driver_stall;
 mod dynamics;

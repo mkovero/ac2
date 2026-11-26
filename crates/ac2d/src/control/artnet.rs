@@ -1,10 +1,12 @@
-//! Art-Net cues: the rig's one DMX universe, made from the cue states the OSC table keeps
-//! (each channel at the highest level any current state lists, 0 elsewhere) and sent to the
-//! rig's Art-Net target.
+//! DMX cues: the rig's one DMX universe, made from the cue states the OSC table keeps (each
+//! channel at the highest level any current state lists, 0 elsewhere) and sent to the rig's
+//! Art-Net target and its sACN target: one frame, computed once here, encoded by each
+//! output (`crate::dmx`).
 //!
 //! A frame that changes is sent at once; the current frame is sent again every
 //! [`KEEPALIVE`] while a target is set, because Art-Net nodes drop a source that has been
-//! silent for about 4 s (and with it, under HTP merge, the light it held).
+//! silent for about 4 s, and sACN receivers one silent for 2.5 s (and with it, under HTP
+//! merge, the light it held).
 //!
 //! A changed cue frame fades in over the rig's `artnet_fade`: every channel moves from the
 //! level last output to its new level in perceived-brightness steps, a frame every
@@ -17,13 +19,17 @@
 use std::time::{Duration, Instant};
 
 use ac2_proto::event::Change;
-use ac2_proto::model::{ArtnetFade, ArtnetTarget, DMX_CHANNELS, DmxLevel, OutputStatus};
-use ac2_proto::units::{Rev, Seconds};
-use ac2_proto::{ProtoError, ReplyBody};
+use ac2_proto::model::{
+    ArtnetFade, ArtnetSocket, ArtnetTarget, DMX_CHANNELS, DmxLevel, SacnTarget,
+};
+use ac2_proto::units::{Rev, RigId, Seconds};
+use ac2_proto::{ProtoError, ReplyBody, Warning};
 
 use super::Control;
 use super::osc::{REPEAT, status_due};
-use crate::artnet::ArtnetSender;
+use crate::dmx::DmxPorts;
+use crate::dmx::artnet::ArtnetSender;
+use crate::dmx::sacn::SacnSender;
 use crate::rig::RigSettings;
 use crate::util::{internal, invalid};
 
@@ -104,10 +110,25 @@ pub(crate) fn check_addr(a: std::net::SocketAddr) -> Result<(), String> {
     Ok(())
 }
 
-/// The frame last sent, the test hold and the sender.
+/// Where the frame goes: each output that has a target.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Targets {
+    pub(crate) artnet: Option<ArtnetTarget>,
+    pub(crate) sacn: Option<SacnTarget>,
+}
+
+impl Targets {
+    /// Some output has a target.
+    pub(crate) fn any(self) -> bool {
+        self.artnet.is_some() || self.sacn.is_some()
+    }
+}
+
+/// The frame last sent, the test hold and the outputs.
 #[derive(Debug)]
 pub(crate) struct Universe {
-    sender: ArtnetSender,
+    pub(super) artnet: ArtnetSender,
+    pub(super) sacn: SacnSender,
     /// The cue frame as last made, to tell when it changes.
     cue_frame: [u8; DMX_CHANNELS],
     /// The cue frame's channels that jump to their level.
@@ -122,14 +143,15 @@ pub(crate) struct Universe {
     fade: Option<Fade>,
     /// When the next frame goes out: the next fade step, else the keepalive.
     next_keepalive: Option<Instant>,
-    /// When `rig.artnet` was last committed for the sent counter alone.
+    /// When `rig.artnet` and `rig.sacn` were last committed for the sent counters alone.
     pub(super) status_at: Option<Instant>,
 }
 
-impl Default for Universe {
-    fn default() -> Self {
+impl Universe {
+    pub(crate) fn new(ports: DmxPorts, rig: RigId, rig_name: &str) -> Self {
         Self {
-            sender: ArtnetSender::default(),
+            artnet: ArtnetSender::new(ports, rig_name),
+            sacn: SacnSender::new(ports, rig, rig_name),
             cue_frame: [0; DMX_CHANNELS],
             cue_snap: [false; DMX_CHANNELS],
             sent: None,
@@ -143,17 +165,13 @@ impl Default for Universe {
 }
 
 impl Universe {
-    pub(crate) fn status(&self) -> &OutputStatus {
-        self.sender.status()
-    }
-
-    fn send(
-        &mut self,
-        target: ArtnetTarget,
-        frame: [u8; DMX_CHANNELS],
-        now: Instant,
-    ) -> Result<(), String> {
-        let r = self.sender.send(target.addr, target.universe, &frame);
+    /// Sends `frame` to every target; the first error.
+    fn send(&mut self, t: Targets, frame: [u8; DMX_CHANNELS], now: Instant) -> Result<(), String> {
+        let a = t.artnet.map_or(Ok(()), |a| {
+            self.artnet.send(a.addr, a.universe, &frame, now)
+        });
+        let s = t.sacn.map_or(Ok(()), |s| self.sacn.send(&s, &frame));
+        let r = a.and(s);
         self.sent = Some(frame);
         let next = if self.fade.is_some() {
             FADE_STEP
@@ -165,14 +183,9 @@ impl Universe {
     }
 
     /// Sends `frame` at once, ending any fade.
-    fn snap(
-        &mut self,
-        target: ArtnetTarget,
-        frame: [u8; DMX_CHANNELS],
-        now: Instant,
-    ) -> Result<(), String> {
+    fn snap(&mut self, t: Targets, frame: [u8; DMX_CHANNELS], now: Instant) -> Result<(), String> {
         self.fade = None;
-        self.send(target, frame, now)
+        self.send(t, frame, now)
     }
 
     /// The frame being output now: the fade's present step, else the frame last sent.
@@ -183,6 +196,11 @@ impl Universe {
         }
     }
 
+    /// The frame being output now, or the cue frame before any was sent.
+    pub(super) fn output_now(&self, now: Instant) -> [u8; DMX_CHANNELS] {
+        self.output(now).unwrap_or(self.cue_frame)
+    }
+
     /// Where the output is going: the fade's end, else the frame last sent.
     fn goal(&self) -> Option<[u8; DMX_CHANNELS]> {
         self.fade.map(|f| f.to).or(self.sent)
@@ -191,7 +209,7 @@ impl Universe {
     /// Moves the output to the cue frame: a fade of `length` from what is output now, or a
     /// jump when there is no fade, nothing has been sent yet, a test frame is out or every
     /// channel that changes snaps.
-    fn go_to_cue(&mut self, target: ArtnetTarget, length: Duration, now: Instant) {
+    fn go_to_cue(&mut self, target: Targets, length: Duration, now: Instant) {
         let to = self.cue_frame;
         let snap = self.cue_snap;
         let from = self.output(now);
@@ -226,10 +244,21 @@ impl Universe {
 }
 
 impl Control {
+    /// The DMX outputs' targets as the rig holds them.
+    pub(super) fn dmx_targets(&self) -> Targets {
+        let rig = &self.store.state().rig;
+        Targets {
+            artnet: rig.artnet_target,
+            sacn: rig.sacn_target,
+        }
+    }
+
     /// Takes the cue frame the current states make and sends it when it changed (or the
-    /// target has not had a frame yet). A changed cue frame ends a test hold at once.
+    /// targets have not had a frame yet). A changed cue frame ends a test hold at once.
     pub(super) fn artnet_sync(&mut self, now: Instant) {
         let (frame, snap) = self.rig.osc.frame();
+        let targets = self.dmx_targets();
+        let fade = self.store.state().rig.artnet_fade;
         let u = &mut self.rig.artnet;
         if frame != u.cue_frame {
             u.cue_frame = frame;
@@ -239,26 +268,30 @@ impl Control {
         if u.test_until.is_some_and(|t| t <= now) {
             u.test_until = None;
         }
-        let rig = &self.store.state().rig;
-        let Some(target) = rig.artnet_target else {
+        if !targets.any() {
             u.sent = None;
             u.fade = None;
             u.after_test = false;
             u.next_keepalive = None;
             u.test_until = None;
             return;
-        };
+        }
         if u.test_until.is_none() && u.goal() != Some(u.cue_frame) {
-            u.go_to_cue(target, rig.artnet_fade.duration(), now);
+            u.go_to_cue(targets, fade.duration(), now);
         }
     }
 
-    /// The next fade step or the keepalive, when due. The status commit stays throttled
-    /// ([`status_due`]): a fade's steps count like keepalives.
+    /// The next fade step or the keepalive, when due, and the Art-Net socket's next try
+    /// for its port. The status commit stays throttled ([`status_due`]): a fade's steps
+    /// count like keepalives.
     pub(super) fn artnet_tick(&mut self, now: Instant) {
-        let Some(target) = self.store.state().rig.artnet_target else {
+        if self.rig.artnet.artnet.retry(now) {
+            self.commit_dmx_status(true);
+        }
+        let targets = self.dmx_targets();
+        if !targets.any() {
             return;
-        };
+        }
         let u = &mut self.rig.artnet;
         if u.next_keepalive.is_some_and(|t| t <= now) {
             let f = match u.fade {
@@ -271,42 +304,68 @@ impl Control {
                 }
                 None => u.sent.unwrap_or(u.cue_frame),
             };
-            let _ = u.send(target, f, now);
-            self.commit_artnet_status(false);
+            let _ = u.send(targets, f, now);
+            self.commit_dmx_status(false);
         }
     }
 
-    /// When the control loop must wake for a fade step, the keepalive or the end of a test
-    /// hold.
+    /// When the control loop must wake for a fade step, the keepalive, the end of a test
+    /// hold or the Art-Net socket's next try for its port.
     pub(super) fn artnet_wake(&self) -> Option<Instant> {
-        match (self.rig.artnet.next_keepalive, self.rig.artnet.test_until) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        let u = &self.rig.artnet;
+        [u.next_keepalive, u.test_until, u.artnet.retry_due()]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
-    /// Clean shutdown: one frame of every cue's `ok` levels.
+    /// Clean shutdown: one frame of every cue's `ok` levels to every target; then the sACN
+    /// stream ends (Stream_Terminated), so its receivers let go of the rig at once, and the
+    /// Art-Net socket closes.
     pub(super) fn artnet_shutdown(&mut self) {
-        if let Some(target) = self.store.state().rig.artnet_target {
+        let targets = self.dmx_targets();
+        if targets.any() {
             let f = self.rig.osc.ok_frame();
-            let _ = self.rig.artnet.snap(target, f, Instant::now());
+            let _ = self.rig.artnet.snap(targets, f, Instant::now());
+            if let Some(t) = targets.sacn {
+                self.rig.artnet.sacn.terminate(&t, &f);
+            }
         }
+        self.rig.artnet.artnet.close();
     }
 
-    /// Commits `rig.artnet` when [`status_due`]; `now_too` for an operator's command.
-    fn commit_artnet_status(&mut self, now_too: bool) {
+    /// Commits `rig.artnet`, `rig.sacn` and `rig.artnet_socket` when [`status_due`] or the
+    /// socket's state changed; `now_too` for an operator's command.
+    pub(super) fn commit_dmx_status(&mut self, now_too: bool) {
         let now = Instant::now();
-        if status_due(
-            &self.store.state().rig.artnet,
-            self.rig.artnet.status(),
-            self.rig.artnet.status_at,
-            now_too,
-            now,
-        ) {
+        let cur = &self.store.state().rig;
+        let u = &self.rig.artnet;
+        let due = |cur, new| status_due(cur, new, u.status_at, now_too, now);
+        if due(&cur.artnet, u.artnet.status())
+            || due(&cur.sacn, u.sacn.status())
+            || cur.artnet_socket != *u.artnet.state()
+        {
             self.rig.artnet.status_at = Some(now);
             let mut rig = self.store.state().rig.clone();
-            rig.artnet = self.rig.artnet.status().clone();
+            self.rig.artnet.fill_status(&mut rig);
             self.commit(Change::Rig(rig));
+        }
+    }
+
+    /// The frame goes to a target set just now: the current output at once, to every
+    /// target. Without another target there is no output yet: it starts afresh (the cue
+    /// frame jumps out).
+    pub(super) fn dmx_target_added(&mut self, others_before: bool) {
+        let now = Instant::now();
+        let targets = self.dmx_targets();
+        let u = &mut self.rig.artnet;
+        if others_before && let Some(f) = u.output(now) {
+            let _ = u.send(targets, f, now);
+        } else {
+            u.sent = None;
+            u.fade = None;
+            u.test_until = None;
+            self.artnet_sync(now);
         }
     }
 
@@ -338,13 +397,28 @@ impl Control {
                 |t| format!("{} universe {} ({})", t.addr, t.universe, t.universe.get())
             )
         );
+        match target {
+            Some(_) => {
+                if let ArtnetSocket::NotConforming {
+                    from_port, reason, ..
+                } = self.rig.artnet.artnet.open(Instant::now())
+                {
+                    self.reply_warnings.push(Warning::ArtnetNotConforming {
+                        from_port: *from_port,
+                        reason: *reason,
+                    });
+                }
+            }
+            None => self.rig.artnet.artnet.close(),
+        }
+        let others = self.dmx_targets().sacn.is_some();
         let rev = self.commit_rig(|r| r.artnet_target = target);
-        // The new receiver gets the current frame now, not at the next keepalive.
-        self.rig.artnet.sent = None;
-        self.rig.artnet.fade = None;
-        self.rig.artnet.test_until = None;
-        self.artnet_sync(Instant::now());
-        self.commit_artnet_status(true);
+        if target.is_some() {
+            self.dmx_target_added(others);
+        } else {
+            self.artnet_sync(Instant::now());
+        }
+        self.commit_dmx_status(true);
         Ok(ReplyBody::Ack { rev })
     }
 
@@ -366,17 +440,19 @@ impl Control {
             artnet_fade: fade,
             ..self.rig_settings_now()
         })?;
-        tracing::info!("Art-Net fade {} s", fade.seconds());
+        tracing::info!("DMX fade {} s", fade.seconds());
         let rev = self.commit_rig(|r| r.artnet_fade = fade);
         Ok(ReplyBody::Ack { rev })
     }
 
     /// `artnet.test`: `channels` merged over the cue frame, each channel at the higher of
-    /// the two, so a lamp the cues hold up stays up while a fixture is found.
+    /// the two, so a lamp the cues hold up stays up while a fixture is found; to every DMX
+    /// target.
     pub(super) fn artnet_test(&mut self, channels: &[DmxLevel]) -> Result<ReplyBody, ProtoError> {
-        let Some(target) = self.store.state().rig.artnet_target else {
-            return Err(invalid("no Art-Net target is set (artnet.target)"));
-        };
+        let targets = self.dmx_targets();
+        if !targets.any() {
+            return Err(invalid("no DMX target is set (artnet.target, sacn.target)"));
+        }
         if let Some((_, d)) = channels
             .iter()
             .enumerate()
@@ -390,14 +466,23 @@ impl Control {
             let slot = &mut frame[d.channel.index()];
             *slot = (*slot).max(d.value);
         }
-        let r = self.rig.artnet.snap(target, frame, now);
+        let r = self.rig.artnet.snap(targets, frame, now);
         self.rig.artnet.test_until = Some(now + TEST_HOLD);
         self.rig.artnet.after_test = true;
-        self.commit_artnet_status(true);
+        self.commit_dmx_status(true);
         r.map_err(internal)?;
         Ok(ReplyBody::Ack {
             rev: self.store.rev(),
         })
+    }
+}
+
+impl Universe {
+    /// The outputs' status into `rig`.
+    pub(super) fn fill_status(&self, rig: &mut ac2_proto::model::Rig) {
+        rig.artnet = self.artnet.status().clone();
+        rig.sacn = self.sacn.status().clone();
+        rig.artnet_socket = self.artnet.state().clone();
     }
 }
 
@@ -433,14 +518,25 @@ mod tests {
         assert_eq!(fade_level(0, 255, 0.5), 55);
     }
 
+    fn artnet_only() -> Targets {
+        Targets {
+            artnet: Some(ArtnetTarget {
+                addr: "127.0.0.1:9".parse().expect("test value"),
+                universe: ac2_proto::model::PortAddress::new(0).expect("test value"),
+            }),
+            sacn: None,
+        }
+    }
+
+    fn universe() -> Universe {
+        Universe::new(DmxPorts::LOOPBACK, RigId(1), "rig")
+    }
+
     #[test]
     fn a_fade_steps_to_its_end_and_retargets_from_the_output() {
-        let target = ArtnetTarget {
-            addr: "127.0.0.1:9".parse().expect("test value"),
-            universe: ac2_proto::model::PortAddress::new(0).expect("test value"),
-        };
+        let target = artnet_only();
         let t0 = Instant::now();
-        let mut u = Universe::default();
+        let mut u = universe();
         // Nothing sent yet: the first frame jumps.
         u.cue_frame[0] = 200;
         u.go_to_cue(target, Duration::from_secs(1), t0);
@@ -481,12 +577,9 @@ mod tests {
 
     #[test]
     fn a_snapping_channel_jumps_while_the_rest_fade() {
-        let target = ArtnetTarget {
-            addr: "127.0.0.1:9".parse().expect("test value"),
-            universe: ac2_proto::model::PortAddress::new(0).expect("test value"),
-        };
+        let target = artnet_only();
         let t0 = Instant::now();
-        let mut u = Universe::default();
+        let mut u = universe();
         u.go_to_cue(target, Duration::from_secs(1), t0);
         // Channel 1 snaps on, channel 2 fades on: the jump goes out at once.
         u.cue_frame[0] = 255;

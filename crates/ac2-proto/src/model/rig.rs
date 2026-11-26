@@ -5,10 +5,10 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
-use super::{ArtnetFade, ArtnetTarget, DmxLevel, LevelsSettings, RigCue};
+use super::{ArtnetFade, ArtnetSocket, ArtnetTarget, DmxLevel, LevelsSettings, RigCue, SacnTarget};
 use crate::units::{Rev, WallNs};
 
-/// How sending to one kind of receiver (OSC, Art-Net) fares.
+/// How sending to one kind of receiver (OSC, Art-Net, sACN) fares.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OutputStatus {
@@ -24,15 +24,19 @@ pub struct OutputStatus {
 #[serde(deny_unknown_fields)]
 pub struct Rig {
     /// Rev at which these settings were last committed; `osc.target`, `artnet.target`,
-    /// `artnet.fade`, `rig.monitor_at_start` and `levels.set` name it as their `base`.
+    /// `sacn.target`, `artnet.fade`, `rig.monitor_at_start` and `levels.set` name it as
+    /// their `base`.
     pub rev: Rev,
     /// Where OSC cues go (an IP literal and port); `None`: nowhere.
     #[serde(with = "opt_addr")]
     pub osc_target: Option<SocketAddr>,
     /// Where the Art-Net universe goes; `None`: nowhere.
     pub artnet_target: Option<ArtnetTarget>,
-    /// How long the DMX channels take to move to a new cue frame (0: they jump).
+    /// How long the DMX channels take to move to a new cue frame (0: they jump), on every
+    /// DMX output (Art-Net and sACN carry the same frame).
     pub artnet_fade: ArtnetFade,
+    /// Where the sACN universe goes; `None`: nowhere.
+    pub sacn_target: Option<SacnTarget>,
     /// At start the daemon reopens the last stream's device capture-only, so the rig
     /// measurements meter with no client connected.
     pub monitor_at_start: bool,
@@ -47,6 +51,10 @@ pub struct Rig {
     pub osc: OutputStatus,
     /// Sending Art-Net.
     pub artnet: OutputStatus,
+    /// How the Art-Net socket is bound: on Art-Net's port, or not.
+    pub artnet_socket: ArtnetSocket,
+    /// Sending sACN.
+    pub sacn: OutputStatus,
     /// The cue universe's channels above 0, in channel order: what the cues' current states
     /// make (whether or not a target is set).
     pub dmx: Vec<DmxLevel>,
@@ -149,6 +157,13 @@ mod tests {
                 universe: PortAddress::from_parts(0, 0, 1).expect("valid"),
             }),
             artnet_fade: ArtnetFade::new(2.5).expect("valid"),
+            sacn_target: Some(crate::model::SacnTarget {
+                dest: crate::model::SacnDest::Unicast {
+                    addr: std::net::Ipv4Addr::new(192, 168, 1, 60),
+                },
+                universe: crate::model::SacnUniverse::new(1).expect("valid"),
+                priority: crate::model::SacnPriority::DEFAULT,
+            }),
             monitor_at_start: true,
             levels: LevelsSettings {
                 ballistic: crate::model::Ballistic::Type2,
@@ -167,6 +182,12 @@ mod tests {
                 sent: 9,
                 last_error: None,
             },
+            artnet_socket: ArtnetSocket::NotConforming {
+                from_port: 40_000,
+                reason: crate::model::ArtnetBindFailure::PortTaken,
+                os_error: "Address in use".into(),
+            },
+            sacn: OutputStatus::default(),
             dmx: vec![DmxLevel {
                 channel: DmxChannel::new(12).expect("valid"),
                 value: 255,

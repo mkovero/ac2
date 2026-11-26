@@ -63,7 +63,7 @@ not the socket, keeps a second daemon of the user's out.
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 106`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 107`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -117,8 +117,10 @@ Warning { type: "<name>", … }
   while they run), `recording_ended` {recording: RecordingRef} (the command closed or
   reopened the stream a recording was recording, which ended it: `stream.open`,
   `stream.close`, `stream.replay`, `file.load`, `file.new`, `file.recover`; never on
-  `rec.stop`) and `line_level_unusual` {full_scale: Dbu} (`cal.line` stored a full scale
-  outside +4 … +30 dBu). A client shows them to the operator; they change nothing in
+  `rec.stop`), `line_level_unusual` {full_scale: Dbu} (`cal.line` stored a full scale
+  outside +4 … +30 dBu) and `artnet_not_conforming` {from_port: u16, reason:
+  `ArtnetBindFailure`} (`artnet.target` set a target while Art-Net's port 6454 could not be
+  bound: frames go out from `from_port` and polls go unanswered; `rig.artnet_socket` says the same). A client shows them to the operator; they change nothing in
   `result`.
 
 - `args` is absent for commands without arguments.
@@ -194,6 +196,7 @@ from the store.
 | `artnet.target` | `base: Rev` (`rig.rev`), `target: ArtnetTarget \| nil` | `ack` (`rig` event) | |
 | `artnet.test` | `channels: [DmxLevel]` | `ack` (`rig` event: the sent count) | |
 | `artnet.fade` | `base: Rev` (`rig.rev`), `seconds: f64` | `ack` (`rig` event) | |
+| `sacn.target` | `base: Rev` (`rig.rev`), `target: SacnTarget \| nil` | `ack` (`rig` event) | |
 | `levels.set` | `base: Rev` (`rig.rev`), `ballistic: Ballistic \| nil`, `correlation_window: CorrelationWindow \| nil`, `over_threshold: Dbtp \| nil`, `correlation_gate: Dbfs \| nil`, `loudness_target: Lufs \| nil` | `ack` (`rig` event) | |
 | `levels.reset` | `channels: [u16]` (empty: every captured input) | `ack` | |
 | `meas.create` | `config: MeasConfig` | `measurement` | |
@@ -358,14 +361,20 @@ it. `state.outputs` lists the labelled outputs, sorted by channel.
 **Rig monitor, OSC and Art-Net cues (`osc.*`, `artnet.*`, `rig.*`).** The `rig` entity (`Rig`) holds what belongs
 to the daemon's machine rather than to a session: `rev` (the rev of its last settings change),
 `osc_target` (`"ip:port"` \| nil: where OSC cues go; an IP literal, never a name to look up),
-`artnet_target` (`ArtnetTarget` \| nil: where the Art-Net universe goes), `artnet_fade` (f64
+`artnet_target` (`ArtnetTarget` \| nil: where the Art-Net universe goes), `sacn_target`
+(`SacnTarget` \| nil: where the same universe goes as sACN), `artnet_fade` (f64
 seconds, 0–60: how long the DMX channels take to move to a new cue frame; 0 jumps; 1 until
 set), `monitor_at_start` (at start the daemon reopens the last stream's device capture-only so the
 rig measurements meter with no client connected; the generator stays disarmed), `levels`
 (`LevelsSettings` {`ballistic`: `Ballistic`, `correlation_window`: `CorrelationWindow`,
-`over_threshold`: Dbtp, `correlation_gate`: Dbfs, `loudness_target`: Lufs}: the programme meters' settings, below), `osc` and
-`artnet` (each an `OutputStatus` {`sent`: packets since the daemon started, u64,
-`last_error`: str \| nil, the latest send error as the operating system said it}), `dmx`
+`over_threshold`: Dbtp, `correlation_gate`: Dbfs, `loudness_target`: Lufs}: the programme meters' settings, below), `osc`,
+`artnet` and `sacn` (each an `OutputStatus` {`sent`: packets since the daemon started, u64,
+`last_error`: str \| nil, the latest send error as the operating system said it}),
+`artnet_socket` (`ArtnetSocket`, tagged by `type`: `closed` (no Art-Net target),
+`conforming` (bound to port 6454: sends from it and answers ArtPoll), `not_conforming`
+{`from_port`: u16, `reason`: `ArtnetBindFailure` (`port_taken`: another program holds 6454
+without sharing it; `refused`: the system refused the bind), `os_error`: str}: frames go out
+from `from_port`, nothing is answered, 6454 is tried again every 30 s), `dmx`
 ([`DmxLevel`] {`channel`, `value`}: the cue universe's channels above 0, in channel order,
 whether or not a target is set), `cues` ([`RigCue`] {`meas`, `subject`:
 `CueSubject`, `state`: `CueState`}: every cued subject's state as last sent) and
@@ -384,15 +393,19 @@ tagged by `type`: `meter` (the whole meter: the worst state of its limits), `win
 {duration, weighting}, `peak` {quantity}, `band` {duration, weighting, nominal},
 `predicted`. `CueState` is `ok` (under the limit, or none), `near`, `over` or `fault` (the rig
 cannot judge: no audio, device lost, not calibrated).
-`osc.target`, `artnet.target`, `artnet.fade`, `rig.monitor_at_start` and `levels.set` carry the `rig.rev` they were made on; another is
+`osc.target`, `artnet.target`, `sacn.target`, `artnet.fade`, `rig.monitor_at_start` and `levels.set` carry the `rig.rev` they were made on; another is
 `conflict` with `detail: conflict {rev}` (the current one). `osc.test` sends one message to
 the target now (setup); `invalid` without a target, `internal` with the operating system's
 reason when the send fails; `append_level` appends 0 dB. `osc.target` refuses an unspecified
 address or port 0 (`invalid`), writes the rig settings file before it takes effect, and sends
 the current state of every cue to the new target at once. `artnet.target` likewise refuses
 an unspecified address or port 0, persists, and sends the current frame at once.
-`artnet.fade` sets `rig.artnet_fade` and persists it; `seconds` outside 0–60 or not finite is
-`invalid`. It applies from the next change of the cue frame (a fade in progress keeps its
+`sacn.target` refuses a unicast address that is unspecified, multicast or broadcast, and a
+multicast interface the host does not have (`invalid`), persists, ends the stream to the old
+target (three packets with Stream_Terminated) and sends the current frame at once.
+`artnet.fade` sets `rig.artnet_fade` and `artnet.test` sends a test frame; both apply to every
+DMX output (Art-Net and sACN), and `artnet.test` is `invalid` only with neither target set.
+`seconds` outside 0–60 or not finite is `invalid`. It applies from the next change of the cue frame (a fade in progress keeps its
 length).
 **Programme meters (`levels.*`).** `rig.levels` holds what the input meters of §5.4
 (`stream_levels`, `preview_levels`) read beyond peak and RMS: `ballistic` is what the bars
@@ -439,11 +452,13 @@ worst subject's for the meter cue), when one is known. A cue that goes away (its
 deleted, a session measurement replaced by a load, the cue removed by `meas.update`, the daemon stopping cleanly)
 sends its `ok` message once and stops holding its levels. Only subjects with a cue are listed in `rig.cues` or sent; a cue
 edit keeps the window's state and history (it changes what is sent, not what is judged).
-`rig.osc` and `rig.artnet` are committed when `last_error` is set or cleared, and otherwise at
+`rig.osc`, `rig.artnet` and `rig.sacn` are committed when `last_error` is set or cleared, and otherwise at
 most every 10 s while the sent counter moves (`rig.cues` and `rig.dmx` changes are committed at
 once).
 Art-Net: ac2 owns one universe and sends all 512 channels as ArtDmx (OpCode 0x5000, protocol
-14, `Sequence` 0) from an ephemeral UDP port to `artnet_target`. Each channel is the highest
+14, `Sequence` 0) from UDP port 6454 to `artnet_target` (port 6454 is bound with address
+reuse, so another Art-Net program on the host that also shares it can run beside the rig;
+when it cannot be bound, see `rig.artnet_socket`). Each channel is the highest
 level any cue's current state lists for it (HTP), 0 where none lists it. When the cue frame
 changes, every channel fades from the level last output to its new level over `artnet_fade`,
 evenly in perceived brightness: with p = (v/255)^(1/2.2), p moves linearly from start to end
@@ -458,6 +473,28 @@ the whole universe and is resent within a second, so a reordered datagram heals 
 a restarted daemon is never ignored by a node that remembers a higher sequence. Mix ac2's
 universe with a lighting desk at the receiver (an Art-Net input merged HTP, or a node's HTP
 merge). A daemon stopping cleanly sends one frame of every cue's `ok` levels.
+ArtPoll: while an Art-Net target is set and 6454 is bound, the rig answers an ArtPoll
+(OpCode 0x2000, from any controller; a targeted poll only when its range holds the
+universe) with one ArtPollReply (OpCode 0x2100, 239 bytes) sent unicast to the poller's
+address on 6454: Style `StController`, ShortName and LongName the rig name (ASCII, `?` for
+anything else), Oem 0x00ff, EstaMan 0, Net/Sub-Net and SwIn from the universe, NumPorts 1
+with one DMX input port (the rig's universe goes out: Art-Net calls a port that sends into
+the network an input). A source is answered at most once a second and the rig at most 8 times
+a second in all; anything else received (ArtDmx included) is ignored. The rig sends no
+ArtPoll of its own.
+sACN (ANSI E1.31-2018): the same frame (fades, snaps, HTP, test frames, the once-a-second
+resend, the clean-stop frame) goes out as E1.31 data packets (638 bytes: root, framing and
+DMP layers, start code 0, 512 slots) from an ephemeral port to port 5568. The CID is derived
+from the rig id, so a restarted daemon is the same source; the source name is the rig name.
+Each universe's sequence number counts up from 0 and wraps. A target removed or changed, and
+a daemon stopping cleanly (after its `ok` frame), end the stream with three packets carrying
+Stream_Terminated (options bit 6). `SacnTarget` = {`dest`: `SacnDest`, `universe`: u16
+1–63999, `priority`: u8 0–200 (100 is E1.31's default)}; out of range fails to decode.
+`SacnDest` is tagged by `type`: `unicast` {`addr`: IPv4 literal, a receiver} or `multicast`
+{`interface`: IPv4 literal, the host's address on the lighting network}: sent to
+239.255.(universe ÷ 256).(universe mod 256) out of that interface with TTL 1 (the group
+stays on the lighting network) and multicast loopback on (a receiver on the rig's host hears
+it). The rig only sends to the group and never joins it, so it emits no IGMP.
 With `monitor_at_start` on, each `stream.open` that succeeds while rig measurements exist is
 recorded in the rig settings (turning it on with a stream open records that one). A daemon
 started with it on and a recorded stream opens that device itself, after restoring the

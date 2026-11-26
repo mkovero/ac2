@@ -366,9 +366,9 @@ pub fn reply_warning(w: &Warning, names: &[String]) -> String {
             "rig SPL meter(s) {} now meter this device's inputs",
             names.join(", ")
         ),
-        Warning::RecordingEnded { .. } | Warning::LineLevelUnusual { .. } => {
-            plain_warning(w).unwrap_or_default()
-        }
+        Warning::RecordingEnded { .. }
+        | Warning::LineLevelUnusual { .. }
+        | Warning::ArtnetNotConforming { .. } => plain_warning(w).unwrap_or_default(),
     }
 }
 
@@ -392,6 +392,9 @@ pub fn plain_warning(w: &Warning) -> Option<String> {
                 full_scale.0
             ))
         }
+        Warning::ArtnetNotConforming { from_port, reason } => {
+            Some(crate::artnet::not_conforming_text(*from_port, *reason))
+        }
     }
 }
 
@@ -399,7 +402,9 @@ pub fn plain_warning(w: &Warning) -> Option<String> {
 pub fn warning_meas(w: &Warning) -> &[MeasId] {
     match w {
         Warning::RigMonitorBlind { meas } | Warning::RigMonitorMoved { meas } => meas,
-        Warning::RecordingEnded { .. } | Warning::LineLevelUnusual { .. } => &[],
+        Warning::RecordingEnded { .. }
+        | Warning::LineLevelUnusual { .. }
+        | Warning::ArtnetNotConforming { .. } => &[],
     }
 }
 

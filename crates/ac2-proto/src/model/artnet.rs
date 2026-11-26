@@ -368,6 +368,41 @@ pub struct ArtnetTarget {
     pub universe: PortAddress,
 }
 
+/// How the rig's Art-Net socket is bound. Art-Net requires its port 6454 as the source of
+/// every packet and as where ArtPoll arrives; a strict node drops ArtDmx from any other
+/// port, and a console lists only the devices that answer its ArtPoll.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ArtnetSocket {
+    /// No socket: no target is set, or none could be opened (`rig.artnet.last_error`).
+    #[default]
+    Closed,
+    /// Bound to port 6454, shared with any other Art-Net program on the host that shares
+    /// it: frames go out from it and ArtPoll is answered.
+    Conforming,
+    /// Port 6454 could not be bound: frames go out from `from_port`, which a strict node
+    /// drops, and ArtPoll is not answered (no console lists the rig). The daemon tries
+    /// 6454 again every 30 s.
+    NotConforming {
+        /// The port frames go out from.
+        from_port: u16,
+        /// Why 6454 could not be bound.
+        reason: ArtnetBindFailure,
+        /// The operating system's words.
+        os_error: String,
+    },
+}
+
+/// Why the Art-Net port could not be bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtnetBindFailure {
+    /// Another program holds it and does not share it.
+    PortTaken,
+    /// The operating system refused it for another reason (permissions, no such address).
+    Refused,
+}
+
 /// How long the rig's DMX channels take to move to a new cue frame, 0–60 s; 0 jumps.
 /// Without a setting it is [`ArtnetFade::DEFAULT`]: a light that changes over a second
 /// reads as a change of state, not a flicker.

@@ -1,5 +1,5 @@
 {
-  "proto_version": 106,
+  "proto_version": 107,
   "value": {
     "grids": [
       {
@@ -285,6 +285,9 @@
           "sent": 0
         },
         "artnet_fade": 1.0,
+        "artnet_socket": {
+          "type": "closed"
+        },
         "artnet_target": null,
         "cues": [],
         "damaged_files": [],
@@ -303,6 +306,11 @@
         },
         "osc_target": null,
         "rev": 0,
+        "sacn": {
+          "last_error": null,
+          "sent": 0
+        },
+        "sacn_target": null,
         "zone": {
           "name": "Europe/Helsinki",
           "utc_offset_s": 7200
@@ -324,11 +332,11 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-26294609"
+              "since": "now-14341408"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-26294609"
+              "since": "now-14341408"
             }
           },
           "started_at": null,
@@ -336,31 +344,31 @@
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-26294609",
+              "since": "now-14341408",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-26294609",
+              "since": "now-14341408",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-26294609",
+              "since": "now-14341408",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-26294609",
+              "since": "now-14341408",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-26294609",
+              "since": "now-14341408",
               "weighting": "a"
             }
           ]
@@ -401,7 +409,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-144036735",
+          "opened_at": "now-57347530",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -430,7 +438,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-6872987"
+        "saved_at": "now-9803209"
       }
     },
     "traces": []

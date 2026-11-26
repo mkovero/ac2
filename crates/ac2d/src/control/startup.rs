@@ -86,6 +86,7 @@ impl Control {
                 osc_target: saved.osc_target,
                 artnet_target: saved.artnet_target,
                 artnet_fade: saved.artnet_fade,
+                sacn_target: saved.sacn_target,
                 levels: saved.levels,
                 zone: crate::hostclock::zone(s.local_clock, crate::util::wall_ns()),
                 ..Default::default()
@@ -164,7 +165,7 @@ impl Control {
                 settings: rig,
                 meas: rigm,
                 osc: osc::Cues::default(),
-                artnet: artnet::Universe::default(),
+                artnet: artnet::Universe::new(s.dmx, s.rig_id, &s.name),
             },
             levels: Default::default(),
             s,

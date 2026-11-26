@@ -95,6 +95,8 @@ pub(crate) struct RigSettings {
     pub(crate) artnet_target: Option<ArtnetTarget>,
     /// How long the DMX channels take to move to a new cue frame.
     pub(crate) artnet_fade: ArtnetFade,
+    /// Where the sACN universe goes; `None`: nowhere.
+    pub(crate) sacn_target: Option<ac2_proto::model::SacnTarget>,
     /// The programme meters: ballistic, correlation window, over threshold, gate.
     pub(crate) levels: LevelsSettings,
     /// The rigs this one may take audio from (`rig.pair`, `rig.unpair`).
@@ -403,6 +405,13 @@ mod tests {
                 universe: ac2_proto::model::PortAddress::new(1).expect("universe"),
             }),
             artnet_fade: ArtnetFade::new(0.0).expect("fade"),
+            sacn_target: Some(ac2_proto::model::SacnTarget {
+                dest: ac2_proto::model::SacnDest::Multicast {
+                    interface: "10.0.0.5".parse().expect("addr"),
+                },
+                universe: ac2_proto::model::SacnUniverse::new(1).expect("universe"),
+                priority: ac2_proto::model::SacnPriority::DEFAULT,
+            }),
             ..RigSettings::default()
         };
         store.persist(&want).expect("write");

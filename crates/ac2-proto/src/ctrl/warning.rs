@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::RecordingRef;
+use crate::model::{ArtnetBindFailure, RecordingRef};
 use crate::units::{Dbu, MeasId};
 
 /// Something the command did that the caller should know about, beside its outcome.
@@ -28,6 +28,15 @@ pub enum Warning {
     RecordingEnded {
         /// The recording that ended.
         recording: RecordingRef,
+    },
+    /// `artnet.target` opened the Art-Net socket, but not on Art-Net's port 6454: frames go
+    /// out from `from_port`, which a strict node drops, and no console lists the rig
+    /// (`rig.artnet_socket` holds it while it lasts).
+    ArtnetNotConforming {
+        /// The port frames go out from.
+        from_port: u16,
+        /// Why 6454 could not be bound.
+        reason: ArtnetBindFailure,
     },
     /// `cal.line` stored a full scale outside the usual +4 … +30 dBu of line interfaces:
     /// within what an input can be (−40 … +50 dBu), but worth a second look at the volts

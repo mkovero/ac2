@@ -1,7 +1,7 @@
 """Checks of convert.py: `python3 -I tools/proto-next/test_convert.py`.
 
 `samples/old` holds a file of every format the converter converts, as the 105 daemon wrote
-them; `samples/new` what the converter makes of them, which the 106 daemon loads whole
+them; `samples/new` what the converter makes of them, which the 107 daemon loads whole
 (`crates/ac2d/tests/it/converted.rs`).
 """
 
@@ -110,6 +110,19 @@ class Samples(unittest.TestCase):
             self.assertEqual(convert.main(["--rig", p]), 1)
         self.assertEqual(read(p), read(os.path.join(OLD, "calibrations.json")))
         self.assertFalse(os.path.exists(p + ".pre106"))
+
+
+class Rig12(unittest.TestCase):
+    def test_a_106_rig_file_gains_the_sacn_section_alone(self):
+        with open(os.path.join(NEW, "rig.json"), encoding="utf-8") as fh:
+            new = json.load(fh)
+        v12 = {k: v for k, v in new.items() if k != "sacn_target"}
+        v12["version"] = 12
+        self.assertEqual(convert.convert_rig(v12), new)
+
+    def test_another_version_is_refused(self):
+        with self.assertRaises(ValueError):
+            convert.convert_rig({"format": convert.RIG_FORMAT, "version": 10})
 
 
 class Backups(unittest.TestCase):

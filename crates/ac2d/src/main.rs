@@ -301,6 +301,7 @@ fn config(
         config.name.clone_from(name);
     }
     config.systemd_notify = true;
+    config.dmx = ac2d::DmxPorts::STANDARD;
     config.network = network;
     config.mdns = Some(Mdns {
         options: ac2_discovery::Options::default(),

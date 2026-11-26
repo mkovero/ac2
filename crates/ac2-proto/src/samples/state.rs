@@ -918,6 +918,13 @@ pub fn rig() -> Rig {
             universe: PortAddress::from_parts(0, 0, 1).expect("valid sample universe"),
         }),
         artnet_fade: ArtnetFade::new(1.5).expect("valid sample fade"),
+        sacn_target: Some(SacnTarget {
+            dest: SacnDest::Multicast {
+                interface: std::net::Ipv4Addr::new(192, 168, 9, 4),
+            },
+            universe: SacnUniverse::new(1).expect("valid sample universe"),
+            priority: SacnPriority::DEFAULT,
+        }),
         monitor_at_start: true,
         levels: LevelsSettings {
             ballistic: Ballistic::Type1,
@@ -936,6 +943,11 @@ pub fn rig() -> Rig {
         },
         artnet: OutputStatus {
             sent: 340,
+            last_error: None,
+        },
+        artnet_socket: ArtnetSocket::Conforming,
+        sacn: OutputStatus {
+            sent: 338,
             last_error: None,
         },
         dmx: dmx("12=255 14=40"),

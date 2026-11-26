@@ -32,7 +32,6 @@
 //! path itself ([`stimulus`]).
 #![deny(unsafe_code)]
 
-mod artnet;
 mod authlog;
 mod autosave;
 mod backend;
@@ -48,6 +47,7 @@ mod conv;
 mod damage;
 mod dedup;
 mod detect;
+mod dmx;
 mod fanout;
 mod firewall;
 mod health;
@@ -107,6 +107,7 @@ use io::{Interest, IoSockets};
 use outbox::Outbox;
 
 pub use control::{FreeSpace, TransferLimits};
+pub use dmx::DmxPorts;
 
 /// The tracing target of the audit trail: who raised the ceiling, authorized, demoted or
 /// revoked a client, made sound or stopped it. `ac2d` writes its events to a file of their
@@ -536,6 +537,7 @@ impl Daemon {
             local_clock: config.local_clock,
             system_clock: config.system_clock,
             systemd_notify: config.systemd_notify,
+            dmx: config.dmx,
             damaged: key_damage,
         });
         let control = std::thread::Builder::new()
