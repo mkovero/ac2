@@ -175,8 +175,12 @@ directories), so nothing restarts it in the window.
    calibration store and authorized clients, and the client keys in `~/.config/ac2/keys`,
    which do not change).
 4. `cp -f bin.new-<rev>/* bin/`, start the daemon (`cd ~/ac2-test && setsid bin/ac2d >>
-   ac2d-local.log 2>&1 &`) and the app (`start-ui.sh`). Verify against both daemons (its own,
-   and `--remote 192.168.9.27`).
+   ac2d-local.log 2>&1 &`), open its audio as the last deploy-log row for ketunkolo gives it
+   (`bin/ac2 stream open --backend jack --in … --outputs … --loopback-out … --loopback-in …
+   --remote-in "pupu:1"`: the words of 105's `session open`, under `stream open`), salvage its
+   autosave as on pupu, and start the app (`start-ui.sh`). Its `~/.config/ac2/ui.toml` (rig
+   list, layout) is read as it is. Verify against both daemons (its own, and
+   `--remote 192.168.9.27`).
 
 **Standalone meters (the CM4 at 192.168.9.33, the netbooted Pi 4)**
 
@@ -193,23 +197,47 @@ below). On the CM4 the root is read-only and `/home/ac2`'s config and data are b
 from `/data`, writable all the time: the conversion needs no rw root, only the binaries do.
 The Pi 4's root is NFS, always writable; `ac2pi-rw` and `ac2pi-ro` do nothing there.
 
+The meter itself lives in `rig.json` (a rig SPL meter, opened with its audio by the daemon at
+every start), so it comes back from the converted file with no session work; the autosave
+holds only what was added by hand. The kiosk's `ui.toml` (its pane pinned by measurement name)
+is read as it is.
+
+At every start the daemon unit runs `ac2-selfpair` (`ExecStartPost`), which appends the kiosk's
+line from `ac2 --json auth pair … | jq -r .authorized_clients_line` to `authorized_clients`
+when the kiosk's key is not in it. The 106 CLI prints that line with a role (`viewer`), which
+the 106 daemon reads; a line from a 105 CLI has none, and one such line sets the whole file
+aside. So `ac2d`, `ac2` and `ac2-ui` are installed together, never the daemon alone. A key
+listed twice also sets the file aside: after the conversion the kiosk's key is there once (as
+`operator`), and the script, matching by key, adds nothing.
+
 1. Export the meter's Leq history on the meter with its own CLI (*every host*, step 2), as
-   `ac2` (`sudo -u ac2 XDG_RUNTIME_DIR=… ac2 spl leq export …`), and copy it off.
-2. `sudo systemctl disable --now ac2-kiosk`, then `uctl disable --now ac2d`.
-3. `python3 -V` (the converter needs only the standard library). Copy `convert.py` to the
+   `ac2` (`sudo -u ac2 XDG_RUNTIME_DIR=… ac2 spl leq export …`), and copy it off. Save by name
+   anything in its session that must be kept (`ac2 session save <name>`).
+2. `sudo ac2pi-rw` first: unit enablement lives on the root (`/etc/systemd/system`, the `ac2`
+   user's `~/.config/systemd/user`), so nothing can be disabled while it is read-only. From
+   here to step 6 the root is writable: `sync` after every step.
+3. `sudo systemctl disable --now ac2-kiosk`, then `uctl disable --now ac2d`; `sync`.
+4. `python3 -V` (the converter needs only the standard library). Copy `convert.py` to the
    meter and run it as the daemon's user:
    `sudo -u ac2 python3 convert.py --rig /home/ac2/.config/ac2/rig.json --cal /home/ac2/.config/ac2/calibrations.json --auth /home/ac2/.config/ac2/authorized_clients`
    (`--plans /home/ac2/.local/share/ac2/plans` when that directory exists). Check
    `sudo ls -l /home/ac2/.config/ac2/`: every converted file owned by `ac2`, mode as before,
-   its `.pre106` beside it.
-4. `sync`. Only then the binaries: `sudo ac2pi-rw`, keep the old ones
-   (`/usr/local/bin/ac2d` → `ac2d.prev-<rev>`, likewise `ac2` and `ac2-ui`), install the 106
-   ones and the revision file (`/usr/local/share/ac2-revision`), `sync`.
-5. `uctl enable --now ac2d`, `sudo systemctl enable --now ac2-kiosk`, verify (below), then
-   `sudo ac2pi-ro`: the CM4 ends read-only.
-6. From pupu: `ac2 --remote <meter> status` shows the meter running and no damaged file.
+   its `.pre106` beside it; the kiosk's key once in `authorized_clients`. `sync`.
+5. Only then the binaries: keep the old ones (`/usr/local/bin/ac2d` → `ac2d.prev-<rev>`,
+   likewise `ac2` and `ac2-ui`), install all three 106 ones and the revision file
+   (`/usr/local/share/ac2-revision`), `sync`.
+6. `uctl enable --now ac2d`; `uctl status ac2d` shows it active with `ac2-selfpair` exited 0
+   and no restart after it. Verify (below): the SPL meter running and calibrated,
+   `authorized_clients` not set aside. `sudo systemctl enable --now ac2-kiosk`: the kiosk
+   shows the meter. `sync`, then `sudo ac2pi-ro`: the CM4 ends read-only.
+7. From pupu: `ac2 --remote <meter> status` shows the meter running and no damaged file.
    After the next power cut, check again from pupu: the meter came back by itself, metering,
    with its calibration.
+
+The Pi 4 boots from `/srv/ac2pi/rootfs` on the build host: its binaries can be staged there,
+but its files are converted first all the same. A meter that is off during the window gets the
+whole sequence at first contact, before its unit is enabled on the new binaries; until then it
+keeps the old binaries and the old files.
 
 **Every host, after the start**
 
@@ -239,7 +267,9 @@ fresh `rig.json`: the converted file replaces it.
 2. Put each `<name>.pre106` back under its own name (the newest `.pre106.N` is the latest
    run's original). A 106 start rewrites `rig.json`, so the 105 one exists only in the
    backup. `session save`s made under 106 do not open in 105.
-3. `cp -f bin.prev-<rev>/* bin/`, `sync` on a meter, enable and start; verify as above.
+3. `cp -f bin.prev-<rev>/* bin/` (a meter: `sudo ac2pi-rw`, the three `*.prev-<rev>` files
+   back in `/usr/local/bin`, `sync`, and `sudo ac2pi-ro` after the start), enable and start;
+   verify as above.
 
 **Reading thread costs:** `ac2d-control` at one wake per audio period (≈375/s at 96 kHz/256) is
 JACK's process thread (libjack threads take the name of the thread that opened the client), not
