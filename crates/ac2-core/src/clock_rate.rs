@@ -178,6 +178,13 @@ impl RateWindow {
         ClockRate::from_fit(fit, self.nominal)
             .filter(|r| r.span_s * self.nominal >= READY_SHARE * self.window as f64)
     }
+
+    /// The oldest point [`RateWindow::rate`] fits, `(sample, ns)` as pushed: where the span
+    /// of its reading starts, so a caller can tell whether a reading reaches back past an
+    /// event (a change of clock rate inside the span moves the slope). `None` while empty.
+    pub fn first(&self) -> Option<(u64, u64)> {
+        self.points.front().map(|&(sample, ns, _)| (sample, ns))
+    }
 }
 
 #[cfg(test)]
@@ -227,6 +234,29 @@ mod tests {
         }
         let r = w.rate().expect("a full window");
         assert!((r.ppm - 8.0).abs() < 0.1, "{r:?}");
+    }
+
+    #[test]
+    fn the_first_point_is_where_the_span_starts() {
+        let mut w = RateWindow::new(48_000.0, 60.0, 0.05);
+        assert_eq!(w.first(), None);
+        feed(&mut w, 30.0, 0.0, 0.0, 0);
+        assert_eq!(w.first(), Some((0, 1_000_000_000)));
+        feed(&mut w, 70.0, 0.0, 0.0, 30 * 48_000);
+        let (sample, ns) = w.first().expect("points");
+        let r = w.rate().expect("a full window");
+        // The reading spans from the first point to the newest kept (one a step, 50 ms):
+        // a window back from the last block fed, at most a step more.
+        let back = (100 * 48_000 - 256 - sample) as f64 / 48_000.0;
+        assert!((60.0..60.05).contains(&back), "first point {back} s back");
+        assert!(
+            r.span_s <= back && r.span_s > back - 0.05,
+            "{r:?}, {back} s back"
+        );
+        assert_eq!(ns, (sample as f64 / 48_000.0 * 1e9 + 1e9) as u64);
+        // An index that goes back starts another stream's window.
+        w.push(100, 7, false);
+        assert_eq!(w.first(), Some((100, 7)));
     }
 
     #[test]
