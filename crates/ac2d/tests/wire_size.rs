@@ -570,10 +570,14 @@ fn slow_tuning_session_fits_a_remote_link() {
             // On the 720-column grid a transfer function is ≈ 2 700 B as a keyframe and
             // ≈ 1 350 B as a delta; the average (`d/4/tf`) also carries its operands' range
             // band (`range_lo`, `range_hi` as offsets from `mag`, `range_coh` in hundredths):
-            // ≈ 4 440 B as a keyframe, ≈ 2 800 B as a delta. The budgets are 25 % and 20 %
-            // over a plain one, ≈ 11 % and 12 % over the average.
+            // ≈ 4 440 B as a keyframe and ≈ 2 800 B as a delta on Linux. The device runs in
+            // real time, so which hops a run catches differs from run to run and from
+            // platform to platform, and the band's delta with it (3 141 B seen on Windows).
+            // These guard against a codec regression, which costs tens of percent, not
+            // against that spread: 25 % and 20 % over a plain one, 25 % over the average's
+            // Linux sizes (11 % over the largest delta seen anywhere).
             let (key, delta) = if topic == "d/4/tf" {
-                (4_920, 3_140)
+                (5_550, 3_500)
             } else {
                 (3_375, 1_620)
             };
