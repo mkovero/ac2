@@ -4488,7 +4488,8 @@ ac2 cue Stage meter --fault-dmx off       # no levels in that state
 ac2 rig status                            # targets, fade, frames sent, the channels above 0
 ```
 
-The target and the fade are kept in the rig settings like the OSC target. `ac2 artnet test` holds its
+The target and the fade are kept in the rig settings like the OSC target; a new target gets
+the levels as they are, a fade or a test frame going on. `ac2 artnet test` holds its
 frame for 5 s, or until a cue changes state, then the cues' frame comes back.
 
 In the app, Settings › Rig monitor has the same controls under the OSC ones: **Art-Net

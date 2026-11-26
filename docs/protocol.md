@@ -409,14 +409,17 @@ the target now (setup); `invalid` without a target, `internal` with the operatin
 reason when the send fails; `append_level` appends 0 dB. `osc.target` refuses an unspecified
 address or port 0 (`invalid`), writes the rig settings file before it takes effect, and sends
 the current state of every cue to the new target at once. `artnet.target` likewise refuses
-an unspecified address, IPv6 or port 0, persists, and sends the current frame at once; a
-subnet's broadcast address is accepted (Art-Net 4 requires unicast ArtDmx; a broadcast
+an unspecified address, IPv6 or port 0, persists, and sends the current frame at once (a
+changed target, or a new one beside an sACN target, gets the frame being output: a fade or
+test frame in progress goes on at the new one); a subnet's broadcast address is accepted (Art-Net 4 requires unicast ArtDmx; a broadcast
 target is the operator's choice for nodes whose addresses are not known), and universe 0 is
 kept with the warning `artnet_universe_zero`. The reply carries `artnet_not_conforming` or
 `artnet_cannot_open` while the socket is not on 6454 or not open; the same target again is
 not a no-op then: it tries the socket (and 6454) at once instead of at the next 30 s retry.
-`sacn.target` refuses a unicast address that is unspecified, multicast or broadcast, and a
-multicast interface the host does not have (`invalid`), persists, and sends the frame being
+`sacn.target` refuses a unicast address that is unspecified, multicast, the limited broadcast
+or the directed broadcast of a network the host is on (the socket may not broadcast), a
+multicast interface that is unspecified, multicast or broadcast, and one the host does not
+have (`invalid`), persists, and sends the frame being
 output at once. A changed `universe` or `dest` first ends the stream to the old one (three
 packets with Stream_Terminated); a fade or test frame in progress goes on at the new one. A
 changed `priority` alone is the same stream: no termination, the sequence goes on, and the
@@ -506,22 +509,26 @@ to back (no keep-alive follows to make good a lost one).
 ArtPoll: while an Art-Net target is set and 6454 is bound, the rig answers an ArtPoll
 (OpCode 0x2000, protocol 14 or later, from any controller; a targeted poll only when its
 range holds the universe; never one from 0.0.0.0, the limited broadcast, the directed
-broadcast of one of the host's interfaces (listed at bind and every 30 s) or a multicast
-address) with
+broadcast of one of the host's interfaces (listed when the listener starts, and again when
+a poll arrives and the list is 30 s old) or a multicast address) with
 one ArtPollReply (OpCode 0x2100, 239 bytes) sent unicast to the poller's
 address on 6454: Style `StController`, ShortName and LongName the rig name (ASCII, `?` for
 anything else), Oem 0x00ff, EstaMan 0, Net/Sub-Net and SwIn from the universe, NumPorts 1
 with one DMX input port (the rig's universe goes out: Art-Net calls a port that sends into
 the network an input). A source is answered at most once a second and the rig at most 8 times
-a second in all, at most 4 of them to sources it has not answered before (so a flood of new
-sources leaves room for a console that polls every 2.5–3 s); anything else received
+a second in all, at most 4 of them to sources it has not answered before (so polls from
+sources never seen before, however many, leave room for a console already answered that
+polls every 2.5–3 s; polls spoofed from addresses already answered can spend the whole
+budget); anything else received
 (ArtDmx included) is ignored. The rig sends no ArtPoll of its own: it sends to the one
 target it is given rather than to subscribers it discovers.
 sACN (ANSI E1.31-2018): the same frame (fades, snaps, HTP, test frames, the repeats and the
 900 ms keep-alive, the clean-stop frame) goes out as E1.31 data packets (638 bytes: root, framing and
 DMP layers, start code 0, 512 slots) from an ephemeral port to port 5568. The CID is derived
 from the rig id, so a restarted daemon is the same source; the source name is the rig name.
-Each universe's sequence number counts up from 0 and wraps. A target removed or moved to
+The sequence number is one count for the rig's packets: from 0 at start, wrapping, and
+carried on across a change of universe or destination (a receiver of the new stream takes
+any first number). A target removed or moved to
 another universe or destination, and a daemon stopping cleanly (after its `ok` frame), end
 the stream with three packets carrying
 Stream_Terminated (options bit 6). `SacnTarget` = {`dest`: `SacnDest`, `universe`: u16
