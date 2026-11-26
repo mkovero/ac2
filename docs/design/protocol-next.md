@@ -947,7 +947,9 @@ or it boots without its meter and refuses every network client.
    transfer's kept result.
 8. **File names inside a session archive** follow the rule session names follow: no Windows
    device name, no `:`, no trailing dot or space (`ac2_archive::windows_device` is the one
-   device-name rule).
+   device-name rule), and no set-aside name (`<name>.damaged-<time>`, `.v<N>-<time>`):
+   a save keeps such a file in the folder for the operator, so it is neither packed nor
+   unpacked, and an archive carrying one is refused.
 9. **The converter runs as the daemon's user.** It refuses any file another user owns
    (nothing written, no backup made), rather than rewriting it as itself: the rewritten file
    would be the runner's, and the daemon admits no network client while the

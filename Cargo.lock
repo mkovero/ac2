@@ -6,6 +6,7 @@ version = 4
 name = "ac2-archive"
 version = "0.1.0"
 dependencies = [
+ "ac2-paths",
  "flate2",
  "sha2",
  "tar",

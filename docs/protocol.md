@@ -3275,6 +3275,8 @@ holds other files is never written into.
 
 A session archive (`.ac2session`) is that directory as a gzip-compressed POSIX tar, the
 entries at their relative paths (`session.json`, `traces/…`, `spl/…`), regular files only.
+A file set aside in place (`<name>.damaged-<time>`, `<name>.v<N>-<time>`) stays on the
+disk it was set aside on: it is not packed, and an archive that holds one is refused.
 
 ### 7.3 Autosave
 

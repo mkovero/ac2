@@ -188,8 +188,12 @@ pub fn is_archive_name(path: &Path) -> bool {
 /// A file name allowed inside a session directory: plain, not hidden, and one every OS a
 /// daemon runs on can create as itself. Windows drops a trailing dot or space (two names,
 /// one file), reads `name:x` as a stream of `name`, and keeps device names for devices.
+/// Nor a set-aside file's name (`<name>.damaged-<time>`): one the daemon set aside stays
+/// on its own disk for the operator, and a save keeps any file of that shape it finds, so
+/// one that travelled in an archive would ride along in every later save and archive.
 fn plain_name(s: &str) -> bool {
     !s.is_empty()
+        && !ac2_paths::is_set_aside(s)
         && !s.starts_with('.')
         && !s.ends_with(['.', ' '])
         && !s.contains(['/', '\\', '\0', ':'])
@@ -502,6 +506,8 @@ mod tests {
         // Not part of a session: skipped by pack.
         fs::write(dir.join("traces/.tmp-1"), b"x").expect("w");
         fs::write(dir.join("notes.txt"), b"x").expect("w");
+        // Set aside by the daemon on this disk: the operator's, not the session's.
+        fs::write(dir.join("spl/Main.csv.damaged-1795867200"), b"x").expect("w");
     }
 
     fn tar_gz(entries: &[(&str, tar::EntryType, &[u8])]) -> Vec<u8> {
@@ -539,6 +545,7 @@ mod tests {
         assert!(out.join("spl/Main.csv").is_file());
         assert!(!out.join("notes.txt").exists());
         assert!(!out.join("traces/.tmp-1").exists());
+        assert!(!out.join("spl/Main.csv.damaged-1795867200").exists());
         verify(&a, &sha256_hex(&a)).expect("checksum");
         assert_eq!(verify(&a, &"0".repeat(64)), Err(ArchiveError::Checksum));
     }
@@ -575,6 +582,8 @@ mod tests {
             ("traces/a.csv:stream", tar::EntryType::Regular),
             ("traces/a.csv.", tar::EntryType::Regular),
             ("traces/a.csv ", tar::EntryType::Regular),
+            ("spl/0-1.csv.damaged-1795867200", tar::EntryType::Regular),
+            ("traces/a.csv.v2-1795867200-2", tar::EntryType::Regular),
         ]
         .into_iter()
         .enumerate()
