@@ -644,13 +644,13 @@ fn a_stopped_spectrum_captures_its_mic_of_the_stop() {
         })
     };
     let before = capture(&mut r.c, "before");
-    r.c.ok(Command::CalCurveImport {
+    r.c.ok(Command::CalCurveImport(ac2_proto::CalCurveImportArgs {
         mic: "M30".into(),
         label: None,
         file_name: "M30.frd".into(),
         content: Blob(CURVE.as_bytes().to_vec()),
         channel: Some(1),
-    });
+    }));
     let after = capture(&mut r.c, "after");
     assert_ne!(
         before.mic.as_ref().map(|m| m.name.as_str()),

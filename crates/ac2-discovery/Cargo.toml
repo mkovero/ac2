@@ -16,6 +16,6 @@ gethostname = "1"
 if-addrs = { workspace = true }
 # No async runtime, no `log` facade: discovery runs on mdns-sd's own thread and is polled.
 mdns-sd = { version = "0.21", default-features = false }
-socket2 = { version = "0.6", features = ["all"] }
+socket2 = { workspace = true, features = ["all"] }
 
 [dev-dependencies]

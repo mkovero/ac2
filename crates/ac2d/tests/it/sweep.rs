@@ -676,13 +676,13 @@ fn a_sweep_through_a_corrected_mic_applies_its_curve() {
     // Flat to 1 kHz (the normalisation point without a calibration), +6 dB from 4 kHz.
     const CURVE: &str = "* test mic\n20 0\n1000 0\n4000 6\n24000 6\n";
     let (_h, _b, mut c, sub, ka, mut d, token) = setup();
-    c.ok(Command::CalCurveImport {
+    c.ok(Command::CalCurveImport(ac2_proto::CalCurveImportArgs {
         mic: "M30".into(),
         label: None,
         file_name: "M30.frd".into(),
         content: Blob(CURVE.as_bytes().to_vec()),
         channel: Some(1),
-    });
+    }));
     let k = MicCurve::from_points(&[(20.0, 0.0), (1000.0, 0.0), (4000.0, 6.0), (24000.0, 6.0)])
         .unwrap()
         .normalised(1000.0);

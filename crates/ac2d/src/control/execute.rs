@@ -329,13 +329,13 @@ impl Control {
                 uncertainty,
                 replace_acoustic,
             }),
-            Command::CalCurveImport {
+            Command::CalCurveImport(ac2_proto::CalCurveImportArgs {
                 mic,
                 label,
                 file_name,
                 content,
                 channel: input,
-            } => self.cal_curve_import(mic, label, file_name, content, input),
+            }) => self.cal_curve_import(mic, label, file_name, content, input),
             Command::CalCurveRename { curve, label } => self.cal_curve_rename(curve, label),
             Command::CalCurveDelete { curve } => self.cal_curve_delete(curve),
             Command::CalList => self.cal_list(),

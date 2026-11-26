@@ -269,7 +269,7 @@ impl Control {
             | Command::TraceExport { .. }
             | Command::CalSpl { .. }
             | Command::CalSplElectrical(..)
-            | Command::CalCurveImport { .. }
+            | Command::CalCurveImport(_)
             | Command::CalCurveRename { .. }
             | Command::CalCurveDelete { .. }
             | Command::CalLine { .. }

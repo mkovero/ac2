@@ -270,13 +270,13 @@ fn mic_curve_on_a_stored_trace() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
-    c.ok(Command::CalCurveImport {
+    c.ok(Command::CalCurveImport(ac2_proto::CalCurveImportArgs {
         mic: "M30".into(),
         label: None,
         file_name: "M30.frd".into(),
         content: Blob(CURVE.as_bytes().to_vec()),
         channel: Some(1),
-    });
+    }));
     let t = c.trace(Command::TraceMicCurve {
         trace: raw.id,
         curve: m30(),

@@ -26,10 +26,10 @@ pub mod units;
 pub const PROTO_VERSION: u16 = 107;
 
 pub use ctrl::{
-    CalSplElectricalArgs, Command, CtrlError, DynamicsEnvelopeArgs, DynamicsRunArgs, Envelope,
-    ErrorCode, ErrorDetail, ImportProblem, MAX_CTRL_BYTES, MicCurveFileReason, ProtoError, Reply,
-    ReplyBody, Request, SweepRunArgs, TraceImportArgs, Warning, Welcome, decode_reply,
-    decode_request, encode_reply, encode_request, peek_envelope,
+    CalCurveImportArgs, CalSplElectricalArgs, Command, CtrlError, DynamicsEnvelopeArgs,
+    DynamicsRunArgs, Envelope, ErrorCode, ErrorDetail, ImportProblem, MAX_CTRL_BYTES,
+    MicCurveFileReason, ProtoError, Reply, ReplyBody, Request, SweepRunArgs, TraceImportArgs,
+    Warning, Welcome, decode_reply, decode_request, encode_reply, encode_request, peek_envelope,
 };
 pub use event::{
     Change, Event, EventError, Patch, SnapshotTransfer, StateSnapshot, decode_event,

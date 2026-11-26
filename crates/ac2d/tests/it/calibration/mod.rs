@@ -149,13 +149,13 @@ fn label(l: &str) -> CurveChoice {
 }
 
 async fn import(c: &Client, mic: &str, file_name: &str, content: &[u8]) -> Mic {
-    c.call(Command::CalCurveImport {
+    c.call(Command::CalCurveImport(ac2_proto::CalCurveImportArgs {
         mic: mic.into(),
         label: None,
         file_name: file_name.into(),
         content: Blob(content.to_vec()),
         channel: Some(1),
-    })
+    }))
     .await
     .unwrap()
     .mic()

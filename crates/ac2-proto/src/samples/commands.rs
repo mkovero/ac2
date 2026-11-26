@@ -130,13 +130,13 @@ pub fn commands() -> Vec<Command> {
             calibrator_level: DbSpl(94.0),
             calibrator_freq: Hz(1000.0),
         },
-        Command::CalCurveImport {
+        Command::CalCurveImport(crate::ctrl::CalCurveImportArgs {
             mic: "M30 #1234".into(),
             label: Some("0°".into()),
             file_name: "M30-1234.frd".into(),
             content: Blob(b"20 -0.5\n20000 1.5\n".to_vec()),
             channel: Some(1),
-        },
+        }),
         Command::CalList,
         Command::SplLogGet {
             meas: MeasId(4),

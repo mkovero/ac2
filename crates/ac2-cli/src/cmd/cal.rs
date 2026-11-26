@@ -231,7 +231,7 @@ async fn curve_import(cli: &Cli, a: &CalCurveImport, out: &mut Out<'_>) -> Resul
         (None, None) => return Err(CliError::Usage("give --mic NAME or --channel N".into())),
     };
     let r = c
-        .call(Command::CalCurveImport {
+        .call(Command::CalCurveImport(ac2_proto::CalCurveImportArgs {
             mic,
             label: a.label.clone(),
             file_name: a.file.file_name().map_or_else(
@@ -244,7 +244,7 @@ async fn curve_import(cli: &Cli, a: &CalCurveImport, out: &mut Out<'_>) -> Resul
                 })?,
             ),
             channel: a.channel.map(|i| i.0),
-        })
+        }))
         .await?;
     let m = expect_body!("cal.curve_import", r, ReplyBody::Mic(m) => m)?;
     let s = state(&c).await?;

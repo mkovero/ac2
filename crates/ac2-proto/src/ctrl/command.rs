@@ -5,7 +5,7 @@ mod meta;
 mod role;
 mod run;
 
-pub use import::{CalSplElectricalArgs, TraceImportArgs};
+pub use import::{CalCurveImportArgs, CalSplElectricalArgs, TraceImportArgs};
 pub use run::{DynamicsEnvelopeArgs, DynamicsRunArgs, SweepRunArgs};
 
 use std::net::SocketAddr;
@@ -169,7 +169,8 @@ pub enum Command {
     },
 
     // -- rig / osc / artnet -------------------------------------------------------------
-    /// Set where OSC cues go (`rig.osc_target`), `None`: nowhere. Kept across restarts.
+    /// Set where OSC cues go (`rig.osc_target`), or stop sending (`None`). Kept by the
+    /// daemon across restarts.
     #[serde(rename = "osc.target")]
     OscTarget {
         /// The `rig.rev` the edit was made on; another is refused with `conflict`.
@@ -181,7 +182,10 @@ pub enum Command {
     /// Send one message to the OSC target now, to check the receiver (setup). Refused
     /// (`invalid`) without a target; `append_level` appends 0 dB SPL.
     #[serde(rename = "osc.test")]
-    OscTest { msg: OscMessage },
+    OscTest {
+        /// Message.
+        msg: OscMessage,
+    },
     /// Set where the rig's Art-Net universe goes (`rig.artnet_target`), or stop sending
     /// (`None`). Kept by the daemon across restarts.
     #[serde(rename = "artnet.target")]
@@ -195,28 +199,37 @@ pub enum Command {
     /// that stream (`None`), on `base` (`conflict` otherwise). Kept across restarts.
     #[serde(rename = "sacn.target")]
     SacnTarget {
+        /// The `rig.rev` the edit was made on; another is refused with `conflict`.
         base: Rev,
+        /// Receiver or multicast interface, universe and priority; `None`: send nowhere.
         target: Option<SacnTarget>,
     },
-    /// How long every DMX output's channels take to move to a new cue frame
-    /// (`rig.artnet_fade`), 0–60 s (0 jumps; else `invalid`). Kept across restarts.
+    /// Set how long the DMX channels take to move to a new cue frame (`rig.artnet_fade`), on
+    /// every DMX output (Art-Net and sACN), 0–60 s, 0: they jump; out of range or not finite
+    /// is refused (`invalid`). Kept by the daemon across restarts.
     #[serde(rename = "artnet.fade")]
     ArtnetFade {
         /// The `rig.rev` the edit was made on; another is refused with `conflict`.
         base: Rev,
+        /// Fade time.
         seconds: Seconds,
     },
-    /// Send these levels merged HTP over the cue frame to every DMX target now, to find a
-    /// fixture's channels while the cue lights stay; the cue frame returns after a few
-    /// seconds or when a cue changes state. Refused (`invalid`) without any target.
+    /// Send one frame with these levels merged over the cue frame (each channel at the
+    /// higher of the two) to every DMX target (Art-Net, sACN) now, to find a fixture's
+    /// channels while the cue lights stay. The cue frame comes back after a few seconds, or
+    /// at once when a cue changes state. Refused (`invalid`) without any target.
     #[serde(rename = "artnet.test")]
-    ArtnetTest { channels: Vec<DmxLevel> },
+    ArtnetTest {
+        /// Levels.
+        channels: Vec<DmxLevel>,
+    },
     /// Whether the daemon reopens the last stream's device capture-only when it starts,
     /// so the rig measurements meter with no client connected (`rig.monitor_at_start`).
     #[serde(rename = "rig.monitor_at_start")]
     RigMonitorAtStart {
         /// The `rig.rev` the edit was made on; another is refused with `conflict`.
         base: Rev,
+        /// On or off.
         on: bool,
     },
     /// Set the rig's programme-meter settings (`rig.levels`): bar ballistic, correlator
@@ -489,18 +502,7 @@ pub enum Command {
     /// replaced. With `input`, that input's mic name is set to `mic`, and the curve becomes
     /// its active one when it is the mic's only curve.
     #[serde(rename = "cal.curve_import")]
-    CalCurveImport {
-        /// Mic name.
-        mic: String,
-        /// Label; `None` = from the file.
-        label: Option<String>,
-        /// Original file name.
-        file_name: String,
-        /// File content (`.frd`, `.txt`, CSV); the daemon parses and validates it.
-        content: Blob,
-        /// Input channel whose mic name is set.
-        channel: Option<u16>,
-    },
+    CalCurveImport(CalCurveImportArgs),
     /// Rename a curve; inputs that chose it follow.
     #[serde(rename = "cal.curve_rename")]
     CalCurveRename {

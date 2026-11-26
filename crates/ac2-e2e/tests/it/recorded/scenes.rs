@@ -351,13 +351,13 @@ pub fn calibrations(cli: &Cli) -> R {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures/mic_curves")
             .join(file);
-        cli.call(Command::CalCurveImport {
+        cli.call(Command::CalCurveImport(ac2_proto::CalCurveImportArgs {
             mic: mic.into(),
             label: Some(label.into()),
             file_name: file.into(),
             content: ac2_proto::units::Blob(std::fs::read(path)?),
             channel: None,
-        })?;
+        }))?;
     }
     cli.call(Command::StreamInputs {
         inputs: vec![InputSetup {

@@ -853,13 +853,13 @@ pub(super) async fn import_curve(
         |n| n.to_string_lossy().into_owned(),
     );
     let r = c
-        .call(Command::CalCurveImport {
+        .call(Command::CalCurveImport(ac2_proto::CalCurveImportArgs {
             mic: mic.to_owned(),
             label: None,
             file_name,
             content: ac2_proto::units::Blob(content),
             channel: input,
-        })
+        }))
         .await
         .map_err(|e| e.to_string())?;
     let m =

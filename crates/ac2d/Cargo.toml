@@ -52,7 +52,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 # The DMX outputs' sockets: address reuse before bind (Art-Net's shared port 6454) and the
 # multicast interface (sACN), which std does not set; "all" for SO_REUSEPORT on macOS.
-socket2 = { version = "0.6", features = ["all"] }
+socket2 = { workspace = true, features = ["all"] }
 # Whole-host CPU use for the health meter (only its CPU figures are read).
 sysinfo = { workspace = true, features = ["system"] }
 tracing = { workspace = true }

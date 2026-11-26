@@ -127,13 +127,13 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
 
     // A refused curve file: typed error, nothing stored.
     let e = c
-        .call(Command::CalCurveImport {
+        .call(Command::CalCurveImport(ac2_proto::CalCurveImportArgs {
             mic: "M30".into(),
             label: None,
             file_name: "bad.frd".into(),
             content: Blob(b"20 0\n10 1\n".to_vec()),
             channel: Some(1),
-        })
+        }))
         .await
         .unwrap_err();
     let ClientError::Daemon(p) = e else {
@@ -389,13 +389,13 @@ async fn a_damaged_store_is_set_aside_and_a_new_one_written() {
     let h = start(&store);
     let c = connect(&h).await;
     c.call(Command::CalList).await.unwrap();
-    c.call(Command::CalCurveImport {
+    c.call(Command::CalCurveImport(ac2_proto::CalCurveImportArgs {
         mic: "M30".into(),
         label: None,
         file_name: "c.txt".into(),
         content: Blob(CURVE.as_bytes().to_vec()),
         channel: None,
-    })
+    }))
     .await
     .unwrap();
     let aside: Vec<_> = std::fs::read_dir(dir.path())

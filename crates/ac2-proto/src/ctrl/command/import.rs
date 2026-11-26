@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::model::{
     ElectricalConnection, ImportFormat, ImportRole, IrImport, MicLoading, TraceOwner,
 };
-use crate::units::{Db, Hz, MvPerPa, TransferId, Volts};
+use crate::units::{Blob, Db, Hz, MvPerPa, TransferId, Volts};
 
 /// Arguments of `trace.import`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -25,6 +25,22 @@ pub struct TraceImportArgs {
     /// the system being tuned belongs with that system's measurement. Refused for a
     /// math trace or a measurement that does not exist.
     pub owner: TraceOwner,
+}
+
+/// Arguments of `cal.curve_import`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CalCurveImportArgs {
+    /// Mic name.
+    pub mic: String,
+    /// Label; `None` = from the file.
+    pub label: Option<String>,
+    /// Original file name.
+    pub file_name: String,
+    /// File content (`.frd`, `.txt`, CSV); the daemon parses and validates it.
+    pub content: Blob,
+    /// Input channel whose mic name is set.
+    pub channel: Option<u16>,
 }
 
 /// Arguments of `cal.spl_electrical`.

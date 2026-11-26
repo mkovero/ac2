@@ -41,13 +41,13 @@ fn two_mic_rig() -> FakeBackend {
 }
 
 fn import_curve(c: &mut Client, mic: &str, input: u16, curve: &str) {
-    c.ok(Command::CalCurveImport {
+    c.ok(Command::CalCurveImport(ac2_proto::CalCurveImportArgs {
         mic: mic.into(),
         label: None,
         file_name: format!("{mic}.frd"),
         content: Blob(curve.as_bytes().to_vec()),
         channel: Some(input),
-    });
+    }));
 }
 
 fn data(c: &mut Client, trace: TraceId) -> TraceData {
