@@ -935,3 +935,51 @@ fn the_marks_counted_begin_again_after_a_spell_the_judge_cannot_tell_from() {
     assert_eq!(at(311, &good).marks_since, after);
     assert_eq!(at(500, &good).marks_since, after);
 }
+
+/// A levels topic gone bad says nothing about the clocks: frames that stop, frames without
+/// a mark and frames repeating one stale mark all read as no marks, never as clocks apart,
+/// and the pair agrees again once the marks run.
+#[test]
+fn a_stale_or_broken_levels_topic_is_no_marks_not_clocks_apart() {
+    type Bad = fn(&mut Rigs, f64);
+    let silent: Bad = |_, _| {};
+    let unmarked: Bad = |r, t| {
+        r.marks = false;
+        r.run(t, t + 1.0);
+        r.marks = true;
+    };
+    let stuck: Bad = |r, t| {
+        let old = r.frame(64.9).1.meta.mark.expect("mark");
+        for n in 0..FPS as u64 {
+            r.one(t + n as f64 / FPS, |m| *m = old);
+        }
+    };
+    for (what, bad) in [("silent", silent), ("unmarked", unmarked), ("stuck", stuck)] {
+        let mut r = Rigs::new(0.0);
+        r.run(0.0, 65.0);
+        assert_eq!(r.shown(65.0), PeerRelation::Agree, "{what}");
+        for s in 65..200 {
+            let t = f64::from(s);
+            bad(&mut r, t);
+            let shown = r.shown(t + 1.0);
+            assert!(
+                !matches!(shown, PeerRelation::NotLocked { .. }),
+                "{what} at {t} s: {shown:?}"
+            );
+            if s >= 75 {
+                let no_marks = PeerRelation::CantTell {
+                    reason: CantTellReason::NoMarks,
+                };
+                assert_eq!(shown, no_marks, "{what} at {t} s");
+            }
+        }
+        r.run_checking(200.0, 330.0, |t, _, s| {
+            assert!(
+                !matches!(s.relation, PeerRelation::NotLocked { .. }),
+                "{what}, marks back, {t} s: {:?}",
+                s.relation
+            );
+        });
+        assert_eq!(r.shown(330.0), PeerRelation::Agree, "{what}, marks back");
+    }
+}
