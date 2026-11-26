@@ -68,6 +68,8 @@ app runs). Profiles in `.config/nextest.toml`:
   platform code (audio backends, paths, packaging, `cfg(windows|macos)`).
 - Any change to what goes on the wire bumps `PROTO_VERSION` (pre-1.0: no compatibility);
   `fixtures/protocol/WIRE_LOCK` and its test enforce it.
+- Hover text: one line, at most 80 characters (a list: at most 4 short lines). Say what the
+  thing is or its state, with at most one key. Explanations go to the user guide.
 
 ## Context budget
 What an agent reads stays in its context for the rest of the session; keep reads bounded.
