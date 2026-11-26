@@ -122,7 +122,10 @@ Warning { type: "<name>", … }
   `ArtnetBindFailure`} (`artnet.target` set a target while Art-Net's port 6454 could not be
   bound: frames go out from `from_port`, nodes that check the source port drop them, and
   polls go unanswered; `rig.artnet_socket` says the same), `artnet_universe_zero`
-  (`artnet.target` set universe 0, which Art-Net 4 deprecates; the target is kept) and
+  (`artnet.target` set universe 0, which Art-Net 4 deprecates; the target is kept),
+  `artnet_cannot_open` {os_error: str} (`artnet.target` set a target, or the same one again,
+  but no Art-Net socket could be opened: nothing is sent; `rig.artnet_socket` is
+  `cannot_open`) and
   `dmx_send_failed` {output: `DmxOutput` (`artnet` \| `sacn`), error: str} (`artnet.test`
   sent its frame to the other output but not to this one). A client shows them to the operator; they change nothing in
   `result`.
@@ -377,7 +380,8 @@ rig measurements meter with no client connected; the generator stays disarmed), 
 `artnet_socket` (`ArtnetSocket`, tagged by `type`: `closed` (no Art-Net target),
 `conforming` (bound to port 6454, the daemon's alone: sends from it and answers ArtPoll),
 `not_conforming` {`from_port`: u16, `reason`: `ArtnetBindFailure` (`port_taken`: another
-program holds 6454; `refused`: the system refused the bind), `os_error`: str}: frames go out
+program holds 6454, or on Windows the system reserves it (WSAEACCES says either);
+`refused`: the system refused the bind), `os_error`: str}: frames go out
 from `from_port`, nodes that check the source port drop them, nothing is answered, 6454 is
 tried again every 30 s; `cannot_open` {`os_error`: str}: a target is set but no socket could
 be opened at all, nothing is sent, tried again every 30 s), `dmx`
@@ -406,12 +410,17 @@ reason when the send fails; `append_level` appends 0 dB. `osc.target` refuses an
 address or port 0 (`invalid`), writes the rig settings file before it takes effect, and sends
 the current state of every cue to the new target at once. `artnet.target` likewise refuses
 an unspecified address, IPv6 or port 0, persists, and sends the current frame at once; a
-subnet's broadcast address is accepted (Art-Net 4 asks for unicast ArtDmx, but a broadcast
-target has always been allowed here), and universe 0 is kept with the warning
-`artnet_universe_zero`.
+subnet's broadcast address is accepted (Art-Net 4 requires unicast ArtDmx; a broadcast
+target is the operator's choice for nodes whose addresses are not known), and universe 0 is
+kept with the warning `artnet_universe_zero`. The reply carries `artnet_not_conforming` or
+`artnet_cannot_open` while the socket is not on 6454 or not open; the same target again is
+not a no-op then: it tries the socket (and 6454) at once instead of at the next 30 s retry.
 `sacn.target` refuses a unicast address that is unspecified, multicast or broadcast, and a
-multicast interface the host does not have (`invalid`), persists, ends the stream to the old
-target (three packets with Stream_Terminated) and sends the current frame at once.
+multicast interface the host does not have (`invalid`), persists, and sends the frame being
+output at once. A changed `universe` or `dest` first ends the stream to the old one (three
+packets with Stream_Terminated); a fade or test frame in progress goes on at the new one. A
+changed `priority` alone is the same stream: no termination, the sequence goes on, and the
+next packet carries the new priority.
 `artnet.fade` sets `rig.artnet_fade` and `artnet.test` sends a test frame; both apply to every
 DMX output (Art-Net and sACN), and `artnet.test` is `invalid` only with neither target set;
 it is `internal` only when no output sent its frame, and an output that failed beside one
@@ -469,7 +478,12 @@ once).
 Art-Net: ac2 owns one universe and sends all 512 channels as ArtDmx (OpCode 0x5000, protocol
 14, `Sequence` 0) from UDP port 6454 to `artnet_target`. While a target is set, port 6454
 is the daemon's alone: bound without address reuse (exclusively on Windows), because two
-programs sharing a UDP port do not both get its unicast. With another Art-Net program on
+programs sharing a UDP port do not both get its unicast. On macOS (BSD sockets) another
+program that sets SO_REUSEADDR can still bind 6454 on one specific address of the host
+beside the daemon's wildcard bind, and then takes the unicast sent to that address (an
+ArtPoll unicast there, ArtDmx to the host); broadcast ArtPoll (Art-Net 4 polls the directed
+broadcast) and unicast to the host's other addresses still reach the daemon. Linux and
+Windows refuse that bind. With another Art-Net program on
 the host holding 6454, see `rig.artnet_socket`: quit it or turn its Art-Net off, and the
 rig binds 6454 within 30 s. Each channel is the highest
 level any cue's current state lists for it (HTP), 0 where none lists it. When the cue frame
@@ -487,10 +501,13 @@ target is set (E1.31's keep-alive and Art-Net 4's recommended re-transmit time a
 the whole universe and is resent within a second, so a reordered datagram heals by itself, and
 a restarted daemon is never ignored by a node that remembers a higher sequence. Mix ac2's
 universe with a lighting desk at the receiver (an Art-Net input merged HTP, or a node's HTP
-merge). A daemon stopping cleanly sends one frame of every cue's `ok` levels.
+merge). A daemon stopping cleanly sends a frame of every cue's `ok` levels three times back
+to back (no keep-alive follows to make good a lost one).
 ArtPoll: while an Art-Net target is set and 6454 is bound, the rig answers an ArtPoll
 (OpCode 0x2000, protocol 14 or later, from any controller; a targeted poll only when its
-range holds the universe; never one from 0.0.0.0, a broadcast or a multicast address) with
+range holds the universe; never one from 0.0.0.0, the limited broadcast, the directed
+broadcast of one of the host's interfaces (listed at bind and every 30 s) or a multicast
+address) with
 one ArtPollReply (OpCode 0x2100, 239 bytes) sent unicast to the poller's
 address on 6454: Style `StController`, ShortName and LongName the rig name (ASCII, `?` for
 anything else), Oem 0x00ff, EstaMan 0, Net/Sub-Net and SwIn from the universe, NumPorts 1
@@ -504,8 +521,9 @@ sACN (ANSI E1.31-2018): the same frame (fades, snaps, HTP, test frames, the repe
 900 ms keep-alive, the clean-stop frame) goes out as E1.31 data packets (638 bytes: root, framing and
 DMP layers, start code 0, 512 slots) from an ephemeral port to port 5568. The CID is derived
 from the rig id, so a restarted daemon is the same source; the source name is the rig name.
-Each universe's sequence number counts up from 0 and wraps. A target removed or changed, and
-a daemon stopping cleanly (after its `ok` frame), end the stream with three packets carrying
+Each universe's sequence number counts up from 0 and wraps. A target removed or moved to
+another universe or destination, and a daemon stopping cleanly (after its `ok` frame), end
+the stream with three packets carrying
 Stream_Terminated (options bit 6). `SacnTarget` = {`dest`: `SacnDest`, `universe`: u16
 1–63999, `priority`: u8 0–200 (100 is E1.31's default)}; out of range fails to decode.
 `SacnDest` is tagged by `type`: `unicast` {`addr`: IPv4 literal, a receiver} or `multicast`
@@ -514,7 +532,8 @@ Stream_Terminated (options bit 6). `SacnTarget` = {`dest`: `SacnDest`, `universe
 stays on the lighting network) and multicast loopback on (a receiver on the rig's host hears
 it). The rig only sends to the group and never joins it, so it emits no IGMP. The interface
 is named by its address, so that address must be static; a send that fails drops the socket
-and the next packet sets up a new one (an interface re-created under the daemon). Not done:
+and the next packet sets up a new one (an interface re-created under the daemon), except a
+send refused for a full send buffer: that frame is lost and the socket kept. Not done:
 no universe discovery packets (a source browser does not list the rig), no synchronisation
 packets (Synchronization Address 0), IPv4 only.
 With `monitor_at_start` on, each `stream.open` that succeeds while rig measurements exist is

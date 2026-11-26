@@ -133,6 +133,11 @@ as `autosave.v49-<time>`, and comes back only by `session salvage` (above); the 
 Leq/SPL logs start again (the old CSV files stay on disk, the 106 daemon does not read them);
 raw captures recorded under 105 are not replayed (keep the WAV).
 
+For the next wire round (PROTO 107, `rig.json` format 13): rolling a host back to 106 makes
+the 106 daemon set the 13 file aside as `rig.json.v13-<time>` and start without the rig
+settings; rolling forward again, stop the daemon and put that file back as `rig.json` before
+the 107 start.
+
 **Every host, before the stop**
 
 1. Nothing armed, firing or recording (sweep, dynamics, walk, recording); generator off.

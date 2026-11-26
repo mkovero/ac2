@@ -4511,8 +4511,17 @@ still go out, but nodes that check the source port drop them, and a console poll
 rig will not find it. Setting the target then says so in the reply (a toast in the app, a
 warning from `ac2 artnet target`), the status line keeps saying it with the system's reason
 (`ac2 rig status`: *Art-Net socket*), and ac2 tries 6454 again every 30 s: quit the other
-program or turn its Art-Net off, and ac2 takes the port within 30 s. When no socket can be
-opened at all, the status line says nothing is sent, and ac2 tries again on the same timer.
+program or turn its Art-Net off, and ac2 takes the port within 30 s (or set the same target
+again to try at once). When no socket can be opened at all, setting the target says so, the
+status line says nothing is sent, and ac2 tries again on the same timer. On Windows a port
+the system reserves fails the same way as one another program holds, so the warning says
+*taken or reserved*.
+
+On macOS the port is ac2's on every address but one case: another program that asks to
+share can still open 6454 on one of the Mac's own addresses. It then gets what is sent to
+that address alone (an ArtPoll a console sends straight to it, DMX addressed to the Mac),
+while ArtPoll sent to the network's broadcast address, which is how consoles poll, still
+reaches ac2. Linux and Windows refuse that program the port.
 
 #### sACN
 
@@ -4535,9 +4544,11 @@ named with the rig's name.
 ac2 sends no sACN universe discovery (a source browser does not list it) and no
 synchronisation packets, and sends over IPv4 only.
 
-Setting the target off, changing it, and a clean daemon stop end the stream at once (three
-packets marked *terminated*), so receivers let go of ac2's levels instead of holding them for
-seconds.
+Setting the target off, changing its receiver or universe, and a clean daemon stop end the
+stream at once (three packets marked *terminated*), so receivers let go of ac2's levels
+instead of holding them for seconds; a new receiver or universe gets the levels as they are,
+a fade or a test frame going on. A new priority alone keeps the stream: receivers see the
+same source, now at the new priority.
 
 ```
 ac2 sacn target 192.168.1.40 1                          # one receiver, universe 1
