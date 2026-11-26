@@ -320,6 +320,10 @@ fn blocks_without_capture_stamps() {
 }
 
 /// Frames delivered per second of wall-clock time while `s` runs for `secs`, after `skip`.
+///
+/// Each reading is the newest block of one drain and the instant the drain ended: a reader
+/// that was descheduled finds a backlog, and stamping its oldest block with the late instant
+/// would read as a burst of speed the device never had.
 fn delivered_rate(s: &mut DuplexStream, skip: Duration, secs: f64) -> f64 {
     let mut buf = Vec::new();
     let start = Instant::now();
@@ -327,12 +331,14 @@ fn delivered_rate(s: &mut DuplexStream, skip: Duration, secs: f64) -> f64 {
         while s.capture().pop_into(&mut buf).is_some() {}
         std::thread::sleep(Duration::from_millis(2));
     }
-    // From the first block seen after `skip` to the last one within `secs`.
     let mut first: Option<(Instant, u64)> = None;
     let mut last = None;
     while start.elapsed() < skip + Duration::from_secs_f64(secs) {
+        let mut newest = None;
         while let Some(h) = s.capture().pop_into(&mut buf) {
-            let end = h.start_sample + u64::from(h.frames);
+            newest = Some(h.start_sample + u64::from(h.frames));
+        }
+        if let Some(end) = newest {
             let now = Instant::now();
             first.get_or_insert((now, end));
             last = Some((now, end));
@@ -346,15 +352,20 @@ fn delivered_rate(s: &mut DuplexStream, skip: Duration, secs: f64) -> f64 {
 
 /// In realtime pacing the device delivers at its own clock's rate: 5 % fast reads 5 % more
 /// frames a wall-clock second, and a step to 5 % slower from a block on slows it.
+///
+/// Each rate is read over two seconds and told apart from the nominal rate by half the
+/// offset: a loaded machine holding the reader or the driver for 50 ms moves a reading by
+/// 2.5 %, and the driver, paced against the stream's start, makes up what it lost.
 #[test]
-fn realtime_pacing_follows_the_device_clock() {
+fn slow_realtime_pacing_follows_the_device_clock() {
     let blocks_per_s = u64::from(RATE / 256);
     let backend = FakeBackend::new(FakeConfig {
         drive: FakeDrive::Thread(Pace::Realtime),
         block_frames: 256,
         audio_clock_ppm: 50_000.0,
+        // Three seconds of the device's time: 2.86 s of wall-clock time at 5 % fast.
         faults: vec![FakeFault::ClockStep {
-            at_block: blocks_per_s,
+            at_block: 3 * blocks_per_s,
             ppb: -100_000_000,
         }],
         ..FakeConfig::default()
@@ -364,9 +375,9 @@ fn realtime_pacing_follows_the_device_clock() {
     let mut s = backend
         .open(DuplexRequest::new(vec![0], 2, level))
         .expect("open");
-    let fast = delivered_rate(&mut s, Duration::from_millis(200), 0.6) / f64::from(RATE);
-    let slow = delivered_rate(&mut s, Duration::from_millis(300), 0.8) / f64::from(RATE);
+    let fast = delivered_rate(&mut s, Duration::from_millis(200), 2.0) / f64::from(RATE);
+    let slow = delivered_rate(&mut s, Duration::from_millis(1000), 2.0) / f64::from(RATE);
     println!("delivered at {fast:.4} then {slow:.4} of the nominal rate");
-    assert!((fast - 1.05).abs() < 0.02, "fast: {fast:.4}");
-    assert!((slow - 0.95).abs() < 0.02, "slow: {slow:.4}");
+    assert!((fast - 1.05).abs() < 0.025, "fast: {fast:.4}");
+    assert!((slow - 0.95).abs() < 0.025, "slow: {slow:.4}");
 }
