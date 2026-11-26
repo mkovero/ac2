@@ -11,6 +11,7 @@ use crate::rng::Rng;
 
 use super::analog::{Reverb, SINC_HALF, SINC_PHASES, shape, sinc_table};
 use super::config::{FakeConfig, FakeFault, InputContent, OutputFault, output_faults, signature};
+use super::noise::TrueTimeNoise;
 
 /// Counters of the simulated device.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -74,6 +75,12 @@ impl FakeDriver {
     pub fn stats(&self) -> FakeStats {
         self.sim.stats
     }
+
+    /// True time the frames simulated so far took on the device's clock: when a real
+    /// device would have captured them.
+    pub(super) fn true_elapsed(&self) -> std::time::Duration {
+        std::time::Duration::from_nanos(self.sim.cfg.true_ns(self.sim.stats.device_frames))
+    }
 }
 
 struct PathRt {
@@ -114,10 +121,22 @@ pub(super) struct Sim {
     drift_ratio: Option<f64>,
     sinc: Box<[f32]>,
     stats: FakeStats,
+    /// [`InputContent::TrueTimeNoise`]'s signal and where the current block reads it.
+    noise: Option<NoiseRead>,
     /// Device frames simulated so far, for the stream's stamp clock.
     now_frames: Arc<AtomicU64>,
     /// The system time at frame 0, ns since the Unix epoch.
     system_origin_ns: u64,
+}
+
+/// The shared signal and the current block's place on its grid: the block's first frame at
+/// `index + offset`, each frame `step` grid samples on (the device's clock against true time).
+struct NoiseRead {
+    signal: TrueTimeNoise,
+    delay_ns: i64,
+    index: u64,
+    offset: f64,
+    step: f64,
 }
 
 impl std::fmt::Debug for Sim {
@@ -216,6 +235,16 @@ impl Sim {
                 Box::new([])
             },
             stats: FakeStats::default(),
+            noise: match cfg.input_content {
+                InputContent::TrueTimeNoise { delay_ns } => Some(NoiseRead {
+                    signal: TrueTimeNoise::new(cfg.sample_rate),
+                    delay_ns,
+                    index: 0,
+                    offset: 0.0,
+                    step: 1.0,
+                }),
+                InputContent::Silence | InputContent::Signature => None,
+            },
             now_frames: Arc::new(AtomicU64::new(0)),
             system_origin_ns: system_now_ns(),
             cfg,
@@ -270,6 +299,7 @@ impl Sim {
         for f in 0..frames as usize {
             self.dac_push(start + f as u64, Some(f));
         }
+        self.place_noise(block_no, start);
         self.capture(start, frames as usize, true);
 
         let (map, inputs, buf) = (&self.input_map, self.device_inputs, &self.in_buf);
@@ -279,7 +309,7 @@ impl Sim {
                 frames,
                 flags,
                 callback_ns,
-                capture_ns: Some(capture_ns),
+                capture_ns: self.cfg.stamps_block(block_no).then_some(capture_ns),
             },
             // A spare input (past the device's channels) has nothing routed into it.
             |f, c| {
@@ -296,6 +326,25 @@ impl Sim {
         self.now_frames
             .store(self.stats.device_frames, Ordering::Release);
         self.load.finish(started, frames);
+    }
+
+    /// Places block `block_no`, first frame `start`, on the shared signal's grid: its
+    /// first frame's true time (the system clock's origin plus the device's clock
+    /// integrated, before the system clock's stated offset), less the delay.
+    fn place_noise(&mut self, block_no: u64, start: u64) {
+        let Some(n) = self.noise.as_mut() else {
+            return;
+        };
+        let t = self.cfg.true_time_ns(start);
+        let whole = t.floor();
+        let ns = self
+            .system_origin_ns
+            .saturating_add(whole as u64)
+            .saturating_add_signed(n.delay_ns.saturating_neg());
+        (n.index, n.offset) = n.signal.grid(ns, t - whole);
+        // The grid runs at the nominal rate; a device fast by ε takes 1/(1 + ε) of a grid
+        // sample per frame.
+        n.step = 1.0 / (1.0 + self.cfg.clock_ppm(block_no) * 1e-6);
     }
 
     /// The stream's stamp clock: the host crystal and the disciplined clock at the newest
@@ -402,9 +451,15 @@ impl Sim {
         let inputs = self.device_inputs;
         for f in 0..frames {
             let n = start + f as u64;
+            // The shared signal is one value per frame on every input; frames a callback
+            // never sees are not computed.
+            let shared = match self.noise.as_mut() {
+                Some(r) if keep => r.signal.at_grid(r.index, r.offset + f as f64 * r.step),
+                _ => 0.0,
+            };
             for i in 0..inputs {
                 let base = match self.cfg.input_content {
-                    InputContent::Silence => 0.0,
+                    InputContent::Silence | InputContent::TrueTimeNoise { .. } => shared,
                     InputContent::Signature => signature(i as u16, n),
                 };
                 let noise = if self.cfg.input_noise_rms > 0.0 {

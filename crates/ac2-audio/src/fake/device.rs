@@ -376,7 +376,6 @@ fn spawn_driver(
     let stop = Arc::new(AtomicBool::new(false));
     let stop_t = Arc::clone(&stop);
     let limit = c.stop_after_blocks;
-    let block = Duration::from_nanos(c.ns(u64::from(c.block_frames)));
     let (sleeper, _) = crate::timer::sleeper()?;
     // Read before the thread starts: an outage begun after the open hits this stream.
     let born = outage.begun.load(Ordering::Acquire);
@@ -385,7 +384,6 @@ fn spawn_driver(
         .name("ac2-fake-audio".into())
         .spawn(move || {
             let t0 = Instant::now();
-            let mut due = Duration::ZERO;
             let mut ended = false;
             while !stop_t.load(Ordering::Acquire) {
                 if panel.resets.load(Ordering::Acquire) != born_resets {
@@ -416,7 +414,10 @@ fn spawn_driver(
                 }
                 driver.step();
                 if pace == Pace::Realtime {
-                    due += block;
+                    // Paced by the device's own clock, as its stamps are: paced at the
+                    // nominal rate, a fast device's capture would fall behind its delivery
+                    // (8.4 ms in 20 min at +7 ppm), late frames no real device makes.
+                    let due = driver.true_elapsed();
                     // A coalesced sleep would deliver the audio in lumps a real device
                     // never produces.
                     while Instant::now() < t0 + due {

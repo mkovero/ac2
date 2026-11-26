@@ -41,7 +41,10 @@ pub enum FakeDrive {
 /// Speed of a [`FakeDrive::Thread`] device.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pace {
-    /// One block per block duration of wall-clock time.
+    /// Each block delivered when its last frame has been captured in wall-clock time, the
+    /// device's own clock ([`FakeConfig::audio_clock_ppm`] and every
+    /// [`FakeFault::ClockStep`]) against the wall clock: a device +7 ppm fast delivers 7 ppm
+    /// more samples a second, as its stamps say.
     Realtime,
     /// As fast as possible (stresses the transport; the consumer will overflow).
     Unpaced,
@@ -55,6 +58,14 @@ pub enum InputContent {
     /// [`signature`] values, unique per (device channel, sample index), for routing tests.
     /// Not audio-like.
     Signature,
+    /// One continuous signal of true time, the same on every input of every fake device in
+    /// every process ([`TrueTimeNoise`](super::TrueTimeNoise)), sampled at each sample's
+    /// true capture time `delay_ns` late: two devices on different clocks sample the same
+    /// signal, as two interfaces hearing one source do.
+    TrueTimeNoise {
+        /// The device hears the signal this much late, ns (an integer: the config is `Eq`).
+        delay_ns: i64,
+    },
 }
 
 /// Deterministic per-channel content of [`InputContent::Signature`].
@@ -183,6 +194,23 @@ pub enum FakeFault {
         /// Callback number (0-based).
         at_block: u64,
     },
+    /// From the first frame of block `at_block` the device's clock runs `ppb` faster (an
+    /// interface relocking or falling back to its crystal): its samples, its stamps and, in
+    /// [`Pace::Realtime`], its pacing follow. Steps add up.
+    ClockStep {
+        /// Callback number (0-based).
+        at_block: u64,
+        /// The change of rate, parts per billion (an integer: the config is `Eq`).
+        ppb: i64,
+    },
+    /// Blocks `at_block .. at_block + blocks` carry no capture stamp, as from a backend
+    /// whose stamp source stopped.
+    NoCaptureStamps {
+        /// Callback number (0-based) of the first block without a stamp.
+        at_block: u64,
+        /// Blocks without a stamp.
+        blocks: u64,
+    },
 }
 
 /// Fake device settings.
@@ -209,9 +237,9 @@ pub struct FakeConfig {
     /// DAC clock error relative to the ADC, ppm; positive = DAC fast.
     pub drift_ppm: f64,
     /// Device clock error against true time (what the host's disciplined clock keeps),
-    /// ppm; positive = the device fast. Only host stamps see it (a frame takes
-    /// `1e9 / (rate · (1 + ppm·1e-6))` ns of true time); the device is paced at its
-    /// nominal rate.
+    /// ppm; positive = the device fast: a frame takes `1e9 / (rate · (1 + ppm·1e-6))` ns of
+    /// true time. Host stamps, [`InputContent::TrueTimeNoise`] and [`Pace::Realtime`]
+    /// follow it; [`FakeFault::ClockStep`] changes it from a block on.
     pub audio_clock_ppm: f64,
     /// Error of the clock the host stamps blocks on (its undisciplined crystal) against true
     /// time, ppm; positive = the crystal fast. Block and output-tick stamps are on it; the
@@ -343,7 +371,15 @@ impl FakeConfig {
         if !(self.drift_ppm.is_finite() && self.drift_ppm.abs() < 1e5) {
             return Err(FakeConfigError::BadNumber("drift_ppm"));
         }
-        if !(self.audio_clock_ppm.is_finite() && self.audio_clock_ppm.abs() < 1e5) {
+        let stepped = self.faults.iter().try_fold(0i64, |sum, f| match *f {
+            FakeFault::ClockStep { ppb, .. } => sum.checked_add(ppb),
+            _ => Some(sum),
+        });
+        let worst = stepped.map(|ppb| self.audio_clock_ppm + ppb as f64 * 1e-3);
+        if !(self.audio_clock_ppm.is_finite()
+            && self.audio_clock_ppm.abs() < 1e5
+            && worst.is_some_and(|w| w.abs() < 1e5))
+        {
             return Err(FakeConfigError::BadNumber("audio_clock_ppm"));
         }
         if !(self.host_crystal_ppm.is_finite() && self.host_crystal_ppm.abs() < 1e5) {
@@ -412,13 +448,91 @@ impl FakeConfig {
     }
 
     /// True time `frames` after the stream's start: the device runs
-    /// [`Self::audio_clock_ppm`] fast against it.
+    /// [`Self::audio_clock_ppm`] fast against it, and from each [`FakeFault::ClockStep`]'s
+    /// block on faster by its step.
     pub(super) fn true_ns(&self, frames: u64) -> u64 {
-        if self.audio_clock_ppm == 0.0 {
+        if self.audio_clock_ppm == 0.0 && !self.has_clock_steps() {
             return self.ns(frames);
         }
-        let rate = f64::from(self.sample_rate) * (1.0 + self.audio_clock_ppm * 1e-6);
-        (frames as f64 / rate * 1e9) as u64
+        self.true_time_ns(frames) as u64
+    }
+
+    fn has_clock_steps(&self) -> bool {
+        self.faults
+            .iter()
+            .any(|f| matches!(f, FakeFault::ClockStep { .. }))
+    }
+
+    /// [`Self::true_ns`] unrounded: the device's clock integrated over its segments, each
+    /// at the rate in force from its first frame. A pure function of the config, so the
+    /// stamp clock and the pacing read the clock the samples were made on.
+    pub(super) fn true_time_ns(&self, frames: u64) -> f64 {
+        let fs = f64::from(self.sample_rate);
+        let ns = |n: u64, ppm: f64| n as f64 / (fs * (1.0 + ppm * 1e-6)) * 1e9;
+        let mut ppm = self.audio_clock_ppm;
+        let (mut from, mut t) = (0u64, 0.0);
+        let mut done: Option<u64> = None;
+        // Steps in block order; a handful at most, so a scan per step allocates nothing.
+        while let Some(block) = self
+            .clock_step_blocks()
+            .filter(|&b| done.is_none_or(|d| b > d))
+            .min()
+        {
+            let at = self.block_frame(block);
+            if at >= frames {
+                break;
+            }
+            t += ns(at - from, ppm);
+            ppm = self.clock_ppm(block);
+            from = at;
+            done = Some(block);
+        }
+        t + ns(frames - from, ppm)
+    }
+
+    fn clock_step_blocks(&self) -> impl Iterator<Item = u64> + '_ {
+        self.faults.iter().filter_map(|f| match *f {
+            FakeFault::ClockStep { at_block, .. } => Some(at_block),
+            _ => None,
+        })
+    }
+
+    /// The device's clock error in block `block`, ppm.
+    pub(super) fn clock_ppm(&self, block: u64) -> f64 {
+        let ppb: i64 = self
+            .faults
+            .iter()
+            .map(|f| match *f {
+                FakeFault::ClockStep { at_block, ppb } if at_block <= block => ppb,
+                _ => 0,
+            })
+            .sum();
+        self.audio_clock_ppm + ppb as f64 * 1e-3
+    }
+
+    /// The first frame of block `block`: the blocks before it and the frames every
+    /// [`FakeFault::Xrun`] up to it lost.
+    pub(super) fn block_frame(&self, block: u64) -> u64 {
+        let lost: u64 = self
+            .faults
+            .iter()
+            .map(|f| match *f {
+                FakeFault::Xrun {
+                    at_block,
+                    lost_frames,
+                } if at_block <= block => u64::from(lost_frames),
+                _ => 0,
+            })
+            .sum();
+        block * u64::from(self.block_frames) + lost
+    }
+
+    /// Whether block `block` carries a capture stamp.
+    pub(super) fn stamps_block(&self, block: u64) -> bool {
+        !self.faults.iter().any(|f| {
+            matches!(*f, FakeFault::NoCaptureStamps { at_block, blocks }
+                if (at_block..at_block.saturating_add(blocks)).contains(&block))
+        })
     }
 
     /// Host stamp-clock time `frames` after the stream's start: true time on a crystal

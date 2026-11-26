@@ -3,4 +3,5 @@
 //! `cargo nextest run -p ac2-audio -E 'test(/^fake::/)'` or `cargo test -p ac2-audio --test it fake::`.
 
 mod fake;
+mod fake_clock;
 mod jack;

@@ -6,7 +6,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use ac2_audio::fake::{FakeFault, FakePath};
+use ac2_audio::fake::{FakeFault, FakePath, InputContent};
 use ac2_audio::generator::{Sine, WhiteNoise};
 use ac2_audio::{
     DuplexRequest, FakeBackend, FakeConfig, Gain, HistoryRequest, MaxLevel, OutputSource, generator,
@@ -129,5 +129,36 @@ fn simulated_callbacks_do_not_allocate() {
     assert!(
         stream.output_stats().limited_samples > 0,
         "limiter exercised"
+    );
+}
+
+#[test]
+fn the_shared_signal_and_clock_steps_do_not_allocate() {
+    let backend = FakeBackend::new(FakeConfig {
+        input_content: InputContent::TrueTimeNoise { delay_ns: 250_000 },
+        audio_clock_ppm: 7.0,
+        faults: vec![
+            FakeFault::Xrun {
+                at_block: 4,
+                lost_frames: 300,
+            },
+            FakeFault::ClockStep {
+                at_block: 8,
+                ppb: 5_600,
+            },
+            FakeFault::NoCaptureStamps {
+                at_block: 10,
+                blocks: 3,
+            },
+        ],
+        ..FakeConfig::default()
+    })
+    .expect("config");
+    let req = DuplexRequest::new(vec![0, 1], 2, MaxLevel::from_peak_db(-12.0).expect("level"));
+    let (_stream, mut driver) = backend.open_manual(req).expect("open");
+    assert_eq!(
+        count(|| driver.run_blocks(20)),
+        0,
+        "noise, steps, no stamps"
     );
 }

@@ -42,6 +42,7 @@ pub const FAKE_SPARE_INPUTS: u16 = 8;
 mod analog;
 mod config;
 mod device;
+mod noise;
 mod outage;
 mod sim;
 #[cfg(test)]
@@ -52,5 +53,6 @@ pub use config::{
     InputContent, Pace, StartStampError, signature,
 };
 pub use device::FakeBackend;
+pub use noise::TrueTimeNoise;
 pub use outage::OutageKind;
 pub use sim::{FakeDriver, FakeStats};
