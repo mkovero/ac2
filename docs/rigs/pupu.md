@@ -140,11 +140,13 @@ raw captures recorded under 105 are not replayed (keep the WAV).
    `ac2 spl leq export --meas <name> -o <file>` for every SPL meter's history. A meter's
    history is written on its own host with that host's CLI, then copied off.
 3. Note the binaries' revision to roll back to (`bin.prev-<rev>` below).
-4. Check the daemon unit's runtime directory: 106 serves the local pair on ipc sockets in
-   `$AC2_RUNTIME_DIR`, else `$XDG_RUNTIME_DIR/ac2`, else `<temp>/ac2-<user>`. It must be the
-   daemon user's own, mode 700, and short (a socket path over 107 bytes is refused). A CLI or
-   kiosk on the same host finds the daemon only with the same setting (a system unit without
-   `XDG_RUNTIME_DIR` and a login shell with it look in different places).
+4. The runtime directory: 106 serves the local pair on ipc sockets in `$AC2_RUNTIME_DIR`,
+   else `$XDG_RUNTIME_DIR/ac2`, else `<temp>/ac2-<user>`. It must be the daemon user's own,
+   mode 700, and short (a socket path over 107 bytes is refused). No host sets
+   `AC2_RUNTIME_DIR`: every daemon takes the user manager's `XDG_RUNTIME_DIR`
+   (`/run/user/<uid>`), and a CLI on the same host finds it only with the same value (hence
+   the `XDG_RUNTIME_DIR=` in every `sudo -u ac2` command on the meters).
+5. Note pupu's max level line (`ac2 status`: −20.0, bound −20.0): it must read the same after.
 
 **pupu (rig daemon with network clients)**
 
@@ -163,33 +165,48 @@ raw captures recorded under 105 are not replayed (keep the WAV).
 
 **ketunkolo (app host with its own ac2d)**
 
-1. Stop the app (`pkill -x ac2-ui`) and its own ac2d (an ac2d the app started stops with it;
-   one run by a unit is stopped and disabled as on pupu). Check none is left
-   (`pgrep -x ac2d`).
+Its own ac2d is a plain process of mui started by hand (no unit, no path flags, default
+directories), so nothing restarts it in the window.
+
+1. Stop the app (`pkill -x ac2-ui`) and the daemon (`pkill -TERM -x ac2d`; SIGTERM lets it
+   write its autosave). Check none is left (`pgrep -x ac2d`).
 2. Ship the binaries as on pupu.
 3. Convert as on pupu, as mui, on ketunkolo's own files (it holds its own `rig.json`,
    calibration store and authorized clients, and the client keys in `~/.config/ac2/keys`,
    which do not change).
-4. `cp -f bin.new-<rev>/* bin/`, start the app as usual (`start-ui.sh`). Verify against both
-   daemons (its own, and `--remote 192.168.9.27`).
+4. `cp -f bin.new-<rev>/* bin/`, start the daemon (`cd ~/ac2-test && setsid bin/ac2d >>
+   ac2d-local.log 2>&1 &`) and the app (`start-ui.sh`). Verify against both daemons (its own,
+   and `--remote 192.168.9.27`).
 
 **Standalone meters (the CM4 at 192.168.9.33, the netbooted Pi 4)**
 
 Unattended, with nightly power cuts: a start in the window must find either the old binary on
 old files or the new binary on new files, never a mix. So the files are converted and synced
-before the new binary is in place, and the unit stays disabled between the two.
+before the new binary is in place, and the units stay disabled between the two.
 
-1. Export the meter's Leq history on the meter with its own CLI (*every host*, step 2).
-2. Make the root writable the way that host's setup does (the CM4: card root rw; the Pi 4:
-   its nfsroot from the server). Steps per image are in the sys repo (`ac2pi/`).
-3. Stop and disable the daemon unit and the kiosk unit.
-4. Convert as the daemon's user. Where the image has no `python3`, copy the four files off
-   (keeping each file's owner and mode: `cp -p`, or `scp -p` / `tar` as root), convert them on
-   a host that has it, copy them back the same way, and check owner and mode
-   (`ls -l`): the daemon must be able to rewrite them.
-   Keep the `.pre106` copies beside them on the meter.
-5. `sync`. Only then install the 106 binaries, `sync` again, enable and start the units,
-   and set the root read-only again.
+Both run the same image: the daemon is the user unit `ac2d.service` of user `ac2` (lingering;
+`/usr/local/bin/ac2d --listen tcp://0.0.0.0`, no path flags, so the default files under
+`/home/ac2`), the kiosk is the system unit `ac2-kiosk.service`. Log in as mui; the `ac2`
+user's units are reached with
+`sudo -u ac2 XDG_RUNTIME_DIR=/run/user/$(id -u ac2) systemctl --user …` (written `uctl …`
+below). On the CM4 the root is read-only and `/home/ac2`'s config and data are bind mounts
+from `/data`, writable all the time: the conversion needs no rw root, only the binaries do.
+The Pi 4's root is NFS, always writable; `ac2pi-rw` and `ac2pi-ro` do nothing there.
+
+1. Export the meter's Leq history on the meter with its own CLI (*every host*, step 2), as
+   `ac2` (`sudo -u ac2 XDG_RUNTIME_DIR=… ac2 spl leq export …`), and copy it off.
+2. `sudo systemctl disable --now ac2-kiosk`, then `uctl disable --now ac2d`.
+3. `python3 -V` (the converter needs only the standard library). Copy `convert.py` to the
+   meter and run it as the daemon's user:
+   `sudo -u ac2 python3 convert.py --rig /home/ac2/.config/ac2/rig.json --cal /home/ac2/.config/ac2/calibrations.json --auth /home/ac2/.config/ac2/authorized_clients`
+   (`--plans /home/ac2/.local/share/ac2/plans` when that directory exists). Check
+   `sudo ls -l /home/ac2/.config/ac2/`: every converted file owned by `ac2`, mode as before,
+   its `.pre106` beside it.
+4. `sync`. Only then the binaries: `sudo ac2pi-rw`, keep the old ones
+   (`/usr/local/bin/ac2d` → `ac2d.prev-<rev>`, likewise `ac2` and `ac2-ui`), install the 106
+   ones and the revision file (`/usr/local/share/ac2-revision`), `sync`.
+5. `uctl enable --now ac2d`, `sudo systemctl enable --now ac2-kiosk`, verify (below), then
+   `sudo ac2pi-ro`: the CM4 ends read-only.
 6. From pupu: `ac2 --remote <meter> status` shows the meter running and no damaged file.
    After the next power cut, check again from pupu: the meter came back by itself, metering,
    with its calibration.
