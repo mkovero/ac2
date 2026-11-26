@@ -14,7 +14,7 @@ LOCKED +7.3 ppm*, and nothing the operator can do on site changes that. With thi
 1. The operator adds the CM4's mic to pupu's session and makes the transfer function, as today.
    Nothing else: no setting, no calibration step, nothing played beyond the measurement's own
    pink noise (operator, 2026-11-25).
-2. About 25 s after the stream starts the CM4's heading in the measurement list reads
+2. About 27 s after the stream starts the CM4's heading in the measurement list reads
    *TRACKED +7.3 ppm* and the transfer function averages. pupu resamples the mic's stream onto
    its own sample clock, steered by the capture stamps both rigs already send; the CM4 is
    unchanged.
@@ -80,7 +80,8 @@ own stamps (two linear stages remove the same bands as one); a nominal-slope lin
 white part), `acquire_min_s` 0.9 s (two stamps a second apart span 1 s ± one B period: at the
 default 1.0 half the time a third would be waited for); the rest default. `Servo::new` checks
 them. Acquisition: rate sd under 1 ppm (σ√(2(1 − e^(−T/100 s)))/T at σ = 33 µs, with the white
-part) after about **21 s**, not 11.3 s (to be measured in stage 1).
+part) after **23 s** at one stamp a second, not 11.3 s (measured in simulation,
+`servo_cross_rig.rs`; the sd read 0.88 / 0.38 / 0.16 ppm at 28 / 100 / 280 s).
 
 **B's capture on system time in the header.** B publishes its stamp map only every 5 s
 (`CLOCK_EVERY_S`), so mapping through it steps periodically, which the servo would read as
@@ -165,7 +166,7 @@ acquired rate in ppb, an integer so the marks keep `Eq`), carried from the hand-
 **every** block of a tracked column with the engaging rate first (engagement implies acquired),
 then held while the servo re-acquires; the recorder turns it into `RemoteTiming` (§8).
 Resampled output starts with the next block.
-The k-placed feed has slid since its anchor by the rate times that time: 0.18 ms at 25 s for
+The k-placed feed has slid since its anchor by the rate times that time: 0.2 ms at 27 s for
 +7.3 ppm, 0.2 ms at 82 s for +2.5 ppm. The transfer function was stopped by the relation
 until then, so its delay returns by `remote-inputs.md` §3.4's relock
 (`tracking_relocks_after_a_far_jump` covers a move of this size).
@@ -197,7 +198,7 @@ is a gap.
 - **A break on A** (a local block whose flags break continuity): A's index may have stepped,
   which steps every placed capture. Every servo `reset_phase`s; the resamplers keep their input.
 - **A new incarnation** (B's session restarted) or a re-anchor: a new stream, untracked;
-  tracking starts again by §4.1. Cost: another ~21 s of acquisition after a source restart.
+  tracking starts again by §4.1. Cost: another 23 s of acquisition after a source restart.
 - **A system clock unsynced** (`system_synced` false, or no `capture_system_ns`): no stamps
   fed (an unsynced clock may step), blocks handed out on the held rate (`Mode::Coasting` after
   3 s); on return the servo `reset_phase`s.
@@ -241,10 +242,10 @@ later stays TRACKED near 0 ppm): the servo is acquired and
 σ√(2(1 − e^(−T/100 s)))/T (σ = 33 µs): 0.83 ppm at 28 s of stamps, 0.37 at 100 s, 0.17 (3 sd
 = 0.5 ppm) only at 280 s. Times (to be measured in stage 1):
 - **USB mic**, B's own line already `Measured` (B up over a minute): `OwnClock` at the first
-  report (≤ 1 s), first full second ≤ 2 s later, acquisition ≈ 21 s, ticks ≤ 2 s: **24–26 s**.
+  report (≤ 1 s), first full second ≤ 2 s later, acquisition 23 s, ticks ≤ 2 s: **26–28 s**.
   A B just started has no own line yet and waits for the windows like the next rows.
 - **Own lines within ±2 ppm, cross rate 3.5 ppm and more**: the 40 s window (36 s,
-  `READY_SHARE` 0.9) then acquisition: **≈ 58 s**.
+  `READY_SHARE` 0.9) then acquisition: **≈ 60 s**.
 - **Cross rate 2.5 ppm**: the 60 s window (54 s), then 28 s of stamps: **≈ 82 s**; nearer
   2 ppm, longer by the curve.
 - **Two interfaces on one word clock** more than 2 ppm off both hosts: `OwnClock`, tracking
@@ -277,16 +278,17 @@ B fast.
   reset: 40 s for the short window, 60 s for the long. Restarting the windows instead would
   also blank the relation's evidence. *Cost* (§9): for 40 s after a re-acquire (60 s for steps
   of 2–3 ppm) nothing catches a second step, while the transfer function already runs on a
-  servo acquired after 21 s, perhaps while an interface's PLL still settles.
+  servo acquired after 23 s, perhaps while an interface's PLL still settles.
 - **Detection time.** A step of Δ in a window moves its least-squares slope by Δ·u²(3 − 2u),
   u the share of the window since the step: the 40 s window crosses 3 ppm 21 s after a 5.6 ppm
   step, 18 s after 7.3 ppm; a 2.5 ppm step crosses the 60 s window's 2 ppm after 43 s (the
-  servo following in part adds a little; to be simulated). Then ≈ 21 s of acquisition.
+  servo following in part adds a little; to be simulated). Then 23 s of acquisition. Simulated: an acquired servo follows a
+  5.6 ppm step by 6 % in 20 s and 63 % only after 453 s, the phase error peaking at 0.49 ms.
 - **False re-acquires.** Servo rate sd 0.03–0.045 ppm; windows 0.34–0.40 ppm per 60 s
   measured (`peer_clock.rs`), about 0.62–0.73 ppm per 40 s (scaled as T^−1.5, to be
   simulated): bounds at 5–5.9 and 4.1–4.8 sd, about one false re-acquire in a hundred hours at
   the worst figure (Gaussian; steady servo; 40–60 s after a (re)start its sd is 0.5–0.67 ppm,
-  a case to simulate), each 21 s of *measuring clocks…* and a stop. The 20 min fake test
+  a case to simulate), each 23 s of *measuring clocks…* and a stop. The 20 min fake test
   and the rig hour assert **0 re-acquired** (§10).
 - A step smaller than the bounds is not caught: it reaches the phase as the filter follows it
   (under TRACKED the delay track and its drift cue show it, `remote-inputs.md` §3.2; under
@@ -326,7 +328,7 @@ acquired, not engaged, 3·`rate_sd_ppm` > 0.5 ppm, |rate| < 1000 ppm):
   `capture_system_ns`, A (this rig) when A's stamp line is missing (`ServoReport.stamps_from`);
   an unsynced system clock is its own Can't tell, held, as today.
 - **Coasting** keeps Tracked up to 60 s (design value: 60 s moved the phase 0.5–5 µs
-  simulated, 10 µs on real stamps). A rate re-acquire (`Full`) reads Measuring ≈ 21 s; a phase
+  simulated, 10 µs on real stamps). A rate re-acquire (`Full`) reads Measuring 23 s; a phase
   re-acquire (2–3 s) stays Tracked.
 
 ### 4.4 The gate
@@ -627,18 +629,22 @@ pub enum RemotePlacement {
     `audio_clock_ppm` plus each `ClockStep` in the fault list from its block on, so it stays a
     pure function of the config, shared by the stamp clock;
   - a **shared signal of true time**, `InputContent::TrueTimeNoise { delay_ns: i64 }`
-    (integer, as `InputContent` derives `Eq`): white noise band-limited to 0.45 × rate, defined
-    on a grid at 2 × rate by a counter hash of a fixed seed and the grid index, and evaluated
-    at each sample's true time (`system_origin_ns` + its `true_ns` − a process-wide epoch, the
-    first fake's, in a `OnceLock` − `delay_ns`) through a 64-tap Kaiser-windowed sinc (β 8.6,
-    cutoff 0.45 × rate) from a 1024-phase table, adjacent phases interpolated linearly (128
-    multiply-adds a sample), grid values cached in a ring. Band-limited, so it can be evaluated
-    at any instant (raw noise could not), dense in frequency where 200 log-spaced tones would
-    leave the finder's bins unexcited (`min_excited_fraction`), and cheap where a multitone
-    would not hold real time at `ac2-audio`'s dev opt-level. A test in `ac2d/tests/it` runs it
-    through `DelayStream` first and asserts `Accepted` with `excited_fraction` ≥ 0.8, which
-    stage 2's tests need too. Two in-process daemons' fakes share it, and a +7 ppm device
-    drifts against a 0 ppm one analytically;
+    (integer, as `InputContent` derives `Eq`; generator `ac2_audio::fake::TrueTimeNoise`):
+    white noise defined on a grid at the nominal rate by a counter hash of a fixed seed and the
+    grid index, and evaluated at each sample's true time through a 64-tap Kaiser-windowed sinc
+    (β 8.6, cutoff 0.435 × rate) from a 1024-phase table, adjacent phases interpolated linearly
+    (128 multiply-adds a sample), grid values cached in a ring. Measured: flat within ±1.3 dB
+    to 0.39 × rate, −1.6 dB at 0.42, below −87 dB from 0.48; 1 µs a frame in a dev build. A
+    grid at 2 × rate would leave 64 taps only 32 samples of span, −16 dB at 0.48 × rate. True
+    time is absolute (`system_origin_ns` + `true_ns`, the grid index formed in u128, only the
+    fraction in f64), with no per-process epoch: two daemons in two processes sample the same
+    signal. Band-limited, so it can be evaluated at any instant (raw noise could not), dense
+    in frequency where 200 log-spaced tones would leave the finder's bins unexcited
+    (`min_excited_fraction`), and cheap where a multitone would not hold real time at
+    `ac2-audio`'s dev opt-level. `ac2d/tests/it/true_time_finder.rs` runs it through
+    `DelayStream`: every window `Accepted`, `excited_fraction` ≥ 0.999, the delay within 0.001
+    sample, which stage 2's tests need too. A +7 ppm device drifts against a 0 ppm one
+    analytically (measured 8.004–8.006 samples over 24 s for 8.005);
   - `FakeFault::NoCaptureStamps { at_block, blocks }` and `FakeFault::ClockStep { at_block,
     ppb: i64 }` (integer: `FakeFault` derives `Eq`); `at_block` is the first frame of that
     callback, frames an `Xrun` lost counted. Stamp wander waits for stage 2.
@@ -661,7 +667,7 @@ pub enum RemotePlacement {
     and no stop, resampled output again within 4 s; a break on A:
     every servo `reset_phase`s;
   - `ClockStep` +5.6 ppm under tracking: re-acquired once, *measuring clocks…*, Tracked again
-    within 50 s (21 s detection + 21 s acquisition + ticks), the held result from before the
+    within 52 s (21 s detection + 23 s acquisition + ticks), the held result from before the
     step (the stop reaching back to the tripped window's start);
   - a pair that agreed, then `ClockStep` +5.6 ppm: stopped and held as today, then tracking
     started and TRACKED;
