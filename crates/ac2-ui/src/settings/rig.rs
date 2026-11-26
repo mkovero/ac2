@@ -1,7 +1,8 @@
 //! The Rig monitor page: where the rig's OSC cues go (typed `ip:port`, empty: off), whether
 //! the daemon starts metering on its own at start, a one-off test message, where the rig's
-//! Art-Net universe goes (an address and a universe, applied together), how long its
-//! channels fade to a new cue state and a test frame,
+//! Art-Net universe goes (an address and a universe, applied together), where it goes as
+//! sACN (a receiver or multicast via an interface, a universe and a priority, applied
+//! together), how long its channels fade to a new cue state and a test frame (both outputs),
 //! how sending fares, the meters the rig keeps, and how its programme meters read (the
 //! ballistic, the loudness target, the correlator's window, the over threshold, the
 //! correlation gate: stepped with
@@ -12,9 +13,9 @@ use crate::caret::Caret;
 use ac2_proto::Command;
 use ac2_proto::model::{LevelsSettings, Rig};
 use ac2_proto::units::Rev;
-use ac2_scene::artnet;
 use ac2_scene::osc::{DEFAULT_TEST, parse_message, parse_target, target_text};
 use ac2_scene::programme::rig as levels;
+use ac2_scene::{artnet, sacn};
 
 /// A row of the page, top to bottom.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +25,9 @@ pub enum RigRow {
     Test,
     ArtnetTarget,
     Universe,
+    SacnTarget,
+    SacnUniverse,
+    SacnPriority,
     Fade,
     DmxTest,
     Ballistic,
@@ -34,12 +38,15 @@ pub enum RigRow {
 }
 
 impl RigRow {
-    pub const ALL: [RigRow; 12] = [
+    pub const ALL: [RigRow; 15] = [
         RigRow::Target,
         RigRow::Monitor,
         RigRow::Test,
         RigRow::ArtnetTarget,
         RigRow::Universe,
+        RigRow::SacnTarget,
+        RigRow::SacnUniverse,
+        RigRow::SacnPriority,
         RigRow::Fade,
         RigRow::DmxTest,
         RigRow::Ballistic,
@@ -56,6 +63,9 @@ impl RigRow {
             RigRow::Test => ac2_scene::osc::TEST_TITLE,
             RigRow::ArtnetTarget => artnet::TARGET_TITLE,
             RigRow::Universe => artnet::UNIVERSE_TITLE,
+            RigRow::SacnTarget => sacn::TARGET_TITLE,
+            RigRow::SacnUniverse => sacn::UNIVERSE_TITLE,
+            RigRow::SacnPriority => sacn::PRIORITY_TITLE,
             RigRow::Fade => artnet::FADE_TITLE,
             RigRow::DmxTest => artnet::TEST_TITLE,
             RigRow::Ballistic => levels::BALLISTIC_TITLE,
@@ -98,6 +108,14 @@ impl RigRow {
     fn is_artnet(self) -> bool {
         matches!(self, RigRow::ArtnetTarget | RigRow::Universe)
     }
+
+    /// The sACN target's rows: Enter on any applies all three.
+    fn is_sacn(self) -> bool {
+        matches!(
+            self,
+            RigRow::SacnTarget | RigRow::SacnUniverse | RigRow::SacnPriority
+        )
+    }
 }
 
 /// A target sent by the last Enter, as typed: a conflict types it again.
@@ -105,6 +123,7 @@ impl RigRow {
 enum Typed {
     Osc(String),
     Artnet(String, String),
+    Sacn(String, String, String),
     Fade(String),
 }
 
@@ -120,6 +139,12 @@ pub struct RigPage {
     pub artnet: String,
     /// The Art-Net target's universe as typed (the rig's while not edited).
     pub universe: String,
+    /// The sACN target's destination as typed (the rig's while not edited).
+    pub sacn: String,
+    /// The sACN target's universe as typed (the rig's while not edited).
+    pub sacn_universe: String,
+    /// The sACN target's priority as typed (the rig's while not edited).
+    pub sacn_priority: String,
     /// The Art-Net fade as typed, seconds (the rig's while not edited).
     pub fade: String,
     /// The test frame's levels as typed.
@@ -130,6 +155,8 @@ pub struct RigPage {
     pub edited: bool,
     /// The Art-Net target was typed since the rig's was shown: a mirror change leaves it.
     pub artnet_edited: bool,
+    /// The sACN target was typed since the rig's was shown: a mirror change leaves it.
+    pub sacn_edited: bool,
     /// The fade was typed since the rig's was shown: a mirror change leaves it.
     pub fade_edited: bool,
     /// Where typing goes in the focused text: at its end when the row is entered.
@@ -150,11 +177,15 @@ impl Default for RigPage {
             test: DEFAULT_TEST.to_owned(),
             artnet: String::new(),
             universe: String::new(),
+            sacn: String::new(),
+            sacn_universe: String::new(),
+            sacn_priority: String::new(),
             fade: artnet::fade_text(ac2_proto::model::ArtnetFade::DEFAULT),
             dmx_test: artnet::DEFAULT_TEST.to_owned(),
             rev: Rev(0),
             edited: false,
             artnet_edited: false,
+            sacn_edited: false,
             fade_edited: false,
             caret: Caret::default(),
             error: None,
@@ -178,10 +209,12 @@ impl RigPage {
     pub fn reload(&mut self, rig: &Rig) {
         self.target = target_text(rig.osc_target);
         (self.artnet, self.universe) = artnet::target_texts(rig.artnet_target);
+        (self.sacn, self.sacn_universe, self.sacn_priority) = sacn::target_texts(rig.sacn_target);
         self.fade = artnet::fade_text(rig.artnet_fade);
         self.rev = rig.rev;
         self.edited = false;
         self.artnet_edited = false;
+        self.sacn_edited = false;
         self.fade_edited = false;
         self.caret_to_end();
         self.notice = None;
@@ -210,6 +243,15 @@ impl RigPage {
                 }
             }
         }
+        if !self.sacn_edited {
+            let t = sacn::target_texts(rig.sacn_target);
+            if (&t.0, &t.1, &t.2) != (&self.sacn, &self.sacn_universe, &self.sacn_priority) {
+                (self.sacn, self.sacn_universe, self.sacn_priority) = t;
+                if self.focus.is_sacn() {
+                    self.caret_to_end();
+                }
+            }
+        }
         if !self.fade_edited {
             let f = artnet::fade_text(rig.artnet_fade);
             if f != self.fade {
@@ -219,7 +261,7 @@ impl RigPage {
                 }
             }
         }
-        if !self.edited && !self.artnet_edited && !self.fade_edited {
+        if !self.edited && !self.artnet_edited && !self.sacn_edited && !self.fade_edited {
             self.rev = rig.rev;
             self.notice = None;
         } else if self.notice.is_some() {
@@ -243,6 +285,10 @@ impl RigPage {
                 self.artnet = a;
                 self.universe = u;
                 self.artnet_edited = true;
+            }
+            Typed::Sacn(d, u, p) => {
+                (self.sacn, self.sacn_universe, self.sacn_priority) = (d, u, p);
+                self.sacn_edited = true;
             }
             Typed::Fade(f) => {
                 self.fade = f;
@@ -293,6 +339,18 @@ impl RigPage {
                 self.artnet_edited = true;
                 Some(&mut self.universe)
             }
+            RigRow::SacnTarget => {
+                self.sacn_edited = true;
+                Some(&mut self.sacn)
+            }
+            RigRow::SacnUniverse => {
+                self.sacn_edited = true;
+                Some(&mut self.sacn_universe)
+            }
+            RigRow::SacnPriority => {
+                self.sacn_edited = true;
+                Some(&mut self.sacn_priority)
+            }
             RigRow::Fade => {
                 self.fade_edited = true;
                 Some(&mut self.fade)
@@ -309,6 +367,9 @@ impl RigPage {
             RigRow::Test => Some(&self.test),
             RigRow::ArtnetTarget => Some(&self.artnet),
             RigRow::Universe => Some(&self.universe),
+            RigRow::SacnTarget => Some(&self.sacn),
+            RigRow::SacnUniverse => Some(&self.sacn_universe),
+            RigRow::SacnPriority => Some(&self.sacn_priority),
             RigRow::Fade => Some(&self.fade),
             RigRow::DmxTest => Some(&self.dmx_test),
             _ => None,
@@ -507,6 +568,29 @@ impl RigPage {
                     )
                 })
             }
+            RigRow::SacnTarget | RigRow::SacnUniverse | RigRow::SacnPriority => {
+                sacn::parse_target(&self.sacn, &self.sacn_universe, &self.sacn_priority).map(
+                    |target| {
+                        let what = sacn::target_text(target);
+                        self.sacn_edited = false;
+                        self.sent = Some((
+                            what.clone(),
+                            Typed::Sacn(
+                                self.sacn.clone(),
+                                self.sacn_universe.clone(),
+                                self.sacn_priority.clone(),
+                            ),
+                        ));
+                        (
+                            Command::SacnTarget {
+                                base: self.rev,
+                                target,
+                            },
+                            what,
+                        )
+                    },
+                )
+            }
             RigRow::Fade => artnet::parse_fade(&self.fade).map(|fade| {
                 let what = artnet::fade_toast(fade);
                 self.fade_edited = false;
@@ -534,8 +618,8 @@ impl RigPage {
                 Err(e) => Err(e),
             },
             RigRow::DmxTest => match artnet::parse_test(&self.dmx_test) {
-                Ok(_) if rig.artnet_target.is_none() => {
-                    Err("no Art-Net target: set one above first".into())
+                Ok(_) if rig.artnet_target.is_none() && rig.sacn_target.is_none() => {
+                    Err("no DMX target: set Art-Net or sACN above first".into())
                 }
                 Ok(channels) => {
                     let what = format!("DMX test {} sent", artnet::cue_text(&channels));

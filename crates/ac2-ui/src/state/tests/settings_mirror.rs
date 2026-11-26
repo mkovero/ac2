@@ -218,7 +218,10 @@ fn the_rig_page_types_artnet_through_mirror_updates() {
         )),
         "{r:?}"
     );
-    t.key("ArrowUp");
+    // Up past the three sACN rows to the universe.
+    for _ in 0..4 {
+        t.key("ArrowUp");
+    }
     let r = t.key("Enter");
     assert!(
         r.iter().any(|r| matches!(

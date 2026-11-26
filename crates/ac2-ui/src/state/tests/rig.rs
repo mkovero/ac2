@@ -471,7 +471,7 @@ fn the_rig_page_sends_a_dmx_test() {
     assert!(call(&t.key("Enter")).is_none());
     assert_eq!(
         rig_page(&t).error.as_deref(),
-        Some("no Art-Net target: set one above first")
+        Some("no DMX target: set Art-Net or sACN above first")
     );
     let mut s = with_rig(7);
     s.rig.artnet_target = ac2_scene::artnet::parse_target("10.0.0.40", "0").expect("test value");
@@ -561,7 +561,7 @@ fn the_rig_page_sets_the_artnet_fade() {
     t.st.apply(Msg::OpenRig, &t.keys);
     assert_eq!(rig_page(&t).fade, "1", "the default a rig starts with");
     t.st.apply(
-        Msg::Settings(SettingsMsg::RigFocus(RigRow::Universe)),
+        Msg::Settings(SettingsMsg::RigFocus(RigRow::SacnPriority)),
         &t.keys,
     );
     t.key("ArrowDown");
@@ -587,7 +587,7 @@ fn the_rig_page_sets_the_artnet_fade() {
                 base: Rev(7),
                 seconds: Seconds(0.5),
             },
-            "Art-Net fade 0.5 s"
+            "DMX fade 0.5 s"
         ))
     );
     let mut s = with_rig(8);
@@ -613,7 +613,7 @@ fn the_rig_page_sets_the_artnet_fade() {
         }
     );
     let what = what.to_owned();
-    assert_eq!(what, "Art-Net fade off: cue changes jump");
+    assert_eq!(what, "DMX fade off: cue changes jump");
     s.rig.rev = Rev(9);
     t.conn(mirror(s));
     t.conn(ConnEvent::Conflict {

@@ -876,6 +876,7 @@ mod own_panes;
 mod meter_pick;
 
 mod rig;
+mod rig_sacn;
 // A stopped measurement's frames judged by their rev.
 mod stopped_frames;
 // Two rigs in one app: their ids collide, their state never mixes.

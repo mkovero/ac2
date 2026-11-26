@@ -426,7 +426,7 @@ once).
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
 | Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars / scale, what the spectrum and sweep panes show, spectrum glide, 3D quality, invert vertical drag (3D), distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
 | Connection | the daemon, whether the app starts and stops this computer's `ac2d`, this client's id and key, reconnect, another daemon; the daemon's mode, mDNS name, authorized clients (each an *operator*, a *viewer* or a *rig*; **←/→** twice changes an app's role) and refused keys; *Paired rigs* and *Pair with rig…* (**Enter**), unpairing (**Delete** twice) | |
-| Rig monitor | where the rig's OSC cues and Art-Net universe go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
+| Rig monitor | where the rig's OSC cues and DMX universe (Art-Net, sACN) go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
 
 #### System max level
 
@@ -4482,17 +4482,58 @@ ac2 artnet test 12=255 13=40              # light these channels for 5 s to find
 ac2 cue Stage meter --over-dmx "12=255 13=0" --ok-dmx "12=0 13=255" --fault-dmx "14=255!"
 ac2 cue Stage window:15min --near-dmx "12=80"
 ac2 cue Stage meter --fault-dmx off       # no levels in that state
-ac2 rig status                            # target, fade, frames sent, the channels above 0
+ac2 rig status                            # targets, fade, frames sent, the channels above 0
 ```
 
 The target and the fade are kept in the rig settings like the OSC target. `ac2 artnet test` holds its
 frame for 5 s, or until a cue changes state, then the cues' frame comes back.
 
 In the app, Settings › Rig monitor has the same controls under the OSC ones: **Art-Net
-target** (`ip[:port]`, IPv4; empty: off) and **Universe** (`N` or `net.sub.uni`), applied
-together by Enter on either row; **Fade (s)** (seconds, 0–60; 0 or empty: jump), which Enter
-applies; **Send DMX test** (`1=255` to start), which Enter sends;
-and a status line with the target, the frames sent, the last error and the channels above 0.
+target** (`ip[:port]`, IPv4; empty: off) and **Art-Net universe** (`N` or `net.sub.uni`),
+applied together by Enter on either row; the three sACN rows ([sACN](#sacn)); **DMX fade
+(s)** (seconds, 0–60; 0 or empty: jump), which Enter applies; **Send DMX test** (`1=255` to
+start), which Enter sends to every DMX output set; and status lines with each target, the
+frames sent, the last error and the channels above 0.
+
+ac2 sends Art-Net from port 6454, the port Art-Net reserves, and answers a console's ArtPoll
+there: a console or a node browser lists the rig by its name, as a controller with one
+input port (the universe ac2 sends into the network). It answers each asker at most once a
+second, and takes nothing else it hears, DMX included. When another program on the host
+holds 6454 and does not share it, ac2 sends from another port instead: nodes still get the
+frames, but a console polling for the rig will not find it. Setting the target then says so
+in the reply (a toast in the app, a warning from `ac2 artnet target`), the status line keeps
+saying it with the system's reason (`ac2 rig status`: *Art-Net socket*), and ac2 tries 6454
+again every 30 s.
+
+#### sACN
+
+The same universe can go out as sACN (ANSI E1.31, *streaming ACN*) beside Art-Net or instead
+of it: the same frame, fades, `!` jumps, merges and test frames, sent again every second. A
+receiver hearing several sACN sources on one universe takes the one with the highest
+priority (0–200, 100 unless you set another), so a desk at 100 and ac2 at 120 hand the
+lights to ac2's cues while ac2 sends. ac2 is one source by its rig: the same after a restart,
+named with the rig's name.
+
+- **Unicast**: the receiver's IPv4 address, for a node or a console's sACN input.
+- **Multicast**: sent to the universe's group (239.255.0.1 for universe 1), which every
+  receiver on the universe listens to. Name the interface by this host's own address on the
+  lighting network; the group stays on that network (TTL 1). ac2 only sends to the group and
+  never joins it, so switches see no IGMP from it.
+
+Setting the target off, changing it, and a clean daemon stop end the stream at once (three
+packets marked *terminated*), so receivers let go of ac2's levels instead of holding them for
+seconds.
+
+```
+ac2 sacn target 192.168.1.40 1                          # one receiver, universe 1
+ac2 sacn target multicast 1 --via 192.168.1.4           # universe 1's group, out of 192.168.1.4
+ac2 sacn target multicast 7 --via 192.168.1.4 --priority 120
+ac2 sacn target off                                     # end the stream
+```
+
+`ac2 artnet fade` and `ac2 artnet test` apply to both outputs. In the app: **sACN target**
+(an address, or `multicast via` this host's address; empty: off), **sACN universe** (1–63999)
+and **sACN priority** (0–200; empty: 100), applied together by Enter on any of the three.
 On the SPL / Leq page each cue row has a DMX line under its OSC line, one field per state
 (`12=255 13=0`, `14=255!` to jump); a field that does not read keeps Enter from applying and says which.
 

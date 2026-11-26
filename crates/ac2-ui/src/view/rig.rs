@@ -1,9 +1,9 @@
 //! The Rig monitor page and the cue chip the tree and the page draw. Every text comes from
-//! `ac2_scene::osc`, `ac2_scene::artnet` and [`crate::settings::RigPage`].
+//! `ac2_scene::osc`, `ac2_scene::artnet`, `ac2_scene::sacn` and [`crate::settings::RigPage`].
 
 use ac2_proto::model::{CueState, Rig};
 use ac2_scene::theme::Theme;
-use ac2_scene::{artnet, osc};
+use ac2_scene::{artnet, osc, sacn};
 use eframe::egui::{self, RichText};
 
 use crate::settings::{RigRow, Settings};
@@ -87,6 +87,9 @@ pub(super) fn rig_page(
                         RigRow::Test => &p.test,
                         RigRow::ArtnetTarget => &p.artnet,
                         RigRow::Universe => &p.universe,
+                        RigRow::SacnTarget => &p.sacn,
+                        RigRow::SacnUniverse => &p.sacn_universe,
+                        RigRow::SacnPriority => &p.sacn_priority,
                         RigRow::Fade => &p.fade,
                         _ => &p.dmx_test,
                     };
@@ -117,6 +120,9 @@ pub(super) fn rig_page(
             RigRow::Test => Some(osc::TEST_NOTE),
             RigRow::ArtnetTarget => Some(artnet::TARGET_NOTE),
             RigRow::Universe => Some(artnet::UNIVERSE_NOTE),
+            RigRow::SacnTarget => Some(sacn::TARGET_NOTE),
+            RigRow::SacnUniverse => Some(sacn::UNIVERSE_NOTE),
+            RigRow::SacnPriority => Some(sacn::PRIORITY_NOTE),
             RigRow::Fade => Some(artnet::FADE_NOTE),
             RigRow::DmxTest => Some(artnet::TEST_NOTE),
             _ => row.levels_note(),
@@ -143,11 +149,16 @@ pub(super) fn rig_page(
         if row == RigRow::Test {
             status(ui, osc::status_line(rig), rig.osc.last_error.is_some());
         } else if row == RigRow::DmxTest {
+            let not_conforming = matches!(
+                rig.artnet_socket,
+                ac2_proto::model::ArtnetSocket::NotConforming { .. }
+            );
             status(
                 ui,
                 artnet::status_line(rig),
-                rig.artnet.last_error.is_some(),
+                rig.artnet.last_error.is_some() || not_conforming,
             );
+            status(ui, sacn::status_line(rig), rig.sacn.last_error.is_some());
             status(ui, artnet::channels_line(rig), false);
         }
     }
