@@ -4,7 +4,7 @@
 //! loopback interface too ([`ac2d::DmxPorts::LOOPBACK`]).
 #![allow(clippy::unwrap_used)]
 
-use std::net::UdpSocket;
+use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};
 
 use super::common::{fake_backend, rig_on, run_plain};
@@ -99,5 +99,34 @@ async fn sacn_target_test_and_status() {
     let (rig, _) = ok(&ep, &["sacn", "target", "off"]).await;
     assert!(rig["sacn_target"].is_null(), "{rig}");
     packet_until(&rx, |p| p[112] & 0x40 != 0);
+    h.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_test_frame_one_output_did_not_send_is_a_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let rx = UdpSocket::bind("127.0.0.1:0").unwrap();
+    rx.set_read_timeout(Some(Duration::from_millis(100)))
+        .unwrap();
+    let port = rx.local_addr().unwrap().port();
+    let (h, ep) = rig_on(fake_backend(), |cfg| {
+        cfg.rig_settings = Some(dir.path().join("rig.json"));
+        cfg.dmx.sacn_port = port;
+        // An address no interface of this host has (TEST-NET-1): no Art-Net socket opens,
+        // so Art-Net sends nothing while sACN does.
+        cfg.dmx.artnet_bind = SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 77), 0);
+    });
+    ok(&ep, &["sacn", "target", "127.0.0.1", "7"]).await;
+    let node = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let to = node.local_addr().unwrap().to_string();
+    let (_, err) = ok(&ep, &["artnet", "target", &to, "1"]).await;
+    assert!(err.contains("no Art-Net socket could be opened"), "{err}");
+    let (t, err) = ok(&ep, &["artnet", "test", "12=255"]).await;
+    assert_eq!(t["sent"][0]["channel"], 12, "{t}");
+    assert!(
+        err.contains("the test frame did not go out on Art-Net"),
+        "{err}"
+    );
+    packet_until(&rx, |p| p[125 + 12] == 255);
     h.shutdown();
 }

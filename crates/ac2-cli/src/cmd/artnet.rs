@@ -6,7 +6,7 @@ use ac2_proto::units::Seconds;
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
 
-use super::osc::rig_edit;
+use super::osc::{note_warnings, rig_edit};
 use super::{connect, state};
 use crate::CliError;
 use crate::args::*;
@@ -53,11 +53,13 @@ pub(crate) async fn artnet(cli: &Cli, cmd: &ArtnetCmd, out: &mut Out<'_>) -> Res
         }
         ArtnetCmd::Test { channels } => {
             let c = connect(cli, false).await?;
-            let r = c
-                .call(Command::ArtnetTest {
+            // The warnings say which output did not send when the other did.
+            let (r, warnings) = c
+                .call_warned(Command::ArtnetTest {
                     channels: channels.clone(),
                 })
                 .await?;
+            note_warnings(&c, &warnings, out).await;
             let rev = expect_body!("artnet.test", r, ReplyBody::Ack { rev } => rev)?;
             let rig = state(&c).await?.rig;
             out.emit(
