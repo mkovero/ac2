@@ -3,8 +3,9 @@
 //! on a slow disk takes far longer than any reply deadline. Giving up after the usual
 //! tries would leave the daemon working for nobody, holding its one file slot meanwhile.
 //! So the call waits as long as the daemon is alive (its keepalives arrive, 4 a second,
-//! from the same incarnation), and a daemon that falls silent or restarts is still
-//! reported within [`ClientConfig::dead_after`] whatever the per-try deadline.
+//! from the same incarnation), and a daemon that falls silent, restarts, or whose
+//! keepalives never came is still reported within [`ClientConfig::dead_after`] whatever
+//! the per-try deadline.
 //!
 //! The same request id is resent once per try: the daemon runs an id once, so a copy that
 //! arrives while the job runs waits for its reply, and one that arrives after the job
@@ -23,6 +24,21 @@ use super::{CallCore, REFUSAL_POLL, Retry};
 use crate::error::ClientError;
 use crate::mirror::MirrorView;
 
+/// The resend interval's floor: a short `--timeout` must not flood the daemon with copies
+/// of an id it is still working on, each one a decode and a dedup lookup on its ctrl loop.
+pub(crate) const RESEND_AT_LEAST: Duration = Duration::from_millis(250);
+
+/// The resend interval's ceiling. The daemon keeps a stored reply 30 s (`ac2d`'s dedup
+/// window); a reply lost on the way and the next copy sent later than that would run the
+/// file job a second time. Well inside it, so a lost reply is fetched with margin.
+pub(crate) const RESEND_AT_MOST: Duration = Duration::from_secs(5);
+
+/// How often a file operation's id is resent while the daemon works on it: the per-try
+/// reply deadline, held within [`RESEND_AT_LEAST`] … [`RESEND_AT_MOST`] whatever it is.
+pub(crate) fn resend_every(timeout: Duration) -> Duration {
+    timeout.clamp(RESEND_AT_LEAST, RESEND_AT_MOST)
+}
+
 /// What a file operation's wait watches.
 #[derive(Debug)]
 pub(crate) struct Liveness {
@@ -34,8 +50,8 @@ pub(crate) struct Liveness {
 
 impl CallCore {
     /// The reply to file operation `op` (sent once already as `bytes`), awaited while the
-    /// daemon is alive; resent each `retry.timeout`, after which `waiting` hears how long
-    /// it has waited.
+    /// daemon is alive; resent each [`resend_every`] `retry.timeout`, after which `waiting`
+    /// hears how long it has waited.
     pub(super) async fn finish_while_alive(
         &self,
         op: &'static str,
@@ -47,7 +63,8 @@ impl CallCore {
     ) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
         let start = tokio::time::Instant::now();
         let mut first = live.view.borrow().incarnation;
-        let mut resend = start + retry.timeout;
+        let every = resend_every(retry.timeout);
+        let mut resend = start + every;
         loop {
             // Liveness is looked at every slice, so a short silence limit holds under a
             // long per-try deadline too.
@@ -58,7 +75,13 @@ impl CallCore {
             let v = live.view.borrow().clone();
             let silent = v.silent_for(Instant::now());
             if silent >= live.dead_after {
-                return Err(ClientError::Silent { op, silent });
+                // Keepalives come on the data port: a daemon whose ctrl port answered and
+                // whose data port never delivered was not heard falling silent, it was
+                // never heard at all.
+                return Err(match v.last_ka {
+                    Some(_) => ClientError::Silent { op, silent },
+                    None => ClientError::NoKeepalives { op, waited: silent },
+                });
             }
             match (first, v.incarnation) {
                 (Some(a), Some(b)) if a != b => return Err(ClientError::Restarted { op }),
@@ -67,7 +90,7 @@ impl CallCore {
             }
             if tokio::time::Instant::now() >= resend {
                 self.io.send(bytes)?;
-                resend += retry.timeout;
+                resend += every;
                 waiting(start.elapsed());
             }
         }

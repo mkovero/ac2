@@ -13,8 +13,8 @@ use crate::route::{Peer, Route};
 /// One request id of a client.
 #[derive(Debug)]
 enum Slot {
-    /// Still running: the routes of every copy of the request received, each owed the
-    /// reply when it is known, and what a retry after it finished gets.
+    /// Still running: each connection a copy of the request came on, once, owed the reply
+    /// when it is known, and what a retry after it finished gets.
     Pending(Vec<Route>, Retry),
     /// Answered: the encoded reply.
     Done(Vec<u8>),
@@ -117,7 +117,7 @@ impl Dedup {
     }
 
     /// Stores the reply to `id`, reserved by the request received on `route`, and
-    /// returns the routes owed it, one per copy of the request received. Empty when that
+    /// returns the routes owed it, one per connection a copy came on. Empty when that
     /// reservation is gone (the client was forgotten meanwhile, and its name may since have
     /// reserved the same id from another connection): the reply is then not stored, and only
     /// the asking connection is owed it.

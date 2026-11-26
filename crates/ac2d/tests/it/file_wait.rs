@@ -1,7 +1,7 @@
 //! A client waits for a session download as long as the daemon packs it, however short its
-//! reply deadline, and a client that asks again (it stopped waiting) cuts its own download
-//! instead of being refused until the pack nobody fetches is done. Slow storage is a named
-//! pipe in place of a session's manifest: reading it blocks until the test writes to it.
+//! reply deadline, and another file command meanwhile is told what the rig is doing. Slow
+//! storage is a named pipe in place of a session's manifest: reading it blocks until the
+//! test writes to it.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 
@@ -14,7 +14,7 @@ use std::time::Duration;
 use ac2_client::sessions::{self, Progress};
 use ac2_client::{ClientConfig, ClientError, Endpoints, Retry};
 use ac2_proto::model::*;
-use ac2_proto::{Command, ErrorCode, ReplyBody, Request};
+use ac2_proto::{Command, ErrorCode, Request};
 use ac2d::{Daemon, Handle};
 use common::*;
 
@@ -80,7 +80,7 @@ async fn a_client_waits_for_a_download_the_daemon_is_still_packing() {
         })
         .await
     });
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    tokio::time::sleep(Duration::from_millis(2000)).await;
     assert!(!job.is_finished(), "gave up while the daemon packed");
     let writer = release(pipe);
     let r = tokio::time::timeout(Duration::from_secs(10), job)
@@ -97,25 +97,14 @@ async fn a_client_waits_for_a_download_the_daemon_is_still_packing() {
     h.shutdown();
 }
 
-/// A new request from the client whose download is being packed means it stopped waiting
-/// for it (an interrupted export asked again): the old download is cut and the new one
-/// begins. Another client is still refused while a download runs.
+/// Another file command while a download packs is refused with what the rig is doing and
+/// for how long, so the operator knows whether to wait; the pack itself goes on.
 #[test]
-fn a_client_asking_again_cuts_its_own_download() {
+fn a_command_while_a_download_packs_is_told_what_the_rig_is_doing() {
     let dir = tempfile::tempdir().unwrap();
-    let h = start("wait-cut", dir.path());
+    let h = start("wait-busy", dir.path());
     let (mut a, _sub) = connect(&h, &[]);
     let (mut b, _sub_b) = connect(&h, &[]);
-    import_fixture(
-        &mut a,
-        "rew_export.txt",
-        "rew_export.txt",
-        TraceOwner::Imported,
-    );
-    a.ok(Command::FileSave {
-        session: named("ready"),
-        overwrite: false,
-    });
     let pipe = slow_session(dir.path(), "slow");
     let first = a.next_id();
     a.send(&Request::new(
@@ -124,42 +113,30 @@ fn a_client_asking_again_cuts_its_own_download() {
             session: Some(named("slow")),
         },
     ));
-    assert!(a.recv(Duration::from_millis(300)).is_none());
-    let e = b
-        .call(Command::FileDownloadBegin {
-            session: Some(named("ready")),
-        })
-        .unwrap_err();
-    assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
-
-    let second = a.next_id();
-    a.send(&Request::new(
-        second,
-        Command::FileDownloadBegin {
-            session: Some(named("ready")),
+    std::thread::sleep(Duration::from_millis(1100));
+    for cmd in [
+        Command::FileSave {
+            session: named("other"),
+            overwrite: false,
         },
-    ));
-    let cut = a
-        .recv(Duration::from_secs(10))
-        .expect("the first is answered");
-    assert_eq!(cut.id, first);
-    let e = cut.result.unwrap_err();
-    assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
-    let begun = a
-        .recv(Duration::from_secs(10))
-        .expect("the second is answered");
-    assert_eq!(begun.id, second);
-    match begun.result {
-        Ok(ReplyBody::Transfer(t)) => {
-            assert!(t.bytes > 0);
-            a.ok(Command::FileDownloadEnd {
-                transfer: t.transfer,
-                saved_as: None,
-            });
-        }
-        other => panic!("{other:?}"),
+        Command::FileDownloadBegin { session: None },
+    ] {
+        let e = b.call(cmd).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+        assert!(
+            e.msg.starts_with(
+                "the rig is packing a session to export for a client on the rig's own machine ("
+            ),
+            "{e:?}"
+        );
+        assert!(e.msg.contains(" s so far); ask for file."), "{e:?}");
+        assert!(!e.msg.contains(" (0 s so far)"), "{e:?}");
     }
-    // The cut worker, still at the pipe, stops there without packing anything.
     release(pipe).join().unwrap();
+    let r = a
+        .recv(Duration::from_secs(10))
+        .expect("the download answered");
+    assert_eq!(r.id, first);
+    assert_eq!(r.result.unwrap_err().code, ErrorCode::Invalid);
     h.shutdown();
 }

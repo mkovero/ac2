@@ -19,7 +19,7 @@ use ac2_client::ClientError;
 use clap::Parser;
 
 pub use args::Cli;
-pub use output::Out;
+pub use output::{Notices, Out};
 
 /// This build's id: `<version>+<git commit>`; the daemon reports its own in `welcome.server`
 /// as `… (build <id>)`.

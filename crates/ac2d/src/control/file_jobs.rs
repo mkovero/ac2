@@ -16,12 +16,11 @@
 //! - One file operation at a time. Another `file.save` / `file.load` / `file.new` /
 //!   `file.recover` / `file.salvage` / `file.import` / `file.download_begin` /
 //!   `file.delete` / `file.rename` is refused
-//!   (`refused`, nothing changed) until it is answered — except that an operator's never
-//!   waits on a viewer's download, and a client's never waits on its own download (a
-//!   client that waits keeps resending the same id, so a new request means it stopped
-//!   waiting): that download is cut (answered `refused`, its worker stops packing and
-//!   removes its staging) and the new command begins. A viewer begins a download at most
-//!   once per [`VIEWER_DOWNLOAD_EVERY`] per key, so it cannot keep the slot taken.
+//!   (`refused`, nothing changed; the refusal says what the rig is doing, for whom and
+//!   for how long) until it is answered — except that an operator's never waits on a
+//!   viewer's download: the viewer's is cut (answered `refused`, its worker stops packing
+//!   and removes its staging) and the operator's begins. A viewer begins a download at
+//!   most once per [`VIEWER_DOWNLOAD_EVERY`] per key, so it cannot keep the slot taken.
 //! - `file.list` only reads and runs beside anything; one at a time, and a request that
 //!   comes while it runs is answered with its result.
 //! - A job answers only the role it began as: when its requester's role is taken down
@@ -35,13 +34,14 @@
 //! - A salvage only adds traces and new SPL meters holding salvaged logs: it imports what
 //!   its worker read onto the state as it is when the read comes back.
 //! - A retry of the request still pending never reaches here: the request's reservation
-//!   (`Dedup::admit`) attaches it, and the one result answers every copy.
+//!   (`Dedup::admit`) attaches it, and the one result answers each connection a copy came
+//!   on, once.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::time::{Duration, Instant};
 
 use ac2_proto::model::{ClientRole, SessionOrigin};
@@ -216,6 +216,9 @@ pub(super) struct FileJob {
     pending: Pending,
     /// Disconnects when the worker ends.
     ended: Receiver<()>,
+    /// What it does and when it was taken on: an operator kept waiting is told both.
+    doing: &'static str,
+    began: Instant,
 }
 
 /// The file operations under way, by token.
@@ -223,13 +226,21 @@ pub(super) struct FileJob {
 pub(super) struct FileJobs {
     jobs: HashMap<u64, FileJob>,
     /// Workers of viewers' downloads an operator's command cut, still removing their
-    /// staging: shutdown waits for them as for the rest.
+    /// staging: shutdown waits for them as for the rest ([`Self::keep_cut`]).
     cut: Vec<Receiver<()>>,
     /// When each viewer key last began a download.
     viewer_downloads: HashMap<PublicKey, Instant>,
 }
 
 impl FileJobs {
+    /// Keeps the end of a cut worker for shutdown to wait on, dropping those already
+    /// ended: a daemon that runs for months sees any number of cuts.
+    fn keep_cut(&mut self, ended: Receiver<()>) {
+        self.cut
+            .retain(|e| e.try_recv() != Err(TryRecvError::Disconnected));
+        self.cut.push(ended);
+    }
+
     /// Downloads being packed for viewers; for viewer `key` only when given.
     pub(super) fn viewer_downloads(&self, key: Option<&PublicKey>) -> usize {
         self.jobs
@@ -254,16 +265,51 @@ impl FileJobs {
     }
 }
 
+/// What the rig does for `cmd`, in the words of an operator who asked for something else
+/// meanwhile.
+fn doing(cmd: &Command) -> &'static str {
+    match cmd {
+        Command::FileSave { .. } => "saving a session",
+        Command::FileLoad { .. } => "loading a session",
+        Command::FileNew { .. } => "starting a new session",
+        Command::FileRecover => "recovering the autosave",
+        Command::FileSalvage { .. } => "salvaging a session",
+        Command::FileImport { .. } => "storing an imported session",
+        Command::FileDownloadBegin { .. } => "packing a session to export",
+        Command::FileDelete { .. } => "deleting a session",
+        Command::FileRename { .. } => "renaming a session",
+        Command::FileList => "listing the sessions",
+        _ => "working on a session file",
+    }
+}
+
+/// `1 min 5 s`.
+fn span(d: Duration) -> String {
+    let s = d.as_secs();
+    match s / 60 {
+        0 => format!("{s} s"),
+        m => format!("{m} min {} s", s % 60),
+    }
+}
+
+/// The refusal of `asked` while the rig is `doing` something for `client`, begun `ran` ago.
+/// A network client is named by its authorized name; a local one's id is a socket's
+/// routing id, which says nothing to the operator.
+fn busy(doing: &str, client: &Peer, ran: Duration, asked: &str) -> String {
+    let whom = match client.curve() {
+        Some((name, _)) => name.to_owned(),
+        None => "a client on the rig's own machine".to_owned(),
+    };
+    format!(
+        "the rig is {doing} for {whom} ({} so far); ask for {asked} again once it is done",
+        span(ran)
+    )
+}
+
 impl Control {
-    /// Takes the file slot for `command` from `client` as `role` (module docs): free, held
-    /// by a viewer's download an operator cuts, or held by a download of `client`'s own,
-    /// which it cuts; refused otherwise.
-    fn take_file_slot(
-        &mut self,
-        command: &str,
-        client: &Peer,
-        role: ClientRole,
-    ) -> Result<(), ProtoError> {
+    /// Takes the file slot for `command` from `role` (module docs): free, or held by a
+    /// viewer's download an operator cuts; refused otherwise.
+    fn take_file_slot(&mut self, command: &str, role: ClientRole) -> Result<(), ProtoError> {
         let Some((&token, j)) = self
             .file_jobs
             .jobs
@@ -272,36 +318,27 @@ impl Control {
         else {
             return Ok(());
         };
-        // A client waiting for its download resends the same id, which never reaches
-        // here; a new request from it means it stopped waiting (an interrupted export
-        // asked again), and packing on for nobody would hold the slot that long.
-        let own = matches!(j.pending, Pending::Download { .. }) && j.reply.client == *client;
-        let operator_over_viewer =
-            role == ClientRole::Operator && j.role == Some(ClientRole::Viewer);
-        if !own && !operator_over_viewer {
-            return Err(refused(format!(
-                "{} is under way; {command} waits until it is answered",
-                j.command
+        if role != ClientRole::Operator || j.role != Some(ClientRole::Viewer) {
+            return Err(refused(busy(
+                j.doing,
+                &j.reply.client,
+                j.began.elapsed(),
+                command,
             )));
         }
         let Some(cut) = self.file_jobs.jobs.remove(&token) else {
             return Ok(());
         };
         cut.cancel.set();
-        let by = if own {
-            "the same client's"
-        } else {
-            "an operator's"
-        };
         tracing::info!(
-            "{} of {} cut for {by} {command}",
+            "{} of {} cut for an operator's {command}",
             cut.command,
             cut.reply.client.id().0
         );
-        self.file_jobs.cut.push(cut.ended);
+        self.file_jobs.keep_cut(cut.ended);
         let r = cut.reply;
         let e = refused(format!(
-            "{by} {command} came after it; ask for {} again",
+            "an operator's {command} came first; ask for {} again",
             cut.command
         ));
         self.answer(&r.route, &r.client, r.id, Err(e), Instant::now());
@@ -337,6 +374,7 @@ impl Control {
         role: ClientRole,
     ) -> Result<(), ProtoError> {
         let command = cmd.name();
+        let what = doing(&cmd);
         let reply = PendingReply {
             route: route.clone(),
             client: client.clone(),
@@ -361,7 +399,7 @@ impl Control {
                 if viewer_download {
                     self.viewer_download_rate(client, now)?;
                 }
-                self.take_file_slot(command, client, role)?;
+                self.take_file_slot(command, role)?;
             }
         }
         let (pending, work) = match cmd {
@@ -421,6 +459,8 @@ impl Control {
                 cancel,
                 pending,
                 ended,
+                doing: what,
+                began: now,
             },
         );
         Ok(())
@@ -542,5 +582,61 @@ impl Control {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ac2_proto::units::ClientId;
+
+    #[test]
+    fn a_busy_rig_says_what_it_does_for_whom_and_how_long() {
+        let laptop = Peer::Curve {
+            id: ClientId("laptop".into()),
+            key: PublicKey::from_bytes([7; 32]),
+        };
+        let msg = busy(
+            doing(&Command::FileDownloadBegin { session: None }),
+            &laptop,
+            Duration::from_secs(65),
+            "file.save",
+        );
+        assert_eq!(
+            msg,
+            "the rig is packing a session to export for laptop (1 min 5 s so far); \
+             ask for file.save again once it is done"
+        );
+        let key = PublicKey::from_bytes([7; 32]).to_string();
+        assert!(!msg.contains(&key[..8]), "{msg}");
+        let local = busy(
+            doing(&Command::FileRecover),
+            &Peer::local(b"\x01\x02"),
+            Duration::from_millis(4_900),
+            "file.load",
+        );
+        assert_eq!(
+            local,
+            "the rig is recovering the autosave for a client on the rig's own machine (4 s so \
+             far); ask for file.load again once it is done"
+        );
+    }
+
+    #[test]
+    fn ended_cut_workers_are_not_kept() {
+        let mut jobs = FileJobs::default();
+        let (alive, ended) = mpsc::channel::<()>();
+        jobs.keep_cut(ended);
+        for _ in 0..100 {
+            let (gone, ended) = mpsc::channel::<()>();
+            drop(gone);
+            jobs.keep_cut(ended);
+        }
+        // The live one and the last ended one, which nothing has looked at since.
+        assert_eq!(jobs.cut.len(), 2);
+        drop(alive);
+        let (_running, ended) = mpsc::channel::<()>();
+        jobs.keep_cut(ended);
+        assert_eq!(jobs.cut.len(), 1);
     }
 }

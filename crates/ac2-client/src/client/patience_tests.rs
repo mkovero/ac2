@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicU32;
 
-use super::patience::Liveness;
+use super::patience::{Liveness, RESEND_AT_LEAST, RESEND_AT_MOST, resend_every};
 use super::retry_tests::core;
 use super::*;
 use crate::mirror::Mirror;
@@ -49,7 +49,8 @@ async fn a_file_operation_is_waited_for_while_keepalives_come() {
     keepalives(tx, stop.clone());
     let daemon = std::thread::spawn(move || {
         let mut got = Vec::new();
-        let end = Instant::now() + Duration::from_millis(800);
+        // Past four resend intervals at the floor a 50 ms deadline is held to.
+        let end = Instant::now() + Duration::from_millis(1300);
         while let Some(left) = end.checked_duration_since(Instant::now()) {
             if let Some(m) = router.recv_timeout(left).unwrap() {
                 let f = m.frames();
@@ -100,6 +101,50 @@ async fn a_file_operation_ends_when_the_daemon_falls_silent() {
         "{e}"
     );
     assert!(t0.elapsed() < Duration::from_secs(5), "{:?}", t0.elapsed());
+}
+
+/// Keepalives that never came since hello (only the ctrl port reaches the daemon) are told
+/// apart from a daemon heard and then silent.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_daemon_never_heard_is_not_said_to_have_fallen_silent() {
+    let retry = Retry {
+        timeout: Duration::from_millis(50),
+        retries: 2,
+    };
+    let (core, _router, _ctx, tx) = watched(retry, Duration::from_millis(400));
+    tx.send_modify(|v| Arc::make_mut(v).last_ka = None);
+    let e = core
+        .call_waiting(Command::FileList, retry, &mut |_| {})
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            e,
+            ClientError::NoKeepalives {
+                op: "file.list",
+                ..
+            }
+        ),
+        "{e}"
+    );
+    let text = e.to_string();
+    assert!(!text.contains("fell silent"), "{text}");
+    assert!(text.contains("no keepalive came"), "{text}");
+}
+
+/// The resend interval follows the reply deadline within its bounds: a tiny deadline does
+/// not flood the daemon, and a long one never outlasts the daemon's stored reply.
+#[test]
+fn the_resend_interval_is_held_within_its_bounds() {
+    assert_eq!(resend_every(Duration::from_millis(1)), RESEND_AT_LEAST);
+    assert_eq!(resend_every(Duration::ZERO), RESEND_AT_LEAST);
+    assert_eq!(
+        resend_every(Duration::from_millis(1500)),
+        Duration::from_millis(1500)
+    );
+    assert_eq!(resend_every(Duration::from_secs(600)), RESEND_AT_MOST);
+    assert_eq!(resend_every(Duration::MAX), RESEND_AT_MOST);
+    assert!(RESEND_AT_MOST < Duration::from_secs(30));
 }
 
 /// A restart ends the wait: the work went with the old daemon, and the resent id would

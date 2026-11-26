@@ -19,7 +19,7 @@ use serde_json::json;
 use super::{is_local, state};
 use crate::CliError;
 use crate::args::*;
-use crate::output::{self, Out};
+use crate::output::{self, Notices, Out};
 
 /// The daemon reads this machine's paths: it runs here (a local or explicit endpoint).
 fn same_host(cli: &Cli) -> bool {
@@ -143,20 +143,25 @@ fn emit_file(out: &mut Out<'_>, f: &SessionFile, toast: String) -> Result<(), Cl
 
 /// Tells the operator once that the daemon is still `doing` a file operation, which the
 /// CLI waits for while the daemon is alive: a large session takes a minute to pack, and
-/// without a word that looks hung.
-fn still_working(doing: &'static str) -> impl FnMut(Duration) + Send {
+/// without a word that looks hung. Ctrl-C ends only the wait, so the line says the rig
+/// goes on.
+fn still_working(notices: &Notices, doing: &'static str) -> impl FnMut(Duration) + Send {
+    let notices = notices.clone();
     let mut told = false;
     move |_| {
         if !told {
             told = true;
-            eprintln!("the daemon is {doing}; waiting while it works (Ctrl-C stops waiting)");
+            notices.say(format!(
+                "the daemon is {doing}; waiting while it works (Ctrl-C stops waiting, not the \
+                 rig: it finishes, and refuses other session file commands until then)"
+            ));
         }
     }
 }
 
 /// [`still_working`] for a download.
-fn packing() -> impl FnMut(sessions::Progress) + Send {
-    let mut tell = still_working("packing the session");
+fn packing(notices: &Notices) -> impl FnMut(sessions::Progress) + Send {
+    let mut tell = still_working(notices, "packing the session");
     move |p| {
         if let sessions::Progress::Packing(w) = p {
             tell(w);
@@ -165,7 +170,7 @@ fn packing() -> impl FnMut(sessions::Progress) + Send {
 }
 
 async fn export_working(c: &Client, path: &Path, out: &mut Out<'_>) -> Result<(), CliError> {
-    let (p, bytes) = sessions::export(c, None, path, packing()).await?;
+    let (p, bytes) = sessions::export(c, None, path, packing(&out.notices)).await?;
     let p = p.to_string_lossy().into_owned();
     out.emit(&json!({ "path": p, "bytes": bytes }), || {
         text::exported_toast(&p, bytes)
@@ -278,7 +283,7 @@ pub(crate) async fn session(
                         session: r,
                         discard: *discard,
                     },
-                    still_working("reading the session"),
+                    still_working(&out.notices, "reading the session"),
                 )
                 .await
                 .map_err(unsaved)?;
@@ -311,7 +316,7 @@ pub(crate) async fn session(
             let (r, _) = c
                 .call_waiting(
                     Command::FileSalvage { session: r },
-                    still_working("reading the session"),
+                    still_working(&out.notices, "reading the session"),
                 )
                 .await?;
             let s = expect_body!("file.salvage", r, ReplyBody::Salvage(s) => s)?;
@@ -328,7 +333,7 @@ pub(crate) async fn session(
             None => export_working(c, file, out).await?,
             Some(s) => {
                 let r = session_ref(s, here)?;
-                let (p, bytes) = sessions::export(c, Some(r), file, packing()).await?;
+                let (p, bytes) = sessions::export(c, Some(r), file, packing(&out.notices)).await?;
                 let p = p.to_string_lossy().into_owned();
                 out.emit(&json!({ "path": p, "bytes": bytes }), || {
                     text::exported_toast(&p, bytes)
@@ -348,7 +353,7 @@ pub(crate) async fn session(
                         name,
                         overwrite: *force,
                     },
-                    still_working("storing the session"),
+                    still_working(&out.notices, "storing the session"),
                 )
                 .await
                 .map_err(unsaved)?;
@@ -399,7 +404,7 @@ async fn save(
     let (r, _) = c
         .call_waiting(
             Command::FileSave { session, overwrite },
-            still_working("saving the session"),
+            still_working(&out.notices, "saving the session"),
         )
         .await
         .map_err(unsaved)?;

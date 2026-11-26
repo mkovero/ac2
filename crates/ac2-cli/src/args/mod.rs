@@ -62,8 +62,9 @@ pub struct Cli {
     /// Key directory (client keypair, pinned daemon keys).
     #[arg(long, global = true, value_name = "DIR")]
     pub key_dir: Option<PathBuf>,
-    /// Reply deadline per try; each request is sent up to three times with the same id. A
-    /// session save, load, import or export is waited for while the daemon is alive.
+    /// Reply deadline per try; each request is sent up to three times with the same id. The
+    /// session file commands (save, load, new, recover, salvage, list, import, delete,
+    /// rename, export) are waited for while the daemon is alive instead.
     #[arg(long, global = true, value_name = "TIME", default_value = "1.5s")]
     pub timeout: Time,
     /// Ctrl endpoint override (tests, unusual setups).

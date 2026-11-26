@@ -1,6 +1,7 @@
 //! Output: one JSON document, JSON lines, or human tables; numbers via `ac2-scene` format.
 
 use std::io::{self, Write};
+use std::sync::{Arc, Mutex};
 
 use ac2_proto::GridDef;
 use ac2_proto::model::layout::{EntryRef, PaneContent, PaneEntry, RigRef};
@@ -30,6 +31,36 @@ pub struct Out<'a> {
     /// Reply warnings met on the way, in words; [`crate::run_reporting`] prints them on
     /// stderr once the command is done.
     pub warnings: Vec<String>,
+    /// Notes the operator needs while the command still runs.
+    pub notices: Notices,
+}
+
+/// Where notes go that the operator needs while a command still runs (a wait that would
+/// otherwise look hung), not once it is done: stderr, or lines a test reads. Shared, since
+/// a client callback that is `Send` writes them.
+#[derive(Clone, Debug, Default)]
+pub struct Notices(Option<Arc<Mutex<Vec<String>>>>);
+
+impl Notices {
+    /// Notes kept for [`Self::lines`] instead of printed.
+    pub fn captured() -> Self {
+        Self(Some(Arc::default()))
+    }
+
+    /// Prints `line` on stderr, or keeps it.
+    pub fn say(&self, line: String) {
+        match &self.0 {
+            None => eprintln!("{line}"),
+            Some(kept) => kept.lock().unwrap_or_else(|e| e.into_inner()).push(line),
+        }
+    }
+
+    /// The lines kept so far.
+    pub fn lines(&self) -> Vec<String> {
+        self.0.as_ref().map_or_else(Vec::new, |kept| {
+            kept.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        })
+    }
 }
 
 impl std::fmt::Debug for Out<'_> {
@@ -45,6 +76,7 @@ impl<'a> Out<'a> {
             json,
             w,
             warnings: Vec::new(),
+            notices: Notices::default(),
         }
     }
 

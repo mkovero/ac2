@@ -29,6 +29,20 @@ pub enum ClientError {
         /// How long nothing had come from the daemon.
         silent: std::time::Duration,
     },
+    /// A file operation was waited for and no keepalive came from the daemon since it
+    /// answered hello: its ctrl port is reachable, its data port (which carries them) may
+    /// not be.
+    #[error(
+        "no keepalive came from the daemon in {} s since it answered hello, so `{op}` was \
+         not waited for further: is its data port reachable?",
+        .waited.as_secs()
+    )]
+    NoKeepalives {
+        /// Command name.
+        op: &'static str,
+        /// How long the wait went on without one.
+        waited: std::time::Duration,
+    },
     /// The daemon restarted while a file operation was waited for: the work it was doing
     /// went with it.
     #[error(

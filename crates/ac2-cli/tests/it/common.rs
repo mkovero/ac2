@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ac2_audio::Backend;
-use ac2_cli::{Cli, Out, run_reporting};
+use ac2_cli::{Cli, Notices, Out, run_reporting};
 use ac2_client::{Client, ClientConfig, Endpoints};
 use ac2_proto::model::{DeviceSelector, StreamConfig};
 use ac2d::{BackendChoice, Daemon, DaemonConfig, Handle, Listen};
@@ -101,14 +101,19 @@ impl Run {
 pub async fn cli(args: &[&str]) -> Run {
     let cli = Cli::try_parse_from(std::iter::once("ac2").chain(args.iter().copied())).unwrap();
     let (mut so, mut se) = (Vec::new(), Vec::new());
+    let notices = Notices::captured();
     let code = {
         let mut out = Out::new(cli.json, &mut so);
+        out.notices = notices.clone();
         run_reporting(&cli, &mut out, &mut se).await
     };
+    // Notes said while the command ran come before what it reported at the end.
+    let mut stderr: String = notices.lines().iter().map(|l| format!("{l}\n")).collect();
+    stderr.push_str(&String::from_utf8(se).unwrap());
     Run {
         code,
         stdout: String::from_utf8(so).unwrap(),
-        stderr: String::from_utf8(se).unwrap(),
+        stderr,
     }
 }
 
