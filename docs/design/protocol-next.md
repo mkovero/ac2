@@ -916,7 +916,8 @@ or it boots without its meter and refuses every network client.
 1. **Where a daemon given no session directory saves.** `DaemonConfig::new` names no real
    directory: a daemon given none (the app's simulated rig, `ac2d --ephemeral`, every
    in-process test daemon) makes one of its own under the system temp dir, closed to other
-   users, and removes it when it stops. Only a daemon that keeps state (`ac2d` without
+   users, and removes it when it stops; one left by a killed daemon of the same user (its
+   pid no longer running) is removed when the next such daemon starts. Only a daemon that keeps state (`ac2d` without
    `--ephemeral`) uses the user's session directory, so only it clears that directory's
    staging at start. An ephemeral daemon's log and audit trail stay in the log directory as
    `ac2d-sim.log` and `ac2d-sim-audit.log`, files of their own; it takes no lock, keeps no
