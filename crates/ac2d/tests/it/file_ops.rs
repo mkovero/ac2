@@ -231,7 +231,10 @@ fn a_delete_or_rename_is_refused_while_another_file_operation_runs() {
     c.send(&ac2_proto::Request::new(probe, Command::ServerInfo));
     assert_eq!(c.recv(T).expect("the probe's reply").id, probe);
     let e = code(delete(&mut c, "a"), ErrorCode::Refused);
-    assert!(e.msg.contains("under way"), "{e:?}");
+    assert!(
+        e.msg.starts_with("the rig is loading a session for "),
+        "{e:?}"
+    );
     code(rename(&mut c, "a", "b"), ErrorCode::Refused);
     std::fs::write(&pipe, b"{}").unwrap();
     assert_eq!(c.recv(T).expect("the load answers").id, load);
