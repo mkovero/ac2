@@ -207,8 +207,10 @@ line from `ac2 --json auth pair … | jq -r .authorized_clients_line` to `author
 when the kiosk's key is not in it. The 106 CLI prints that line with a role (`viewer`), which
 the 106 daemon reads; a line from a 105 CLI has none, and one such line sets the whole file
 aside. So `ac2d`, `ac2` and `ac2-ui` are installed together, never the daemon alone. A key
-listed twice also sets the file aside: after the conversion the kiosk's key is there once (as
-`operator`), and the script, matching by key, adds nothing.
+listed twice also sets the file aside, so the script must look for the key alone (the line's
+second field): one that looks for everything after the name finds `<key> viewer` missing
+beside the converted `<key> operator` and appends the key a second time. The script that
+matches by key is installed with the binaries, before the first 106 start.
 
 1. Export the meter's Leq history on the meter with its own CLI (*every host*, step 2), as
    `ac2` (`sudo -u ac2 XDG_RUNTIME_DIR=… ac2 spl leq export …`), and copy it off. Save by name
@@ -224,11 +226,14 @@ listed twice also sets the file aside: after the conversion the kiosk's key is t
    `sudo ls -l /home/ac2/.config/ac2/`: every converted file owned by `ac2`, mode as before,
    its `.pre106` beside it; the kiosk's key once in `authorized_clients`. `sync`.
 5. Only then the binaries: keep the old ones (`/usr/local/bin/ac2d` → `ac2d.prev-<rev>`,
-   likewise `ac2` and `ac2-ui`), install all three 106 ones and the revision file
-   (`/usr/local/share/ac2-revision`), `sync`.
+   likewise `ac2` and `ac2-ui`), install all three 106 ones, the `ac2-selfpair` that matches
+   by key (above; from the sys repo) and the revision file (`/usr/local/share/ac2-revision`),
+   `sync`.
 6. `uctl enable --now ac2d`; `uctl status ac2d` shows it active with `ac2-selfpair` exited 0
    and no restart after it. Verify (below): the SPL meter running and calibrated,
-   `authorized_clients` not set aside. `sudo systemctl enable --now ac2-kiosk`: the kiosk
+   `authorized_clients` not set aside and no name in it twice
+   (`sudo awk '!/^#/{print $1}' /home/ac2/.config/ac2/authorized_clients | sort | uniq -d`
+   prints nothing). `sudo systemctl enable --now ac2-kiosk`: the kiosk
    shows the meter. `sync`, then `sudo ac2pi-ro`: the CM4 ends read-only.
 7. From pupu: `ac2 --remote <meter> status` shows the meter running and no damaged file.
    After the next power cut, check again from pupu: the meter came back by itself, metering,
