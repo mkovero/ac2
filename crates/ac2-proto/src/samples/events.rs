@@ -187,5 +187,25 @@ pub fn events() -> Vec<Event> {
                 ..generator()
             }),
         ),
+        ev(
+            109,
+            Change::Rig(Rig {
+                artnet_socket: ArtnetSocket::NotConforming {
+                    from_port: 40_000,
+                    reason: ArtnetBindFailure::PortTaken,
+                    os_error: "Address already in use (os error 98)".into(),
+                },
+                ..rig()
+            }),
+        ),
+        ev(
+            110,
+            Change::Rig(Rig {
+                artnet_socket: ArtnetSocket::CannotOpen {
+                    os_error: "Cannot assign requested address (os error 99)".into(),
+                },
+                ..rig()
+            }),
+        ),
     ]
 }

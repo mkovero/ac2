@@ -124,12 +124,21 @@ pub fn fade_toast(f: ArtnetFade) -> String {
 /// the status line keeps saying.
 pub fn not_conforming_text(from_port: u16, reason: ArtnetBindFailure) -> String {
     let why = match reason {
-        ArtnetBindFailure::PortTaken => "another program holds it",
+        // Winsock says WSAEACCES both for a port another program holds exclusively and
+        // for one in a range the system reserves, so the words claim neither.
+        ArtnetBindFailure::PortTaken => "taken or reserved",
         ArtnetBindFailure::Refused => "the system refused it",
     };
     format!(
         "Art-Net sends from port {from_port}, not {ARTNET_PORT} ({why}): frames still go out, \
          but nodes that check the source port drop them, and consoles will not list the rig"
+    )
+}
+
+/// No Art-Net socket could be opened for the target just set: what the operator is told.
+pub fn cannot_open_text(os_error: &str) -> String {
+    format!(
+        "no Art-Net socket could be opened: nothing is sent; tried again every 30 s — {os_error}"
     )
 }
 
@@ -373,7 +382,7 @@ mod tests {
         assert_eq!(
             status_line(&rig),
             "Art-Net to 192.168.1.50:6454 universe 0.0.1 (1) · 1 frame sent · Art-Net sends \
-             from port 40000, not 6454 (another program holds it): frames still go out, but \
+             from port 40000, not 6454 (taken or reserved): frames still go out, but \
              nodes that check the source port drop them, and consoles will not list the rig — \
              Address in use (os error 98)"
         );
@@ -384,6 +393,11 @@ mod tests {
              the rig"
         );
         assert!(socket_is_warning(&rig.artnet_socket));
+        assert_eq!(
+            cannot_open_text("Too many open files (os error 24)"),
+            "no Art-Net socket could be opened: nothing is sent; tried again every 30 s — Too \
+             many open files (os error 24)"
+        );
         rig.artnet_socket = ArtnetSocket::CannotOpen {
             os_error: "Too many open files (os error 24)".into(),
         };

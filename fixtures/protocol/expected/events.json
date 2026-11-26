@@ -1585,5 +1585,179 @@
     }
    ]
   }
+ },
+ {
+  "kind": "rig",
+  "rev": 109,
+  "payload": {
+   "rev": 38,
+   "osc_target": "192.168.9.20:9000",
+   "artnet_target": {
+    "addr": "192.168.9.255:6454",
+    "universe": 1
+   },
+   "artnet_fade": 1.5,
+   "sacn_target": {
+    "dest": {
+     "type": "multicast",
+     "interface": "192.168.9.4"
+    },
+    "universe": 1,
+    "priority": 100
+   },
+   "monitor_at_start": true,
+   "levels": {
+    "ballistic": "type1",
+    "correlation_window": "short",
+    "over_threshold": -1.0,
+    "correlation_gate": -50.0,
+    "loudness_target": -16.0
+   },
+   "zone": {
+    "name": "Europe/Helsinki",
+    "utc_offset_s": 10800
+   },
+   "osc": {
+    "sent": 12,
+    "last_error": "Connection refused (os error 111)"
+   },
+   "artnet": {
+    "sent": 340,
+    "last_error": null
+   },
+   "artnet_socket": {
+    "type": "not_conforming",
+    "from_port": 40000,
+    "reason": "port_taken",
+    "os_error": "Address already in use (os error 98)"
+   },
+   "sacn": {
+    "sent": 338,
+    "last_error": null
+   },
+   "dmx": [
+    {
+     "channel": 12,
+     "value": 255
+    },
+    {
+     "channel": 14,
+     "value": 40
+    }
+   ],
+   "cues": [
+    {
+     "meas": 4,
+     "subject": {
+      "type": "meter"
+     },
+     "state": "over"
+    },
+    {
+     "meas": 4,
+     "subject": {
+      "type": "window",
+      "duration": 1800.0,
+      "weighting": "a"
+     },
+     "state": "near"
+    }
+   ],
+   "damaged_files": [
+    {
+     "kind": "rig_settings",
+     "path": "/home/op/.config/ac2/rig.json",
+     "set_aside_as": "/home/op/.config/ac2/rig.json.damaged-1790000000",
+     "reason": "EOF while parsing an object at line 3 column 0; restored the previous copy",
+     "at": 1790000000000000000
+    }
+   ]
+  }
+ },
+ {
+  "kind": "rig",
+  "rev": 110,
+  "payload": {
+   "rev": 38,
+   "osc_target": "192.168.9.20:9000",
+   "artnet_target": {
+    "addr": "192.168.9.255:6454",
+    "universe": 1
+   },
+   "artnet_fade": 1.5,
+   "sacn_target": {
+    "dest": {
+     "type": "multicast",
+     "interface": "192.168.9.4"
+    },
+    "universe": 1,
+    "priority": 100
+   },
+   "monitor_at_start": true,
+   "levels": {
+    "ballistic": "type1",
+    "correlation_window": "short",
+    "over_threshold": -1.0,
+    "correlation_gate": -50.0,
+    "loudness_target": -16.0
+   },
+   "zone": {
+    "name": "Europe/Helsinki",
+    "utc_offset_s": 10800
+   },
+   "osc": {
+    "sent": 12,
+    "last_error": "Connection refused (os error 111)"
+   },
+   "artnet": {
+    "sent": 340,
+    "last_error": null
+   },
+   "artnet_socket": {
+    "type": "cannot_open",
+    "os_error": "Cannot assign requested address (os error 99)"
+   },
+   "sacn": {
+    "sent": 338,
+    "last_error": null
+   },
+   "dmx": [
+    {
+     "channel": 12,
+     "value": 255
+    },
+    {
+     "channel": 14,
+     "value": 40
+    }
+   ],
+   "cues": [
+    {
+     "meas": 4,
+     "subject": {
+      "type": "meter"
+     },
+     "state": "over"
+    },
+    {
+     "meas": 4,
+     "subject": {
+      "type": "window",
+      "duration": 1800.0,
+      "weighting": "a"
+     },
+     "state": "near"
+    }
+   ],
+   "damaged_files": [
+    {
+     "kind": "rig_settings",
+     "path": "/home/op/.config/ac2/rig.json",
+     "set_aside_as": "/home/op/.config/ac2/rig.json.damaged-1790000000",
+     "reason": "EOF while parsing an object at line 3 column 0; restored the previous copy",
+     "at": 1790000000000000000
+    }
+   ]
+  }
  }
 ]

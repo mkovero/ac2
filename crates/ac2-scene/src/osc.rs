@@ -369,6 +369,7 @@ pub fn reply_warning(w: &Warning, names: &[String]) -> String {
         Warning::RecordingEnded { .. }
         | Warning::LineLevelUnusual { .. }
         | Warning::ArtnetNotConforming { .. }
+        | Warning::ArtnetCannotOpen { .. }
         | Warning::ArtnetUniverseZero
         | Warning::DmxSendFailed { .. } => plain_warning(w).unwrap_or_default(),
     }
@@ -397,6 +398,7 @@ pub fn plain_warning(w: &Warning) -> Option<String> {
         Warning::ArtnetNotConforming { from_port, reason } => {
             Some(crate::artnet::not_conforming_text(*from_port, *reason))
         }
+        Warning::ArtnetCannotOpen { os_error } => Some(crate::artnet::cannot_open_text(os_error)),
         Warning::ArtnetUniverseZero => Some(crate::artnet::UNIVERSE_ZERO.to_owned()),
         Warning::DmxSendFailed { output, error } => {
             Some(crate::artnet::send_failed_text(*output, error))
@@ -411,6 +413,7 @@ pub fn warning_meas(w: &Warning) -> &[MeasId] {
         Warning::RecordingEnded { .. }
         | Warning::LineLevelUnusual { .. }
         | Warning::ArtnetNotConforming { .. }
+        | Warning::ArtnetCannotOpen { .. }
         | Warning::ArtnetUniverseZero
         | Warning::DmxSendFailed { .. } => &[],
     }

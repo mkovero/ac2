@@ -1112,4 +1112,28 @@ def events():
                 ],
             },
         },
+        {
+            "kind": "rig",
+            "rev": 109,
+            "payload": {
+                **RIG,
+                "artnet_socket": {
+                    "type": "not_conforming",
+                    "from_port": 40000,
+                    "reason": "port_taken",
+                    "os_error": "Address already in use (os error 98)",
+                },
+            },
+        },
+        {
+            "kind": "rig",
+            "rev": 110,
+            "payload": {
+                **RIG,
+                "artnet_socket": {
+                    "type": "cannot_open",
+                    "os_error": "Cannot assign requested address (os error 99)",
+                },
+            },
+        },
     ]

@@ -380,7 +380,8 @@ pub enum ArtnetSocket {
     /// Bound to port 6454, the daemon's alone (never shared: a shared UDP port gives its
     /// unicast to one program only): frames go out from it and ArtPoll is answered.
     Conforming,
-    /// Port 6454 could not be bound (another program on the host holds it): frames still
+    /// Port 6454 could not be bound (another program on the host holds it, or the system
+    /// reserves it): frames still
     /// go out, from `from_port`, but nodes that check the source port drop them, and
     /// ArtPoll is not answered (no console lists the rig). The daemon tries 6454 again
     /// every 30 s.
@@ -404,7 +405,8 @@ pub enum ArtnetSocket {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtnetBindFailure {
-    /// Another program holds it.
+    /// Another program holds it, or (on Windows, where WSAEACCES says either) the system
+    /// reserves it.
     PortTaken,
     /// The operating system refused it for another reason (permissions, no such address).
     Refused,

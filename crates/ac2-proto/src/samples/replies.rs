@@ -33,6 +33,9 @@ pub fn warnings() -> Vec<Warning> {
             from_port: 40_000,
             reason: ArtnetBindFailure::PortTaken,
         },
+        Warning::ArtnetCannotOpen {
+            os_error: "Cannot assign requested address (os error 99)".into(),
+        },
         Warning::ArtnetUniverseZero,
         Warning::DmxSendFailed {
             output: DmxOutput::Sacn,

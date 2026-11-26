@@ -38,6 +38,13 @@ pub enum Warning {
         /// Why 6454 could not be bound.
         reason: ArtnetBindFailure,
     },
+    /// `artnet.target` set a target (or the same one again), but no Art-Net socket could be
+    /// opened at all: nothing is sent, and the daemon tries again every 30 s
+    /// (`rig.artnet_socket` holds it while it lasts).
+    ArtnetCannotOpen {
+        /// The operating system's words.
+        os_error: String,
+    },
     /// `artnet.target` set universe 0 (Port-Address 0): kept, but Art-Net 4 deprecates it
     /// (sACN has no universe 0), so a node may not take it.
     ArtnetUniverseZero,

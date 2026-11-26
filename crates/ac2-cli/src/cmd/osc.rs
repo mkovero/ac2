@@ -509,6 +509,7 @@ pub(crate) fn warning_text(w: &Warning, st: Option<&State>) -> String {
         Warning::RecordingEnded { .. }
         | Warning::LineLevelUnusual { .. }
         | Warning::ArtnetNotConforming { .. }
+        | Warning::ArtnetCannotOpen { .. }
         | Warning::ArtnetUniverseZero
         | Warning::DmxSendFailed { .. } => ac2_scene::osc::plain_warning(w).unwrap_or_default(),
     }
