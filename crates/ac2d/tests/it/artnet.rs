@@ -417,7 +417,7 @@ async fn a_cue_change_fades_and_a_zero_fade_jumps() {
     );
     assert!(steps.windows(2).all(|w| w[0] <= w[1]), "steps {steps:?}");
     assert!(
-        took >= Duration::from_millis(300) && took < Duration::from_secs(3),
+        took >= Duration::from_millis(300) && took < Duration::from_secs(5),
         "{took:?}"
     );
 

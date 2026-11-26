@@ -104,6 +104,14 @@ async fn sacn_target_test_and_status() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_test_frame_one_output_did_not_send_is_a_warning() {
+    // Linux binding an address no interface has, which this test needs to fail.
+    if cfg!(target_os = "linux")
+        && std::fs::read_to_string("/proc/sys/net/ipv4/ip_nonlocal_bind")
+            .is_ok_and(|v| v.trim() == "1")
+    {
+        eprintln!("skipped: net.ipv4.ip_nonlocal_bind is 1, so a bind to 192.0.2.77 opens");
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let rx = UdpSocket::bind("127.0.0.1:0").unwrap();
     rx.set_read_timeout(Some(Duration::from_millis(100)))
