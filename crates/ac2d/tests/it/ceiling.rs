@@ -202,7 +202,7 @@ fn level_and_output_labels_survive_a_restart_under_the_bound() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("rig.json");
     let start = |bound: f64| {
-        let mut cfg = config(manual_rig(), inproc("ceiling-restart"));
+        let mut cfg = hardware_config(manual_rig(), inproc("ceiling-restart"));
         cfg.max_level_dbfs = bound;
         cfg.rig_settings = Some(file.clone());
         Daemon::start(cfg).unwrap()
@@ -215,7 +215,7 @@ fn level_and_output_labels_survive_a_restart_under_the_bound() {
     let h = start(-10.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
-    ceiling(&mut c, -32.0, false).unwrap();
+    ceiling(&mut c, -32.0, true).unwrap();
     let o = c.outputs(Command::StreamOutputs {
         outputs: vec![label(0, "Main L"), label(1, "Sub")],
     });
@@ -272,7 +272,7 @@ fn a_restart_with_a_higher_bound_never_raises_the_level_by_itself() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("rig.json");
     let start = |bound: f64| {
-        let mut cfg = config(manual_rig(), inproc("ceiling-higher-bound"));
+        let mut cfg = hardware_config(manual_rig(), inproc("ceiling-higher-bound"));
         cfg.max_level_dbfs = bound;
         cfg.rig_settings = Some(file.clone());
         Daemon::start(cfg).unwrap()
@@ -283,7 +283,8 @@ fn a_restart_with_a_higher_bound_never_raises_the_level_by_itself() {
             .clone()
     };
 
-    // No file: the bound is the level in force, and it is stored right away.
+    // No file: the quiet start (here the bound too) is the level in force, and it is
+    // stored right away.
     let h = start(-50.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
     assert_eq!(c.state().generator.ceiling, Dbfs(-50.0));
@@ -296,28 +297,27 @@ fn a_restart_with_a_higher_bound_never_raises_the_level_by_itself() {
     assert_eq!((g.ceiling, g.ceiling_bound), (Dbfs(-50.0), Dbfs(-20.0)));
     h.shutdown();
 
-    // A file with no level (as written before a level was stored): setting the level in
-    // force stores it.
+    // A file with no level: the quiet start again, under a bound lower still, and stored.
     let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
     v["ceiling_dbfs"] = serde_json::Value::Null;
     std::fs::write(&file, serde_json::to_vec(&v).unwrap()).unwrap();
-    let h = start(-30.0);
+    let h = start(-60.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
-    assert_eq!(c.state().generator.ceiling, Dbfs(-30.0));
+    assert_eq!(c.state().generator.ceiling, Dbfs(-60.0));
     h.shutdown();
-    assert_eq!(stored(), serde_json::json!(-30.0));
+    assert_eq!(stored(), serde_json::json!(-60.0));
 }
 
 /// A torn rig settings file is set aside and its previous copy read: the start writes the
 /// file again with the level in force and the labels, so the next start finds them there,
-/// never a missing file that would take a higher bound.
+/// never a missing file that would start quiet.
 #[test]
 fn a_recovered_file_is_written_back_at_start() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("rig.json");
     let start = |bound: f64| {
-        let mut cfg = config(manual_rig(), inproc("ceiling-recovered"));
+        let mut cfg = hardware_config(manual_rig(), inproc("ceiling-recovered"));
         cfg.max_level_dbfs = bound;
         cfg.rig_settings = Some(file.clone());
         Daemon::start(cfg).unwrap()
@@ -325,7 +325,7 @@ fn a_recovered_file_is_written_back_at_start() {
     let h = start(-10.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
-    ceiling(&mut c, -36.0, false).unwrap();
+    ceiling(&mut c, -36.0, true).unwrap();
     c.outputs(Command::StreamOutputs {
         outputs: vec![OutputSetup {
             channel: 0,
@@ -364,12 +364,15 @@ fn a_level_not_stored_at_start_is_stored_when_set() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("rig.json");
     let start = |bound: f64| {
-        let mut cfg = config(manual_rig(), inproc("ceiling-readonly"));
+        let mut cfg = hardware_config(manual_rig(), inproc("ceiling-readonly"));
         cfg.max_level_dbfs = bound;
         cfg.rig_settings = Some(file.clone());
         Daemon::start(cfg).unwrap()
     };
     let h = start(-20.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    ceiling(&mut c, -20.0, true).unwrap();
     h.shutdown();
     let mode =
         |m: u32| std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(m)).unwrap();
@@ -400,7 +403,7 @@ fn a_lowered_level_survives_a_torn_file() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("rig.json");
     let start = |bound: f64| {
-        let mut cfg = config(manual_rig(), inproc("ceiling-torn-lowered"));
+        let mut cfg = hardware_config(manual_rig(), inproc("ceiling-torn-lowered"));
         cfg.max_level_dbfs = bound;
         cfg.rig_settings = Some(file.clone());
         Daemon::start(cfg).unwrap()
@@ -408,6 +411,7 @@ fn a_lowered_level_survives_a_torn_file() {
     let h = start(-10.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
+    ceiling(&mut c, -10.0, true).unwrap();
     ceiling(&mut c, -40.0, false).unwrap();
     h.shutdown();
     std::fs::write(&file, b"{\"ceil").unwrap();
@@ -428,12 +432,15 @@ fn another_setting_saved_stores_the_level_in_force() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("rig.json");
     let start = |bound: f64| {
-        let mut cfg = config(manual_rig(), inproc("ceiling-other-setting"));
+        let mut cfg = hardware_config(manual_rig(), inproc("ceiling-other-setting"));
         cfg.max_level_dbfs = bound;
         cfg.rig_settings = Some(file.clone());
         Daemon::start(cfg).unwrap()
     };
     let h = start(-20.0);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    ceiling(&mut c, -20.0, true).unwrap();
     h.shutdown();
     let mode =
         |m: u32| std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(m)).unwrap();
@@ -469,7 +476,7 @@ fn a_lowering_that_cannot_write_its_copy_changes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("rig.json");
     let start = || {
-        let mut cfg = config(manual_rig(), inproc("ceiling-prev-first"));
+        let mut cfg = hardware_config(manual_rig(), inproc("ceiling-prev-first"));
         cfg.max_level_dbfs = -10.0;
         cfg.rig_settings = Some(file.clone());
         Daemon::start(cfg).unwrap()
@@ -477,7 +484,7 @@ fn a_lowering_that_cannot_write_its_copy_changes_nothing() {
     let h = start();
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
-    ceiling(&mut c, -20.0, false).unwrap();
+    ceiling(&mut c, -20.0, true).unwrap();
     let before = std::fs::read(&file).unwrap();
     // A directory where the copy goes: no file can be written there.
     let prev = dir.path().join("rig.json.prev");
@@ -609,4 +616,84 @@ fn a_simulated_rig_with_no_level_stored_starts_at_its_bound() {
     let (mut c, _) = connect(&h, &[b"evt"]);
     assert_eq!(c.state().generator.ceiling, Dbfs(-20.0));
     h.shutdown();
+}
+
+/// A simulated rig never stores a max level: a real rig on the same settings file starts
+/// as it would without the simulated run, quiet or at what a real rig stored, and a raise
+/// on the simulated rig is admitted though not stored.
+#[test]
+fn a_simulated_rig_never_stores_its_level() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("rig.json");
+    let start = |hardware: bool| {
+        let name = inproc("ceiling-simulated-keeps");
+        let mut cfg = if hardware {
+            hardware_config(manual_rig(), name)
+        } else {
+            config(manual_rig(), name)
+        };
+        cfg.rig_settings = Some(file.clone());
+        Daemon::start(cfg).unwrap()
+    };
+    // The level in force on a real rig, and that a stimulus above it is refused.
+    let real_rig = || {
+        let h = start(true);
+        let (mut c, _) = connect(&h, &[b"evt"]);
+        let level = c.state().generator.ceiling.0;
+        c.ok(Command::StreamOpen {
+            config: stream(false),
+        });
+        let tok = c.acquire();
+        let e = c
+            .call(Command::GenSet {
+                lease_token: tok,
+                desired: fire(level + 10.0),
+            })
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+        drop(c);
+        h.shutdown();
+        level
+    };
+
+    // A simulated start at its bound, then a real one: quiet.
+    let h = start(false);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    assert_eq!(c.state().generator.ceiling, Dbfs(-10.0));
+    h.shutdown();
+    assert_eq!(real_rig(), -50.0);
+
+    // The simulated rig reads the quiet start the real one stored; a confirmed raise there
+    // is admitted, and still not stored.
+    let h = start(false);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    assert_eq!(c.state().generator.ceiling, Dbfs(-50.0));
+    assert_eq!(ceiling(&mut c, -10.0, true).unwrap().ceiling, Dbfs(-10.0));
+    h.shutdown();
+    assert_eq!(real_rig(), -50.0);
+
+    // A real rig's stored level survives a simulated run that raised the level and saved
+    // another setting.
+    let h = start(true);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    ceiling(&mut c, -30.0, true).unwrap();
+    h.shutdown();
+    let h = start(false);
+    let (mut c, _) = connect(&h, &[b"evt"]);
+    hello(&mut c);
+    assert_eq!(c.state().generator.ceiling, Dbfs(-30.0));
+    assert_eq!(ceiling(&mut c, -10.0, true).unwrap().ceiling, Dbfs(-10.0));
+    c.outputs(Command::StreamOutputs {
+        outputs: vec![OutputSetup {
+            channel: 0,
+            label: Some("Main L".into()),
+        }],
+    });
+    h.shutdown();
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(v["ceiling_dbfs"], serde_json::json!(-30.0));
+    assert_eq!(real_rig(), -30.0);
 }

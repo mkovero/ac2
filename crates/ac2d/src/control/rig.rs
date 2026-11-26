@@ -71,7 +71,7 @@ impl Control {
             // The level in force, kept where a restart reads it if the file has none yet
             // (its start could not write it): a later start then never takes a higher bound.
             if self.rig.settings.stored_ceiling() != Some(new) {
-                self.rig.settings.persist(&RigSettings {
+                self.rig.settings.store_level(&RigSettings {
                     ceiling_dbfs: Some(new),
                     ..self.rig_settings_now()
                 })?;
@@ -98,7 +98,7 @@ impl Control {
         }
         // Kept first: a level that would quietly come back different after a restart is
         // worse than a refused change.
-        self.rig.settings.persist(&RigSettings {
+        self.rig.settings.store_level(&RigSettings {
             ceiling_dbfs: Some(new),
             ..self.rig_settings_now()
         })?;

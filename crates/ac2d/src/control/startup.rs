@@ -60,6 +60,7 @@ impl Control {
             .unwrap_or_default();
         damaged.extend(plan_damage);
         let reach = crate::rig::OutputsReach::of(s.backends.iter().map(|b| b.kind()));
+        rig.for_outputs(reach, saved.ceiling_dbfs);
         let ceiling = crate::rig::start_ceiling(saved.ceiling_dbfs, s.ceiling_bound, reach);
         let (ceiling, m) = match crate::stimulus::peak_limit(ceiling) {
             Ok(m) => (ceiling, m),
@@ -202,9 +203,10 @@ impl Control {
     fn store_start_ceiling(&mut self, stored: Option<f64>) {
         let now = self.s.ceiling_dbfs;
         // A file read whole that holds the level in force needs nothing. Anything else
-        // (no file, one set aside or recovered from its previous copy) is written now: after
-        // the start the file always holds what is in force, so the next start cannot find
-        // it missing and start as with none stored (a simulated rig's bound may be higher).
+        // (no file, one set aside or recovered from its previous copy) is written now where
+        // the outputs may reach loudspeakers: after the start the file holds what is in
+        // force, so a later start with a higher bound cannot find it missing. Where they
+        // reach nothing the level is never stored (`RigStore::store_level`).
         if self.rig.settings.stored_ceiling() == Some(now) {
             return;
         }
@@ -216,7 +218,7 @@ impl Control {
             ceiling_dbfs: Some(now),
             ..self.rig_settings_now()
         };
-        match self.rig.settings.persist(&s) {
+        match self.rig.settings.store_level(&s) {
             Ok(()) => {}
             Err(e) => {
                 let then = match stored {

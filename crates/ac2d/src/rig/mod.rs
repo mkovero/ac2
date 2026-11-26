@@ -112,6 +112,20 @@ pub(crate) struct RigStore {
     /// The max level the file on disk holds, as last read whole or written: `None` when
     /// the file was missing, set aside, recovered or salvaged and not written since.
     stored: std::cell::Cell<Option<f64>>,
+    /// What a write puts in the file's max level.
+    level: LevelWrites,
+}
+
+/// What a write of the rig settings puts in the file's max level.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum LevelWrites {
+    /// The level in force: the outputs may reach loudspeakers, and it was set for them.
+    InForce,
+    /// The level the file held at start, unchanged (`None`: none). A level set while the
+    /// outputs reach nothing (the simulated rig) says nothing about what loudspeakers on
+    /// a real rig take: stored, the next start of a real daemon on the same settings would
+    /// read it as the operator's and skip the quiet start.
+    AsRead(Option<f64>),
 }
 
 impl RigStore {
@@ -122,6 +136,26 @@ impl RigStore {
             unreadable: None,
             damage: None,
             stored: std::cell::Cell::new(None),
+            level: LevelWrites::InForce,
+        }
+    }
+
+    /// Where the daemon's outputs go, and the level the file held at start: where they
+    /// reach nothing, the file keeps that level and the level in force lives only in memory.
+    pub(crate) fn for_outputs(&mut self, reach: OutputsReach, read: Option<f64>) {
+        self.level = match reach {
+            OutputsReach::Loudspeakers => LevelWrites::InForce,
+            OutputsReach::Nothing => LevelWrites::AsRead(read),
+        };
+    }
+
+    /// Keeps a new max level in force (`gen.ceiling`, the start's own level) with the rest
+    /// of `s`. Where the outputs reach nothing the level is not stored and nothing else
+    /// changed, so nothing is written and nothing can refuse it.
+    pub(crate) fn store_level(&self, s: &RigSettings) -> Result<(), ProtoError> {
+        match self.level {
+            LevelWrites::InForce => self.persist(s),
+            LevelWrites::AsRead(_) => Ok(()),
         }
     }
 
@@ -148,6 +182,7 @@ impl RigStore {
             unreadable: None,
             damage: None,
             stored: std::cell::Cell::new(None),
+            level: LevelWrites::InForce,
         };
         let text = match std::fs::read(path) {
             Ok(t) => t,
@@ -258,6 +293,17 @@ impl RigStore {
     /// as it was, and the caller changes nothing.
     pub(crate) fn persist(&self, s: &RigSettings) -> Result<(), ProtoError> {
         self.check()?;
+        let as_read;
+        let s = match self.level {
+            LevelWrites::InForce => s,
+            LevelWrites::AsRead(level) => {
+                as_read = RigSettings {
+                    ceiling_dbfs: level,
+                    ..s.clone()
+                };
+                &as_read
+            }
+        };
         let Some(path) = &self.path else {
             self.stored.set(s.ceiling_dbfs);
             return Ok(());

@@ -441,7 +441,8 @@ I/O page shows it with its bound and who changed it last: at the bound,
 prints the same with where to raise it). A rig with no level stored (a new rig, or one whose
 settings file was lost) starts quiet, at −50 dBFS (or its bound, if that is lower): raise it
 here to what the system takes. The simulated rig starts at its bound instead, as it drives
-no loudspeakers. Type a level and **Enter**:
+no loudspeakers, and never stores its level (a real rig on the same settings still starts
+quiet). Type a level and **Enter**:
 
 - a **lower** level applies at once for every client; a stimulus armed or playing above it
   is stopped;

@@ -559,6 +559,21 @@ mod tests {
         MaxLevel::from_peak_db(-20.0).expect("level")
     }
 
+    /// Every real audio API may have loudspeakers behind it; the simulated device and a
+    /// replay never do. A new kind must take a side here.
+    #[test]
+    fn which_kinds_reach_loudspeakers() {
+        for (kind, reaches) in [
+            (BackendKind::Jack, true),
+            (BackendKind::CoreAudio, true),
+            (BackendKind::Asio, true),
+            (BackendKind::Fake, false),
+            (BackendKind::Replay, false),
+        ] {
+            assert_eq!(kind.reaches_loudspeakers(), reaches, "{kind:?}");
+        }
+    }
+
     #[test]
     fn request_validation() {
         assert_eq!(
